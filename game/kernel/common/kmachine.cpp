@@ -13,6 +13,7 @@
 #include "game/external/discord.h"
 #include "game/graphics/display.h"
 #include "game/graphics/gfx.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/screenshot.h"
 #include "game/kernel/common/Ptr.h"
 #include "game/kernel/common/kernel_types.h"
@@ -1085,6 +1086,14 @@ u32 pc_is_imgui_visible() {
   return bool_to_symbol(Gfx::g_debug_settings.show_imgui);
 }
 
+void pc_enhanced_set_sun(u32 vec_ptr) {
+  auto* v = Ptr<float>(vec_ptr).c();
+  g_enhanced_sun.dir[0] = v[0];
+  g_enhanced_sun.dir[1] = v[1];
+  g_enhanced_sun.dir[2] = v[2];
+  g_enhanced_sun.valid = true;
+}
+
 void pc_screen_shot() {
   g_want_screenshot = true;
 }
@@ -1223,6 +1232,7 @@ void init_common_pc_port_functions(
 
   // RNG
   make_func_symbol_func("pc-rand", (void*)pc_rand);
+  make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

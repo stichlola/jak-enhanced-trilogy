@@ -6,11 +6,14 @@
 
 #include "common/log/log.h"
 
+#include "game/graphics/enhanced_state.h"
+
 #include "game/graphics/pipelines/opengl.h"
 
 #include "third-party/imgui/imgui.h"
 
 EnhancedCamera g_enhanced_camera;
+EnhancedSun g_enhanced_sun;
 
 namespace {
 GLuint make_1x1(u32 rgba) {
@@ -142,6 +145,19 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glUniform1f(glGetUniformLocation(id, "radius"), m_settings.ssao_radius * kMeter);
   glUniform1f(glGetUniformLocation(id, "intensity"), m_settings.ssao_intensity);
   glUniform1f(glGetUniformLocation(id, "max_distance"), m_settings.ssao_max_distance * kMeter);
+  {
+    // sun direction into the view space the shader rebuilds from depth
+    float sun[3] = {0, 0, 0};
+    for (int col = 0; col < 3; col++) {
+      for (int row = 0; row < 3; row++) {
+        sun[col] += g_enhanced_sun.dir[row] * cam.rot[row][col];
+      }
+    }
+    const bool on = m_settings.sun_shadows && g_enhanced_sun.valid;
+    glUniform4f(glGetUniformLocation(id, "sun"), sun[0], sun[1], sun[2],
+                on ? m_settings.sun_shadow_strength : 0.f);
+    glUniform1f(glGetUniformLocation(id, "sun_length"), m_settings.sun_shadow_length * kMeter);
+  }
   glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
@@ -328,6 +344,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("SSAO intensity", &m_settings.ssao_intensity, 0.f, 3.f);
     ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
     ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
+    ImGui::Checkbox("Sun shadows", &m_settings.sun_shadows);
+    ImGui::SliderFloat("Sun shadow strength", &m_settings.sun_shadow_strength, 0.f, 1.f);
+    ImGui::SliderFloat("Sun shadow length (m)", &m_settings.sun_shadow_length, 0.5f, 10.f);
     ImGui::Checkbox("Depth of field", &m_settings.dof);
     ImGui::SliderFloat("DoF start (m)", &m_settings.dof_start, 10.f, 500.f);
     ImGui::SliderFloat("DoF end (m)", &m_settings.dof_end, 20.f, 1000.f);

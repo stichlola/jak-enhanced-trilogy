@@ -291,6 +291,7 @@
 (define-extern pc-treat-pad0-as-pad1 (function symbol none))
 (define-extern pc-is-imgui-visible? (function symbol))
 (define-extern pc-rand (function int))
+(define-extern pc-enhanced-set-sun (function pointer none))
 
 (define-extern pc-encode-utf8-string (function string string none))
 

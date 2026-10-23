@@ -719,6 +719,8 @@
       (set! (-> s5-5 fog-dists w) (lerp 64.0 (-> s5-5 fog-dists w) f30-1))
       )
     (update-environment-colors arg0)
+    ;; Enhanced: the key light for the renderer's screen-space sun shadows
+    (pc-enhanced-set-sun (the-as pointer (-> arg0 light-group 0 dir0 direction)))
     (let ((a0-109 (-> arg0 current-fog))
           (v1-156 *fog-texture-work*)
           )

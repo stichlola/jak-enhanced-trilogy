@@ -15,6 +15,7 @@ struct EnhancedCamera {
   float depth_b = 0.f;
   float fx = 1.f;
   float fy = 1.f;
+  float rot[3][3] = {};  // world -> view: view[col] = sum over row of world[row] * rot[row][col]
   bool valid = false;
 };
 extern EnhancedCamera g_enhanced_camera;
@@ -34,6 +35,9 @@ class EnhancedPost {
     float ssao_radius = 1.4f;      // meters
     float ssao_intensity = 1.4f;
     float ssao_max_distance = 250.f;  // meters, faded out beyond
+    bool sun_shadows = true;          // screen-space shadows toward the sun, in the same pass
+    float sun_shadow_strength = 0.45f;
+    float sun_shadow_length = 3.0f;   // meters marched toward the sun
     bool ssao_debug = false;       // show the occlusion alone
     bool dof = true;
     float dof_start = 70.f;  // meters: sharp until here

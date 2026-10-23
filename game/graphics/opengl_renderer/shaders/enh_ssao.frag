@@ -10,6 +10,8 @@ uniform vec2 texel;
 uniform float radius;        // game units
 uniform float intensity;
 uniform float max_distance;  // game units
+uniform vec4 sun;            // xyz: key light direction in view space, w: shadow strength
+uniform float sun_length;    // game units marched toward the light
 
 in vec2 tex_coord;
 out float ao_out;
@@ -85,6 +87,40 @@ void main() {
   }
 
   float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
+
+  // screen-space sun shadow: march toward the light, shadowed if the depth buffer has a surface
+  // in front of the ray (but not so far in front that it's just something unrelated)
+  if (sun.w > 0.0) {
+    // the game lights with dot(normal, dir), so dir points toward the light
+    vec3 to_light = normalize(sun.xyz);
+    float facing = dot(n, to_light);
+    float shadow = 0.0;
+    if (facing > 0.05) {
+      const int STEPS = 20;
+      vec3 start = p + n * (0.004 * dist);  // off the surface, more for far (coarser) depth
+      for (int i = 1; i <= STEPS; i++) {
+        float t = (float(i) + noise) / float(STEPS);
+        vec3 q = start + to_light * sun_length * t * t;
+        vec2 quv = 0.5 * vec2(proj.z * q.x, proj.w * q.y) / q.z + 0.5;
+        if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+          break;
+        }
+        float qd = texture(tex_T0, quv).r;
+        if (qd <= 1e-7) {
+          continue;
+        }
+        float scene = abs(view_z(qd));
+        float ray = abs(q.z);
+        float in_front = ray - scene;
+        if (in_front > 0.002 * ray && in_front < 0.35 * sun_length) {
+          shadow = 1.0;
+          break;
+        }
+      }
+    }
+    // faces turned away from the light are already dark in the game's lighting
+    ao *= 1.0 - sun.w * shadow;
+  }
   // fade out toward the max distance
   ao = mix(ao, 1.0, smoothstep(0.6 * max_distance, max_distance, dist));
   ao_out = ao;

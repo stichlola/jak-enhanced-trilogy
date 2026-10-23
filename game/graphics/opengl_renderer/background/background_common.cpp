@@ -233,6 +233,11 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
   g_enhanced_camera.depth_b = result[3][2] / game_pzw;
   g_enhanced_camera.fx = pc_pxx / game_pzw;
   g_enhanced_camera.fy = pc_pyy / game_pzw;
+  for (int row = 0; row < 3; row++) {
+    for (int col = 0; col < 3; col++) {
+      g_enhanced_camera.rot[row][col] = cam_T_w[row][col];
+    }
+  }
   g_enhanced_camera.valid = true;
 
   return result;
