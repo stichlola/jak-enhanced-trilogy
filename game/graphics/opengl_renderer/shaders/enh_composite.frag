@@ -12,6 +12,8 @@ uniform int ao_debug;
 uniform sampler2D tex_T3;  // depth
 uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
 uniform vec3 dof;          // start, end (game units), max radius (pixels)
+uniform sampler2D tex_T4;  // god rays
+uniform float shafts_strength;
 uniform vec2 texel;
 uniform float bloom_strength;
 uniform float saturation;
@@ -78,8 +80,9 @@ void main() {
   }
   c *= ao;
 
-  // bloom
+  // bloom and god rays
   c += texture(tex_T1, uv).rgb * bloom_strength;
+  c += texture(tex_T4, uv).rgb * shafts_strength;
 
   // highlights roll off instead of clipping (bloom can push past 1)
   c = c / (1.0 + max(c - 0.85, 0.0) * 1.2);

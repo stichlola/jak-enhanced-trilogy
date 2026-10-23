@@ -1,5 +1,6 @@
 #include "EnhancedPost.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -51,8 +52,86 @@ EnhancedPost::EnhancedPost() {
 EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
+  if (m_shaft_fbo) {
+    glDeleteFramebuffers(1, &m_shaft_fbo);
+    glDeleteTextures(1, &m_shaft_tex);
+  }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
+}
+
+void EnhancedPost::do_shafts(GLuint scene_tex,
+                             GLuint screen_vao,
+                             SharedRenderState* render_state,
+                             ScopedProfilerNode& prof) {
+  // the sun on screen: in view space the camera looks down +z (see enh_ssao.frag)
+  float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
+                        m_sun_view[2] * m_sun_view[2]);
+  if (m_settings.ssao_debug) {
+    static int behind_counter = 0;
+    if ((behind_counter++ % 300) == 0) {
+      lg::info("[enhanced] sun view {} {} {}", m_sun_view[0], m_sun_view[1], m_sun_view[2]);
+    }
+  }
+  if (len < 1e-6f || m_sun_view[2] / len < 0.05f) {
+    return;  // behind the camera
+  }
+  float sx = 0.5f * m_last_proj[2] * m_sun_view[0] / m_sun_view[2] + 0.5f;
+  float sy = 0.5f * m_last_proj[3] * m_sun_view[1] / m_sun_view[2] + 0.5f;
+  // fade out as the sun leaves the screen
+  float off = std::max(std::max(-sx, sx - 1.f), std::max(-sy, sy - 1.f));
+  float fade = 1.f - std::clamp(off / 0.6f, 0.f, 1.f);
+  static int debug_counter = 0;
+  if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
+    lg::info("[enhanced] sun on screen {} {} fade {}", sx, sy, fade);
+  }
+  if (fade <= 0.f) {
+    return;
+  }
+
+  int w = std::max(1, m_ssao_w / 2);
+  int h = std::max(1, m_ssao_h / 2);
+  if (w != m_shaft_w || h != m_shaft_h) {
+    if (m_shaft_fbo) {
+      glDeleteFramebuffers(1, &m_shaft_fbo);
+      glDeleteTextures(1, &m_shaft_tex);
+    }
+    m_shaft_w = w;
+    m_shaft_h = h;
+    glGenFramebuffers(1, &m_shaft_fbo);
+    glGenTextures(1, &m_shaft_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shaft_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shaft_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_shaft_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_shaft_fbo);
+  glViewport(0, 0, w, h);
+  auto& shader = render_state->shaders[ShaderId::ENH_SHAFTS];
+  shader.activate();
+  auto id = shader.id();
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, scene_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform2f(glGetUniformLocation(id, "sun_uv"), sx, sy);
+  glUniform1f(glGetUniformLocation(id, "threshold"), m_settings.shafts_threshold);
+  glUniform1f(glGetUniformLocation(id, "fade"), fade);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  prof.add_draw_call();
+  glBindVertexArray(0);
+  m_shafts_ready = true;
 }
 
 void EnhancedPost::free_ssao() {
@@ -153,6 +232,17 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
         sun[col] += g_enhanced_sun.dir[row] * cam.rot[row][col];
       }
     }
+    // test switch: JAK_ENHANCED_SUN_FLIP=1 puts the sun on the other side (god rays, shadows)
+    static const bool flip = [] {
+      const char* env = std::getenv("JAK_ENHANCED_SUN_FLIP");
+      return env && std::strcmp(env, "1") == 0;
+    }();
+    for (int i = 0; i < 3; i++) {
+      if (flip) {
+        sun[i] = -sun[i];
+      }
+      m_sun_view[i] = sun[i];
+    }
     const bool on = m_settings.sun_shadows && g_enhanced_sun.valid;
     glUniform4f(glGetUniformLocation(id, "sun"), sun[0], sun[1], sun[2],
                 on ? m_settings.sun_shadow_strength : 0.f);
@@ -236,8 +326,12 @@ void EnhancedPost::prepare(GLuint scene_tex,
     return;
   }
   m_ssao_ready = false;
+  m_shafts_ready = false;
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
+    if (m_settings.shafts && m_ssao_ready && g_enhanced_sun.valid) {
+      do_shafts(scene_tex, screen_vao, render_state, prof);
+    }
   }
   // set again by the next frame's background draws
   g_enhanced_camera.valid = false;
@@ -312,6 +406,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   // depth for the depth of field (only valid when the occlusion pass copied it this frame)
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_depth_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE4);
+  glBindTexture(GL_TEXTURE_2D, m_shafts_ready ? m_shaft_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -320,6 +416,9 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
+  glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
+  glUniform1f(glGetUniformLocation(id, "shafts_strength"),
+              m_shafts_ready ? m_settings.shafts_strength : 0.f);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
               m_last_proj[3]);
   const bool dof = m_settings.dof && m_ssao_ready;
@@ -351,6 +450,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("DoF start (m)", &m_settings.dof_start, 10.f, 500.f);
     ImGui::SliderFloat("DoF end (m)", &m_settings.dof_end, 20.f, 1000.f);
     ImGui::SliderFloat("DoF radius (px)", &m_settings.dof_radius, 0.f, 8.f);
+    ImGui::Checkbox("God rays", &m_settings.shafts);
+    ImGui::SliderFloat("God rays strength", &m_settings.shafts_strength, 0.f, 2.f);
+    ImGui::SliderFloat("God rays threshold", &m_settings.shafts_threshold, 0.f, 1.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);
