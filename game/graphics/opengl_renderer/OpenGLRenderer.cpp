@@ -1667,8 +1667,10 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
 
   const bool enhanced = m_enhanced_post && m_enhanced_post->active();
   if (enhanced) {
-    m_enhanced_post->prepare(*window_blit_src->tex_id, window_blit_src->width,
-                             window_blit_src->height, screen_vao, render_state, prof);
+    // depth comes from the render buffer (the msaa resolve buffer has none)
+    m_enhanced_post->prepare(*window_blit_src->tex_id, m_fbo_state.render_fbo->fbo_id,
+                             window_blit_src->width, window_blit_src->height, screen_vao,
+                             render_state, prof);
   }
 
   glDisable(GL_DEPTH_TEST);

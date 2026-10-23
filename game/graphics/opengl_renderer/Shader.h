@@ -72,6 +72,8 @@ enum class ShaderId {
   ENH_BLOOM_DOWN = 45,
   ENH_BLOOM_UP = 46,
   ENH_COMPOSITE = 47,
+  ENH_SSAO = 48,
+  ENH_SSAO_BLUR = 49,
   MAX_SHADERS
 };
 

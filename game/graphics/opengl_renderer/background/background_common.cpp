@@ -2,6 +2,8 @@
 
 #include "background_common.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 #include "common/util/os.h"
 #include "common/util/simd_util.h"
 
@@ -224,6 +226,14 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
 
   // depth buffer offset - now needs to be scaled by the PC depth buffer scaling too
   result[3][2] = fog_constant * game_depth_offset / 8388608;
+
+  // Enhanced: keep the projection so post effects can turn depth back into view-space positions.
+  // ndc_z = a + b / view_z, ndc_x = fx * view_x / view_z, ndc_y = fy * view_y / view_z
+  g_enhanced_camera.depth_a = persp_scale.z() / game_pzw;
+  g_enhanced_camera.depth_b = result[3][2] / game_pzw;
+  g_enhanced_camera.fx = pc_pxx / game_pzw;
+  g_enhanced_camera.fy = pc_pyy / game_pzw;
+  g_enhanced_camera.valid = true;
 
   return result;
 }

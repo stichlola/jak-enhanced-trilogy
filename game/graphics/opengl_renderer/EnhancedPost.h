@@ -5,8 +5,23 @@
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 
 /*!
+ * The game's projection, saved by the background renderers each frame (make_new_cam_mat), so post
+ * effects can rebuild view-space positions from the depth buffer:
+ * ndc_z = depth_a + depth_b / view_z, ndc_x = fx * view_x / view_z, ndc_y = fy * view_y / view_z
+ * (fy before the shaders' SCISSOR_ADJUST * HEIGHT_SCALE).
+ */
+struct EnhancedCamera {
+  float depth_a = 0.f;
+  float depth_b = 0.f;
+  float fx = 1.f;
+  float fy = 1.f;
+  bool valid = false;
+};
+extern EnhancedCamera g_enhanced_camera;
+
+/*!
  * Jak 3 Enhanced post-processing, run on the finished game frame before it goes to the window:
- * a soft bloom (bright pass + dual-filter blur chain), color grading, vignette and a light
+ * screen-space ambient occlusion from the depth buffer, a soft bloom (bright pass + dual-filter blur chain), color grading, vignette and a light
  * contrast-adaptive sharpen. Set JAK_ENHANCED=0 in the environment to start with it off (vanilla
  * look); the settings can be changed live in the "Renderer Debug" window.
  */
@@ -14,6 +29,11 @@ class EnhancedPost {
  public:
   struct Settings {
     bool enabled = true;
+    bool ssao = true;
+    float ssao_radius = 1.4f;      // meters
+    float ssao_intensity = 1.4f;
+    float ssao_max_distance = 250.f;  // meters, faded out beyond
+    bool ssao_debug = false;       // show the occlusion alone
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
@@ -32,9 +52,11 @@ class EnhancedPost {
   EnhancedPost& operator=(const EnhancedPost&) = delete;
 
   /*!
-   * Build the bloom texture from the frame in scene_tex (w x h). Call before composite().
+   * Build the occlusion (from scene_fbo's depth) and bloom (from scene_tex) textures for a w x h
+   * frame. Call before activate_composite().
    */
   void prepare(GLuint scene_tex,
+               GLuint scene_fbo,
                int w,
                int h,
                GLuint screen_vao,
@@ -61,10 +83,27 @@ class EnhancedPost {
 
   void resize(int w, int h);
   void free_levels();
+  void free_ssao();
+  void do_ssao(GLuint src_fbo,
+               int w,
+               int h,
+               GLuint screen_vao,
+               SharedRenderState* render_state,
+               ScopedProfilerNode& prof);
 
   Settings m_settings;
   std::array<Level, kLevels> m_levels;
   int m_w = 0;
   int m_h = 0;
   GLuint m_black_tex = 0;
+  GLuint m_white_tex = 0;
+
+  // full-res depth copy and occlusion (raw + blurred)
+  GLuint m_depth_fbo = 0;
+  GLuint m_depth_tex = 0;
+  GLuint m_ao_fbo[2] = {0, 0};
+  GLuint m_ao_tex[2] = {0, 0};
+  int m_ssao_w = 0;
+  int m_ssao_h = 0;
+  bool m_ssao_ready = false;
 };

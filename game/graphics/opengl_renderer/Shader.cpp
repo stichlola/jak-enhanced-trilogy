@@ -139,6 +139,8 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
   at(ShaderId::ENH_BLOOM_DOWN) = {"enh_bloom_down", version};
   at(ShaderId::ENH_BLOOM_UP) = {"enh_bloom_up", version};
   at(ShaderId::ENH_COMPOSITE) = {"enh_composite", version};
+  at(ShaderId::ENH_SSAO) = {"enh_ssao", version};
+  at(ShaderId::ENH_SSAO_BLUR) = {"enh_ssao_blur", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

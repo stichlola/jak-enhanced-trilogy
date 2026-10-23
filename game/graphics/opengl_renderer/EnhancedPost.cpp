@@ -1,31 +1,170 @@
 #include "EnhancedPost.h"
 
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
+
+#include "common/log/log.h"
 
 #include "game/graphics/pipelines/opengl.h"
 
 #include "third-party/imgui/imgui.h"
+
+EnhancedCamera g_enhanced_camera;
+
+namespace {
+GLuint make_1x1(u32 rgba) {
+  GLuint tex;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &rgba);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  return tex;
+}
+
+// the game's vertex shaders scale y by SCISSOR_ADJUST * HEIGHT_SCALE (jak 2/3 values, Shader.cpp)
+constexpr float kScissorHeightScale = (512.f / 416.f) * 0.5f;
+// GOAL distance units per meter
+constexpr float kMeter = 4096.f;
+}  // namespace
 
 EnhancedPost::EnhancedPost() {
   const char* env = std::getenv("JAK_ENHANCED");
   if (env && std::strcmp(env, "0") == 0) {
     m_settings.enabled = false;
   }
+  const char* ao_debug = std::getenv("JAK_ENHANCED_AO_DEBUG");
+  if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
+    m_settings.ssao_debug = true;
+  }
 
-  // bound in place of the bloom when it's off, so the composite shader always samples something
-  glGenTextures(1, &m_black_tex);
-  glBindTexture(GL_TEXTURE_2D, m_black_tex);
-  u32 black = 0;
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &black);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  // bound in place of the bloom / occlusion when they're off, so the composite always samples
+  m_black_tex = make_1x1(0);
+  m_white_tex = make_1x1(0xffffffff);
 }
 
 EnhancedPost::~EnhancedPost() {
   free_levels();
+  free_ssao();
   glDeleteTextures(1, &m_black_tex);
+  glDeleteTextures(1, &m_white_tex);
+}
+
+void EnhancedPost::free_ssao() {
+  if (m_depth_fbo) {
+    glDeleteFramebuffers(1, &m_depth_fbo);
+    glDeleteTextures(1, &m_depth_tex);
+    glDeleteFramebuffers(2, m_ao_fbo);
+    glDeleteTextures(2, m_ao_tex);
+  }
+  m_depth_fbo = m_depth_tex = 0;
+  m_ao_fbo[0] = m_ao_fbo[1] = m_ao_tex[0] = m_ao_tex[1] = 0;
+  m_ssao_w = m_ssao_h = 0;
+}
+
+void EnhancedPost::do_ssao(GLuint src_fbo,
+                           int w,
+                           int h,
+                           GLuint screen_vao,
+                           SharedRenderState* render_state,
+                           ScopedProfilerNode& prof) {
+  m_ssao_ready = false;
+  static int debug_counter = 0;
+  if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
+    lg::info("[enhanced] ssao camera valid {} a {} b {} fx {} fy {}", g_enhanced_camera.valid,
+             g_enhanced_camera.depth_a, g_enhanced_camera.depth_b, g_enhanced_camera.fx,
+             g_enhanced_camera.fy);
+  }
+  if (!g_enhanced_camera.valid || std::abs(g_enhanced_camera.depth_b) < 1e-12f) {
+    return;  // no 3D scene drawn this frame (menus, loading)
+  }
+
+  if (w != m_ssao_w || h != m_ssao_h) {
+    free_ssao();
+    m_ssao_w = w;
+    m_ssao_h = h;
+    glGenFramebuffers(1, &m_depth_fbo);
+    glGenTextures(1, &m_depth_tex);
+    glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL,
+                 GL_UNSIGNED_INT_24_8, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_depth_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, m_depth_tex,
+                           0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+
+    glGenFramebuffers(2, m_ao_fbo);
+    glGenTextures(2, m_ao_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_ao_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ao_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  // copy (and for msaa, resolve) the depth buffer into a texture we can sample
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_depth_fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                    GL_NEAREST);
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glBindVertexArray(screen_vao);
+  glViewport(0, 0, w, h);
+
+  const auto& cam = g_enhanced_camera;
+  const float fy = cam.fy * kScissorHeightScale;
+
+  // occlusion
+  auto& ssao = render_state->shaders[ShaderId::ENH_SSAO];
+  ssao.activate();
+  auto id = ssao.id();
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform4f(glGetUniformLocation(id, "proj"), cam.depth_a, cam.depth_b, cam.fx, fy);
+  glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);
+  glUniform1f(glGetUniformLocation(id, "radius"), m_settings.ssao_radius * kMeter);
+  glUniform1f(glGetUniformLocation(id, "intensity"), m_settings.ssao_intensity);
+  glUniform1f(glGetUniformLocation(id, "max_distance"), m_settings.ssao_max_distance * kMeter);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  prof.add_draw_call();
+
+  // depth-aware blur, horizontal then vertical; the result ends up back in m_ao_tex[0]
+  auto& blur = render_state->shaders[ShaderId::ENH_SSAO_BLUR];
+  blur.activate();
+  id = blur.id();
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform4f(glGetUniformLocation(id, "proj"), cam.depth_a, cam.depth_b, cam.fx, fy);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glActiveTexture(GL_TEXTURE0);
+  for (int pass = 0; pass < 2; pass++) {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[1 - pass]);
+    glBindTexture(GL_TEXTURE_2D, m_ao_tex[pass]);
+    glUniform2f(glGetUniformLocation(id, "step"), pass == 0 ? 1.f / w : 0.f,
+                pass == 0 ? 0.f : 1.f / h);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    prof.add_draw_call();
+  }
+  m_ssao_ready = true;
+  glBindVertexArray(0);
 }
 
 void EnhancedPost::free_levels() {
@@ -70,12 +209,22 @@ void EnhancedPost::resize(int w, int h) {
 }
 
 void EnhancedPost::prepare(GLuint scene_tex,
+                           GLuint scene_fbo,
                            int w,
                            int h,
                            GLuint screen_vao,
                            SharedRenderState* render_state,
                            ScopedProfilerNode& prof) {
-  if (!m_settings.enabled || !m_settings.bloom) {
+  if (!m_settings.enabled) {
+    return;
+  }
+  m_ssao_ready = false;
+  if (m_settings.ssao) {
+    do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
+  }
+  // set again by the next frame's background draws
+  g_enhanced_camera.valid = false;
+  if (!m_settings.bloom) {
     return;
   }
   resize(w, h);
@@ -141,11 +290,15 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   shader.activate();
   glActiveTexture(GL_TEXTURE1);
   glBindTexture(GL_TEXTURE_2D, m_settings.bloom && m_levels[0].tex ? m_levels[0].tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_ao_tex[0] : m_white_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
+  glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);
   glUniform1f(glGetUniformLocation(id, "bloom_strength"),
               m_settings.bloom ? m_settings.bloom_strength : 0.f);
@@ -160,6 +313,11 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
 void EnhancedPost::draw_debug_window() {
   if (ImGui::TreeNode("Enhanced Post")) {
     ImGui::Checkbox("Enabled", &m_settings.enabled);
+    ImGui::Checkbox("SSAO", &m_settings.ssao);
+    ImGui::SliderFloat("SSAO radius (m)", &m_settings.ssao_radius, 0.2f, 5.f);
+    ImGui::SliderFloat("SSAO intensity", &m_settings.ssao_intensity, 0.f, 3.f);
+    ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
+    ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);

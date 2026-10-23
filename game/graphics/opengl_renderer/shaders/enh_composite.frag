@@ -1,11 +1,14 @@
 #version 410 core
 
-// Jak 3 Enhanced: final composite of the frame on its way to the window. Light sharpen, bloom,
+// Jak 3 Enhanced: final composite of the frame on its way to the window. Light sharpen, ambient
+// occlusion, bloom,
 // color grading and vignette, then the game's own brightness/contrast (color_mult/color_add, as
 // in post_processing.frag).
 
 uniform sampler2D tex_T0;  // frame
 uniform sampler2D tex_T1;  // bloom
+uniform sampler2D tex_T2;  // ambient occlusion
+uniform int ao_debug;
 uniform vec2 texel;
 uniform float bloom_strength;
 uniform float saturation;
@@ -38,6 +41,14 @@ void main() {
   vec3 amp = sqrt(clamp(min(mn, 1.0 - mx) / max(mx, 1e-4), 0.0, 1.0));
   vec3 wgt = -amp * mix(0.125, 0.2, sharpen) * sharpen;
   c = clamp((c + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt), 0.0, 1.0);
+
+  // ambient occlusion
+  float ao = texture(tex_T2, uv).r;
+  if (ao_debug != 0) {
+    color = vec4(vec3(ao), 1.0);
+    return;
+  }
+  c *= ao;
 
   // bloom
   c += texture(tex_T1, uv).rgb * bloom_strength;
