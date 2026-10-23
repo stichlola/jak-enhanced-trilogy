@@ -5,6 +5,9 @@
 ;; name in dgo: target-gun
 ;; dgos: GAME
 
+;; Enhanced: guns fire this many times faster (their fire-delay is divided by it). 1.0 = vanilla.
+(define *enhanced-gun-fire-rate* 1.5)
+
 ;; DECOMP BEGINS
 
 (define *gun-walk-mods*
@@ -895,6 +898,10 @@
          (remove-setting! 'gun-max-height)
          )
         )
+      ;; Enhanced: faster guns
+      (set! (-> self gun fire-delay)
+            (the-as uint (the int (/ (the float (-> self gun fire-delay)) *enhanced-gun-fire-rate*)))
+            )
       (quat<-gun! (the-as quaternion (-> self gun top-anim-twist-targ)) (the-as quaternion arg0))
       (set! (-> self skel top-anim frame-post-blend) 0.1333333)
       ((lambda :behavior target

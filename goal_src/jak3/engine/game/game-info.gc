@@ -195,6 +195,9 @@
   0
   )
 
+;; Enhanced: every gun carries this many times its vanilla ammo. 1.0 = vanilla.
+(define *enhanced-ammo-mult* 2.0)
+
 (defmethod get-max-ammo-for-gun ((this game-info) (gun pickup-type))
   (let ((f0-0 (the-as number 0.0)))
     (case gun
@@ -267,7 +270,7 @@
            )
        )
       )
-    (the-as float f0-0)
+    (* *enhanced-ammo-mult* (the-as float f0-0))
     )
   )
 
