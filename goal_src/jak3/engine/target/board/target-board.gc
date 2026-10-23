@@ -10,6 +10,10 @@
 (define-extern *board-spin-post-mods* surface)
 (define-extern *board-flip-mods* surface)
 
+;; Enhanced: the jetboard's top speed and acceleration everywhere, not only in the desert
+;; with the board-fast secret. 1.0 = vanilla.
+(define *enhanced-board-speed* 1.35)
+
 
 (#when PC_PORT
 
@@ -155,7 +159,10 @@
             (set! (-> arg0 target-speed) (* 3.5 (-> arg0 target-speed)))
             )
            (else
-             (set! (-> arg0 transv-max) (fmin (-> arg0 transv-max) (-> *setting-control* user-current board-max-speed)))
+             (set! (-> arg0 transv-max)
+                   (fmin (* *enhanced-board-speed* (-> arg0 transv-max)) (-> *setting-control* user-current board-max-speed))
+                   )
+             (set! (-> arg0 target-speed) (* *enhanced-board-speed* (-> arg0 target-speed)))
              )
            )
          (set! (-> self board slip-factor)
@@ -272,14 +279,20 @@
       ((arg0 surface) (arg1 surface) (arg2 surface) (arg3 int))
       (case arg3
         ((1)
-         (when (and (logtest? (game-secrets board-fast) (-> self game secrets))
-                    (-> self current-level)
-                    (logtest? (level-flags desert) (-> self current-level info level-flags))
-                    )
-           (set! (-> arg0 transv-max)
-                 (fmin (fmin 245760.0 (-> *setting-control* user-current board-max-speed)) (* 2.5 (-> arg0 transv-max)))
+         (cond
+           ((and (logtest? (game-secrets board-fast) (-> self game secrets))
+                 (-> self current-level)
+                 (logtest? (level-flags desert) (-> self current-level info level-flags))
                  )
-           (set! (-> arg0 target-speed) (* 3.5 (-> arg0 target-speed)))
+            (set! (-> arg0 transv-max)
+                  (fmin (fmin 245760.0 (-> *setting-control* user-current board-max-speed)) (* 2.5 (-> arg0 transv-max)))
+                  )
+            (set! (-> arg0 target-speed) (* 3.5 (-> arg0 target-speed)))
+            )
+           (else
+             (set! (-> arg0 transv-max) (* *enhanced-board-speed* (-> arg0 transv-max)))
+             (set! (-> arg0 target-speed) (* *enhanced-board-speed* (-> arg0 target-speed)))
+             )
            )
          )
         )

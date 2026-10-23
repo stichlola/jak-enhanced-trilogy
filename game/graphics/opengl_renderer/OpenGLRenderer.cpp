@@ -1,5 +1,7 @@
 #include "OpenGLRenderer.h"
 
+#include <chrono>
+
 #include "common/goal_constants.h"
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
@@ -7,6 +9,7 @@
 #include "game/graphics/opengl_renderer/BlitDisplays.h"
 #include "game/graphics/opengl_renderer/DepthCue.h"
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
 #include "game/graphics/opengl_renderer/ProgressRenderer.h"
 #include "game/graphics/opengl_renderer/ShadowRenderer.h"
@@ -123,6 +126,8 @@ OpenGLRenderer::OpenGLRenderer(std::shared_ptr<TexturePool> texture_pool,
   glBindVertexArray(0);
 
   // end set up screen draw
+
+  m_enhanced_post = std::make_unique<EnhancedPost>();
 
   const tfrag3::Level* common_level = nullptr;
   {
@@ -1090,6 +1095,24 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   }
 
   m_profiler.finish();
+
+  // Enhanced: average frame rate in the log every 5 seconds, for before/after measurements
+  {
+    using clock = std::chrono::steady_clock;
+    static clock::time_point window_start = clock::now();
+    static int frames = 0;
+    static double render_ms = 0;
+    frames++;
+    render_ms += m_profiler.root_time() * 1000.0;
+    double elapsed = std::chrono::duration<double>(clock::now() - window_start).count();
+    if (elapsed >= 5.0) {
+      lg::info("[enhanced] average {:.1f} fps, renderer {:.2f} ms/frame, post {}", frames / elapsed,
+               render_ms / frames, m_enhanced_post && m_enhanced_post->active() ? "on" : "off");
+      window_start = clock::now();
+      frames = 0;
+      render_ms = 0;
+    }
+  }
   //  if (m_profiler.root_time() > 0.018) {
   //    fmt::print("Slow frame: {:.2f} ms\n", m_profiler.root_time() * 1000);
   //    fmt::print("{}\n", m_profiler.to_string());
@@ -1143,6 +1166,9 @@ void OpenGLRenderer::draw_renderer_selection_window() {
   ImGui::Checkbox("Sky CPU", &m_render_state.use_sky_cpu);
   ImGui::Checkbox("Occlusion Cull", &m_render_state.use_occlusion_culling);
   ImGui::Checkbox("Blackout Loads", &m_enable_fast_blackout_loads);
+  if (m_enhanced_post) {
+    m_enhanced_post->draw_debug_window();
+  }
 
   if (m_texture_animator && ImGui::TreeNode("Texture Animator")) {
     m_texture_animator->draw_debug_window();
@@ -1639,6 +1665,12 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
     window_blit_src = &m_fbo_state.resources.render_buffer;
   }
 
+  const bool enhanced = m_enhanced_post && m_enhanced_post->active();
+  if (enhanced) {
+    m_enhanced_post->prepare(*window_blit_src->tex_id, window_blit_src->width,
+                             window_blit_src->height, screen_vao, render_state, prof);
+  }
+
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
   glViewport(render_state->draw_offset_x, render_state->draw_offset_y, render_state->draw_region_w,
@@ -1651,8 +1683,12 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
 
   float color = (float)brightness_contrast_color / 128.0f;
   float alpha = (float)brightness_contrast_alpha / 128.0f;
-  auto& shader = render_state->shaders[ShaderId::POST_PROCESSING];
+  auto& shader = enhanced ? m_enhanced_post->activate_composite(render_state,
+                                                                 window_blit_src->width,
+                                                                 window_blit_src->height)
+                          : render_state->shaders[ShaderId::POST_PROCESSING];
   shader.activate();
+  glBindTexture(GL_TEXTURE_2D, *window_blit_src->tex_id);
   glUniform1i(glGetUniformLocation(shader.id(), "tex_T0"), 0);
   if (brightness_contrast_color < 0) {
     // subtractive blend - note that color is already negative

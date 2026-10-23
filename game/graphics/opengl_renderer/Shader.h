@@ -69,6 +69,9 @@ enum class ShaderId {
   SLOW_TIME = 42,
   OCEAN_ENVMAP = 43,
   OCEAN_ENVMAP_HAZE = 44,
+  ENH_BLOOM_DOWN = 45,
+  ENH_BLOOM_UP = 46,
+  ENH_COMPOSITE = 47,
   MAX_SHADERS
 };
 
