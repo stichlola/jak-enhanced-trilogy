@@ -5,6 +5,21 @@
 ;; name in dgo: wvehicle
 ;; dgos: LPATK, LFACCAR, WASALL
 
+;; Enhanced: driving modes for the desert vehicles, as an engine torque multiplier. Kept across
+;; level reloads (define-perm). From the REPL: (enhanced-drive-mode 'sport)
+(define-perm *enhanced-vehicle-torque* float 1.35)
+
+(defun enhanced-drive-mode ((mode symbol))
+  "classic = vanilla, sport = 1.35x torque (default), turbo = 1.8x torque."
+  (set! *enhanced-vehicle-torque* (case mode
+                                    (('classic) 1.0)
+                                    (('turbo) 1.8)
+                                    (else 1.35)
+                                    )
+        )
+  *enhanced-vehicle-torque*
+  )
+
 ;; DECOMP BEGINS
 
 (defmethod wvehicle-method-166 ((this wvehicle) (arg0 float) (arg1 float))
@@ -402,7 +417,7 @@
     (set! (-> this final-drive-ratio) (-> s5-0 transmission final-drive-ratio))
     (set! (-> this total-gear-ratio) (* (-> this final-drive-ratio) (-> this gear-ratio)))
     (set! (-> this inv-total-gear-ratio) (/ 1.0 (-> this total-gear-ratio)))
-    (set! (-> this engine-max-torque) (-> s5-0 engine max-torque))
+    (set! (-> this engine-max-torque) (* *enhanced-vehicle-torque* (-> s5-0 engine max-torque)))
     (set! (-> this clutch-inertia) (* 0.0 (-> s5-0 transmission inertia)))
     )
   0
