@@ -9,6 +9,9 @@ uniform sampler2D tex_T0;  // frame
 uniform sampler2D tex_T1;  // bloom
 uniform sampler2D tex_T2;  // ambient occlusion
 uniform int ao_debug;
+uniform sampler2D tex_T3;  // depth
+uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
+uniform vec3 dof;          // start, end (game units), max radius (pixels)
 uniform vec2 texel;
 uniform float bloom_strength;
 uniform float saturation;
@@ -30,6 +33,31 @@ float luma(vec3 c) {
 void main() {
   vec2 uv = tex_coord;
   vec3 c = texture(tex_T0, uv).rgb;
+
+  // light depth of field: far geometry gets a small disk blur. The sky (no depth) and anything
+  // near stays sharp, and samples nearer than the pixel are skipped so nothing bleeds outward.
+  if (dof.z > 0.0) {
+    float d = texture(tex_T3, uv).r;
+    float z = d > 1e-7 ? abs(proj.y / (d * 2.0 - 1.0 - proj.x)) : 0.0;
+    float coc = smoothstep(dof.x, dof.y, z) * dof.z;
+    if (coc > 0.25) {
+      const vec2 disk[12] = vec2[](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
+                                   vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480),
+                                   vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064),
+                                   vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
+      vec3 sum = c;
+      float wsum = 1.0;
+      for (int i = 0; i < 12; i++) {
+        vec2 suv = uv + disk[i] * coc * texel;
+        float sd = texture(tex_T3, suv).r;
+        float sz = sd > 1e-7 ? abs(proj.y / (sd * 2.0 - 1.0 - proj.x)) : 1e12;
+        float w = sz > z * 0.85 ? 1.0 : 0.0;
+        sum += texture(tex_T0, suv).rgb * w;
+        wsum += w;
+      }
+      c = sum / wsum;
+    }
+  }
 
   // contrast-adaptive sharpen (AMD CAS, simplified): less where the local contrast is already high
   vec3 n = texture(tex_T0, uv + vec2(0, -texel.y)).rgb;

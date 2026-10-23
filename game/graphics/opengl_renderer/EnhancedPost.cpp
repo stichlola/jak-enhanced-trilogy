@@ -128,6 +128,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
 
   const auto& cam = g_enhanced_camera;
   const float fy = cam.fy * kScissorHeightScale;
+  m_last_proj = {cam.depth_a, cam.depth_b, cam.fx, fy};
 
   // occlusion
   auto& ssao = render_state->shaders[ShaderId::ENH_SSAO];
@@ -292,6 +293,9 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_settings.bloom && m_levels[0].tex ? m_levels[0].tex : m_black_tex);
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_ao_tex[0] : m_white_tex);
+  // depth for the depth of field (only valid when the occlusion pass copied it this frame)
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_depth_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -299,6 +303,12 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
   glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
+  glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  const bool dof = m_settings.dof && m_ssao_ready;
+  glUniform3f(glGetUniformLocation(id, "dof"), m_settings.dof_start * kMeter,
+              m_settings.dof_end * kMeter, dof ? m_settings.dof_radius * h / 1080.f : 0.f);
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);
   glUniform1f(glGetUniformLocation(id, "bloom_strength"),
               m_settings.bloom ? m_settings.bloom_strength : 0.f);
@@ -318,6 +328,10 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("SSAO intensity", &m_settings.ssao_intensity, 0.f, 3.f);
     ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
     ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
+    ImGui::Checkbox("Depth of field", &m_settings.dof);
+    ImGui::SliderFloat("DoF start (m)", &m_settings.dof_start, 10.f, 500.f);
+    ImGui::SliderFloat("DoF end (m)", &m_settings.dof_end, 20.f, 1000.f);
+    ImGui::SliderFloat("DoF radius (px)", &m_settings.dof_radius, 0.f, 8.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);

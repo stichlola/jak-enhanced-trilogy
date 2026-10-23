@@ -21,7 +21,8 @@ extern EnhancedCamera g_enhanced_camera;
 
 /*!
  * Jak 3 Enhanced post-processing, run on the finished game frame before it goes to the window:
- * screen-space ambient occlusion from the depth buffer, a soft bloom (bright pass + dual-filter blur chain), color grading, vignette and a light
+ * screen-space ambient occlusion from the depth buffer, a light depth of field on the far
+ * distance, a soft bloom (bright pass + dual-filter blur chain), color grading, vignette and a light
  * contrast-adaptive sharpen. Set JAK_ENHANCED=0 in the environment to start with it off (vanilla
  * look); the settings can be changed live in the "Renderer Debug" window.
  */
@@ -34,6 +35,10 @@ class EnhancedPost {
     float ssao_intensity = 1.4f;
     float ssao_max_distance = 250.f;  // meters, faded out beyond
     bool ssao_debug = false;       // show the occlusion alone
+    bool dof = true;
+    float dof_start = 70.f;  // meters: sharp until here
+    float dof_end = 350.f;   // meters: full blur from here
+    float dof_radius = 2.5f;  // pixels at 1080p, scaled with the resolution
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
@@ -106,4 +111,5 @@ class EnhancedPost {
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
+  std::array<float, 4> m_last_proj = {0, 0, 1, 1};
 };
