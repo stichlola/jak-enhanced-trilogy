@@ -39,6 +39,10 @@ uniform float water_strength;
 uniform vec3 right_view;  // world axes in view space
 uniform vec3 fwd_view;
 uniform vec3 cam_pos;     // world
+uniform vec4 sun_dir;     // toward the sun in view space, w: glint strength (0 = none)
+uniform vec3 water_deep_color;
+uniform vec3 water_shallow_color;
+uniform float water_unify;  // how much of our water color replaces the game's
 
 uniform vec4 color_mult;
 uniform vec4 color_add;
@@ -91,6 +95,34 @@ void main() {
   vec3 p = d > 1e-7 ? view_pos(uv, d) : vec3(0.0);
   float height = dot(up_view, p);  // above (+) or below (-) the camera
 
+  // water: the near sea's surface in front of the scene, or the far sea still showing. From here
+  // on the surface is this pixel's depth (fog, blur, ...); seabed_d keeps what's under it.
+  float wsurf = 0.0;
+  float seabed_d = d;
+  bool water_deep = true;
+  if (water_strength > 0.0) {
+    float wd = texture(tex_T5, uv).r;
+    float fd = texture(tex_T6, uv).r;
+    bool under_is_sea = fd > 1e-7 && abs(fd - d) < 1e-7 && dot(up_view, view_pos(uv, fd)) < -4096.0;
+    if (wd > d + 1e-7) {
+      wsurf = wd;
+      water_deep = under_is_sea || d <= 1e-7;
+    } else if (under_is_sea) {
+      wsurf = fd;
+    }
+    if (wsurf > 0.0) {
+      d = wsurf;
+      z = view_z(d);
+      p = view_pos(uv, d);
+      height = dot(up_view, p);
+    }
+  }
+
+  // the surface under the water: is it level (a beach) or upright (a leg, a wall)?
+  vec3 seabed_p = view_pos(uv, max(seabed_d, 1e-6));
+  vec3 seabed_n = normalize(cross(dFdx(seabed_p), dFdy(seabed_p)));
+  bool seabed_level = abs(dot(seabed_n, up_view)) > 0.75;
+
   // heat haze: far ground below the camera wobbles a little
   if (haze.x > 0.0 && z > 0.0) {
     float amount = smoothstep(haze.y, haze.z, z) * clamp(-height / (z * 0.05 + 1.0), 0.0, 1.0);
@@ -127,75 +159,91 @@ void main() {
     c = fxaa != 0 ? fxaa_at(uv) : texture(tex_T0, uv).rgb;
   }
 
-  // water reflections: where the ocean's surface is in front of the scene, trace the reflected
-  // ray through the depth buffer (which has no water) and mix in what it hits, by Fresnel
-  if (water_strength > 0.0) {
-    float wd = texture(tex_T5, uv).r;
-    float fd = texture(tex_T6, uv).r;
-    // far sea: still the ocean's own depth at the end of the frame
-    if (fd > 1e-7 && abs(fd - d) < 1e-7 && dot(up_view, view_pos(uv, fd)) < -4096.0) {
-      wd = fd;
-    }
-    if (wd > d + 1e-7 || (wd > 1e-7 && wd == fd && dot(up_view, view_pos(uv, fd)) < -4096.0)) {
-      vec3 wp = view_pos(uv, wd);
-      // ripples: two moving wave trains on the world's horizontal plane
-      vec2 world = vec2(dot(right_view, wp) + cam_pos.x, dot(fwd_view, wp) + cam_pos.z) / 4096.0;
-      float t = haze.w;
-      vec2 slope = 0.035 * vec2(sin(world.x * 1.3 + world.y * 0.4 + t * 1.7),
-                                cos(world.y * 1.1 - world.x * 0.5 + t * 1.3)) +
-                   0.015 * vec2(sin(world.y * 4.1 + t * 2.9), cos(world.x * 3.7 - t * 2.3));
-      // smaller than a pixel far away: fade them out there, or they alias into moire bands
-      slope *= 1.0 / (1.0 + abs(wp.z) / (60.0 * 4096.0));
-      vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
-      vec3 vdir = normalize(wp);
-      vec3 r = reflect(vdir, n);
-      float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-vdir, n), 0.0, 1.0), 5.0);
+  // water: our own shading over the game's, the same for the near and far sea (drawn by two
+  // renderers with different colors), with reflections, sun glints, clearer shallows and foam
+  if (wsurf > 0.0) {
+    // ripples: wave trains on the world's horizontal plane, finer ones fading out with distance
+    vec2 world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
+    float t = haze.w;
+    float far = 1.0 / (1.0 + z / (60.0 * 4096.0));
+    vec2 slope = 0.030 * vec2(sin(world.x * 0.9 + world.y * 0.35 + t * 1.3),
+                              cos(world.y * 0.8 - world.x * 0.45 + t * 1.1));
+    slope += far * 0.022 * vec2(sin(world.x * 2.3 - world.y * 1.7 + t * 2.1),
+                                cos(world.y * 2.6 + world.x * 1.2 - t * 1.9));
+    slope += far * far * 0.012 * vec2(sin(world.y * 6.1 + world.x * 2.0 + t * 3.3),
+                                      cos(world.x * 5.7 - world.y * 2.2 - t * 2.9));
+    vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
+    vec3 vdir = normalize(p);
+    vec3 r = reflect(vdir, n);
+    float facing = clamp(dot(-vdir, n), 0.0, 1.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
 
-      vec3 refl = vec3(0.0);
-      float found = 0.0;
-      float dist = abs(wp.z);
-      float step_len = 0.25 * 4096.0 + dist * 0.01;
-      vec3 q = wp;
-      vec2 quv = uv;
-      vec2 hit_uv = uv;
-      vec2 sky_uv = vec2(-1.0);  // last sky (or cloud) texel the ray passed over
-      for (int i = 0; i < 40; i++) {
+    // how deep the water is here (meters), from the sea bed seen through it (near sea only)
+    float depth_m = 40.0;
+    if (!water_deep && seabed_d > 1e-7) {
+      depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
+    }
+    float clear_water = exp(-depth_m / 2.0);
+
+    // the water's body: one color for the near and far sea (the game draws them differently),
+    // shaded a little by the ripples so it keeps some texture; clearer where it's shallow, where
+    // what's under it (and the game's own water) shows through
+    float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
+    vec3 body = mix(water_deep_color, water_shallow_color, clear_water) * shade;
+    vec3 wc = mix(body, c, clear_water * 0.75 * water_unify + (1.0 - water_unify));
+
+    // reflection. Far away: the screen where the reflected ray vanishes (sky, distant hills).
+    // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
+    vec3 refl = fog_color;
+    if (r.z > 1e-3) {
+      vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
+      refl = texture(tex_T0, env_uv).rgb;
+    }
+    if (z < 80.0 * 4096.0) {
+      float step_len = 0.25 * 4096.0 + z * 0.01;
+      vec3 q = p;
+      for (int i = 0; i < 32; i++) {
         q += r * step_len;
         step_len *= 1.12;
         if (q.z <= 0.0) {
           break;  // came back toward the camera
         }
-        quv = 0.5 * vec2(proj.z * q.x, proj.w * q.y) / q.z + 0.5;
+        vec2 quv = 0.5 * vec2(proj.z * q.x, proj.w * q.y) / q.z + 0.5;
         if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
           break;
         }
         float sd = texture(tex_T3, quv).r;
         float sfd = texture(tex_T6, quv).r;
         if (sd <= 1e-7 || (sfd > 1e-7 && abs(sfd - sd) < 1e-7)) {
-          // sky, clouds (they keep the sky pass's depth too) or the sea itself: not a reflector
-          if (sd <= 1e-7 || dot(up_view, view_pos(quv, sd)) > 0.0) {
-            sky_uv = quv;
-          }
-          continue;
+          continue;  // sky, clouds or the sea itself: not a reflector
         }
         float scene_z = view_z(sd);
-        if (q.z > scene_z && q.z - scene_z < step_len * 2.0 + 4096.0) {
-          refl = texture(tex_T0, quv).rgb;
-          hit_uv = quv;
-          found = 1.0;
+        if (q.z > scene_z && q.z - scene_z < step_len + 4096.0) {
+          vec2 edge = min(quv, 1.0 - quv);
+          float hit = smoothstep(0.0, 0.05, min(edge.x, edge.y)) *
+                      (1.0 - smoothstep(50.0 * 4096.0, 80.0 * 4096.0, z));
+          refl = mix(refl, texture(tex_T0, quv).rgb, hit);
           break;
         }
       }
-      // a real hit fades out toward the screen's edges (it may be cut off there)
-      vec2 edge = min(hit_uv, 1.0 - hit_uv);
-      float fade = found * smoothstep(0.0, 0.05, min(edge.x, edge.y));
-      // missed everything: reflect the sky the ray last went over
-      if (found == 0.0 && sky_uv.x >= 0.0) {
-        refl = texture(tex_T0, sky_uv).rgb;
-        fade = 1.0;
-      }
-      c = mix(c, refl, clamp(fresnel * 1.2, 0.0, 1.0) * fade * water_strength);
     }
+    wc = mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
+
+    // sun glints: a tight highlight plus a broad sheen toward the sun
+    if (sun_dir.w > 0.0) {
+      float sr = max(dot(r, sun_dir.xyz), 0.0);
+      float glint = pow(sr, 900.0) * 7.0 + pow(sr, 80.0) * 0.25;
+      wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w;
+    }
+
+    // foam where the water meets the shore, moving with the waves
+    if (!water_deep && seabed_level && depth_m < 0.8) {
+      float wave = 0.5 + 0.5 * sin(world.x * 2.1 + world.y * 1.3 + t * 1.6) *
+                             sin(world.y * 2.9 - world.x * 0.7 - t * 1.2);
+      float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
+      wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
+    }
+    c = wc;
   }
 
   // light depth of field on the far distance (samples nearer than the pixel are skipped)
@@ -236,7 +284,7 @@ void main() {
   }
 
   // ambient occlusion and sun shadows
-  float ao = texture(tex_T2, tex_coord).r;
+  float ao = wsurf > 0.0 ? 1.0 : texture(tex_T2, tex_coord).r;
   if (ao_debug != 0) {
     color = vec4(vec3(ao), 1.0);
     return;

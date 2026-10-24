@@ -42,6 +42,14 @@ def wait_for_server(port=8181, timeout=120):
 if __name__ == "__main__":
     if not wait_for_server():
         sys.exit("goalc nREPL not reachable on 8181")
-    for form in sys.argv[1:]:
+    forms = []
+    for arg in sys.argv[1:]:
+        # @file: one form per line (avoids shell quoting of GOAL strings)
+        if arg.startswith("@"):
+            forms += [line for line in open(arg[1:], encoding="utf-8").read().splitlines() if line.strip()]
+        else:
+            forms.append(arg)
+    for form in forms:
         send(form)
         print("sent", form)
+        time.sleep(0.5)

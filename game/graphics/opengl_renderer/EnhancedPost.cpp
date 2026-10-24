@@ -231,6 +231,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3f(glGetUniformLocation(id, "right_view"), cam.rot[0][0], cam.rot[0][1], cam.rot[0][2]);
   glUniform3f(glGetUniformLocation(id, "fwd_view"), cam.rot[2][0], cam.rot[2][1], cam.rot[2][2]);
   glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, m_settings.water_deep);
+  glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
+  glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
+  {
+    // the sun for the glints, only when it's above the horizon
+    float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
+                          m_sun_view[2] * m_sun_view[2]);
+    float up = len > 0.f ? (m_sun_view[0] * cam.rot[1][0] + m_sun_view[1] * cam.rot[1][1] +
+                            m_sun_view[2] * cam.rot[1][2]) / len
+                         : 0.f;
+    const bool sun = g_enhanced_sun.valid && len > 0.f && up > 0.f;
+    glUniform4f(glGetUniformLocation(id, "sun_dir"), sun ? m_sun_view[0] / len : 0.f,
+                sun ? m_sun_view[1] / len : 0.f, sun ? m_sun_view[2] / len : 0.f,
+                sun ? m_settings.water_glint * std::min(1.f, up * 4.f) : 0.f);
+  }
   m_ocean_ready = false;
 
   // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
@@ -679,6 +694,10 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::Checkbox("Water reflections", &m_settings.water_reflections);
     ImGui::SliderFloat("Water reflection strength", &m_settings.water_reflection_strength, 0.f, 1.f);
+    ImGui::ColorEdit3("Deep water", m_settings.water_deep);
+    ImGui::ColorEdit3("Shallow water", m_settings.water_shallow);
+    ImGui::SliderFloat("Water color (ours vs game)", &m_settings.water_unify, 0.f, 1.f);
+    ImGui::SliderFloat("Sun glints", &m_settings.water_glint, 0.f, 3.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);

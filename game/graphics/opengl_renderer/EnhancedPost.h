@@ -55,6 +55,10 @@ class EnhancedPost {
     float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
     bool water_reflections = true;
     float water_reflection_strength = 0.6f;
+    float water_deep[3] = {0.035f, 0.17f, 0.2f};
+    float water_shallow[3] = {0.16f, 0.42f, 0.4f};
+    float water_unify = 1.0f;
+    float water_glint = 1.0f;
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
