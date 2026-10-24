@@ -167,7 +167,15 @@ GLuint OpenGLTexturePool::allocate(u64 w, u64 h) {
   }
 
   if (it->second.empty()) {
-    lg::die("OpenGLTexturePool needs more entries for {} x {}", w, h);
+    // Enhanced: HD texture replacements make animated textures bigger than the preallocated
+    // set expects, so grow the pool instead of stopping the game.
+    lg::warn("OpenGLTexturePool growing for {} x {}", w, h);
+    GLuint slot;
+    glGenTextures(1, &slot);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, slot);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, nullptr);
+    return slot;
   }
 
   auto ret = it->second.back();
