@@ -422,8 +422,7 @@ void TFragment::render_tree(int geom,
     m_color_result.resize(tree.colors->color_count);
   }
   interp_time_of_day(settings.camera.itimes, *tree.colors, m_color_result.data());
-  enhanced_grade_custom_level(m_level_name, settings.camera.itimes, m_color_result.data(),
-                              tree.colors->color_count);
+  enhanced_grade_custom_level(m_level_name, m_color_result.data(), tree.colors->color_count);
   glActiveTexture(GL_TEXTURE10);
   glBindTexture(GL_TEXTURE_1D, tree.time_of_day_texture);
   glTexSubImage1D(GL_TEXTURE_1D, 0, 0, tree.colors->color_count, GL_RGBA,

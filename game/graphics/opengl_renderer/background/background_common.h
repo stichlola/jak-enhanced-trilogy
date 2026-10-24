@@ -56,12 +56,10 @@ void interp_time_of_day(const math::Vector<s32, 4> itimes[4],
                         math::Vector<u8, 4>* out);
 
 // Enhanced: custom levels have the same color in all 8 time-of-day palettes, so they take the raw
-// tint of the palette weights (yellow in Haven). For those levels, take the tint out and grade the
-// colors like the city around them. Does nothing for other levels.
-void enhanced_grade_custom_level(const std::string& level,
-                                 const math::Vector<s32, 4> itimes[4],
-                                 math::Vector<u8, 4>* colors,
-                                 u32 count);
+// tint of the palette weights (yellow, too bright in Haven). The city levels' mean color is tracked
+// and the plaza's colors are scaled per channel to the same mean: it follows the city's grading
+// at every time of day. Call after interp_time_of_day for every level.
+void enhanced_grade_custom_level(const std::string& level, math::Vector<u8, 4>* colors, u32 count);
 
 void cull_check_all_slow(const math::Vector4f* planes,
                          const std::vector<tfrag3::VisNode>& nodes,
