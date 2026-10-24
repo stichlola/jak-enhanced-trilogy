@@ -60,8 +60,92 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(1, &m_scene_fbo);
     glDeleteTextures(1, &m_scene_tex);
   }
+  if (m_ocean_fbo[0]) {
+    glDeleteFramebuffers(3, m_ocean_fbo);
+    glDeleteTextures(3, m_ocean_depth);
+  }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
+}
+
+void EnhancedPost::begin_ocean(GLuint render_fbo,
+                               int w,
+                               int h,
+                               SharedRenderState* render_state) {
+  m_ocean_ready = false;
+  if (!m_settings.enabled || !m_settings.water_reflections) {
+    return;
+  }
+  ensure_ocean_buffers(w, h);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_ocean_fbo[0]);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                    GL_NEAREST);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  render_state->enhanced_ocean_depth_write = true;
+}
+
+void EnhancedPost::capture_far_ocean(GLuint render_fbo, int w, int h) {
+  m_far_ocean_ready = false;
+  if (!m_settings.enabled || !m_settings.water_reflections) {
+    return;
+  }
+  ensure_ocean_buffers(w, h);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_ocean_fbo[2]);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                    GL_NEAREST);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  m_far_ocean_ready = true;
+}
+
+void EnhancedPost::ensure_ocean_buffers(int w, int h) {
+  if (w != m_ocean_w || h != m_ocean_h) {
+    if (m_ocean_fbo[0]) {
+      glDeleteFramebuffers(3, m_ocean_fbo);
+      glDeleteTextures(3, m_ocean_depth);
+    }
+    m_ocean_w = w;
+    m_ocean_h = h;
+    glGenFramebuffers(3, m_ocean_fbo);
+    glGenTextures(3, m_ocean_depth);
+    for (int i = 0; i < 3; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_ocean_depth[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL,
+                   GL_UNSIGNED_INT_24_8, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_ocean_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D,
+                             m_ocean_depth[i], 0);
+      glDrawBuffer(GL_NONE);
+      glReadBuffer(GL_NONE);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+}
+
+void EnhancedPost::end_ocean(GLuint render_fbo,
+                             int w,
+                             int h,
+                             SharedRenderState* render_state) {
+  if (!render_state->enhanced_ocean_depth_write) {
+    return;
+  }
+  render_state->enhanced_ocean_depth_write = false;
+  // keep the depth with the ocean surface, then put the original back
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_ocean_fbo[1]);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                    GL_NEAREST);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, m_ocean_fbo[0]);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                    GL_NEAREST);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  m_ocean_ready = true;
 }
 
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
@@ -128,6 +212,26 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength : 0.f,
               120.f * kMeter, 400.f * kMeter, (float)m_time);
   glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa);
+
+  // water reflections: the ocean surface depth from begin/end_ocean this frame
+  const bool near_water = have_scene && m_ocean_ready && m_settings.water_reflections;
+  const bool far_water = have_scene && m_far_ocean_ready && m_settings.water_reflections;
+  const bool water = near_water || far_water;
+  glActiveTexture(GL_TEXTURE5);
+  glBindTexture(GL_TEXTURE_2D, near_water ? m_ocean_depth[1] : m_black_tex);
+  glActiveTexture(GL_TEXTURE6);
+  glBindTexture(GL_TEXTURE_2D, far_water ? m_ocean_depth[2] : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T5"), 5);
+  glUniform1i(glGetUniformLocation(id, "tex_T6"), 6);
+  m_far_ocean_ready = false;
+  glUniform1f(glGetUniformLocation(id, "water_strength"),
+              water ? m_settings.water_reflection_strength : 0.f);
+  // the camera's right and forward in view space, and its position, for the ripples
+  glUniform3f(glGetUniformLocation(id, "right_view"), cam.rot[0][0], cam.rot[0][1], cam.rot[0][2]);
+  glUniform3f(glGetUniformLocation(id, "fwd_view"), cam.rot[2][0], cam.rot[2][1], cam.rot[2][2]);
+  glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  m_ocean_ready = false;
 
   // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
   float strength = 0.f;
@@ -573,6 +677,8 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
     ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
+    ImGui::Checkbox("Water reflections", &m_settings.water_reflections);
+    ImGui::SliderFloat("Water reflection strength", &m_settings.water_reflection_strength, 0.f, 1.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);

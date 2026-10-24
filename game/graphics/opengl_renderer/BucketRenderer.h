@@ -44,6 +44,9 @@ struct SharedRenderState {
   math::Vector<u8, 4> fog_color = math::Vector<u8, 4>{0, 0, 0, 0};
   float fog_intensity = 1.f;
   bool no_multidraw = false;
+  // Enhanced: the near ocean writes depth (normally it doesn't), so its surface can be captured
+  // for reflections; EnhancedPost restores the depth buffer right after.
+  bool enhanced_ocean_depth_write = false;
 
   void reset();
   bool has_pc_data = false;

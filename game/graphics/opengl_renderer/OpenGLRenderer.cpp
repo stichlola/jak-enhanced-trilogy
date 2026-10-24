@@ -1437,7 +1437,20 @@ void OpenGLRenderer::dispatch_buckets_jak3(DmaFollower dma,
     auto bucket_prof = prof.make_scoped_child(renderer->name_and_id());
     g_current_renderer = renderer->name_and_id();
     // lg::info("Render: {} start", g_current_renderer);
+    const bool ocean = bucket_id == (int)jak3::BucketId::OCEAN_NEAR && m_enhanced_post;
+    if (ocean) {
+      m_enhanced_post->begin_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                   m_render_state.render_fb_h, &m_render_state);
+    }
     renderer->render(dma, &m_render_state, bucket_prof);
+    if (ocean) {
+      m_enhanced_post->end_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                 m_render_state.render_fb_h, &m_render_state);
+    }
+    if (bucket_id == (int)jak3::BucketId::OCEAN_MID_FAR && m_enhanced_post) {
+      m_enhanced_post->capture_far_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                         m_render_state.render_fb_h);
+    }
     if (sync_after_buckets) {
       auto pp = scoped_prof("finish");
       glFinish();

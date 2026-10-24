@@ -53,6 +53,8 @@ class EnhancedPost {
     float fog_amount = 0.35f;      // at most this much of the fog color
     float haze_strength = 0.0009f;  // heat shimmer over the far ground (uv)
     float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
+    bool water_reflections = true;
+    float water_reflection_strength = 0.85f;
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
@@ -94,6 +96,16 @@ class EnhancedPost {
    * Run every effect on the 3D scene in render_fbo (w x h) and draw the result back into it.
    * Called between the 3D buckets and the HUD, so the HUD stays untouched.
    */
+  /*!
+   * Around the near ocean bucket: save the depth buffer and let the ocean write its surface,
+   * then keep that surface for reflections and put the depth buffer back as it was.
+   */
+  void begin_ocean(GLuint render_fbo, int w, int h, SharedRenderState* render_state);
+  // right after the mid/far ocean (drawn over the sky, with depth): where the depth is still the
+  // same at the end of the frame, the far sea shows
+  void capture_far_ocean(GLuint render_fbo, int w, int h);
+  void end_ocean(GLuint render_fbo, int w, int h, SharedRenderState* render_state);
+
   void apply_to_scene(GLuint render_fbo,
                       int w,
                       int h,
@@ -137,6 +149,15 @@ class EnhancedPost {
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
   std::array<float, 4> m_last_proj = {0, 0, 1, 1};
+
+  // the near ocean's surface depth, and the depth buffer from before it was drawn
+  GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean
+  GLuint m_ocean_depth[3] = {0, 0, 0};
+  void ensure_ocean_buffers(int w, int h);
+  bool m_far_ocean_ready = false;
+  int m_ocean_w = 0;
+  int m_ocean_h = 0;
+  bool m_ocean_ready = false;
 
   // copy of the scene being composited
   GLuint m_scene_fbo = 0;

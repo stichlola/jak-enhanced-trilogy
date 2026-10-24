@@ -12,11 +12,20 @@ import time
 EVAL = 10
 
 
-def send(form, port=8181, host="127.0.0.1"):
+def send(form, port=8181, host="127.0.0.1", retry_for=180):
+    """The REPL doesn't take connections while it's busy (e.g. during (mi)): keep trying."""
     data = form.encode()
-    with socket.create_connection((host, port), timeout=10) as sock:
-        sock.sendall(struct.pack("<II", len(data), EVAL) + data)
-        time.sleep(0.3)
+    end = time.time() + retry_for
+    while True:
+        try:
+            with socket.create_connection((host, port), timeout=10) as sock:
+                sock.sendall(struct.pack("<II", len(data), EVAL) + data)
+                time.sleep(0.3)
+            return
+        except OSError:
+            if time.time() > end:
+                raise
+            time.sleep(2)
 
 
 def wait_for_server(port=8181, timeout=120):

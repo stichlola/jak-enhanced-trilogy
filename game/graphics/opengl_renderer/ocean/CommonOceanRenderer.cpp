@@ -289,7 +289,7 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
               render_state->fog_color[0] / 255.f, render_state->fog_color[1] / 255.f,
               render_state->fog_color[2] / 255.f, render_state->fog_intensity / 255);
 
-  glDepthMask(GL_FALSE);
+  glDepthMask(render_state->enhanced_ocean_depth_write ? GL_TRUE : GL_FALSE);
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
   glDepthFunc(GL_GEQUAL);

@@ -33,6 +33,13 @@ uniform vec3 to_prev_offset;
 uniform vec4 motion;    // previous fx, fy, strength (0 = off), max length (uv)
 uniform vec2 motion_keep;  // sharp until, full blur from (game units)
 
+uniform sampler2D tex_T5;  // depth with the near ocean's surface (black when none)
+uniform sampler2D tex_T6;  // depth right after the mid/far ocean (black when none)
+uniform float water_strength;
+uniform vec3 right_view;  // world axes in view space
+uniform vec3 fwd_view;
+uniform vec3 cam_pos;     // world
+
 uniform vec4 color_mult;
 uniform vec4 color_add;
 
@@ -118,6 +125,77 @@ void main() {
   }
   if (blur == 0.0) {
     c = fxaa != 0 ? fxaa_at(uv) : texture(tex_T0, uv).rgb;
+  }
+
+  // water reflections: where the ocean's surface is in front of the scene, trace the reflected
+  // ray through the depth buffer (which has no water) and mix in what it hits, by Fresnel
+  if (water_strength > 0.0) {
+    float wd = texture(tex_T5, uv).r;
+    float fd = texture(tex_T6, uv).r;
+    // far sea: still the ocean's own depth at the end of the frame
+    if (fd > 1e-7 && abs(fd - d) < 1e-7 && dot(up_view, view_pos(uv, fd)) < -4096.0) {
+      wd = fd;
+    }
+    if (wd > d + 1e-7 || (wd > 1e-7 && wd == fd && dot(up_view, view_pos(uv, fd)) < -4096.0)) {
+      vec3 wp = view_pos(uv, wd);
+      // ripples: two moving wave trains on the world's horizontal plane
+      vec2 world = vec2(dot(right_view, wp) + cam_pos.x, dot(fwd_view, wp) + cam_pos.z) / 4096.0;
+      float t = haze.w;
+      vec2 slope = 0.035 * vec2(sin(world.x * 1.3 + world.y * 0.4 + t * 1.7),
+                                cos(world.y * 1.1 - world.x * 0.5 + t * 1.3)) +
+                   0.015 * vec2(sin(world.y * 4.1 + t * 2.9), cos(world.x * 3.7 - t * 2.3));
+      // smaller than a pixel far away: fade them out there, or they alias into moire bands
+      slope *= 1.0 / (1.0 + abs(wp.z) / (60.0 * 4096.0));
+      vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
+      vec3 vdir = normalize(wp);
+      vec3 r = reflect(vdir, n);
+      float fresnel = 0.02 + 0.98 * pow(1.0 - clamp(dot(-vdir, n), 0.0, 1.0), 5.0);
+
+      vec3 refl = vec3(0.0);
+      float found = 0.0;
+      float dist = abs(wp.z);
+      float step_len = 0.25 * 4096.0 + dist * 0.01;
+      vec3 q = wp;
+      vec2 quv = uv;
+      vec2 hit_uv = uv;
+      vec2 sky_uv = vec2(-1.0);  // last sky (or cloud) texel the ray passed over
+      for (int i = 0; i < 40; i++) {
+        q += r * step_len;
+        step_len *= 1.12;
+        if (q.z <= 0.0) {
+          break;  // came back toward the camera
+        }
+        quv = 0.5 * vec2(proj.z * q.x, proj.w * q.y) / q.z + 0.5;
+        if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+          break;
+        }
+        float sd = texture(tex_T3, quv).r;
+        float sfd = texture(tex_T6, quv).r;
+        if (sd <= 1e-7 || (sfd > 1e-7 && abs(sfd - sd) < 1e-7)) {
+          // sky, clouds (they keep the sky pass's depth too) or the sea itself: not a reflector
+          if (sd <= 1e-7 || dot(up_view, view_pos(quv, sd)) > 0.0) {
+            sky_uv = quv;
+          }
+          continue;
+        }
+        float scene_z = view_z(sd);
+        if (q.z > scene_z && q.z - scene_z < step_len * 2.0 + 4096.0) {
+          refl = texture(tex_T0, quv).rgb;
+          hit_uv = quv;
+          found = 1.0;
+          break;
+        }
+      }
+      // missed everything: reflect the sky the ray last went over
+      if (found == 0.0 && sky_uv.x >= 0.0) {
+        refl = texture(tex_T0, sky_uv).rgb;
+        hit_uv = sky_uv;
+        found = 1.0;
+      }
+      vec2 edge = min(hit_uv, 1.0 - hit_uv);
+      float fade = found * smoothstep(0.0, 0.05, min(edge.x, edge.y));
+      c = mix(c, refl, clamp(fresnel * 1.5, 0.0, 1.0) * fade * water_strength);
+    }
   }
 
   // light depth of field on the far distance (samples nearer than the pixel are skipped)
