@@ -1457,6 +1457,13 @@ void OpenGLRenderer::dispatch_buckets_jak3(DmaFollower dma,
       m_collide_renderer.render(&m_render_state, p);
     }
 
+    // Enhanced: post effects on the finished 3D scene, before the HUD is drawn over it
+    if (bucket_id + 1 == (int)jak3::BucketId::TEX_HUD_HUD_ALPHA && m_enhanced_post) {
+      auto p = prof.make_scoped_child("enhanced-post");
+      m_enhanced_post->apply_to_scene(m_render_state.render_fb, m_render_state.render_fb_w,
+                                      m_render_state.render_fb_h, screen_vao, &m_render_state, p);
+    }
+
     if (bucket_id == (int)jak3::BucketId::TEX_HUD_HUD_ALPHA) {
       auto p = prof.make_scoped_child("color-filter");
       m_blit_displays->apply_color_filter(&m_render_state, p);
@@ -1665,14 +1672,6 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
     window_blit_src = &m_fbo_state.resources.render_buffer;
   }
 
-  const bool enhanced = m_enhanced_post && m_enhanced_post->active();
-  if (enhanced) {
-    // depth comes from the render buffer (the msaa resolve buffer has none)
-    m_enhanced_post->prepare(*window_blit_src->tex_id, m_fbo_state.render_fbo->fbo_id,
-                             window_blit_src->width, window_blit_src->height, screen_vao,
-                             render_state, prof);
-  }
-
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
   glViewport(render_state->draw_offset_x, render_state->draw_offset_y, render_state->draw_region_w,
@@ -1685,12 +1684,9 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
 
   float color = (float)brightness_contrast_color / 128.0f;
   float alpha = (float)brightness_contrast_alpha / 128.0f;
-  auto& shader = enhanced ? m_enhanced_post->activate_composite(render_state,
-                                                                 window_blit_src->width,
-                                                                 window_blit_src->height)
-                          : render_state->shaders[ShaderId::POST_PROCESSING];
+  // (the Enhanced effects already ran on the 3D scene, see dispatch_buckets_jak3)
+  auto& shader = render_state->shaders[ShaderId::POST_PROCESSING];
   shader.activate();
-  glBindTexture(GL_TEXTURE_2D, *window_blit_src->tex_id);
   glUniform1i(glGetUniformLocation(shader.id(), "tex_T0"), 0);
   if (brightness_contrast_color < 0) {
     // subtractive blend - note that color is already negative

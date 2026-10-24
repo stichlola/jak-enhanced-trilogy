@@ -278,6 +278,9 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   */
 
   glUniformMatrix4fv(glGetUniformLocation(id, "pc_camera"), 1, GL_FALSE, newcam[0].data());
+  for (int i = 0; i < 3; i++) {
+    g_enhanced_camera.trans[i] = settings.trans[i];
+  }
 
   glUniform4f(glGetUniformLocation(id, "hvdf_offset"), settings.hvdf_off[0], settings.hvdf_off[1],
               settings.hvdf_off[2], settings.hvdf_off[3]);

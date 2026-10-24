@@ -56,8 +56,122 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(1, &m_shaft_fbo);
     glDeleteTextures(1, &m_shaft_tex);
   }
+  if (m_scene_fbo) {
+    glDeleteFramebuffers(1, &m_scene_fbo);
+    glDeleteTextures(1, &m_scene_tex);
+  }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
+}
+
+void EnhancedPost::apply_to_scene(GLuint render_fbo,
+                                  int w,
+                                  int h,
+                                  GLuint screen_vao,
+                                  SharedRenderState* render_state,
+                                  ScopedProfilerNode& prof) {
+  if (!m_settings.enabled) {
+    g_enhanced_camera.valid = false;
+    return;
+  }
+  if (w != m_scene_w || h != m_scene_h) {
+    if (m_scene_fbo) {
+      glDeleteFramebuffers(1, &m_scene_fbo);
+      glDeleteTextures(1, &m_scene_tex);
+    }
+    m_scene_w = w;
+    m_scene_h = h;
+    glGenFramebuffers(1, &m_scene_fbo);
+    glGenTextures(1, &m_scene_tex);
+    glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_scene_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_scene_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  // copy (resolving msaa) the scene so we can read it while drawing over it
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+  const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
+  prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
+
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  auto& shader = activate_composite(render_state, w, h);
+  auto id = shader.id();
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+  // the game's brightness/contrast is applied later, on the whole frame
+  glUniform4f(glGetUniformLocation(id, "color_mult"), 1.f, 1.f, 1.f, 1.f);
+  glUniform4f(glGetUniformLocation(id, "color_add"), 0.f, 0.f, 0.f, 0.f);
+
+  // world up in view space, for the fog and the heat haze
+  glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
+  const bool have_scene = m_ssao_ready;
+  glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
+              m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount : 0.f, 0.f);
+  glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
+              render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
+  m_time += 1.0 / 60.0;
+  glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength : 0.f,
+              120.f * kMeter, 400.f * kMeter, (float)m_time);
+  glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa);
+
+  // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
+  float strength = 0.f;
+  if (have_scene && m_prev_camera.valid && cam.valid && m_settings.motion_blur > 0.f) {
+    float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
+    float offset[3];
+    float moved = 0.f;
+    for (int k = 0; k < 3; k++) {
+      for (int c = 0; c < 3; c++) {
+        to_prev[k][c] = 0.f;
+        for (int r = 0; r < 3; r++) {
+          to_prev[k][c] += cam.rot[r][k] * m_prev_camera.rot[r][c];
+        }
+      }
+    }
+    for (int c = 0; c < 3; c++) {
+      offset[c] = 0.f;
+      for (int r = 0; r < 3; r++) {
+        offset[c] += (cam.trans[r] - m_prev_camera.trans[r]) * m_prev_camera.rot[r][c];
+      }
+      moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
+    }
+    // a cut or a teleport isn't motion
+    if (std::sqrt(moved) < 8.f * kMeter) {
+      strength = m_settings.motion_blur;
+      glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+      glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
+    }
+  }
+  glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy, strength, 0.02f);
+  glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
+
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  prof.add_draw_call();
+
+  m_prev_camera = cam;
+  m_prev_fy = cam.fy * kScissorHeightScale;
+
+  // leave the state the way the bucket renderers expect it
+  glBindVertexArray(0);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_BLEND);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
 }
 
 void EnhancedPost::do_shafts(GLuint scene_tex,
@@ -453,6 +567,12 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("God rays", &m_settings.shafts);
     ImGui::SliderFloat("God rays strength", &m_settings.shafts_strength, 0.f, 2.f);
     ImGui::SliderFloat("God rays threshold", &m_settings.shafts_threshold, 0.f, 1.f);
+    ImGui::Checkbox("FXAA", &m_settings.fxaa);
+    ImGui::SliderFloat("Fog density (/m)", &m_settings.fog_density, 0.f, 0.01f, "%.4f");
+    ImGui::SliderFloat("Fog height falloff (/m)", &m_settings.fog_height, 0.f, 0.2f);
+    ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
+    ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
+    ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);
     ImGui::SliderFloat("Bloom knee", &m_settings.bloom_knee, 0.f, 1.f);

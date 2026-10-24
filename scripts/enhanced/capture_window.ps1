@@ -1,5 +1,5 @@
-# Save a screenshot of the gk game window: capture_window.ps1 -Out shot.png
-param([string]$Out, [string]$Process = "gk")
+# Save a screenshot of the gk game window: capture_window.ps1 -Out shot.png [-ProcessId <pid>]
+param([string]$Out, [string]$Process = "gk", [int]$ProcessId = 0)
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System; using System.Runtime.InteropServices;
@@ -14,7 +14,8 @@ public class W {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-$p = Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+$p = if ($ProcessId) { Get-Process -Id $ProcessId -ErrorAction Stop } else {
+  Get-Process $Process -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1 }
 $h = $p.MainWindowHandle
 $r = New-Object W+RECT; [W]::GetClientRect($h, [ref]$r) | Out-Null
 $bmp = New-Object System.Drawing.Bitmap ($r.R - $r.L), ($r.B - $r.T)

@@ -16,6 +16,7 @@ struct EnhancedCamera {
   float fx = 1.f;
   float fy = 1.f;
   float rot[3][3] = {};  // world -> view: view[col] = sum over row of world[row] * rot[row][col]
+  float trans[3] = {};   // camera position, world
   bool valid = false;
 };
 extern EnhancedCamera g_enhanced_camera;
@@ -46,6 +47,12 @@ class EnhancedPost {
     bool shafts = true;  // god rays: the bright sky smeared toward the sun on screen
     float shafts_strength = 0.6f;
     float shafts_threshold = 0.4f;
+    bool fxaa = true;
+    float fog_density = 0.0012f;   // per meter
+    float fog_height = 0.02f;      // per meter above the camera
+    float fog_amount = 0.35f;      // at most this much of the fog color
+    float haze_strength = 0.0009f;  // heat shimmer over the far ground (uv)
+    float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
@@ -55,7 +62,7 @@ class EnhancedPost {
     float contrast = 0.10f;  // 0 = linear, 1 = full S-curve
     float warmth = 0.0f;     // shifts toward warm highlights / cool shadows
     float vignette = 0.18f;
-    float sharpen = 0.35f;
+    float sharpen = 0.25f;
   };
 
   EnhancedPost();
@@ -82,6 +89,17 @@ class EnhancedPost {
   Shader& activate_composite(SharedRenderState* render_state, int w, int h);
 
   bool active() const { return m_settings.enabled; }
+
+  /*!
+   * Run every effect on the 3D scene in render_fbo (w x h) and draw the result back into it.
+   * Called between the 3D buckets and the HUD, so the HUD stays untouched.
+   */
+  void apply_to_scene(GLuint render_fbo,
+                      int w,
+                      int h,
+                      GLuint screen_vao,
+                      SharedRenderState* render_state,
+                      ScopedProfilerNode& prof);
   void draw_debug_window();
 
  private:
@@ -119,6 +137,17 @@ class EnhancedPost {
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
   std::array<float, 4> m_last_proj = {0, 0, 1, 1};
+
+  // copy of the scene being composited
+  GLuint m_scene_fbo = 0;
+  GLuint m_scene_tex = 0;
+  int m_scene_w = 0;
+  int m_scene_h = 0;
+
+  // the camera of the frame before, for motion blur
+  EnhancedCamera m_prev_camera;
+  float m_prev_fy = 1.f;
+  double m_time = 0;
 
   // god rays, half resolution
   void do_shafts(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,
