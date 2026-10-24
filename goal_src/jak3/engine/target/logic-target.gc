@@ -1624,6 +1624,10 @@
                   )
         )
       )
+  ;; Enhanced: the jetboard counts as unlocked (board-h.gc)
+  (if *enhanced-board-always*
+      (logior! (-> self game features) (game-feature board))
+      )
   (if (and (!= (not (logtest? (game-feature board) (-> self game features))) (not (-> self board board)))
            (not (logtest? (focus-status board) (-> self focus-status)))
            )

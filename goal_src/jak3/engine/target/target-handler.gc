@@ -1305,7 +1305,11 @@
                      (set! v0-0
                            (cond
                              ((= v1-63 'board)
-                              (if (logtest? (logand (game-feature board) (-> *setting-control* user-current features)) (-> self game features))
+                              (if (or *enhanced-board-always*
+                                      (logtest? (logand (game-feature board) (-> *setting-control* user-current features))
+                                                (-> self game features)
+                                                )
+                                      )
                                   (go target-board-start (process->handle (the-as process (-> arg3 param 1))))
                                   )
                               )
