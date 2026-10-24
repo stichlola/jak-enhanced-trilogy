@@ -76,6 +76,51 @@
       v-x-ride))
   )
 
+;; Enhanced: play as if the game were complete. *enhanced-unlock-all* (default #t) keeps every
+;; ability, gun and gun mode, vehicle and secret unlocked (bought in the secrets menu; the
+;; upgrades active, the toggles like big head left to the player), and fills ammo, health and
+;; eco once per boot.
+(define *enhanced-unlock-all* #t)
+(define *enhanced-unlock-given* #f)
+
+(defun enhanced-unlock-all ()
+  (when *enhanced-unlock-all*
+    (logior! (-> *game-info* features)
+             (game-feature
+               jakc
+               board board-launch board-zap
+               darkeco
+               darkjak darkjak-smack darkjak-bomb0 darkjak-bomb1
+               lighteco
+               lightjak lightjak-regen lightjak-swoop lightjak-freeze lightjak-shield
+               gun
+               gun-red-1 gun-yellow-1 gun-blue-1 gun-dark-1
+               gun-red-2 gun-yellow-2 gun-blue-2 gun-dark-2
+               gun-red-3 gun-yellow-3 gun-blue-3 gun-dark-3
+               )
+             )
+    (logior! (-> *game-info* vehicles)
+             (game-vehicles v-turtle v-snake v-scorpion v-toad v-fox v-rhino v-mirage v-x-ride)
+             )
+    (logior! (-> *game-info* purchase-secrets) (the-as game-secrets #x3ffffffffffffff))
+    (logior! (-> *game-info* secrets)
+             (game-secrets
+               gun-upgrade-red-1 gun-upgrade-red-2 gun-upgrade-red-3
+               gun-upgrade-yellow-1 gun-upgrade-yellow-2 gun-upgrade-yellow-3
+               gun-upgrade-blue-1 gun-upgrade-blue-2 gun-upgrade-blue-3
+               gun-upgrade-dark-1 gun-upgrade-dark-2 gun-upgrade-dark-3
+               gun-upgrade-ammo-red gun-upgrade-ammo-yellow gun-upgrade-ammo-blue gun-upgrade-ammo-dark
+               vehicle-fox vehicle-mirage vehicle-x-ride
+               )
+             )
+    (when (not *enhanced-unlock-given*)
+      (set! *enhanced-unlock-given* #t)
+      (give-all-stuff)
+      )
+    )
+  (none)
+  )
+
 (defmacro test-play ()
   "Temporary start macro"
   `(begin

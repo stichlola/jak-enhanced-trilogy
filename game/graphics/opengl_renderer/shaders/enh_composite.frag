@@ -140,7 +140,7 @@ void main() {
   // camera motion blur: where this pixel was last frame, if the world held still
   float blur = 0.0;
   vec3 c = vec3(0.0);
-  if (motion.z > 0.0 && z > motion_keep.x) {
+  if (motion.z > 0.0 && z > motion_keep.x && wsurf == 0.0) {
     vec3 pp = to_prev * p + to_prev_offset;
     vec2 prev_uv = 0.5 * vec2(motion.x * pp.x, motion.y * pp.y) / pp.z + 0.5;
     vec2 vel = (uv - prev_uv) * motion.z * smoothstep(motion_keep.x, motion_keep.y, z);
@@ -250,7 +250,8 @@ void main() {
   }
 
   // light depth of field on the far distance (samples nearer than the pixel are skipped)
-  if (dof.z > 0.0 && z > 0.0) {
+  // (not on water: its pixels would blur back in the game's own, two-colored water)
+  if (dof.z > 0.0 && z > 0.0 && wsurf == 0.0) {
     float coc = smoothstep(dof.x, dof.y, z) * dof.z;
     if (coc > 0.25) {
       const vec2 disk[12] = vec2[](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
@@ -273,7 +274,7 @@ void main() {
   }
 
   // contrast-adaptive sharpen (AMD CAS, simplified), not where we just blurred
-  float sharp = sharpen * (1.0 - blur);
+  float sharp = wsurf > 0.0 ? 0.0 : sharpen * (1.0 - blur);  // not on water (raw neighbors)
   if (sharp > 0.0) {
     vec3 n = texture(tex_T0, uv + vec2(0, -texel.y)).rgb;
     vec3 s = texture(tex_T0, uv + vec2(0, texel.y)).rgb;

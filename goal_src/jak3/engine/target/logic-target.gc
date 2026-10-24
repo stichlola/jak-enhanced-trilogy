@@ -5,6 +5,9 @@
 ;; name in dgo: logic-target
 ;; dgos: GAME
 
+(define-extern enhanced-unlock-all (function none))
+(define *enhanced-travel-to-city* #f)
+
 ;; DECOMP BEGINS
 
 (defbehavior build-conversions target ((arg0 vector))
@@ -1624,10 +1627,30 @@
                   )
         )
       )
-  ;; Enhanced: the jetboard counts as unlocked (board-h.gc)
+  ;; Enhanced: the jetboard counts as unlocked (board-h.gc), and everything else too (level.gc)
   (if *enhanced-board-always*
       (logior! (-> self game features) (game-feature board))
       )
+  (enhanced-unlock-all)
+  ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
+  (when (and *enhanced-unlock-all*
+             (cpad-hold? (-> self control cpad number) l3)
+             (cpad-pressed? (-> self control cpad number) r3)
+             (not (focus-test? self dead teleporting))
+             )
+    (set! *enhanced-travel-to-city* (not *enhanced-travel-to-city*))
+    (let ((cp (get-continue-by-name *game-info* (if *enhanced-travel-to-city*
+                                                     "ctyinda-wasall"
+                                                     "desert-facing-wasdoors"
+                                                     )
+                                    )
+              )
+          )
+      (if cp
+          (send-event self 'continue cp)
+          )
+      )
+    )
   (if (and (!= (not (logtest? (game-feature board) (-> self game features))) (not (-> self board board)))
            (not (logtest? (focus-status board) (-> self focus-status)))
            )
