@@ -5,9 +5,10 @@
 Reads the decompiler's texture dump (decompiler_out/jak3_pal/textures/<tpage>/<name>.png, made
 with "save_texture_pngs": true), upscales each one 4x with Real-ESRGAN (wrap-padded so tiling
 textures stay seamless) and writes custom_assets/jak3/texture_replacements/<tpage>/<name>.png.
-Only opaque textures are upscaled: decals, cutouts and glass (any texel with alpha < 120/128,
-see translucent.ps1) are often blended so that even their "transparent" color shows, and the
-upscaler changes it. The decompiler also skips a replacement that doesn't match its texture when
+Decals, cutouts and glass (any texel with alpha < 120/128, see translucent.ps1) get the upscaled
+colors but their original alpha, resized smoothly (alpha_restore.ps1): the upscaler would move
+and soften their transparency. --opaque-only leaves them at their original resolution. The
+decompiler also skips a replacement that doesn't match its texture when
 scaled back down (TextureDB::replace_texture), since texture names aren't unique. The decompiler
 picks those up when it extracts the levels again (levels_extract), so the .fr3
 files carry the HD textures. Results are cached by content hash, so re-runs only do new ones.
@@ -84,6 +85,7 @@ def main():
     parser.add_argument("--max-size", type=int, default=256, help="skip textures larger than this (px)")
     parser.add_argument("--batch", type=int, default=200)
     parser.add_argument("--tools", type=Path, default=ROOT.parent / "jak3-ue5/tools")
+    parser.add_argument("--opaque-only", action="store_true", help="skip translucent textures")
     args = parser.parse_args()
 
     pick, skip = re.compile(args.tpages), re.compile(EXCLUDE)
@@ -102,12 +104,14 @@ def main():
 
     (CACHE / args.model).mkdir(parents=True, exist_ok=True)
     unique = {key: (tpage, png, key) for tpage, png, key in todo}
-    skipped = translucent(list(unique.values()))
-    for tpage, png, key in todo:
-        if key in skipped:  # drop a replacement left by an older run
-            (OUT / tpage / png.name).unlink(missing_ok=True)
-    todo = [entry for entry in todo if entry[2] not in skipped]
-    print(f"{len(skipped)} translucent textures left at their original resolution")
+    see_through = translucent(list(unique.values()))
+    if args.opaque_only:
+        for tpage, png, key in todo:
+            if key in see_through:  # drop a replacement left by an older run
+                (OUT / tpage / png.name).unlink(missing_ok=True)
+        todo = [entry for entry in todo if entry[2] not in see_through]
+        print(f"{len(see_through)} translucent textures left at their original resolution")
+        see_through = set()
     missing = {}
     for _, png, key in todo:
         if not (CACHE / args.model / f"{key}.png").exists():
@@ -120,9 +124,29 @@ def main():
         run_batch(batch, args.tools, args.model, args.gpu)
         print(f"  upscaled {min(start + args.batch, len(keys))}/{len(keys)}", flush=True)
 
+    # translucent ones: the upscaled colors with the original alpha, cached apart
+    alpha_dir = CACHE / f"{args.model}-alpha"
+    alpha_dir.mkdir(parents=True, exist_ok=True)
+    pending = {key: unique[key][1] for key in see_through
+               if not (alpha_dir / f"{key}.png").exists() and (CACHE / args.model / f"{key}.png").exists()}
+    if pending:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            (tmp / "orig").mkdir()
+            (tmp / "scaled").mkdir()
+            for key, png in pending.items():
+                shutil.copyfile(png, tmp / "orig" / f"{key}.png")
+                shutil.copyfile(CACHE / args.model / f"{key}.png", tmp / "scaled" / f"{key}.png")
+            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                            str(Path(__file__).with_name("alpha_restore.ps1")), str(tmp / "orig"),
+                            str(tmp / "scaled")], check=True)
+            for key in pending:
+                shutil.copyfile(tmp / "scaled" / f"{key}.png", alpha_dir / f"{key}.png")
+        print(f"{len(pending)} translucent textures given back their original alpha")
+
     written = 0
     for tpage, png, key in todo:
-        scaled = CACHE / args.model / f"{key}.png"
+        scaled = (alpha_dir if key in see_through else CACHE / args.model) / f"{key}.png"
         if scaled.exists():
             (OUT / tpage).mkdir(parents=True, exist_ok=True)
             shutil.copyfile(scaled, OUT / tpage / png.name)

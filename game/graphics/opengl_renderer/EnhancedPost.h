@@ -21,6 +21,21 @@ struct EnhancedCamera {
 };
 extern EnhancedCamera g_enhanced_camera;
 
+// Enhanced character shading (merc2): rim light and highlights from the key light.
+struct EnhancedMerc {
+  bool enabled = true;
+  float rim = 0.45f;
+  float spec = 0.35f;
+};
+extern EnhancedMerc g_enhanced_merc;
+
+// Enhanced wind on grass and leaves (shrub.vert).
+struct EnhancedWind {
+  bool enabled = true;
+  float strength = 1.0f;
+};
+extern EnhancedWind g_enhanced_wind;
+
 /*!
  * Jak 3 Enhanced post-processing, run on the finished game frame before it goes to the window:
  * screen-space ambient occlusion from the depth buffer, a light depth of field on the far
@@ -59,6 +74,7 @@ class EnhancedPost {
     float water_shallow[3] = {0.16f, 0.42f, 0.4f};
     float water_unify = 1.0f;
     float water_glint = 1.0f;
+    float relight = 1.0f;  // sun shading from depth normals
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold

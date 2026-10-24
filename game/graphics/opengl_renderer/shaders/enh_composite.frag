@@ -42,7 +42,8 @@ uniform vec3 cam_pos;     // world
 uniform vec4 sun_dir;     // toward the sun in view space, w: glint strength (0 = none)
 uniform vec3 water_deep_color;
 uniform vec3 water_shallow_color;
-uniform float water_unify;  // how much of our water color replaces the game's
+uniform float water_unify;
+uniform float relight;      // sun relight strength (0 = off)  // how much of our water color replaces the game's
 
 uniform vec4 color_mult;
 uniform vec4 color_add;
@@ -290,6 +291,24 @@ void main() {
     return;
   }
   c *= ao;
+
+  // sun relight: the game's light is baked per vertex; shade each pixel a little more by how it
+  // faces the sun, with normals rebuilt from the depth buffer (the levels have none)
+  if (relight > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
+    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
+    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
+    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
+    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
+    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+    vec3 nn = normalize(cross(dx, dy));
+    if (dot(nn, -p) < 0.0) {
+      nn = -nn;
+    }
+    float ndl = dot(nn, sun_dir.xyz);
+    float k = relight * (1.0 - smoothstep(150.0 * 4096.0, 300.0 * 4096.0, z));
+    c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;
+  }
 
   // fog: thicker with distance and below the camera
   if (fog.z > 0.0 && z > 0.0) {

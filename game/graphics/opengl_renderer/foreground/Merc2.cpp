@@ -4,6 +4,7 @@
 #include "common/util/fnv.h"
 #include "common/util/simd_util.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
 
@@ -907,6 +908,16 @@ void Merc2::handle_setup_dma(DmaFollower& dma, SharedRenderState* render_state) 
   set_uniform(m_merc_uniforms.fog, m_low_memory.fog);
   glUniformMatrix4fv(m_merc_uniforms.perspective_matrix, 1, GL_FALSE,
                      &m_low_memory.perspective[0].x());
+  {
+    // Enhanced: the camera's world -> view rotation (columns = rows of rot, see EnhancedCamera)
+    // for the rim light and highlights in merc2.vert/frag
+    const auto id = render_state->shaders[ShaderId::MERC2].id();
+    glUniformMatrix3fv(glGetUniformLocation(id, "enh_world_to_view"), 1, GL_FALSE,
+                       &g_enhanced_camera.rot[0][0]);
+    glUniform2f(glGetUniformLocation(id, "enh_rim_spec"),
+                g_enhanced_merc.enabled ? g_enhanced_merc.rim : 0.f,
+                g_enhanced_merc.enabled ? g_enhanced_merc.spec : 0.f);
+  }
   switch_to_emerc(render_state);
   set_uniform(m_emerc_uniforms.hvdf_offset, m_low_memory.hvdf_offset);
   set_uniform(m_emerc_uniforms.fog, m_low_memory.fog);

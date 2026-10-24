@@ -15,6 +15,8 @@
 
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
+EnhancedMerc g_enhanced_merc;
+EnhancedWind g_enhanced_wind;
 
 namespace {
 GLuint make_1x1(u32 rgba) {
@@ -38,6 +40,16 @@ EnhancedPost::EnhancedPost() {
   const char* env = std::getenv("JAK_ENHANCED");
   if (env && std::strcmp(env, "0") == 0) {
     m_settings.enabled = false;
+  }
+  // test switch: JAK_ENHANCED_RIM=<strength> overrides the character rim light
+  if (const char* rim = std::getenv("JAK_ENHANCED_RIM")) {
+    g_enhanced_merc.rim = (float)std::atof(rim);
+  }
+  if (const char* relight = std::getenv("JAK_ENHANCED_RELIGHT")) {
+    m_settings.relight = (float)std::atof(relight);
+  }
+  if (const char* wind = std::getenv("JAK_ENHANCED_WIND")) {
+    g_enhanced_wind.strength = (float)std::atof(wind);
   }
   const char* ao_debug = std::getenv("JAK_ENHANCED_AO_DEBUG");
   if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
@@ -234,6 +246,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, m_settings.water_deep);
   glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
   glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
+  glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
   {
     // the sun for the glints, only when it's above the horizon
     float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
@@ -692,6 +705,12 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
     ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
+    ImGui::SliderFloat("Sun relight", &m_settings.relight, 0.f, 2.f);
+    ImGui::Checkbox("Wind on grass/leaves", &g_enhanced_wind.enabled);
+    ImGui::SliderFloat("Wind strength", &g_enhanced_wind.strength, 0.f, 3.f);
+    ImGui::Checkbox("Character rim/highlights", &g_enhanced_merc.enabled);
+    ImGui::SliderFloat("Character rim light", &g_enhanced_merc.rim, 0.f, 1.5f);
+    ImGui::SliderFloat("Character highlights", &g_enhanced_merc.spec, 0.f, 1.5f);
     ImGui::Checkbox("Water reflections", &m_settings.water_reflections);
     ImGui::SliderFloat("Water reflection strength", &m_settings.water_reflection_strength, 0.f, 1.f);
     ImGui::ColorEdit3("Deep water", m_settings.water_deep);

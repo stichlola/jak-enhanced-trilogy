@@ -609,7 +609,8 @@
           "title-start"
           )
          ((and *debug-segment* (= mode 'boot))
-          "wascity-start"
+          ;; Enhanced: start in the desert, outside Spargus' big gate
+          "desert-facing-wasdoors"
           )
          (else
            "title-start"

@@ -14,6 +14,8 @@ uniform int decal;
 uniform vec4 cam_trans;
 uniform mat4 pc_camera;
 uniform sampler1D tex_T10; // note, sampled in the vertex shader on purpose.
+uniform float enh_wind;  // Enhanced: wind strength on this draw (0 = none)
+uniform float enh_time;  // seconds
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -35,7 +37,19 @@ void main() {
   // the itof0 is done in the preprocessing step.  now we have floats.
   
   // Step 3, the camera transform
-  vec3 vert = position_in - cam_trans.xyz;
+  vec3 world = position_in;
+  if (enh_wind > 0.0) {
+    // the top of a card (texture v near 0) sways, its foot (v near 1) stays put: two gusts
+    // travelling across the world plus a quick flutter
+    float tip = clamp(1.0 - tex_coord_in.y / 4096.0, 0.0, 1.0);
+    vec2 wp = position_in.xz / 4096.0;
+    float gust = sin(enh_time * 1.3 + wp.x * 0.11 + wp.y * 0.07) * 0.6 +
+                 sin(enh_time * 2.1 + wp.x * 0.05 - wp.y * 0.13) * 0.4;
+    float flutter = sin(enh_time * 7.0 + wp.x * 1.7 + wp.y * 1.3) * 0.25;
+    float amount = enh_wind * tip * tip * 0.12 * 4096.0;  // up to ~12 cm at the tips
+    world.xz += vec2(0.8, 0.6) * (gust + flutter) * amount;
+  }
+  vec3 vert = world - cam_trans.xyz;
   vec4 transformed = -pc_camera[3];
   transformed -= pc_camera[0] * vert.x;
   transformed -= pc_camera[1] * vert.y;

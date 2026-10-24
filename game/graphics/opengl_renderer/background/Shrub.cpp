@@ -1,5 +1,9 @@
 #include "Shrub.h"
 
+#include <chrono>
+
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 #include "common/log/log.h"
 
 Shrub::Shrub(const std::string& name, int my_id) : BucketRenderer(name, my_id) {
@@ -295,6 +299,12 @@ void Shrub::render_tree(int idx,
                   GL_UNSIGNED_INT_8_8_8_8_REV, m_color_result.data());
 
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB);
+  {
+    using clock = std::chrono::steady_clock;
+    static const auto start = clock::now();
+    glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_time"),
+                std::chrono::duration<float>(clock::now() - start).count());
+  }
 
   glBindVertexArray(tree.vao);
   glBindBuffer(GL_ARRAY_BUFFER, tree.vertex_buffer);
@@ -352,6 +362,10 @@ void Shrub::render_tree(int idx,
     }
 
     glUniform1i(m_uniforms.decal, draw.mode.get_decal() ? 1 : 0);
+    // Enhanced: wind only on cutout (alpha tested) shrubs: grass and leaves, not rocks or props
+    glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_wind"),
+                draw.mode.get_at_enable() && g_enhanced_wind.enabled ? g_enhanced_wind.strength
+                                                                      : 0.f);
 
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, ShaderId::SHRUB);
 

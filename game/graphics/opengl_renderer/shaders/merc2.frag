@@ -16,6 +16,12 @@ uniform int decal_enable;
 
 uniform int gfx_hack_no_tex;
 
+in vec3 vtx_nrm;
+in vec3 vtx_key;
+in vec3 vtx_view;
+in vec3 vtx_key_color;
+uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
+
 void main() {
   if (gfx_hack_no_tex == 0) {
     vec4 T0 = texture(tex_T0, vtx_st);
@@ -45,6 +51,19 @@ void main() {
 
   if (ignore_alpha == 0 && color.w < 0.128) {
     discard;
+  }
+
+  // Enhanced: a rim of the key light around the silhouette, brighter on the lit side, and a soft
+  // highlight (Blinn) from it
+  if (decal_enable == 0 && (enh_rim_spec.x > 0.0 || enh_rim_spec.y > 0.0) && length(vtx_key) > 0.01) {
+    vec3 n = normalize(vtx_nrm);
+    vec3 v = normalize(vtx_view);
+    vec3 l = normalize(vtx_key);
+    float ndl = max(dot(n, l), 0.0);
+    float rim = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 3.0) * (0.35 + 0.65 * ndl);
+    float spec = pow(max(dot(n, normalize(l + v)), 0.0), 40.0) * ndl;
+    vec3 key = clamp(vtx_key_color, 0.0, 1.5);
+    color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * (0.3 + 0.7 * color.rgb));
   }
 
    color.xyz = mix(color.xyz, fog_color.rgb, clamp(fog_color.a * fog, 0, 1));
