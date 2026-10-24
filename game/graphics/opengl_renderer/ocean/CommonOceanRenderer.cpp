@@ -289,7 +289,7 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
               render_state->fog_color[0] / 255.f, render_state->fog_color[1] / 255.f,
               render_state->fog_color[2] / 255.f, render_state->fog_intensity / 255);
 
-  glDepthMask(render_state->enhanced_ocean_depth_write ? GL_TRUE : GL_FALSE);
+  glDepthMask(GL_FALSE);
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
   glDepthFunc(GL_GEQUAL);
@@ -346,6 +346,22 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
     glDrawElements(GL_TRIANGLE_STRIP, m_next_free_index[bucket], GL_UNSIGNED_INT, nullptr);
     prof.add_draw_call();
     prof.add_tri(m_next_free_index[bucket]);
+  }
+
+  // Enhanced: the surface's depth alone, drawn again after the normal passes (writing depth in
+  // them would let the ocean's overlapping strips hide each other), for the reflections
+  if (render_state->enhanced_ocean_depth_write) {
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ogl.index_buffer[0]);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_next_free_index[0] * sizeof(u32), m_indices[0].data(),
+                 GL_STREAM_DRAW);
+    glDrawElements(GL_TRIANGLE_STRIP, m_next_free_index[0], GL_UNSIGNED_INT, nullptr);
+    prof.add_draw_call();
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_BLEND);
   }
 }
 

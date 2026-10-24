@@ -54,7 +54,7 @@ class EnhancedPost {
     float haze_strength = 0.0009f;  // heat shimmer over the far ground (uv)
     float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
     bool water_reflections = true;
-    float water_reflection_strength = 0.85f;
+    float water_reflection_strength = 0.6f;
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold

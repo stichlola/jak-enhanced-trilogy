@@ -186,15 +186,15 @@ void main() {
           break;
         }
       }
+      // a real hit fades out toward the screen's edges (it may be cut off there)
+      vec2 edge = min(hit_uv, 1.0 - hit_uv);
+      float fade = found * smoothstep(0.0, 0.05, min(edge.x, edge.y));
       // missed everything: reflect the sky the ray last went over
       if (found == 0.0 && sky_uv.x >= 0.0) {
         refl = texture(tex_T0, sky_uv).rgb;
-        hit_uv = sky_uv;
-        found = 1.0;
+        fade = 1.0;
       }
-      vec2 edge = min(hit_uv, 1.0 - hit_uv);
-      float fade = found * smoothstep(0.0, 0.05, min(edge.x, edge.y));
-      c = mix(c, refl, clamp(fresnel * 1.5, 0.0, 1.0) * fade * water_strength);
+      c = mix(c, refl, clamp(fresnel * 1.2, 0.0, 1.0) * fade * water_strength);
     }
   }
 

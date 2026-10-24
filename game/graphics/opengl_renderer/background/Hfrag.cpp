@@ -42,6 +42,15 @@ Hfrag::Hfrag(const std::string& name, int my_id) : BucketRenderer(name, my_id) {
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
       glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 16.f);
       glBindTexture(GL_TEXTURE_2D, 0);
+      double sum[3] = {0, 0, 0};
+      for (int i = 0; i < w * h; i++) {
+        for (int c = 0; c < 3; c++) {
+          sum[c] += data[i * 4 + c];
+        }
+      }
+      for (int c = 0; c < 3; c++) {
+        m_enhanced_sand_mean[c] = (float)(sum[c] / (255.0 * w * h));
+      }
       stbi_image_free(data);
       lg::info("[enhanced] desert sand {} ({}x{})", sand_path.string(), w, h);
     }
@@ -431,11 +440,15 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
   glActiveTexture(GL_TEXTURE0);
   // glBindTexture(GL_TEXTURE_2D, lev->hfrag->wang_tree_tex_id[0]);
 
-  // Enhanced: world-space sand, repeating every 8 vertices (64 m) like the jak3-ue5 dunes
+  // Enhanced: world-space sand grain, repeating every 8 vertices (64 m) like the jak3-ue5 dunes,
+  // plus a turned copy 2.7x smaller
   {
     const auto id = render_state->shaders[ShaderId::HFRAG].id();
     glUniform1i(glGetUniformLocation(id, "enhanced_sand"), m_enhanced_sand != 0);
     glUniform1f(glGetUniformLocation(id, "sand_scale"), 1.f / (8.f * 32768.f));
+    glUniform3f(glGetUniformLocation(id, "sand_mean"), m_enhanced_sand_mean[0],
+                m_enhanced_sand_mean[1], m_enhanced_sand_mean[2]);
+    glUniform1f(glGetUniformLocation(id, "sand_detail"), 0.7f);
     if (m_enhanced_sand) {
       glActiveTexture(GL_TEXTURE1);
       glBindTexture(GL_TEXTURE_2D, m_enhanced_sand);

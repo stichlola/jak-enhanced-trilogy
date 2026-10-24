@@ -6,9 +6,11 @@
 
 class Hfrag : public BucketRenderer {
  public:
-  // Enhanced: a seamless sand picture for the dunes (out/enhanced/desert_sand.png, made by
-  // scripts/enhanced/desert_sand.py), sampled in world space instead of the Wang tiles. 0 if none.
+  // Enhanced: a seamless sand picture (out/enhanced/desert_sand.png, made by
+  // scripts/enhanced/desert_sand.py) whose grain is laid over the dunes' own sand, sampled in
+  // world space. 0 if none.
   GLuint m_enhanced_sand = 0;
+  float m_enhanced_sand_mean[3] = {1.f, 1.f, 1.f};
 
   Hfrag(const std::string& name, int my_id);
 
