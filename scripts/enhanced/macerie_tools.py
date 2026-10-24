@@ -18,6 +18,7 @@ Load it in the .blend as a text block and run it once (or tick Register). Coordi
 (Shader.cpp, collide-cache.gc): rays ignore those levels inside the same volumes.
 """
 import math
+from collections import Counter
 import random
 
 import bmesh
@@ -225,9 +226,10 @@ def placed_names():
 
 
 def wall_tree(scene, bounds):
-    """BVH of the steep (wall) triangles drawn around the canvas, world space."""
+    """BVH of the wall triangles drawn around the canvas, world space: steep and at least 1.2 m tall
+(curbs, steps and planter edges don't count)."""
     lo, hi = bounds
-    verts, tris = [], []
+    verts, tris, normals, centers = [], [], [], []
     for o in bpy.data.objects:
         if o.type != 'MESH' or o.name in scene.ignore or o.name == CANVAS:
             continue
@@ -252,10 +254,14 @@ def wall_tree(scene, bounds):
             ln = np.linalg.norm(n)
             if ln < 1e-6 or abs(n[2] / ln) > 0.6:
                 continue
+            if max(a[2], b[2], c[2]) - min(a[2], b[2], c[2]) < 1.2:
+                continue
             base = len(verts)
             verts += [Vector(a), Vector(b), Vector(c)]
             tris.append((base, base + 1, base + 2))
-    return BVHTree.FromPolygons(verts, tris) if tris else None
+            normals.append(Vector((n[0] / ln, n[1] / ln, 0.0)))
+            centers.append(Vector(((a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, 0.0)))
+    return (BVHTree.FromPolygons(verts, tris), normals, centers) if tris else None
 
 
 def piece_tree(me, m):
@@ -288,7 +294,7 @@ def place(context, canvas, props):
     templates = [o for c in TEMPLATES for o in bpy.data.collections[c].objects
                  if o.type == 'MESH' and props.macerie_min <= max(o.dimensions) <= props.macerie_max * 1.2]
     if not templates:
-        return 0, 0
+        return 0, Counter()
     templates.sort(key=lambda o: max(o.dimensions))
     sizes = [max(o.dimensions) for o in templates]
 
@@ -306,7 +312,8 @@ def place(context, canvas, props):
     count = int(total + rng.random())
     others = [aabb(o.data, o.matrix_world) for o in bpy.data.collections["Passaggio"].all_objects
               if o.type == 'MESH' and (o.name.startswith(("grande_", "nuovo_")) or o.get("macerie_batch"))]
-    made = rejected = 0
+    made = 0
+    rejected = Counter()
     face_weights = [a * fw for _v, a, fw in faces]
     for _ in range(count):
         vs, _a, wt = rng.choices(faces, weights=face_weights)[0]
@@ -315,11 +322,11 @@ def place(context, canvas, props):
             c0, c1, c2, c3 = (co[i] for i in vs)
             p = (c0 * (1 - u) + c1 * u) * (1 - v) + (c3 * (1 - u) + c2 * u) * v
             if path_distance(p.x, -p.y) < 1.0:
-                rejected += 1
+                rejected["walkway"] += 1
                 continue
             g = scene.ground(p, above=8.0, depth=30.0)
             if not g:
-                rejected += 1
+                rejected["no ground"] += 1
                 continue
             gp, gn = g[0], g[1]
             # bigger pieces where the paint is stronger
@@ -346,20 +353,39 @@ def place(context, canvas, props):
             dz = -gaps[len(gaps) // 2] - props.macerie_affonda * h
             hover = max(gaps) + dz
             if hover > 0.3 * h + 0.3:  # sitting on one edge
-                rejected += 1
+                rejected["edge"] += 1
                 continue
             m = Matrix.Translation((0, 0, dz)) @ m
             # out of the walkways
             if any(path_distance(q.x, -q.y) < 0.5 and q.z + dz < gp.z + 6.0 for q in pts):
-                rejected += 1
+                rejected["walkway"] += 1
                 continue
-            # through a wall
-            if walls and piece_tree(me, m).overlap(walls):
-                rejected += 1
-                continue
+            # through a wall: slide it away from the wall, up to 4.5 m
+            if walls:
+                tree, wn, wc = walls
+                for _push in range(7):
+                    hits = piece_tree(me, m).overlap(tree)
+                    if not hits:
+                        break
+                    centre = m.translation
+                    away = Vector((0, 0, 0))
+                    for _ip, iw in hits:
+                        n = wn[iw] if wn[iw].dot(centre - wc[iw]) >= 0 else -wn[iw]
+                        away += n
+                    if away.length < 1e-6:
+                        break
+                    away.normalize()
+                    m = Matrix.Translation(away * 0.75) @ m
+                if hits:
+                    rejected["wall"] += 1
+                    continue
+                pts = [m @ vv.co for vv in me.vertices]
+                if any(path_distance(q.x, -q.y) < 0.5 and q.z < gp.z + 6.0 for q in pts):
+                    rejected["walkway"] += 1
+                    continue
             box = aabb(me, m)
-            if any(overlap_ratio(box, b) > 0.3 for b in others):
-                rejected += 1
+            if any(overlap_ratio(box, b) > 0.5 for b in others):
+                rejected["overlap"] += 1
                 continue
             ob = bpy.data.objects.new("macerie_" + tpl.name.split("_", 1)[-1], me)
             ob.matrix_world = m
@@ -456,7 +482,10 @@ class MACERIE_OT_place(bpy.types.Operator):
             return {'CANCELLED'}
         made, rejected = place(context, ob, context.scene)
         ob.hide_set(True)
-        self.report({'INFO'}, f"{made} pezzi piazzati ({rejected} posizioni scartate)")
+        why = {"walkway": "percorso", "no ground": "senza terreno", "edge": "su uno spigolo", "wall": "nel muro",
+               "overlap": "sovrapposti"}
+        self.report({'INFO'}, f"{made} pezzi piazzati; scartati: " +
+                    (", ".join(f"{n} {why[k]}" for k, n in rejected.most_common()) or "nessuno"))
         return {'FINISHED'}
 
 
