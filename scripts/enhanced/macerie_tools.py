@@ -7,9 +7,11 @@ A sidebar panel "Macerie" in the 3D view:
   the walkways, rays all around: a downward ray that finds no ground (a hole) or a ray that meets the
   back of a face (the inside of a shell) marks the spot.
 - "Piazza macerie": scatters pieces from the template collections ("Pezzi grandi", "Pezzi da
-  posizionare") over the painted area as linked copies in "Passaggio/Macerie pennello". Each piece
-  follows the ground's slope, is sunk a little, may not hover on one edge, go through a wall or
-  another piece, or reach into the walkways. "Togli macerie" removes them.
+  posizionare") over the painted area as linked copies in "Passaggio/Macerie pennello", adding to
+  what is there, then wipes the paint (kept in "Macerie ultima"): each batch only follows its own
+  strokes. "Altra variante" redoes the last batch. Each piece follows the ground's slope, is sunk a
+  little, may not hover on one edge, go through a wall or another piece, or reach into the
+  walkways. "Togli macerie" removes every brush piece.
 
 Load it in the .blend as a text block and run it once (or tick Register). Coordinates: GOAL meters
 (x, y up, z) are Blender (x, -z, y). The game cuts the passages out of mhcitya and ctyport
@@ -27,6 +29,7 @@ from mathutils.kdtree import KDTree
 
 CANVAS = "Tela macerie"
 GROUP = "Macerie"
+LAST_GROUP = "Macerie ultima"  # the strokes of the last batch, for "Altra variante"
 OUT_COLLECTION = "Macerie pennello"
 TEMPLATES = ("Pezzi grandi", "Pezzi da posizionare")
 # never hit by rays: templates, helpers, collision-only meshes
@@ -155,8 +158,10 @@ def make_canvas(context):
     return ob
 
 
-def read_weights(ob):
-    gi = ob.vertex_groups[GROUP].index
+def read_weights(ob, group=GROUP):
+    if group not in ob.vertex_groups:
+        return np.zeros(len(ob.data.vertices), np.float32)
+    gi = ob.vertex_groups[group].index
     w = np.zeros(len(ob.data.vertices), np.float32)
     for v in ob.data.vertices:
         for g in v.groups:
@@ -165,8 +170,8 @@ def read_weights(ob):
     return w
 
 
-def write_weights(ob, w):
-    vg = ob.vertex_groups[GROUP]
+def write_weights(ob, w, group=GROUP):
+    vg = ob.vertex_groups.get(group) or ob.vertex_groups.new(name=group)
     for x in np.unique(w):
         vg.add(np.nonzero(w == x)[0].tolist(), float(x), 'REPLACE')
 
@@ -273,8 +278,9 @@ def overlap_ratio(a, b):
 
 
 def place(context, canvas, props):
-    rng = random.Random(props.macerie_seed)
-    clear_placed()
+    """Add one batch of pieces over the current paint, then move the paint to LAST_GROUP."""
+    batch = int(context.scene.get("macerie_batch", 0)) + 1
+    rng = random.Random(props.macerie_seed * 1000 + batch)
     out = bpy.data.collections.get(OUT_COLLECTION) or bpy.data.collections.new(OUT_COLLECTION)
     if out.name not in bpy.data.collections["Passaggio"].children:
         bpy.data.collections["Passaggio"].children.link(out)
@@ -298,8 +304,8 @@ def place(context, canvas, props):
     walls = wall_tree(scene, (lo, hi))
     total = sum(a * wt for _v, a, wt in faces) * props.macerie_densita / 100.0
     count = int(total + rng.random())
-    others = [aabb(o.data, o.matrix_world) for o in bpy.data.collections["Passaggio"].objects
-              if o.type == 'MESH' and o.name.startswith(("grande_", "nuovo_"))]
+    others = [aabb(o.data, o.matrix_world) for o in bpy.data.collections["Passaggio"].all_objects
+              if o.type == 'MESH' and (o.name.startswith(("grande_", "nuovo_")) or o.get("macerie_batch"))]
     made = rejected = 0
     face_weights = [a * fw for _v, a, fw in faces]
     for _ in range(count):
@@ -359,11 +365,27 @@ def place(context, canvas, props):
             ob.matrix_world = m
             ob["set_collision"] = 1
             ob["ignore"] = 1
+            ob["macerie_batch"] = batch
             out.objects.link(ob)
             others.append(box)
             made += 1
             break
+    context.scene["macerie_batch"] = batch
+    write_weights(canvas, w, LAST_GROUP)
+    write_weights(canvas, np.zeros_like(w))
     return made, rejected
+
+
+def undo_last_batch(context, canvas):
+    """Remove the last batch's pieces and give its strokes back to the canvas."""
+    batch = int(context.scene.get("macerie_batch", 0))
+    col = bpy.data.collections.get(OUT_COLLECTION)
+    if col:
+        for o in list(col.objects):
+            if o.get("macerie_batch") == batch:
+                bpy.data.objects.remove(o)
+    context.scene["macerie_batch"] = max(0, batch - 1)
+    write_weights(canvas, read_weights(canvas, LAST_GROUP))
 
 
 def clear_placed():
@@ -421,7 +443,7 @@ class MACERIE_OT_junctions(bpy.types.Operator):
 class MACERIE_OT_place(bpy.types.Operator):
     bl_idname = "macerie.place"
     bl_label = "Piazza macerie"
-    bl_description = "Sparge i pezzi sulle zone colorate (rifà da zero quelli del pennello)"
+    bl_description = "Aggiunge pezzi sulle zone colorate, poi cancella il colore (i pezzi già messi restano)"
 
     def execute(self, context):
         if context.object and context.object.mode != 'OBJECT':
@@ -439,19 +461,26 @@ class MACERIE_OT_place(bpy.types.Operator):
 class MACERIE_OT_clear(bpy.types.Operator):
     bl_idname = "macerie.clear"
     bl_label = "Togli macerie"
-    bl_description = "Toglie i pezzi messi dal pennello (non quelli messi a mano)"
+    bl_description = "Toglie tutti i pezzi messi dal pennello (non quelli messi a mano)"
 
     def execute(self, context):
         clear_placed()
+        context.scene["macerie_batch"] = 0
         return {'FINISHED'}
 
 
 class MACERIE_OT_reroll(bpy.types.Operator):
     bl_idname = "macerie.reroll"
     bl_label = "Altra variante"
-    bl_description = "Stesse zone, pezzi e posizioni diversi"
+    bl_description = "Rifà l'ultima piazzata: stesse pennellate, pezzi e posizioni diversi"
 
     def execute(self, context):
+        if context.object and context.object.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        ob = bpy.data.objects.get(CANVAS)
+        if not ob:
+            return {'CANCELLED'}
+        undo_last_batch(context, ob)
         context.scene.macerie_seed += 1
         return bpy.ops.macerie.place()
 
