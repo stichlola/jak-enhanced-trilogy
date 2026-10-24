@@ -1094,6 +1094,19 @@ void pc_enhanced_set_sun(u32 vec_ptr) {
   g_enhanced_sun.valid = true;
 }
 
+// Enhanced: read an environment variable (test runs pick their start point, run probes... without
+// recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
+u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
+  const char* name = std::getenv(Ptr<String>(var).c()->data());
+  if (!name || !*name) {
+    return bool_to_symbol(false);
+  }
+  auto* data = Ptr<String>(dest).c()->data();
+  strncpy(data, name, max_len - 1);
+  data[max_len - 1] = '\0';
+  return bool_to_symbol(true);
+}
+
 void pc_screen_shot() {
   g_want_screenshot = true;
 }
@@ -1233,6 +1246,7 @@ void init_common_pc_port_functions(
   // RNG
   make_func_symbol_func("pc-rand", (void*)pc_rand);
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
+  make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

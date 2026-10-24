@@ -43,6 +43,10 @@ struct DoubleDraw {
 DoubleDraw setup_tfrag_shader(SharedRenderState* render_state, DrawMode mode, ShaderId shader);
 DoubleDraw setup_opengl_from_draw_mode(DrawMode mode, u32 tex_unit, bool mipmap);
 
+// Enhanced: the level whose background is being drawn (set before first_tfrag_draw_setup), so
+// parts of some levels can be cut away where they now open onto new areas (see Shader.cpp).
+extern std::string g_enhanced_bg_level;
+
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
                             ShaderId shader);

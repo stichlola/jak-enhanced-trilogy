@@ -6,6 +6,25 @@
 
 #include "game/graphics/pipelines/opengl.h"
 
+namespace {
+// Enhanced TAA: the shaders that draw the 3D world into the frame get a sub-pixel jitter. Not the
+// HUD, post effects, or anything drawing into an offscreen texture (texture animation, sky
+// blend, eyes, ocean textures, glow probes).
+bool enhanced_jitters(const std::string& name) {
+  static const char* world[] = {"tfrag3",      "tfrag3_no_tex", "shrub",       "tie_wind",
+                                "etie",        "etie_base",     "merc2",       "emerc",
+                                "generic",     "hfrag",         "ocean_common", "sprite_3d",
+                                "sprite3_3d",  "shadow2",       "glow_draw",   "collision",
+                                "sky"};
+  for (const char* w : world) {
+    if (name == w) {
+      return true;
+    }
+  }
+  return false;
+}
+}  // namespace
+
 Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(shader_name) {
   const std::string height_scale = version == GameVersion::Jak1 ? "1.0" : "0.5";
   const std::string scissor_height = version == GameVersion::Jak1 ? "448.0" : "416.0";
@@ -21,6 +40,42 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   vert_src = std::regex_replace(vert_src, std::regex("SCISSOR_HEIGHT"), scissor_height);
   frag_src = std::regex_replace(frag_src, std::regex("SCISSOR_HEIGHT"), scissor_height);
   vert_src = std::regex_replace(vert_src, std::regex("SCISSOR_ADJUST"), "(" + scissor_adjust + ")");
+
+  // Enhanced: background shaders pass their world position on, and the fragment shader drops
+  // what lies inside the cut volumes when the level asks for it (enh_cut, background_common.cpp):
+  // the passages from the Metal Head city and the port into the Jak 2 plaza (custom level
+  // "piazza"). Volumes in GOAL meters.
+  if (shader_name == "tfrag3" || shader_name == "shrub" || shader_name == "etie" ||
+      shader_name == "etie_base") {
+    vert_src = std::regex_replace(vert_src, std::regex("void\\s+main\\s*\\(\\s*\\)"),
+                                  "void enh_cut_main()");
+    vert_src += "\nout vec3 enh_world;\nvoid main() {\n  enh_world = position_in / 4096.0;\n"
+                "  enh_cut_main();\n}\n";
+    frag_src = std::regex_replace(frag_src, std::regex("void\\s+main\\s*\\(\\s*\\)"),
+                                  "void enh_cut_frag_main()");
+    frag_src +=
+        "\nin vec3 enh_world;\nuniform int enh_cut;\n"
+        "bool enh_in_cut(vec3 p) {\n"
+        // the gap into the Metal Head city (mhcitya)
+        "  if (p.x > 42.0 && p.x < 92.0 && p.y > 7.0 && p.y < 60.0 && p.z > 950.0 && p.z < 968.0)"
+        " return true;\n"
+        // the lane under the fallen tower into the port (ctyport)
+        "  vec2 a = vec2(229.0, 1146.0), b = vec2(200.0, 1206.0);\n"
+        "  vec2 ab = b - a; float t = clamp(dot(p.xz - a, ab) / dot(ab, ab), 0.0, 1.0);\n"
+        "  return length(p.xz - (a + ab * t)) < 6.5 && p.y > 4.6 && p.y < 16.0;\n"
+        "}\n"
+        "void main() {\n  if (enh_cut != 0 && enh_in_cut(enh_world)) discard;\n"
+        "  enh_cut_frag_main();\n}\n";
+  }
+
+  // Enhanced TAA: wrap main() to add the frame's sub-pixel jitter to the final position
+  m_jitters = enhanced_jitters(shader_name);
+  if (m_jitters) {
+    vert_src = std::regex_replace(vert_src, std::regex("void\\s+main\\s*\\(\\s*\\)"),
+                                  "void enh_original_main()");
+    vert_src += "\nuniform vec2 enh_jitter;\nvoid main() {\n  enh_original_main();\n"
+                "  gl_Position.xy += enh_jitter * gl_Position.w;\n}\n";
+  }
 
   m_vert_shader = glCreateShader(GL_VERTEX_SHADER);
   const char* src = vert_src.c_str();
@@ -83,6 +138,16 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   glDeleteShader(m_vert_shader);
   glDeleteShader(m_frag_shader);
   m_is_okay = true;
+  if (m_jitters) {
+    m_jitter_loc = glGetUniformLocation(m_program, "enh_jitter");
+  }
+}
+
+void Shader::set_jitter(float x, float y) const {
+  if (m_jitters && m_is_okay && m_jitter_loc != -1) {
+    glUseProgram(m_program);
+    glUniform2f(m_jitter_loc, x, y);
+  }
 }
 
 void Shader::activate() const {
@@ -147,5 +212,11 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");
+  }
+}
+
+void ShaderLibrary::set_jitter(float x, float y) {
+  for (auto& shader : m_shaders) {
+    shader.set_jitter(x, y);
   }
 }

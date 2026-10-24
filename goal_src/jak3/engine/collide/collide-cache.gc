@@ -5,6 +5,53 @@
 ;; name in dgo: collide-cache
 ;; dgos: GAME
 
+;; Enhanced: passages from the Metal Head city and the port into the Jak 2 plaza (custom level
+;; "piazza"). The same volumes are cut from the drawing in the renderer (Shader.cpp).
+(defun enhanced-level-has-cuts? ((name symbol))
+  (or (= name 'mhcitya) (= name 'ctyport))
+  )
+
+(defun enhanced-in-cut? ((p vector))
+  "Is p (game units) inside one of the passage volumes?"
+  (let ((x (/ (-> p x) 4096.0))
+        (y (/ (-> p y) 4096.0))
+        (z (/ (-> p z) 4096.0))
+        )
+    (or (and (< 42.0 x) (< x 92.0) (< 7.0 y) (< y 60.0) (< 950.0 z) (< z 968.0))
+        ;; the lane under the fallen tower, from (229, 1146) to (200, 1206)
+        (let* ((ax 229.0)
+               (az 1146.0)
+               (bx -29.0)
+               (bz 60.0)
+               (t (fmax 0.0 (fmin 1.0 (/ (+ (* (- x ax) bx) (* (- z az) bz)) (+ (* bx bx) (* bz bz))))))
+               (dx (- x (+ ax (* t bx))))
+               (dz (- z (+ az (* t bz))))
+               )
+          (and (< (+ (* dx dx) (* dz dz)) (* 6.5 6.5)) (< 4.6 y) (< y 16.0))
+          )
+        )
+    )
+  )
+
+(defun enhanced-cut-cache-tris ((cache collide-cache) (first-tri int))
+  "Collapse the cache triangles added since first-tri whose centre lies in a passage: a
+degenerate triangle collides with nothing."
+  (let ((c (new 'stack-no-clear 'vector)))
+    (countdown (i (- (-> cache num-tris) first-tri))
+      (let ((tri (-> cache tris (+ first-tri i))))
+        (vector+! c (-> tri vertex 0) (-> tri vertex 1))
+        (vector+! c c (-> tri vertex 2))
+        (vector-float*! c c (/ 1.0 3.0))
+        (when (enhanced-in-cut? c)
+          (set! (-> tri vertex 1 quad) (-> tri vertex 0 quad))
+          (set! (-> tri vertex 2 quad) (-> tri vertex 0 quad))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 ;; DECOMP BEGINS
 
 (defmethod reset ((this collide-cache))
@@ -35,9 +82,18 @@
       )
   (dotimes (s3-0 (-> *level* length))
     (let ((v1-7 (-> *level* level s3-0)))
-      (if (= (-> v1-7 status) 'active)
-          (arg0 (-> v1-7 bsp collide-hash) 0 *collide-list* arg2)
+      (when (= (-> v1-7 status) 'active)
+        (arg0 (-> v1-7 bsp collide-hash) 0 *collide-list* arg2)
+        ;; Enhanced: levels with passages cut into them fill the cache on their own, so their
+        ;; triangles can be told apart and the ones inside the passages dropped
+        (when (and (enhanced-level-has-cuts? (-> v1-7 name)) (> (-> *collide-list* num-items) 0))
+          (let ((first-tri (-> *collide-cache* num-tris)))
+            (arg1 *collide-cache* *collide-list* arg2)
+            (set! (-> *collide-list* num-items) 0)
+            (enhanced-cut-cache-tris *collide-cache* first-tri)
+            )
           )
+        )
       )
     )
   (if (> (-> *collide-list* num-items) 0)

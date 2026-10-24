@@ -544,6 +544,7 @@ void Tie3::draw_matching_draws_for_tree(int idx,
   auto shader_id = use_envmap ? ShaderId::ETIE_BASE : ShaderId::TFRAG3;
 
   // setup OpenGL shader
+  g_enhanced_bg_level = m_level_name;
   first_tfrag_draw_setup(settings.camera, render_state, shader_id);
 
   if (use_envmap) {
@@ -650,6 +651,7 @@ void Tie3::envmap_second_pass_draw(const Tree& tree,
                                    SharedRenderState* render_state,
                                    ScopedProfilerNode& prof,
                                    tfrag3::TieCategory category) {
+  g_enhanced_bg_level = m_level_name;
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::ETIE);
   glBindVertexArray(tree.vao);
   glBindBuffer(GL_ARRAY_BUFFER, tree.vertex_buffer);
@@ -932,6 +934,7 @@ void Tie3::render_tree_wind(int idx,
   }
 
   auto shader_id = ShaderId::TIE_WIND;
+  g_enhanced_bg_level = m_level_name;
   first_tfrag_draw_setup(settings.camera, render_state, shader_id);
   glBindVertexArray(tree.vao);
   glBindBuffer(GL_ARRAY_BUFFER, tree.vertex_buffer);

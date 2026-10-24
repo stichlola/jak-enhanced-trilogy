@@ -243,6 +243,8 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
   return result;
 }
 
+std::string g_enhanced_bg_level;
+
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
                             ShaderId shader) {
@@ -278,6 +280,9 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   */
 
   glUniformMatrix4fv(glGetUniformLocation(id, "pc_camera"), 1, GL_FALSE, newcam[0].data());
+  // Enhanced: the Jak 2 plaza's passages through the Metal Head city and the port
+  glUniform1i(glGetUniformLocation(id, "enh_cut"),
+              g_enhanced_bg_level == "mhcitya" || g_enhanced_bg_level == "ctyport");
   for (int i = 0; i < 3; i++) {
     g_enhanced_camera.trans[i] = settings.trans[i];
   }

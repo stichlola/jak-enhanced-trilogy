@@ -530,6 +530,9 @@
   (none)
   )
 
+;; Enhanced: filled from JAK_ENHANCED_START
+(define *enhanced-start-name* (new 'global 'string 64 (the-as string #f)))
+
 (defmethod initialize! ((this game-info) (mode symbol) (arg2 game-save) (continue-name string) (reset-spec resetter-spec))
   (when reset-spec
     (if (not continue-name)
@@ -607,6 +610,10 @@
           )
          ((demo?)
           "title-start"
+          )
+         ((and *debug-segment* (= mode 'boot) (pc-enhanced-getenv "JAK_ENHANCED_START" *enhanced-start-name* 64))
+          ;; Enhanced: JAK_ENHANCED_START picks the boot continue point (test runs)
+          *enhanced-start-name*
           )
          ((and *debug-segment* (= mode 'boot))
           ;; Enhanced: start in Haven City, at the port (by the sea)

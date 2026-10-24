@@ -410,6 +410,10 @@
 (goal-src "levels/test-zone/test-zone-obs.gc" "process-focusable")
 (custom-level-cgo "TSZ.DGO" "test-zone/testzone.gd")
 
+;; Jak 3 Enhanced: Jak 2's palace plaza
+(build-custom-level "piazza")
+(custom-level-cgo "PZZ.DGO" "piazza/piazza.gd")
+
 ;; generate the art group for a custom actor.
 ;; requires a .glb model file in custom_assets/jak3/models/custom_levels
 ;; options:

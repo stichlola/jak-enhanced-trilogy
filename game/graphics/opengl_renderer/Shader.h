@@ -13,6 +13,8 @@ class Shader {
   void activate() const;
   bool okay() const { return m_is_okay; }
   u64 id() const { return m_program; }
+  // Enhanced TAA: NDC offset added to gl_Position (only for the 3D world's shaders)
+  void set_jitter(float x, float y) const;
 
  private:
   std::string m_name;
@@ -20,6 +22,8 @@ class Shader {
   u64 m_vert_shader = 0;
   u64 m_program = 0;
   bool m_is_okay = false;
+  bool m_jitters = false;
+  int m_jitter_loc = -1;
 };
 
 // note: update the constructor in Shader.cpp
@@ -85,6 +89,7 @@ class ShaderLibrary {
   ShaderLibrary(GameVersion version);
   Shader& operator[](ShaderId id) { return m_shaders[(int)id]; }
   Shader& at(ShaderId id) { return m_shaders[(int)id]; }
+  void set_jitter(float x, float y);
 
  private:
   Shader m_shaders[(int)ShaderId::MAX_SHADERS];

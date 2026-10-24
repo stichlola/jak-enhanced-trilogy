@@ -298,6 +298,8 @@ void Shrub::render_tree(int idx,
   glTexSubImage1D(GL_TEXTURE_1D, 0, 0, tree.colors->color_count, GL_RGBA,
                   GL_UNSIGNED_INT_8_8_8_8_REV, m_color_result.data());
 
+  g_enhanced_bg_level = m_level_name;
+
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB);
   {
     using clock = std::chrono::steady_clock;

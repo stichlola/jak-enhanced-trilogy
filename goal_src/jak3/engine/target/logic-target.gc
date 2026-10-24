@@ -8,6 +8,130 @@
 (define-extern enhanced-unlock-all (function none))
 (define *enhanced-travel-to-city* #f)
 
+;; Enhanced: walk-through probe of the passages into the Jak 2 plaza, for test runs
+;; (JAK_ENHANCED_PROBE=1). Once the plaza and its neighbours are active, a capsule-sized sphere is
+;; swept along each route against the real background collision (with the passage cuts of
+;; collide-cache.gc) and the gk log gets WALL / HOLE / DROP lines plus a height profile.
+(define *enhanced-probe-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-probe-wanted* (pc-enhanced-getenv "JAK_ENHANCED_PROBE" *enhanced-probe-buf* 64))
+(define *enhanced-probe-frames* 0)
+
+;; routes: start floor height, then x z pairs (meters)
+(define *enhanced-probe-routes*
+  (new 'static 'boxed-array :type (array float)
+    ;; plaza -> up the ramp -> Metal Head city
+    (new 'static 'boxed-array :type float 8.0 100.0 960.0 70.0 959.0 42.0 959.0 30.0 959.0)
+    ;; plaza -> down the ramp under the fallen tower -> port
+    (new 'static 'boxed-array :type float 8.0 236.0 1135.0 227.0 1151.0 213.5 1178.0 204.0 1196.0)
+    )
+  )
+
+(defun enhanced-probe-line ((from vector) (to vector) (radius float))
+  "Sweep a sphere from -> to against the background: the fraction of the way to the first hit, < 0 if clear."
+  (let ((cq (new 'stack-no-clear 'collide-query)))
+    (set! (-> cq radius) radius)
+    (set! (-> cq collide-with) (collide-spec backgnd))
+    (set! (-> cq ignore-process0) #f)
+    (set! (-> cq ignore-process1) #f)
+    (set! (-> cq ignore-pat) (the-as pat-surface 0))
+    (set! (-> cq action-mask) (collide-action solid))
+    (vector-copy! (-> cq start-pos) from)
+    (vector-! (-> cq move-dist) to from)
+    (fill-and-probe-using-line-sphere *collide-cache* cq)
+    )
+  )
+
+(defun enhanced-probe-route ((index int) (route (array float)))
+  "Walk one route in 0.5 m steps, logging what would stop or drop Jak. Returns the problem count."
+  (let ((from (new 'stack-no-clear 'vector))
+        (to (new 'stack-no-clear 'vector))
+        (floor (-> route 0))
+        (px (-> route 1))
+        (pz (-> route 2))
+        (problems 0)
+        (step 0)
+        )
+    (format 0 "[probe] route ~D start ~,,1f ~,,1f floor ~,,1f~%" index px pz floor)
+    (let ((k 1))
+      (while (< (+ k 3) (-> route length))
+        (let* ((ax (-> route k))
+               (az (-> route (+ k 1)))
+               (bx (-> route (+ k 2)))
+               (bz (-> route (+ k 3)))
+               (len (sqrtf (+ (* (- bx ax) (- bx ax)) (* (- bz az) (- bz az)))))
+               (n (+ 1 (the int (* 2.0 len))))
+               )
+          (dotimes (i n)
+            (let* ((f (/ (the float (+ i 1)) (the float n)))
+                   (x (+ ax (* f (- bx ax))))
+                   (z (+ az (* f (- bz az))))
+                   )
+              ;; wall: knee-to-chest sweep from the last point
+              (set-vector! from (* 4096.0 px) (* 4096.0 (+ floor 1.0)) (* 4096.0 pz) 1.0)
+              (set-vector! to (* 4096.0 x) (* 4096.0 (+ floor 1.0)) (* 4096.0 z) 1.0)
+              (when (>= (enhanced-probe-line from to 1638.4) 0.0)
+                (format 0 "[probe] route ~D WALL at ~,,1f ~,,1f height ~,,1f~%" index x z (+ floor 1.0))
+                (+! problems 1)
+                )
+              ;; floor: down from a step's height above the current floor
+              (set-vector! from (* 4096.0 x) (* 4096.0 (+ floor 1.8)) (* 4096.0 z) 1.0)
+              (set-vector! to (* 4096.0 x) (* 4096.0 (+ floor -6.2)) (* 4096.0 z) 1.0)
+              (let ((u (enhanced-probe-line from to 819.2)))
+                (cond
+                  ((< u 0.0)
+                   (format 0 "[probe] route ~D HOLE at ~,,1f ~,,1f under ~,,1f~%" index x z floor)
+                   (+! problems 1)
+                   )
+                  (else
+                    (let ((y (- (+ floor 1.8) (* 8.0 u))))
+                      (when (< y (+ floor -1.0))
+                        (format 0 "[probe] route ~D DROP at ~,,1f ~,,1f ~,,1f -> ~,,1f~%" index x z floor y)
+                        (+! problems 1)
+                        )
+                      (set! floor y)
+                      )
+                    )
+                  )
+                )
+              (if (zero? (logand step 3))
+                  (format 0 "[probe] route ~D at ~,,1f ~,,1f floor ~,,1f~%" index x z floor)
+                  )
+              (+! step 1)
+              (set! px x)
+              (set! pz z)
+              )
+            )
+          )
+        (+! k 2)
+        )
+      )
+    (format 0 "[probe] route ~D done: ~D problems~%" index problems)
+    problems
+    )
+  )
+
+(defun enhanced-probe-update ()
+  "Run the passage probes once, a few seconds after the plaza and its neighbours are up."
+  (when (and *enhanced-probe-wanted*
+             (level-get *level* 'piazza)
+             (level-get *level* 'mhcitya)
+             (level-get *level* 'ctyport)
+             (= (-> (level-get *level* 'piazza) status) 'active)
+             )
+    (+! *enhanced-probe-frames* 1)
+    (when (= *enhanced-probe-frames* 300)
+      (set! *enhanced-probe-wanted* #f)
+      (let ((total 0))
+        (dotimes (i (-> *enhanced-probe-routes* length))
+          (+! total (enhanced-probe-route i (-> *enhanced-probe-routes* i)))
+          )
+        (format 0 "[probe] all done: ~D problems~%" total)
+        )
+      )
+    )
+  (none)
+  )
+
 ;; DECOMP BEGINS
 
 (defbehavior build-conversions target ((arg0 vector))
@@ -1632,6 +1756,7 @@
       (logior! (-> self game features) (game-feature board))
       )
   (enhanced-unlock-all)
+  (enhanced-probe-update)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)

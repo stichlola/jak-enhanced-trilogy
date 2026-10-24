@@ -1,0 +1,35 @@
+{
+  // Jak 3 Enhanced: Jak 2's palace plaza (Haven), brought back between the Metal Head city and the
+  // port, with passages through the rubble. Built from local/blender/piazza_jak2.blend.
+  "long_name": "piazza",
+  "iso_name": "PIAZZA",
+  "nickname": "pzz",
+  "gltf_file": "custom_assets/jak3/levels/piazza/piazza.glb",
+  "automatic_wall_detection": true,
+  "automatic_wall_angle": 45.0,
+  "double_sided_collide": false,
+  "base_id": 9100,
+  "base_region_id": 0,
+  "art_groups": [],
+  "custom_models": [],
+  "textures": [],
+  // (the builder crashes on a level without regions: one placeholder in the plaza's centre)
+  "region_trees": {
+    "camera": {"bsphere": [120, 8, 1050, 400], "regions": [
+      {"id": 1, "shape": "sphere", "trans": [120, 8, 1050], "bsphere": [120, 8, 1050, 5], "on-enter": "(print 'piazza)"}
+    ]},
+    "target": {}, "water": {}, "data": {}, "city_vis": {}, "sample": {}, "light": {}, "entity": {}
+  },
+  "actor_groups": [{"id": 0, "entities": ["piazza-crate"]}],
+  "actors": [
+    {
+      "trans": [120, 8.5, 1040],
+      "etype": "crate",
+      "game_task": "(game-task none)",
+      "kill_mask": 0,
+      "quat": [0, 0, 0, 1],
+      "bsphere": [120, 8.5, 1040, 10],
+      "lump": {"name": "piazza-crate", "eco-info": ["eco-info", "(pickup-type ammo-red)", 5]}
+    }
+  ]
+}

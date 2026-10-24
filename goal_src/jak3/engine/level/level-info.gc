@@ -20661,6 +20661,101 @@
                              )
         )
 
+;; Jak 3 Enhanced: Jak 2's palace plaza, between the Metal Head city (mhcitya) and the port
+(define piazza
+  (new 'static 'level-load-info
+    :name 'piazza
+    :visname 'piazza-vis
+    :nickname 'pzz
+    :dbname 'piazza
+    :taskname 'default
+    :index #x129
+    :master-level 'ctywide
+    :packages '()
+    :run-packages '("common")
+    :memory-mode (level-memory-mode borrow-city-small)
+    :music-bank #f
+    :extra-sound-bank #f
+    :mood-func 'update-mood-default
+    :special-mood #f
+    :ocean #f
+    :ocean-alpha 1.0
+    :priority 100
+    :draw-priority 10.0
+    :base-task-mask (task-mask task0)
+    :bigmap-id (bigmap-id none)
+    :continues '((new 'static 'continue-point
+        :name "piazza-start"
+        :level 'piazza
+        :trans (static-vectorm 110 8.5 960)
+        :camera-trans (static-vectorm 125 13 960)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 0 0 #x7fff))
+        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :on-goto #f
+        :vis-nick 'pzz
+        :vehicle-type #x1b
+        :want-count 4
+        :want (new 'static 'inline-array level-buffer-state-small 4
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      (new 'static 'continue-point
+        :name "piazza-varco-mhcity"
+        :level 'piazza
+        :trans (static-vectorm 88 8.5 959)
+        :camera-trans (static-vectorm 100 13 959)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -23170 0 23170))
+        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :on-goto #f
+        :vis-nick 'pzz
+        :vehicle-type #x1b
+        :want-count 4
+        :want (new 'static 'inline-array level-buffer-state-small 4
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      (new 'static 'continue-point
+        :name "piazza-varco-porto"
+        :level 'piazza
+        :trans (static-vectorm 233 8.5 1137)
+        :camera-trans (static-vectorm 237 13 1129)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -7307 0 31947))
+        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :on-goto #f
+        :vis-nick 'pzz
+        :vehicle-type #x1b
+        :want-count 4
+        :want (new 'static 'inline-array level-buffer-state-small 4
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      )
+    :callback-list '()
+    :borrow #f
+    :bottom-height (meters -150)
+    :fog-height (meters 80)
+    :max-rain 1.0
+    :fog-mult 1.0
+    :mood-range (new 'static 'mood-range :max-cloud 1.0 :min-fog 0.5 :max-fog 1.0)
+    )
+  )
+
+(#when PC_PORT
+  (cons! *level-load-list* 'piazza)
+  )
+
 ;; og:preserve-this added test-zone level
 (define test-zone
   (new 'static 'level-load-info
