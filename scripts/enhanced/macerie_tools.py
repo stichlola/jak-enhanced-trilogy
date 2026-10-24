@@ -423,6 +423,8 @@ class MACERIE_OT_paint(bpy.types.Operator):
         context.view_layer.objects.active = ob
         ob.vertex_groups.active_index = ob.vertex_groups[GROUP].index
         bpy.ops.object.mode_set(mode='WEIGHT_PAINT')
+        # stay on the canvas: a click elsewhere would start painting the level's meshes
+        context.scene.tool_settings.lock_object_mode = True
         return {'FINISHED'}
 
 
@@ -516,7 +518,7 @@ CLASSES = (MACERIE_OT_canvas, MACERIE_OT_paint, MACERIE_OT_junctions, MACERIE_OT
 
 def register():
     S = bpy.types.Scene
-    S.macerie_densita = bpy.props.FloatProperty(name="Densità (per 100 m²)", default=1.2, min=0.05, max=20)
+    S.macerie_densita = bpy.props.FloatProperty(name="Densità (per 100 m²)", default=4.0, min=0.05, max=20)
     S.macerie_min = bpy.props.FloatProperty(name="Grandezza min (m)", default=3.0, min=0.5, max=80)
     S.macerie_max = bpy.props.FloatProperty(name="Grandezza max (m)", default=25.0, min=1, max=120)
     S.macerie_inclinazione = bpy.props.FloatProperty(name="Inclinazione max (°)", default=22, min=0, max=80)
