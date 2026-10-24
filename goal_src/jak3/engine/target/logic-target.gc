@@ -23,6 +23,8 @@
     (new 'static 'boxed-array :type float 8.0 100.0 960.0 70.0 959.0 42.0 959.0 30.0 959.0)
     ;; plaza -> down the ramp under the fallen tower -> port
     (new 'static 'boxed-array :type float 8.0 230.5 1140.5 227.0 1151.0 213.5 1178.0 204.0 1196.0)
+    ;; plaza -> north part (collision added from the Jak 2 plaza)
+    (new 'static 'boxed-array :type float 8.0 190.0 900.0 200.0 840.0 200.0 800.0 150.0 765.0)
     )
   )
 

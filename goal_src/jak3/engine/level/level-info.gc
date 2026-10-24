@@ -20673,7 +20673,7 @@
     :master-level 'ctywide
     :packages '()
     :run-packages '("common")
-    :memory-mode (level-memory-mode borrow-city-small)
+    :memory-mode (level-memory-mode borrow4)  ;; Enhanced: ctywide's 810 KB slot (only missions use it)
     :music-bank #f
     :extra-sound-bank #f
     :mood-func 'update-mood-default
@@ -20755,6 +20755,25 @@
         :want (new 'static 'inline-array level-buffer-state-small 2
           (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
           (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      (new 'static 'continue-point
+        :name "piazza-nord"
+        :level 'piazza
+        :trans (static-vectorm 200 9.5 820)
+        :camera-trans (static-vectorm 200 14 832)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 32767 0 0))
+        :camera-rot (new 'static 'array int16 9 -32767 0 0 0 32530 -3932 0 -3932 -32530)
+        :on-goto #f
+        :vis-nick 'pzz
+        :vehicle-type #x1b
+        :want-count 4
+        :want (new 'static 'inline-array level-buffer-state-small 4
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
           )
         :want-sound (new 'static 'array symbol 3 #f #f #f)
         )

@@ -47,7 +47,7 @@ for mat in {m for o in objects for m in o.data.materials if m and m.node_tree}:
 flipped = 0
 for o in objects:
     if not (o.name.startswith("COLL_") or o.name.startswith("Passaggio rampa")) or \
-            o.name == "COLL_jak2_palazzo":
+            o.name.startswith("COLL_jak2_palazzo"):  # the ripped Jak 2 collision is left as it is
         continue
     nm = o.matrix_world.to_3x3().inverted().transposed()
     tree = BVHTree.FromObject(o, bpy.context.evaluated_depsgraph_get())
