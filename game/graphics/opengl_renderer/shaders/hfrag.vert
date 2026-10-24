@@ -18,6 +18,7 @@ uniform float fog_hack_threshold;
 out vec4 fragment_color;
 out vec2 tex_coord;
 out float fogginess;
+out vec2 world_xz;  // Enhanced: for the world-space sand
 
 void main() {
   int vx = vi % 512;
@@ -25,6 +26,7 @@ void main() {
 
   tex_coord.x = (uv.x == 1) ? 1.f : 0.f;
   tex_coord.y = (uv.y == 1) ? 1.f : 0.f;
+  world_xz = vec2(32768.f * vx, 32768.f * vz);
 
   vec3 vert = position_in - cam_trans.xyz;
   vec4 transformed = -pc_camera[3];

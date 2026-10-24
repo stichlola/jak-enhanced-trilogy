@@ -6,6 +6,10 @@
 
 class Hfrag : public BucketRenderer {
  public:
+  // Enhanced: a seamless sand picture for the dunes (out/enhanced/desert_sand.png, made by
+  // scripts/enhanced/desert_sand.py), sampled in world space instead of the Wang tiles. 0 if none.
+  GLuint m_enhanced_sand = 0;
+
   Hfrag(const std::string& name, int my_id);
 
   void render(DmaFollower& dma, SharedRenderState* render_state, ScopedProfilerNode& prof) override;

@@ -20,7 +20,7 @@ Ratchet & Clank Enhanced. Everything is code: the game data comes from your own 
 
 ## Graphics (game/graphics/opengl_renderer/EnhancedPost.*, shaders/enh_*)
 
-All in one post pass on the finished frame, before it goes to the window; sliders under
+All in one pass on the finished 3D scene, between the 3D buckets and the HUD (so minimap and text stay untouched); sliders under
 "Renderer Debug" → "Enhanced Post" in the ImGui menu. About 0-2 fps at 2560x1600 on an RTX 5070
 Laptop (the game stays at its 60 fps cap).
 
@@ -32,6 +32,11 @@ Laptop (the game stays at its 60 fps cap).
 | Depth of field | Light disk blur from 70 m to 350 m; sky, HUD and near objects stay sharp |
 | Bloom | Soft-knee bright pass, 6-level dual-filter blur |
 | Grading | Contrast-adaptive sharpen, highlight roll-off, saturation, S-curve, vignette |
+| Anti-aliasing | FXAA (Lottes' compact version) |
+| Fog and heat haze | Distance + height fog in the game's fog color, thicker below the camera; shimmer over the far ground |
+| Motion blur | Camera only: each pixel reprojected into the previous frame's camera; sharp within 10 m (Jak), skipped on cuts |
+| Sea reflections | Screen-space rays on the far sea (depth kept right after OCEAN_MID_FAR) and the near sea (OceanNear made to write its surface, then the depth restored); ripples, Fresnel, sky fallback |
+| Desert sand | `scripts/enhanced/desert_sand.py`: the jak3-ue5 Tripo sand tile, color-matched to the Wang atlas, in `out/enhanced/desert_sand.png`; the hfrag dunes sample it in world space every 64 m instead of the Wang montage |
 | HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
 
 Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and

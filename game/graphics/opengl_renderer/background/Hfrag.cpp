@@ -1,8 +1,10 @@
 #include "Hfrag.h"
 
 #include "common/log/log.h"
+#include "common/util/FileUtil.h"
 
 #include "third-party/imgui/imgui.h"
+#include "third-party/stb_image/stb_image.h"
 
 Hfrag::Hfrag(const std::string& name, int my_id) : BucketRenderer(name, my_id) {
   // generate shared index buffer
@@ -23,6 +25,27 @@ Hfrag::Hfrag(const std::string& name, int my_id) : BucketRenderer(name, my_id) {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(u32) * indices.size(), indices.data(),
                GL_STATIC_DRAW);
   ASSERT(indices.size() == kIndsPerTile * kNumMontageTiles * kNumBuckets);
+
+  // Enhanced: the dunes' sand, if there is one
+  const auto sand_path = file_util::get_jak_project_dir() / "out" / "enhanced" / "desert_sand.png";
+  if (fs::exists(sand_path)) {
+    int w, h;
+    auto* data = stbi_load(sand_path.string().c_str(), &w, &h, nullptr, 4);
+    if (data) {
+      glGenTextures(1, &m_enhanced_sand);
+      glBindTexture(GL_TEXTURE_2D, m_enhanced_sand);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+      glGenerateMipmap(GL_TEXTURE_2D);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+      glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAX_ANISOTROPY, 16.f);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      stbi_image_free(data);
+      lg::info("[enhanced] desert sand {} ({}x{})", sand_path.string(), w, h);
+    }
+  }
 }
 
 void Hfrag::draw_debug_window() {
@@ -407,6 +430,18 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
 
   glActiveTexture(GL_TEXTURE0);
   // glBindTexture(GL_TEXTURE_2D, lev->hfrag->wang_tree_tex_id[0]);
+
+  // Enhanced: world-space sand, repeating every 8 vertices (64 m) like the jak3-ue5 dunes
+  {
+    const auto id = render_state->shaders[ShaderId::HFRAG].id();
+    glUniform1i(glGetUniformLocation(id, "enhanced_sand"), m_enhanced_sand != 0);
+    glUniform1f(glGetUniformLocation(id, "sand_scale"), 1.f / (8.f * 32768.f));
+    if (m_enhanced_sand) {
+      glActiveTexture(GL_TEXTURE1);
+      glBindTexture(GL_TEXTURE_2D, m_enhanced_sand);
+      glActiveTexture(GL_TEXTURE0);
+    }
+  }
 
   // draw pass
   for (u32 bucket_idx = 0; bucket_idx < lev->hfrag->buckets.size(); bucket_idx++) {

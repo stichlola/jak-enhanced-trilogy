@@ -5,7 +5,11 @@ out vec4 color;
 in vec4 fragment_color;
 in vec2 tex_coord;
 in float fogginess;
+in vec2 world_xz;
 uniform sampler2D tex_T0;
+uniform sampler2D tex_T1;   // Enhanced: seamless sand (when enhanced_sand is set)
+uniform int enhanced_sand;
+uniform float sand_scale;
 uniform vec4 fog_color;
 
 uniform int gfx_hack_no_tex;
@@ -13,7 +17,7 @@ uniform int gfx_hack_no_tex;
 
 void main() {
   if (gfx_hack_no_tex == 0) {
-    vec4 T0 = texture(tex_T0, tex_coord);
+    vec4 T0 = enhanced_sand != 0 ? texture(tex_T1, world_xz * sand_scale) : texture(tex_T0, tex_coord);
     color = fragment_color * T0 * 2;
   } else {
     color = fragment_color;
