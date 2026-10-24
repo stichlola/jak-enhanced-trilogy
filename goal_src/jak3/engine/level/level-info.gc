@@ -20689,8 +20689,8 @@
         :level 'piazza
         :trans (static-vectorm 110 8.5 960)
         :camera-trans (static-vectorm 125 13 960)
-        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 0 0 #x7fff))
-        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -23170 0 23170))
+        :camera-rot (new 'static 'array int16 9 0 0 32767 -3932 32530 0 -32530 -3932 0)
         :on-goto #f
         :vis-nick 'pzz
         :vehicle-type #x1b
@@ -20709,7 +20709,7 @@
         :trans (static-vectorm 88 8.5 959)
         :camera-trans (static-vectorm 100 13 959)
         :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -23170 0 23170))
-        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :camera-rot (new 'static 'array int16 9 0 0 32767 -3932 32530 0 -32530 -3932 0)
         :on-goto #f
         :vis-nick 'pzz
         :vehicle-type #x1b
@@ -20726,9 +20726,9 @@
         :name "piazza-varco-porto"
         :level 'piazza
         :trans (static-vectorm 233 8.5 1137)
-        :camera-trans (static-vectorm 237 13 1129)
-        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -7307 0 31947))
-        :camera-rot (new 'static 'array int16 9 #x7fff 0 0 0 #x7fff 0 0 0 #x7fff)
+        :camera-trans (static-vectorm 237.5 13 1128)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -7528 0 31890))
+        :camera-rot (new 'static 'array int16 9 29308 0 14654 -1758 32530 3517 -14548 -3932 29096)
         :on-goto #f
         :vis-nick 'pzz
         :vehicle-type #x1b
@@ -20738,6 +20738,23 @@
           (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
           (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
           (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      (new 'static 'continue-point
+        :name "piazza-test-dal-porto"
+        :level 'ctyport
+        :trans (static-vectorm 203 2.5 1199)
+        :camera-trans (static-vectorm 198.5 7 1208)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 31890 0 7528))
+        :camera-rot (new 'static 'array int16 9 -29308 0 -14654 1758 32530 -3517 14548 -3932 -29096)
+        :on-goto #f
+        :vis-nick 'ctyport
+        :vehicle-type #x1b
+        :want-count 2
+        :want (new 'static 'inline-array level-buffer-state-small 2
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
           )
         :want-sound (new 'static 'array symbol 3 #f #f #f)
         )

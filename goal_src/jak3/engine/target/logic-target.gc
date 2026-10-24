@@ -22,7 +22,7 @@
     ;; plaza -> up the ramp -> Metal Head city
     (new 'static 'boxed-array :type float 8.0 100.0 960.0 70.0 959.0 42.0 959.0 30.0 959.0)
     ;; plaza -> down the ramp under the fallen tower -> port
-    (new 'static 'boxed-array :type float 8.0 236.0 1135.0 227.0 1151.0 213.5 1178.0 204.0 1196.0)
+    (new 'static 'boxed-array :type float 8.0 230.5 1140.5 227.0 1151.0 213.5 1178.0 204.0 1196.0)
     )
   )
 
@@ -110,8 +110,67 @@
     )
   )
 
+(defun enhanced-piazza-autoload ()
+  "Keep the Jak 2 plaza (custom level piazza) in the wanted levels while Jak is around it in Haven:
+the city's load boundaries rewrite the list as he walks and know nothing of the plaza."
+  (when (and *target* (level-get *level* 'ctywide))
+    (let* ((p (-> *target* control trans))
+           (x (/ (-> p x) 4096.0))
+           (z (/ (-> p z) 4096.0))
+           (near? (and (< -30.0 x) (< x 410.0) (< 790.0 z) (< z 1260.0)))
+           (ls *load-state*)
+           (slot -1)
+           )
+      (dotimes (i 10)
+        (if (= (-> ls want i name) 'piazza)
+            (set! slot i)
+            )
+        )
+      (cond
+        ((and near? (< slot 0))
+         (dotimes (i 10)
+           (if (and (< slot 0) (not (-> ls want i name)))
+               (set! slot i)
+               )
+           )
+         (format 0 "[piazza] near, want slot ~D~%" slot)
+         (when (>= slot 0)
+           (set! (-> ls want slot name) 'piazza)
+           (set! (-> ls want slot display?) 'display)
+           (set! (-> ls want slot force-vis?) #f)
+           (set! (-> ls want slot force-inside?) #f)
+           (add-borrow-levels ls)
+           )
+         )
+        ((and (not near?) (>= slot 0))
+         (format 0 "[piazza] far, dropped~%")
+         (set! (-> ls want slot name) #f)
+         (set! (-> ls want slot display?) #f)
+         (add-borrow-levels ls)
+         )
+        )
+      )
+    )
+  (none)
+  )
+
+(define *enhanced-camlog-frames* 0)
+
 (defun enhanced-probe-update ()
-  "Run the passage probes once, a few seconds after the plaza and its neighbours are up."
+  "Run the passage probes once, a few seconds after the plaza and its neighbours are up.
+On test boots (JAK_ENHANCED_START) also log the camera every 2 s, so a Blender camera can match a
+capture exactly."
+  (when (nonzero? (length *enhanced-start-name*))
+    (+! *enhanced-camlog-frames* 1)
+    (when (zero? (mod *enhanced-camlog-frames* 120))
+      (let ((cam (-> *math-camera* trans))
+            (fwd (-> *math-camera* inv-camera-rot fvec))
+            )
+        (format 0 "[camera] ~,,2f ~,,2f ~,,2f " (/ (-> cam x) 4096.0) (/ (-> cam y) 4096.0) (/ (-> cam z) 4096.0))
+        (format 0 "fwd ~,,4f ~,,4f ~,,4f fov ~,,2f~%" (-> fwd x) (-> fwd y) (-> fwd z) (/ (-> *math-camera* fov) 182.04445))
+        )
+      )
+    )
   (when (and *enhanced-probe-wanted*
              (level-get *level* 'piazza)
              (level-get *level* 'mhcitya)
@@ -1757,6 +1816,7 @@
       )
   (enhanced-unlock-all)
   (enhanced-probe-update)
+  (enhanced-piazza-autoload)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)

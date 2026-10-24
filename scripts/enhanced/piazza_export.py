@@ -7,10 +7,12 @@ Exports the collections "Jak2 palazzo" (plaza background), "Passaggio" (ramps an
 export_skip. Materials are made opaque first (the ripped plaza materials link the texture alpha,
 the custom level builder then treats them as see-through and draws nothing) except real cutouts.
 In our own collision meshes and ramps (not the ripped Jak 2 collision or the rubble shells cut from
-the game), floors facing down with nothing of their own mesh above them are flipped: the game's collision is one-sided, Jak falls
-through them (the port ramp did).
+the game), floors facing down with nothing of their own mesh above them are flipped: the game's
+collision is one-sided, Jak falls through them (the port ramp did). Near the passages the one-sided
+Jak 2 plaza faces get a back side.
 The .blend is not saved: the user's live copy stays as it is.
 """
+import math
 import os
 import sys
 
@@ -44,7 +46,8 @@ for mat in {m for o in objects for m in o.data.materials if m and m.node_tree}:
 
 flipped = 0
 for o in objects:
-    if not (o.name.startswith("COLL_") or o.name.startswith("Passaggio rampa")) or             o.name == "COLL_jak2_palazzo":
+    if not (o.name.startswith("COLL_") or o.name.startswith("Passaggio rampa")) or \
+            o.name == "COLL_jak2_palazzo":
         continue
     nm = o.matrix_world.to_3x3().inverted().transposed()
     tree = BVHTree.FromObject(o, bpy.context.evaluated_depsgraph_get())
@@ -66,6 +69,39 @@ for o in objects:
         print(f"[piazza_export] {o.name}: {len(down)} floor faces were facing down, flipped")
     bm.free()
 
+
+def near_passage(x, y, z, margin):
+    """Is the GOAL-meter point within margin of a passage (the cut volumes of Shader.cpp)?"""
+    if 42 - margin < x < 92 + margin and 950 - margin < z < 968 + margin and y < 60:
+        return True
+    ax, az, bx, bz = 229.0, 1146.0, 200.0, 1206.0
+    t = max(0.0, min(1.0, ((x - ax) * (bx - ax) + (z - az) * (bz - az)) /
+                     ((bx - ax) ** 2 + (bz - az) ** 2)))
+    return math.hypot(x - (ax + (bx - ax) * t), z - (az + (bz - az) * t)) < 6.5 + margin and y < 40
+
+
+# The Jak 2 plaza was only ever seen from inside: its faces are one-sided and from the new passages
+# the backs of pillars and walls show as missing triangles. Near the passages, add a flipped copy
+# of every face (drawing only: these objects take no collision).
+doubled = 0
+for o in objects:
+    if o.users_collection[0].name != "Jak2 palazzo":
+        continue
+    mw = o.matrix_world
+    bm = bmesh.new()
+    bm.from_mesh(o.data)
+    near = []
+    for f in bm.faces:
+        c = mw @ f.calc_center_median()
+        if near_passage(c.x, c.z, -c.y, 25.0):
+            near.append(f)
+    if near:
+        copy = bmesh.ops.duplicate(bm, geom=near)["geom"]
+        bmesh.ops.reverse_faces(bm, faces=[g for g in copy if isinstance(g, bmesh.types.BMFace)])
+        bm.to_mesh(o.data)
+        doubled += len(near)
+    bm.free()
+
 for o in bpy.context.view_layer.objects:
     o.select_set(False)
 for o in objects:
@@ -77,4 +113,4 @@ bpy.ops.export_scene.gltf(filepath=out, use_selection=True, export_extras=True, 
                           export_apply=True, export_vertex_color="ACTIVE", export_format="GLB")
 faces = sum(len(o.data.polygons) for o in objects)
 print(f"[piazza_export] {len(objects)} objects, {faces} faces, {opaque} alpha links cut, "
-      f"{flipped} faces flipped -> {out} ({os.path.getsize(out) // 1024} KB)")
+      f"{flipped} faces flipped, {doubled} doubled -> {out} ({os.path.getsize(out) // 1024} KB)")
