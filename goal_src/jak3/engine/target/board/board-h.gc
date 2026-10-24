@@ -5,6 +5,10 @@
 ;; name in dgo: board-h
 ;; dgos: GAME
 
+;; Enhanced: the jetboard is always at hand (R2), without unlocking it and where a level's
+;; settings would leave it out. #f = vanilla.
+(define *enhanced-board-always* #t)
+
 ;; +++board-tricks
 (defenum board-tricks
   :type uint32
@@ -294,7 +298,9 @@
         )
 
 (defbehavior want-to-board? target ()
-  (and (logtest? (logand (game-feature board) (-> *setting-control* user-current features)) (-> self game features))
+  (and (or *enhanced-board-always*
+           (logtest? (logand (game-feature board) (-> *setting-control* user-current features)) (-> self game features))
+           )
        (or (and (cpad-pressed? (-> self control cpad number) r2)
                 (or (!= *cheat-mode* 'debug)
                     (not (logtest? (-> *cpad-list* cpads (-> self control cpad number) button0-abs 0) (pad-buttons l2)))
