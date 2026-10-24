@@ -434,6 +434,8 @@ void Tie3::setup_tree(int idx,
   }
 
   interp_time_of_day(settings.camera.itimes, *tree.colors, m_color_result.data());
+  enhanced_grade_custom_level(m_level_name, settings.camera.itimes, m_color_result.data(),
+                              tree.colors->color_count);
 
   glActiveTexture(GL_TEXTURE10);
   glBindTexture(GL_TEXTURE_1D, tree.time_of_day_texture);

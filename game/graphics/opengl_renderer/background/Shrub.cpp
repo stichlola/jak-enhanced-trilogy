@@ -290,6 +290,8 @@ void Shrub::render_tree(int idx,
 
   Timer interp_timer;
   interp_time_of_day(settings.camera.itimes, *tree.colors, m_color_result.data());
+  enhanced_grade_custom_level(m_level_name, settings.camera.itimes, m_color_result.data(),
+                              tree.colors->color_count);
   tree.perf.tod_time.add(interp_timer.getSeconds());
 
   Timer setup_timer;

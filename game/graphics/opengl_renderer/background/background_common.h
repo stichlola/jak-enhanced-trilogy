@@ -55,6 +55,14 @@ void interp_time_of_day(const math::Vector<s32, 4> itimes[4],
                         const tfrag3::PackedTimeOfDay& packed_colors,
                         math::Vector<u8, 4>* out);
 
+// Enhanced: custom levels have the same color in all 8 time-of-day palettes, so they take the raw
+// tint of the palette weights (yellow in Haven). For those levels, take the tint out and grade the
+// colors like the city around them. Does nothing for other levels.
+void enhanced_grade_custom_level(const std::string& level,
+                                 const math::Vector<s32, 4> itimes[4],
+                                 math::Vector<u8, 4>* colors,
+                                 u32 count);
+
 void cull_check_all_slow(const math::Vector4f* planes,
                          const std::vector<tfrag3::VisNode>& nodes,
                          const u8* level_occlusion_string,

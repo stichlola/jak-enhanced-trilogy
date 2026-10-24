@@ -299,6 +299,41 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
               render_state->fog_intensity / 255);
 }
 
+void enhanced_grade_custom_level(const std::string& level,
+                                 const math::Vector<s32, 4> itimes[4],
+                                 math::Vector<u8, 4>* colors,
+                                 u32 count) {
+  if (level != "piazza") {
+    return;
+  }
+  // the cool grey of Haven's stone; JAK_ENHANCED_PIAZZA_GRADE=r,g,b overrides it
+  static math::Vector3f grade = [] {
+    math::Vector3f g(0.92f, 0.98f, 1.06f);
+    if (const char* env = std::getenv("JAK_ENHANCED_PIAZZA_GRADE")) {
+      sscanf(env, "%f,%f,%f", &g.x(), &g.y(), &g.z());
+    }
+    return g;
+  }();
+  // per channel sum of the 8 palette weights (same unpacking as interp_time_of_day)
+  float sum[3] = {0, 0, 0};
+  for (int component = 0; component < 8; component++) {
+    for (int channel = 0; channel < 3; channel++) {
+      u32 word_val = itimes[component / 2][(component % 2 * 2) + channel / 2];
+      sum[channel] += ((channel % 2) ? (word_val >> 16) : word_val) & 0xff;
+    }
+  }
+  float mean = (sum[0] + sum[1] + sum[2]) / 3.f;
+  float scale[3];
+  for (int channel = 0; channel < 3; channel++) {
+    scale[channel] = sum[channel] > 0 ? grade[channel] * mean / sum[channel] : 1.f;
+  }
+  for (u32 i = 0; i < count; i++) {
+    for (int channel = 0; channel < 3; channel++) {
+      colors[i][channel] = std::min(255.f, colors[i][channel] * scale[channel]);
+    }
+  }
+}
+
 void interp_time_of_day_slow(const math::Vector<s32, 4> itimes[4],
                              const tfrag3::PackedTimeOfDay& in,
                              math::Vector<u8, 4>* out) {
