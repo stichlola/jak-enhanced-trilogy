@@ -23,6 +23,7 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 from mathutils.bvhtree import BVHTree
+from mathutils.kdtree import KDTree
 
 CANVAS = "Tela macerie"
 GROUP = "Macerie"
@@ -32,11 +33,11 @@ TEMPLATES = ("Pezzi grandi", "Pezzi da posizionare")
 IGNORED_COLLECTIONS = TEMPLATES + ("Kit pezzi", "Kit macerie (rubblea)", "Collisione nuova", "Pennelli",
                                    "Jak2 ctywide")
 CUT_LEVELS = ("Jak3 mhcitya", "Jak3 ctyport")
-# canvas regions, GOAL x and z ranges
-REGIONS = (((15.0, 125.0), (925.0, 995.0)), ((150.0, 290.0), (1095.0, 1250.0)))
+# canvas region, GOAL x and z ranges: the whole plaza and both passages
+REGIONS = (((-20.0, 405.0), (360.0, 1260.0)),)
 # walkways, GOAL (x, z) segment + half width: nothing lower than 6 m above the floor may enter them
 PATHS = (((24.0, 959.0), (104.0, 959.0), 12.0), ((238.0, 1131.0), (198.0, 1208.0), 8.0))
-CELL = 1.5
+CELL = 2.5
 
 
 def goal(x, y, z):
@@ -122,12 +123,23 @@ def make_canvas(context):
             for j in range(nz - 1):
                 bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
     old = bpy.data.objects.get(CANVAS)
-    weights = None
-    if old and len(old.data.vertices) == len(bm.verts) and GROUP in old.vertex_groups:
-        weights = read_weights(old)
     me = bpy.data.meshes.new(CANVAS)
     bm.to_mesh(me)
     bm.free()
+    # keep the paint of an earlier canvas: each new vertex takes the nearest old one's weight
+    weights = None
+    if old and GROUP in old.vertex_groups:
+        old_w = read_weights(old)
+        kd = KDTree(len(old.data.vertices))
+        for v in old.data.vertices:
+            co = old.matrix_world @ v.co
+            kd.insert((co.x, co.y, 0.0), v.index)
+        kd.balance()
+        weights = np.zeros(len(me.vertices), np.float32)
+        for v in me.vertices:
+            _co, i, d = kd.find((v.co.x, v.co.y, 0.0))
+            if i is not None and d < CELL * 1.5:
+                weights[v.index] = old_w[i]
     if old:
         bpy.data.objects.remove(old)
     ob = bpy.data.objects.new(CANVAS, me)
@@ -139,6 +151,7 @@ def make_canvas(context):
     vg.add(range(len(me.vertices)), 0.0, 'REPLACE')
     if weights is not None:
         write_weights(ob, weights)
+    ob.show_in_front = True  # paint it over the buildings
     return ob
 
 
@@ -154,8 +167,8 @@ def read_weights(ob):
 
 def write_weights(ob, w):
     vg = ob.vertex_groups[GROUP]
-    for i, x in enumerate(w):
-        vg.add([i], float(x), 'REPLACE')
+    for x in np.unique(w):
+        vg.add(np.nonzero(w == x)[0].tolist(), float(x), 'REPLACE')
 
 
 # ------------------------------------------------------------------ junction finder
