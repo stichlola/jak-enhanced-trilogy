@@ -5,7 +5,11 @@
 Reads the decompiler's texture dump (decompiler_out/jak3_pal/textures/<tpage>/<name>.png, made
 with "save_texture_pngs": true), upscales each one 4x with Real-ESRGAN (wrap-padded so tiling
 textures stay seamless) and writes custom_assets/jak3/texture_replacements/<tpage>/<name>.png.
-The decompiler picks those up when it extracts the levels again (levels_extract), so the .fr3
+Only opaque textures are upscaled: decals, cutouts and glass (any texel with alpha < 120/128,
+see translucent.ps1) are often blended so that even their "transparent" color shows, and the
+upscaler changes it. The decompiler also skips a replacement that doesn't match its texture when
+scaled back down (TextureDB::replace_texture), since texture names aren't unique. The decompiler
+picks those up when it extracts the levels again (levels_extract), so the .fr3
 files carry the HD textures. Results are cached by content hash, so re-runs only do new ones.
 
 Real-ESRGAN and the wrap helper come from the jak3-ue5 checkout (--tools).
@@ -59,6 +63,18 @@ def run_batch(files, tools, model, gpu):
         wrap_step("crop", tmp / "scaled", CACHE / model)
 
 
+def translucent(todo):
+    """Keys of the textures with any translucent texel (see translucent.ps1)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for _, png, key in todo:
+            shutil.copyfile(png, tmp / f"{key}.png")
+        result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                                 str(Path(__file__).with_name("translucent.ps1")), str(tmp)],
+                                check=True, capture_output=True, text=True)
+    return {Path(name).stem for name in result.stdout.split()}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--tpages", default=DEFAULT_TPAGES, help="regex of texture pages to upscale")
@@ -85,6 +101,13 @@ def main():
             todo.append((tpage.name, png, hashlib.sha1(data).hexdigest()))
 
     (CACHE / args.model).mkdir(parents=True, exist_ok=True)
+    unique = {key: (tpage, png, key) for tpage, png, key in todo}
+    skipped = translucent(list(unique.values()))
+    for tpage, png, key in todo:
+        if key in skipped:  # drop a replacement left by an older run
+            (OUT / tpage / png.name).unlink(missing_ok=True)
+    todo = [entry for entry in todo if entry[2] not in skipped]
+    print(f"{len(skipped)} translucent textures left at their original resolution")
     missing = {}
     for _, png, key in todo:
         if not (CACHE / args.model / f"{key}.png").exists():

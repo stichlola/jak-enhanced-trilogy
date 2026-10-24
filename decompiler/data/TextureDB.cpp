@@ -1,4 +1,4 @@
-#include "TextureDB.h"
+﻿#include "TextureDB.h"
 
 #include "common/log/log.h"
 #include "common/util/Assert.h"
@@ -174,6 +174,40 @@ std::optional<ResolvedTextureData> TextureDB::replace_texture(u32 id) const {
   if (!data) {
     lg::warn("failed to load PNG file: {}", full_path.string().c_str());
     return std::nullopt;
+  }
+
+  // A replacement is meant to be the same picture at a higher resolution. Texture names are not
+  // unique (a page can hold two different textures under one name), so check it: box-filter it
+  // down to the original size and skip it if it doesn't look like the texture it replaces.
+  if (w >= tex.w && h >= tex.h && w % tex.w == 0 && h % tex.h == 0 && !tex.rgba_bytes.empty()) {
+    const int sx = w / tex.w;
+    const int sy = h / tex.h;
+    double diff = 0;
+    int count = 0;
+    for (int y = 0; y < tex.h; y++) {
+      for (int x = 0; x < tex.w; x++) {
+        const u32 orig = tex.rgba_bytes.at(y * tex.w + x);
+        if (((orig >> 24) & 0xff) < 8) {
+          continue;  // transparent: its color doesn't matter
+        }
+        for (int c = 0; c < 3; c++) {
+          int sum = 0;
+          for (int yy = 0; yy < sy; yy++) {
+            for (int xx = 0; xx < sx; xx++) {
+              sum += data[((y * sy + yy) * w + (x * sx + xx)) * 4 + c];
+            }
+          }
+          diff += std::abs(sum / (sx * sy) - (int)((orig >> (8 * c)) & 0xff));
+        }
+        count++;
+      }
+    }
+    if (count > 0 && diff / (3.0 * count) > 10.0) {
+      lg::warn("Not replacing {}: the replacement doesn't match the texture (mean diff {:.1f})",
+               tpage_name + "/" + tex.name, diff / (3.0 * count));
+      stbi_image_free(data);
+      return std::nullopt;
+    }
   }
 
   ResolvedTextureData result;
