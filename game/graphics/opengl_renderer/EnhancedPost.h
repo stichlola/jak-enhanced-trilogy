@@ -75,6 +75,9 @@ class EnhancedPost {
     float water_unify = 1.0f;
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
+    bool gi = true;         // one-bounce screen-space indirect light
+    float gi_strength = 1.5f;
+    float gi_radius = 3.0f;  // meters
     bool bloom = true;
     float bloom_threshold = 0.82f;  // luminance where the bright pass starts
     float bloom_knee = 0.12f;       // soft ramp above the threshold
@@ -198,5 +201,14 @@ class EnhancedPost {
   int m_shaft_w = 0;
   int m_shaft_h = 0;
   bool m_shafts_ready = false;
+
+  // indirect light, half resolution (0: raw, 1: blur temp)
+  void do_gi(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,
+             ScopedProfilerNode& prof);
+  GLuint m_gi_fbo[2] = {0, 0};
+  GLuint m_gi_tex[2] = {0, 0};
+  int m_gi_w = 0;
+  int m_gi_h = 0;
+  bool m_gi_ready = false;
   float m_sun_view[3] = {0, 0, 0};
 };

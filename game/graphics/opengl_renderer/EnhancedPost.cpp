@@ -48,6 +48,9 @@ EnhancedPost::EnhancedPost() {
   if (const char* relight = std::getenv("JAK_ENHANCED_RELIGHT")) {
     m_settings.relight = (float)std::atof(relight);
   }
+  if (const char* gi = std::getenv("JAK_ENHANCED_GI")) {
+    m_settings.gi_strength = (float)std::atof(gi);
+  }
   if (const char* wind = std::getenv("JAK_ENHANCED_WIND")) {
     g_enhanced_wind.strength = (float)std::atof(wind);
   }
@@ -75,6 +78,10 @@ EnhancedPost::~EnhancedPost() {
   if (m_ocean_fbo[0]) {
     glDeleteFramebuffers(3, m_ocean_fbo);
     glDeleteTextures(3, m_ocean_depth);
+  }
+  if (m_gi_fbo[0]) {
+    glDeleteFramebuffers(2, m_gi_fbo);
+    glDeleteTextures(2, m_gi_tex);
   }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
@@ -380,6 +387,79 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
   m_shafts_ready = true;
 }
 
+void EnhancedPost::do_gi(GLuint scene_tex,
+                         GLuint screen_vao,
+                         SharedRenderState* render_state,
+                         ScopedProfilerNode& prof) {
+  int w = std::max(1, m_ssao_w / 2);
+  int h = std::max(1, m_ssao_h / 2);
+  if (w != m_gi_w || h != m_gi_h) {
+    if (m_gi_fbo[0]) {
+      glDeleteFramebuffers(2, m_gi_fbo);
+      glDeleteTextures(2, m_gi_tex);
+    }
+    m_gi_w = w;
+    m_gi_h = h;
+    glGenFramebuffers(2, m_gi_fbo);
+    glGenTextures(2, m_gi_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_gi_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_gi_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_gi_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glBindVertexArray(screen_vao);
+  glViewport(0, 0, w, h);
+
+  auto& gi = render_state->shaders[ShaderId::ENH_GI];
+  gi.activate();
+  auto id = gi.id();
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, scene_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glUniform2f(glGetUniformLocation(id, "texel"), 1.f / m_ssao_w, 1.f / m_ssao_h);
+  glUniform1f(glGetUniformLocation(id, "radius"), m_settings.gi_radius * kMeter);
+  glUniform1f(glGetUniformLocation(id, "max_distance"), 150.f * kMeter);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_gi_fbo[0]);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  prof.add_draw_call();
+
+  auto& blur = render_state->shaders[ShaderId::ENH_GI_BLUR];
+  blur.activate();
+  id = blur.id();
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glActiveTexture(GL_TEXTURE0);
+  for (int pass = 0; pass < 2; pass++) {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_gi_fbo[1 - pass]);
+    glBindTexture(GL_TEXTURE_2D, m_gi_tex[pass]);
+    glUniform2f(glGetUniformLocation(id, "step"), pass == 0 ? 1.f / w : 0.f,
+                pass == 0 ? 0.f : 1.f / h);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    prof.add_draw_call();
+  }
+  glBindVertexArray(0);
+  m_gi_ready = true;
+}
+
 void EnhancedPost::free_ssao() {
   if (m_depth_fbo) {
     glDeleteFramebuffers(1, &m_depth_fbo);
@@ -573,8 +653,12 @@ void EnhancedPost::prepare(GLuint scene_tex,
   }
   m_ssao_ready = false;
   m_shafts_ready = false;
+  m_gi_ready = false;
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
+    if (m_settings.gi && m_ssao_ready) {
+      do_gi(scene_tex, screen_vao, render_state, prof);
+    }
     if (m_settings.shafts && m_ssao_ready && g_enhanced_sun.valid) {
       do_shafts(scene_tex, screen_vao, render_state, prof);
     }
@@ -654,6 +738,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_depth_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_2D, m_shafts_ready ? m_shaft_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE7);
+  glBindTexture(GL_TEXTURE_2D, m_gi_ready ? m_gi_tex[0] : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -663,6 +749,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
+  glUniform1i(glGetUniformLocation(id, "tex_T7"), 7);
+  glUniform1f(glGetUniformLocation(id, "gi_strength"), m_gi_ready ? m_settings.gi_strength : 0.f);
   glUniform1f(glGetUniformLocation(id, "shafts_strength"),
               m_shafts_ready ? m_settings.shafts_strength : 0.f);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
@@ -706,6 +794,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::SliderFloat("Sun relight", &m_settings.relight, 0.f, 2.f);
+    ImGui::Checkbox("Indirect light (SSGI)", &m_settings.gi);
+    ImGui::SliderFloat("Indirect strength", &m_settings.gi_strength, 0.f, 3.f);
+    ImGui::SliderFloat("Indirect radius (m)", &m_settings.gi_radius, 0.5f, 10.f);
     ImGui::Checkbox("Wind on grass/leaves", &g_enhanced_wind.enabled);
     ImGui::SliderFloat("Wind strength", &g_enhanced_wind.strength, 0.f, 3.f);
     ImGui::Checkbox("Character rim/highlights", &g_enhanced_merc.enabled);

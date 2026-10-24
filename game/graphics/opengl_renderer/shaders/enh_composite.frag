@@ -10,6 +10,8 @@ uniform sampler2D tex_T1;  // bloom
 uniform sampler2D tex_T2;  // ambient occlusion and sun shadows
 uniform sampler2D tex_T3;  // depth (black when no 3D scene this frame)
 uniform sampler2D tex_T4;  // god rays
+uniform sampler2D tex_T7;  // indirect light (SSGI)
+uniform float gi_strength;
 uniform int ao_debug;
 uniform vec4 proj;  // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;
@@ -291,6 +293,12 @@ void main() {
     return;
   }
   c *= ao;
+
+  // indirect light: what the surroundings send, tinted by this surface's own color
+  if (gi_strength > 0.0 && wsurf == 0.0) {
+    vec3 gi = texture(tex_T7, tex_coord).rgb;
+    c += gi * gi_strength * (0.35 + c) * ao;
+  }
 
   // sun relight: the game's light is baked per vertex; shade each pixel a little more by how it
   // faces the sun, with normals rebuilt from the depth buffer (the levels have none)
