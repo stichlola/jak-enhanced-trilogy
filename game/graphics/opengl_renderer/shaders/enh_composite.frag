@@ -57,6 +57,38 @@ float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
 
+// gradient noise, for water that doesn't repeat
+vec2 hash2(vec2 q) {
+  q = vec2(dot(q, vec2(127.1, 311.7)), dot(q, vec2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(q) * 43758.5453);
+}
+
+float gnoise(vec2 x) {
+  vec2 i = floor(x);
+  vec2 f = fract(x);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(dot(hash2(i), f), dot(hash2(i + vec2(1, 0)), f - vec2(1, 0)), u.x),
+             mix(dot(hash2(i + vec2(0, 1)), f - vec2(0, 1)), dot(hash2(i + vec2(1, 1)), f - vec2(1, 1)), u.x),
+             u.y);
+}
+
+// water height (m) at a world point (m): four octaves moving in different directions, each
+// faded out when its waves get smaller than a pixel (foot: meters per pixel) so nothing aliases
+float water_height(vec2 w, float t, float foot) {
+  const float freq[4] = float[](0.12, 0.35, 0.95, 2.6);
+  const float amp[4] = float[](0.045, 0.016, 0.0055, 0.0018);
+  const vec2 drift[4] = vec2[](vec2(0.35, 0.2), vec2(-0.25, 0.4), vec2(0.5, -0.3), vec2(-0.6, -0.45));
+  float h = 0.0;
+  mat2 turn = mat2(0.8, -0.6, 0.6, 0.8);
+  vec2 q = w;
+  for (int i = 0; i < 4; i++) {
+    float fade = 1.0 - smoothstep(0.25, 0.7, foot * freq[i]);
+    h += amp[i] * fade * gnoise(q * freq[i] + drift[i] * t * freq[i] * 2.0 + float(i) * 17.3);
+    q = turn * q;
+  }
+  return h;
+}
+
 float view_z(float d) {
   return d > 1e-7 ? abs(proj.y / (d * 2.0 - 1.0 - proj.x)) : 0.0;
 }
@@ -120,6 +152,9 @@ void main() {
       height = dot(up_view, p);
     }
   }
+  // the water's world position and pixel footprint, here in uniform control flow (derivatives)
+  vec2 water_world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
+  float water_foot = clamp(length(fwidth(water_world)), 0.0005, 50.0);
 
   // the surface under the water: is it level (a beach) or upright (a leg, a wall)?
   vec3 seabed_p = view_pos(uv, max(seabed_d, 1e-6));
@@ -165,16 +200,14 @@ void main() {
   // water: our own shading over the game's, the same for the near and far sea (drawn by two
   // renderers with different colors), with reflections, sun glints, clearer shallows and foam
   if (wsurf > 0.0) {
-    // ripples: wave trains on the world's horizontal plane, finer ones fading out with distance
-    vec2 world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
+    // ripples: the slope of a non-repeating noise height field (finite differences)
+    vec2 world = water_world;
     float t = haze.w;
     float far = 1.0 / (1.0 + z / (60.0 * 4096.0));
-    vec2 slope = 0.030 * vec2(sin(world.x * 0.9 + world.y * 0.35 + t * 1.3),
-                              cos(world.y * 0.8 - world.x * 0.45 + t * 1.1));
-    slope += far * 0.022 * vec2(sin(world.x * 2.3 - world.y * 1.7 + t * 2.1),
-                                cos(world.y * 2.6 + world.x * 1.2 - t * 1.9));
-    slope += far * far * 0.012 * vec2(sin(world.y * 6.1 + world.x * 2.0 + t * 3.3),
-                                      cos(world.x * 5.7 - world.y * 2.2 - t * 2.9));
+    float e = 0.08;
+    float h0 = water_height(world, t, water_foot);
+    vec2 slope = vec2(water_height(world + vec2(e, 0.0), t, water_foot) - h0,
+                      water_height(world + vec2(0.0, e), t, water_foot) - h0) / e;
     vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
     vec3 vdir = normalize(p);
     vec3 r = reflect(vdir, n);
@@ -193,7 +226,8 @@ void main() {
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
     vec3 body = mix(water_deep_color, water_shallow_color, clear_water) * shade;
-    vec3 wc = mix(body, c, clear_water * 0.75 * water_unify + (1.0 - water_unify));
+    // (only a little of the game's own water texture shows: it's a small repeating tile)
+    vec3 wc = mix(body, c, clear_water * 0.3 * water_unify + (1.0 - water_unify));
 
     // reflection. Far away: the screen where the reflected ray vanishes (sky, distant hills).
     // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
@@ -241,8 +275,8 @@ void main() {
 
     // foam where the water meets the shore, moving with the waves
     if (!water_deep && seabed_level && depth_m < 0.8) {
-      float wave = 0.5 + 0.5 * sin(world.x * 2.1 + world.y * 1.3 + t * 1.6) *
-                             sin(world.y * 2.9 - world.x * 0.7 - t * 1.2);
+      float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
+                   0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
       wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
     }

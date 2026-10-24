@@ -609,8 +609,8 @@
           "title-start"
           )
          ((and *debug-segment* (= mode 'boot))
-          ;; Enhanced: start in the desert, outside Spargus' big gate
-          "desert-facing-wasdoors"
+          ;; Enhanced: start in Haven City, at the port (by the sea)
+          "ctyport-start"
           )
          (else
            "title-start"
