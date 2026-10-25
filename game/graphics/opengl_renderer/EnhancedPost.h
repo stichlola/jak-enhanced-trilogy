@@ -23,6 +23,25 @@ struct EnhancedCamera {
 };
 extern EnhancedCamera g_enhanced_camera;
 
+// Enhanced: the game's framebuffer has a second color target for the level geometry's world
+// normals (computed at load, see compute_vertex_normals). fbo = that framebuffer (0 = none).
+struct EnhancedNormals {
+  GLuint fbo = 0;
+  bool enabled = true;
+};
+extern EnhancedNormals g_enhanced_normals;
+
+// While alive, the background renderers' draws into the game's framebuffer also write their
+// normals (the draw mode decides per draw: opaque, depth-writing draws only).
+class EnhancedNormalTarget {
+ public:
+  EnhancedNormalTarget();
+  ~EnhancedNormalTarget();
+
+ private:
+  bool m_on = false;
+};
+
 // Enhanced character shading (merc2): rim light and highlights from the key light.
 struct EnhancedMerc {
   bool enabled = true;
@@ -95,6 +114,8 @@ class EnhancedPost {
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
+    bool geometry_normals = true;  // the levels' own normals (else rebuilt from depth)
+    bool normal_debug = false;     // show the normals the post pass uses
     float light_strength = 1.0f;
     float light_reach = 6.0f;  // light radius as a multiple of the glow's size
     float lamp_strength = 0.75f;  // the levels' lamps (light spheres)
@@ -199,6 +220,9 @@ class EnhancedPost {
   // full-res depth copy and occlusion (raw + blurred)
   GLuint m_depth_fbo = 0;
   GLuint m_depth_tex = 0;
+  GLuint m_normal_fbo = 0;  // the level normals, resolved (no msaa)
+  GLuint m_normal_tex = 0;
+  bool m_normals_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
   int m_ssao_w = 0;

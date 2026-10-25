@@ -1,6 +1,7 @@
 #version 410 core
 
-out vec4 color;
+layout (location = 0) out vec4 color;
+layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
 
 in vec4 fragment_color;
 in vec3 tex_coord;
@@ -15,6 +16,7 @@ uniform int gfx_hack_no_tex;
 
 
 void main() {
+  enh_normal_out = vec4(0.0);
   if (gfx_hack_no_tex == 0) {
     //vec4 T0 = texture(tex_T0, tex_coord);
     vec4 T0 = texture(tex_T0, tex_coord.xy);

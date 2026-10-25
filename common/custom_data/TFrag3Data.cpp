@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <unordered_map>
 
 #include "common/log/log.h"
 #include "common/util/Assert.h"
@@ -231,6 +232,137 @@ void tie_normal_v3(__m128* out, const std::array<math::Vector4f, 4>& in) {
 }
  */
 
+namespace {
+/*!
+ * Enhanced: smooth vertex normals for level geometry that has none (its light is baked into the
+ * vertex colors). Vertices are welded by position across strips; faces bent more than 60 degrees
+ * away from a vertex's own faces stay out of its average, so hard edges stay hard. The winding
+ * isn't consistent in these meshes, so the normals are only defined up to their sign (the shaders
+ * turn them toward the camera). Calls set(vertex, normal) for every vertex used by a triangle.
+ */
+template <typename GetPos, typename SetNormal>
+void compute_vertex_normals(size_t vertex_count,
+                            const std::vector<u32>& indices,
+                            size_t first_index,
+                            size_t index_count,
+                            bool strips,
+                            GetPos pos,
+                            SetNormal set) {
+  std::vector<math::Vector3f> face_normals;  // area weighted
+  std::vector<math::Vector3f> face_units;
+  std::vector<u32> face_verts;
+  auto add_face = [&](u32 a, u32 b, u32 c) {
+    if (a >= vertex_count || b >= vertex_count || c >= vertex_count || a == b || b == c ||
+        a == c) {
+      return;
+    }
+    math::Vector3f pa = pos(a);
+    math::Vector3f n = (pos(b) - pa).cross(pos(c) - pa);
+    float len = n.length();
+    if (!(len > 1e-3f)) {
+      return;
+    }
+    face_normals.push_back(n);
+    face_units.push_back(n / len);
+    face_verts.push_back(a);
+    face_verts.push_back(b);
+    face_verts.push_back(c);
+  };
+  const size_t end = first_index + index_count;
+  if (strips) {
+    size_t start = first_index;
+    for (size_t i = first_index; i < end; i++) {
+      if (indices[i] == UINT32_MAX) {
+        start = i + 1;
+      } else if (i >= start + 2) {
+        add_face(indices[i - 2], indices[i - 1], indices[i]);
+      }
+    }
+  } else {
+    for (size_t i = first_index; i + 2 < end; i += 3) {
+      add_face(indices[i], indices[i + 1], indices[i + 2]);
+    }
+  }
+  if (face_normals.empty()) {
+    return;
+  }
+
+  // weld: one group per position (cells of 1/128 m)
+  std::vector<u32> group_of(vertex_count, UINT32_MAX);
+  std::unordered_map<u64, u32> groups;
+  u32 group_count = 0;
+  for (u32 v : face_verts) {
+    if (group_of[v] != UINT32_MAX) {
+      continue;
+    }
+    math::Vector3f p = pos(v);
+    auto cell = [](float x) { return (u64)((s64)std::floor(x / 32.f) + (1 << 20)) & 0x1fffff; };
+    u64 key = cell(p.x()) | (cell(p.y()) << 21) | (cell(p.z()) << 42);
+    auto it = groups.find(key);
+    if (it == groups.end()) {
+      it = groups.emplace(key, group_count++).first;
+    }
+    group_of[v] = it->second;
+  }
+
+  // faces of each group (compressed rows)
+  std::vector<u32> row(group_count + 1, 0);
+  for (u32 v : face_verts) {
+    row[group_of[v] + 1]++;
+  }
+  for (u32 g = 0; g < group_count; g++) {
+    row[g + 1] += row[g];
+  }
+  std::vector<u32> fill(row.begin(), row.end() - 1);
+  std::vector<u32> group_faces(face_verts.size());
+  for (size_t i = 0; i < face_verts.size(); i++) {
+    group_faces[fill[group_of[face_verts[i]]]++] = i / 3;
+  }
+
+  // each vertex's own direction: its faces, sign-aligned to the first one
+  std::vector<math::Vector3f> own(vertex_count, math::Vector3f::zero());
+  std::vector<u8> has_own(vertex_count, 0);
+  for (size_t i = 0; i < face_verts.size(); i++) {
+    u32 v = face_verts[i];
+    const auto& n = face_units[i / 3];
+    if (!has_own[v]) {
+      own[v] = n;
+      has_own[v] = 1;
+    } else {
+      own[v] += own[v].dot(n) < 0 ? n * -1.f : n;
+    }
+  }
+
+  constexpr float kCosLimit = 0.5f;  // 60 degrees
+  for (size_t v = 0; v < vertex_count; v++) {
+    if (!has_own[v]) {
+      continue;
+    }
+    float own_len = own[v].length();
+    if (!(own_len > 1e-6f)) {
+      continue;
+    }
+    math::Vector3f ref = own[v] / own_len;
+    math::Vector3f sum = math::Vector3f::zero();
+    u32 g = group_of[v];
+    for (u32 k = row[g]; k < row[g + 1]; k++) {
+      u32 f = group_faces[k];
+      float d = ref.dot(face_units[f]);
+      if (std::abs(d) > kCosLimit) {
+        sum += d < 0 ? face_normals[f] * -1.f : face_normals[f];
+      }
+    }
+    float len = sum.length();
+    set(v, len > 0 ? sum / len : ref);
+  }
+}
+
+u32 pack_unit_normal(const math::Vector3f& n) {
+  return pack_to_gl_normal((s16)std::lround(n.x() * 511.f), (s16)std::lround(n.y() * 511.f),
+                           (s16)std::lround(n.z() * 511.f));
+}
+}  // namespace
+
 void TieTree::unpack() {
   unpacked.vertices.resize(packed_vertices.color_indices.size());
   size_t i = 0;
@@ -317,6 +449,17 @@ void TieTree::unpack() {
     unpacked.indices.insert(unpacked.indices.end(), draw.plain_indices.begin(),
                             draw.plain_indices.end());
   }
+
+  // Enhanced: normals for the vertices the game gave none (only envmapped ties have them)
+  auto& verts = unpacked.vertices;
+  compute_vertex_normals(
+      verts.size(), unpacked.indices, 0, unpacked.indices.size(), true,
+      [&](u32 v) { return math::Vector3f(verts[v].x, verts[v].y, verts[v].z); },
+      [&](u32 v, const math::Vector3f& n) {
+        if (verts[v].nor == 0) {
+          verts[v].nor = pack_unit_normal(n);
+        }
+      });
 }
 
 void ShrubTree::unpack() {
@@ -336,10 +479,18 @@ void ShrubTree::unpack() {
       vtx.s = proto_vtx.s;
       vtx.t = proto_vtx.t;
       memcpy(vtx.rgba_base, proto_vtx.rgba, 3);
+      vtx.pad0 = 0;
       i++;
     }
   }
   ASSERT(i == unpacked.vertices.size());
+
+  // Enhanced: shrub normals, packed into the vertex's free word
+  auto& verts = unpacked.vertices;
+  compute_vertex_normals(
+      verts.size(), indices, 0, indices.size(), true,
+      [&](u32 v) { return math::Vector3f(verts[v].x, verts[v].y, verts[v].z); },
+      [&](u32 v, const math::Vector3f& n) { verts[v].pad0 = pack_unit_normal(n); });
 }
 
 void TfragTree::unpack() {
@@ -375,6 +526,13 @@ void TfragTree::unpack() {
     unpacked.indices.insert(unpacked.indices.end(), draw.plain_indices.begin(),
                             draw.plain_indices.end());
   }
+
+  // Enhanced: tfrag has no normals at all
+  auto& verts = unpacked.vertices;
+  compute_vertex_normals(
+      verts.size(), unpacked.indices, 0, unpacked.indices.size(), use_strips,
+      [&](u32 v) { return math::Vector3f(verts[v].x, verts[v].y, verts[v].z); },
+      [&](u32 v, const math::Vector3f& n) { verts[v].nor = pack_unit_normal(n); });
 }
 
 void TieTree::serialize(Serializer& ser) {

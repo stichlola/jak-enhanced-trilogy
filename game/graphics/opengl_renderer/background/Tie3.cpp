@@ -4,6 +4,8 @@
 #include "common/log/log.h"
 #include "common/util/Assert.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 #include "third-party/imgui/imgui.h"
 
 Tie3::Tie3(const std::string& name,
@@ -544,6 +546,7 @@ void Tie3::draw_matching_draws_for_tree(int idx,
   }
   bool use_envmap = tfrag3::is_envmap_first_draw_category(category);
   auto shader_id = use_envmap ? ShaderId::ETIE_BASE : ShaderId::TFRAG3;
+  EnhancedNormalTarget normals;
 
   // setup OpenGL shader
   g_enhanced_bg_level = m_level_name;
@@ -936,6 +939,7 @@ void Tie3::render_tree_wind(int idx,
   }
 
   auto shader_id = ShaderId::TIE_WIND;
+  EnhancedNormalTarget normals;  // wind ties write "no normal" over what they cover
   g_enhanced_bg_level = m_level_name;
   first_tfrag_draw_setup(settings.camera, render_state, shader_id);
   glBindVertexArray(tree.vao);

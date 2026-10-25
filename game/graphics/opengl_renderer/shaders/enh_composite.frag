@@ -23,6 +23,8 @@ uniform vec4 light_color[32];
 uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
+uniform sampler2D tex_T11;  // the level geometry's world normals (a = 0: none, use depth)
+uniform int normal_debug;
 uniform vec4 proj;  // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;
 
@@ -127,6 +129,25 @@ vec3 view_pos(vec2 uv, float d) {
 }
 
 // how much of the sun the shadow map says is blocked at a world point (game units), 0..1
+// the surface normal in view space, toward the camera: the level's own normal where it wrote one,
+// else rebuilt from the depth buffer (the neighbor on each axis with the smaller depth jump)
+vec3 surface_normal(vec2 uv, vec3 p) {
+  vec3 nn;
+  vec4 g = texture(tex_T11, uv);
+  if (g.a > 0.5) {
+    nn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
+  } else {
+    vec3 pr = view_pos(uv + vec2(texel.x, 0), texture(tex_T3, uv + vec2(texel.x, 0)).r);
+    vec3 pl = view_pos(uv - vec2(texel.x, 0), texture(tex_T3, uv - vec2(texel.x, 0)).r);
+    vec3 pu = view_pos(uv + vec2(0, texel.y), texture(tex_T3, uv + vec2(0, texel.y)).r);
+    vec3 pd = view_pos(uv - vec2(0, texel.y), texture(tex_T3, uv - vec2(0, texel.y)).r);
+    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+    nn = normalize(cross(dx, dy));
+  }
+  return dot(nn, -p) < 0.0 ? -nn : nn;
+}
+
 float sun_shadow(vec3 w) {
   vec4 l = light_mvp * vec4(w, 1.0);
   vec3 s = l.xyz * 0.5 + 0.5;
@@ -399,21 +420,29 @@ void main() {
     color = vec4(vec3(ao), 1.0);
     return;
   }
+  if (normal_debug != 0 && z > 0.0) {
+    // the level's own normals in color, the depth-rebuilt ones in grey
+    // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
+    // depth-rebuilt ones in color, to compare
+    vec3 nn = surface_normal(tex_coord, p);
+    bool own = texture(tex_T11, tex_coord).a > 0.5;
+    if (tex_coord.x > 0.5) {
+      vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
+      vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
+      nn = normalize(cross(pr - p, pu - p));
+      nn = dot(nn, -p) < 0.0 ? -nn : nn;
+      own = true;
+    }
+    vec3 shown = nn * 0.5 + 0.5;
+    color = vec4(own ? shown : vec3(dot(shown, vec3(0.33))), 1.0);
+    return;
+  }
   c *= ao;
 
   // sun shadow map: surfaces facing the sun but blocked from it lose some light (the game's light is
   // baked per vertex and knows nothing of what stands between them and the sun)
   if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
-    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
-    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
-    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
-    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
-    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
-    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
-    vec3 nn = normalize(cross(dx, dy));
-    if (dot(nn, -p) < 0.0) {
-      nn = -nn;
-    }
+    vec3 nn = surface_normal(tex_coord, p);
     float ndl = dot(nn, sun_dir.xyz);
     if (ndl > 0.0) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
@@ -426,16 +455,7 @@ void main() {
   // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
   // own color (the scene's color stands in for its albedo), with a smooth falloff to its radius
   if (light_count > 0 && z > 0.0 && wsurf == 0.0) {
-    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
-    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
-    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
-    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
-    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
-    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
-    vec3 nn = normalize(cross(dx, dy));
-    if (dot(nn, -p) < 0.0) {
-      nn = -nn;
-    }
+    vec3 nn = surface_normal(tex_coord, p);
     vec3 added = vec3(0.0);
     for (int i = 0; i < light_count; i++) {
       vec3 to_light = light_pos[i].xyz - p;
@@ -459,16 +479,7 @@ void main() {
   // sun relight: the game's light is baked per vertex; shade each pixel a little more by how it
   // faces the sun, with normals rebuilt from the depth buffer (the levels have none)
   if (relight > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
-    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
-    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
-    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
-    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
-    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
-    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
-    vec3 nn = normalize(cross(dx, dy));
-    if (dot(nn, -p) < 0.0) {
-      nn = -nn;
-    }
+    vec3 nn = surface_normal(tex_coord, p);
     float ndl = dot(nn, sun_dir.xyz);
     float k = relight * (1.0 - smoothstep(150.0 * 4096.0, 300.0 * 4096.0, z));
     c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;

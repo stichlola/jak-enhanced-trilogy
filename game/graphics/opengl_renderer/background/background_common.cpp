@@ -152,6 +152,11 @@ DoubleDraw setup_opengl_from_draw_mode(DrawMode mode, u32 tex_unit, bool mipmap)
   } else {
     glDepthMask(GL_FALSE);
   }
+  // Enhanced: the normal target (when on, see EnhancedNormalTarget) keeps the surface that won
+  // the depth test: blended or not depth-writing draws leave it alone
+  const GLboolean write_normal = !should_enable_blend && mode.get_depth_write_enable() &&
+                                 !alpha_hack_to_disable_z_write;
+  glColorMaski(1, write_normal, write_normal, write_normal, write_normal);
   double_draw.aref_first = alpha_min;
   return double_draw;
 }

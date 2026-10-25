@@ -11,6 +11,7 @@ struct Fbo {
   // optional rgba/zbuffer/stencil data.
   std::optional<GLuint> tex_id;
   std::optional<GLuint> zbuf_stencil_id;
+  std::optional<GLuint> normal_tex_id;  // Enhanced: level normals (color attachment 1)
 
   bool multisampled = false;
   int multisample_count = 0;  // Should be 1 if multisampled is disabled
@@ -43,6 +44,11 @@ struct Fbo {
       if (zbuf_stencil_id) {
         glDeleteRenderbuffers(1, &zbuf_stencil_id.value());
         zbuf_stencil_id.reset();
+      }
+
+      if (normal_tex_id) {
+        glDeleteTextures(1, &normal_tex_id.value());
+        normal_tex_id.reset();
       }
 
       valid = false;

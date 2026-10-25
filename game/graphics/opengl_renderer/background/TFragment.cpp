@@ -1,5 +1,6 @@
 #include "TFragment.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
 
 #include "third-party/imgui/imgui.h"
@@ -331,6 +332,11 @@ void TFragment::update_load(const std::vector<tfrag3::TFragmentTreeKind>& tree_k
                                sizeof(tfrag3::PreloadedVertex),  // stride
                                (void*)offsetof(tfrag3::PreloadedVertex, color_index)  // offset (0)
         );
+        // Enhanced: the normals computed at load
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 4, GL_INT_2_10_10_10_REV, GL_TRUE,
+                              sizeof(tfrag3::PreloadedVertex),
+                              (void*)offsetof(tfrag3::PreloadedVertex, nor));
         glGenBuffers(1, &tree_cache.single_draw_index_buffer);
         glGenBuffers(1, &tree_cache.index_buffer);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tree_cache.index_buffer);
@@ -408,6 +414,7 @@ void TFragment::render_tree(int geom,
   }
   auto& tree = m_cached_trees.at(geom).at(settings.tree_idx);
   [[maybe_unused]] const auto* itimes = settings.camera.itimes;
+  EnhancedNormalTarget normals;
 
   if (tree.freeze_itimes) {
     itimes = tree.itimes_debug;

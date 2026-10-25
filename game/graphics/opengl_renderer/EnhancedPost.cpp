@@ -22,6 +22,29 @@ EnhancedWind g_enhanced_wind;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedMenu g_enhanced_menu;
+EnhancedNormals g_enhanced_normals;
+
+EnhancedNormalTarget::EnhancedNormalTarget() {
+  if (!g_enhanced_normals.fbo || !g_enhanced_normals.enabled) {
+    return;
+  }
+  GLint bound = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+  if ((GLuint)bound != g_enhanced_normals.fbo) {
+    return;  // drawing somewhere else (texture animation, offscreen)
+  }
+  const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+  glDrawBuffers(2, both);
+  m_on = true;
+}
+
+EnhancedNormalTarget::~EnhancedNormalTarget() {
+  if (m_on) {
+    const GLenum color = GL_COLOR_ATTACHMENT0;
+    glDrawBuffers(1, &color);
+    glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  }
+}
 
 namespace {
 GLuint make_1x1(u32 rgba) {
@@ -78,6 +101,11 @@ EnhancedPost::EnhancedPost() {
     if (m_settings.volume) {
       m_settings.mist_density = (float)std::atof(vol);
     }
+  }
+  if (const char* normals = std::getenv("JAK_ENHANCED_NORMALS")) {
+    // 0 = normals rebuilt from depth only, 2 = show them
+    m_settings.geometry_normals = std::atoi(normals) != 0;
+    m_settings.normal_debug = std::atoi(normals) == 2;
   }
   if (const char* menu = std::getenv("JAK_ENHANCED_MENU")) {
     // test runs: the in-game menu open from the start; "<kind>:<value>" also queues one request
@@ -194,6 +222,21 @@ float halton(u32 i, u32 base) {
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
+  g_enhanced_normals.enabled = m_settings.enabled && m_settings.geometry_normals;
+  if (g_enhanced_normals.enabled && g_enhanced_normals.fbo) {
+    // a = 0: no normal (the post pass rebuilds one from depth there)
+    GLint prev = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_enhanced_normals.fbo);
+    const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, both);
+    glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+    glClearBufferfv(GL_COLOR, 1, zero);
+    const GLenum color = GL_COLOR_ATTACHMENT0;
+    glDrawBuffers(1, &color);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prev);
+  }
   const bool on = m_settings.enabled && m_settings.taa && w > 0 && h > 0;
   if (!on) {
     if (m_jittered) {
@@ -1026,6 +1069,11 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
 }
 
 void EnhancedPost::free_ssao() {
+  if (m_normal_fbo) {
+    glDeleteFramebuffers(1, &m_normal_fbo);
+    glDeleteTextures(1, &m_normal_tex);
+    m_normal_fbo = m_normal_tex = 0;
+  }
   if (m_depth_fbo) {
     glDeleteFramebuffers(1, &m_depth_fbo);
     glDeleteTextures(1, &m_depth_tex);
@@ -1073,6 +1121,18 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
 
+    glGenFramebuffers(1, &m_normal_fbo);
+    glGenTextures(1, &m_normal_tex);
+    glBindTexture(GL_TEXTURE_2D, m_normal_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
+                 nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_normal_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_normal_tex, 0);
+
     glGenFramebuffers(2, m_ao_fbo);
     glGenTextures(2, m_ao_tex);
     for (int i = 0; i < 2; i++) {
@@ -1093,6 +1153,15 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_depth_fbo);
   glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
                     GL_NEAREST);
+  // and the level normals (msaa: averaged, renormalized in the shaders)
+  m_normals_ready = false;
+  if (g_enhanced_normals.enabled && src_fbo == g_enhanced_normals.fbo) {
+    glReadBuffer(GL_COLOR_ATTACHMENT1);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_normal_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    m_normals_ready = true;
+  }
 
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
@@ -1320,6 +1389,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_vol_ready ? m_vol_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE9);
   glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : m_no_shadow_tex);
+  glActiveTexture(GL_TEXTURE11);
+  glBindTexture(GL_TEXTURE_2D, m_normals_ready ? m_normal_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -1327,6 +1398,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
   glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
+  glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
+  glUniform1i(glGetUniformLocation(id, "normal_debug"), m_settings.normal_debug);
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
   glUniform1i(glGetUniformLocation(id, "tex_T7"), 7);
@@ -1393,6 +1466,7 @@ void EnhancedPost::draw_menu() {
       s.motion_blur = blur ? 0.5f : 0.f;
     }
     check("Luci dinamiche", &s.lights);
+    check("Normali della geometria", &s.geometry_normals);
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");

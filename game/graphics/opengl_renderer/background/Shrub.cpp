@@ -147,6 +147,10 @@ void Shrub::update_load(const LevelData* loader_data) {
                            sizeof(tfrag3::ShrubGpuVertex),  // stride
                            (void*)offsetof(tfrag3::ShrubGpuVertex, color_index)  // offset (0)
     );
+    // Enhanced: the normals computed at load, in the vertex's spare word
+    glEnableVertexAttribArray(4);
+    glVertexAttribPointer(4, 4, GL_INT_2_10_10_10_REV, GL_TRUE, sizeof(tfrag3::ShrubGpuVertex),
+                          (void*)offsetof(tfrag3::ShrubGpuVertex, pad0));
 
     glGenBuffers(1, &m_trees[l_tree].single_draw_index_buffer);
     glGenBuffers(1, &m_trees[l_tree].index_buffer);
@@ -279,6 +283,7 @@ void Shrub::render_tree(int idx,
   Timer tree_timer;
   auto& tree = m_trees.at(idx);
   tree.perf.draws = 0;
+  EnhancedNormalTarget normals;
   tree.perf.wind_draws = 0;
   if (!m_has_level) {
     return;

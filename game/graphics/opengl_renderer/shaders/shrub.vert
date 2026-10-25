@@ -4,6 +4,7 @@ layout (location = 0) in vec3 position_in;
 layout (location = 1) in vec3 tex_coord_in;
 layout (location = 2) in vec3 rgba_base;
 layout (location = 3) in int time_of_day_index;
+layout (location = 4) in vec4 normal_in;  // Enhanced
 
 uniform vec4 hvdf_offset;
 uniform mat4 camera;
@@ -20,6 +21,8 @@ uniform float enh_time;  // seconds
 out vec4 fragment_color;
 out vec3 tex_coord;
 out float fogginess;
+out vec3 enh_normal;
+out vec3 enh_pos;
 
 void main() {
   // old system:
@@ -75,5 +78,7 @@ void main() {
   }
 
   tex_coord = tex_coord_in;
+  enh_normal = normal_in.xyz;
+  enh_pos = vert;
   tex_coord.xy /= 4096;
 }

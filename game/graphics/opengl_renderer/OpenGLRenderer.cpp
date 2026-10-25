@@ -924,6 +924,23 @@ Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil) {
       glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
     }
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, zbuf);
+
+    // Enhanced: the level geometry's world normals, written next to the color (only while
+    // EnhancedNormalTarget turns the second draw buffer on)
+    GLuint ntex;
+    glGenTextures(1, &ntex);
+    result.normal_tex_id = ntex;
+    if (use_multisample) {
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, ntex);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGB10_A2, w, h, GL_TRUE);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D_MULTISAMPLE, ntex,
+                             0);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, ntex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
+                   nullptr);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, ntex, 0);
+    }
   }
   // attach texture to framebuffer as target for colors
 
@@ -1309,6 +1326,8 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
       (settings.window_framebuffer_height - m_render_state.draw_region_h) / 2;
 
   m_render_state.render_fb = m_fbo_state.render_fbo->fbo_id;
+  g_enhanced_normals.fbo =
+      m_fbo_state.render_fbo->normal_tex_id ? m_fbo_state.render_fbo->fbo_id : 0;
 
   if (m_render_state.draw_region_w <= 0 || m_render_state.draw_region_h <= 0) {
     // trying to draw to 0 size region... opengl doesn't like this.
