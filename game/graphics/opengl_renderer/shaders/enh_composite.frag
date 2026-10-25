@@ -20,6 +20,7 @@ uniform mat3 view_to_world;
 uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
 uniform vec4 light_color[32];
+uniform float light_shadow;     // how dark what blocks a dynamic light makes it (0 = no shadows)
 uniform int fire_count;         // the nearest fires: view space, flame size (game units)
 uniform vec4 fire_pos[4];
 uniform float fire_seed[4];
@@ -124,6 +125,35 @@ float caustics(vec2 w, float t) {
 
 float view_z(float d) {
   return d > 1e-7 ? abs(proj.y / (d * 2.0 - 1.0 - proj.x)) : 0.0;
+}
+
+// screen-space shadow toward a dynamic light: a few steps through the depth buffer, up to 3 m
+// (and short of the light itself, which often sits inside its lamp)
+float light_blocked(vec3 from, vec3 lp, float jitter) {
+  vec3 dir = lp - from;
+  float len = length(dir);
+  float reach = min(len * 0.85, 3.0 * 4096.0);
+  vec3 stp = dir / len * (reach / 8.0);
+  for (int s = 0; s < 8; s++) {
+    vec3 q = from + stp * (float(s) + jitter);
+    if (q.z < 0.3 * 4096.0) {
+      break;
+    }
+    vec2 quv = vec2(q.x * proj.z / q.z, q.y * proj.w / q.z) * 0.5 + 0.5;
+    if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+      break;
+    }
+    float sd = texture(tex_T3, quv).r;
+    if (sd > 1e-7) {
+      float sz = view_z(sd);
+      // something in front of the ray (but not a whole building's depth: then it's beside it)
+      float gap = q.z - sz;
+      if (gap > 0.04 * 4096.0 + q.z * 0.004 && gap < 1.5 * 4096.0) {
+        return 1.0;
+      }
+    }
+  }
+  return 0.0;
 }
 
 vec3 view_pos(vec2 uv, float d) {
@@ -511,6 +541,10 @@ void main() {
   if (light_count > 0 && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surface_normal(tex_coord, p);
     vec3 added = vec3(0.0);
+    // per-pixel jitter of the shadow steps (the TAA averages it)
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
+                         haze.w * 7.13);
+    vec3 from = p + nn * (0.05 * 4096.0 + z * 0.003);
     for (int i = 0; i < light_count; i++) {
       vec3 to_light = light_pos[i].xyz - p;
       float d = length(to_light);
@@ -518,7 +552,12 @@ void main() {
       if (d < r) {
         float k = 1.0 - (d * d) / (r * r);
         float ndl = dot(nn, to_light / max(d, 1.0));
-        added += light_color[i].rgb * (k * k) * clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
+        float lit = clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
+        // the strongest lights (sorted first) cast shadows where they still matter
+        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02) {
+          lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter);
+        }
+        added += light_color[i].rgb * (k * k) * lit;
       }
     }
     c += (c + 0.12) * added * ao;

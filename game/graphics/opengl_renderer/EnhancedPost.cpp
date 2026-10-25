@@ -124,6 +124,10 @@ EnhancedPost::EnhancedPost() {
       g_enhanced_menu.ask(std::atoi(menu), colon + 1);
     }
   }
+  if (const char* ls = std::getenv("JAK_ENHANCED_LIGHT_SHADOWS")) {
+    // how dark the dynamic lights' shadows are, 0 = none
+    m_settings.light_shadow = (float)std::atof(ls);
+  }
   if (const char* fire = std::getenv("JAK_ENHANCED_FIRE")) {
     // 0 = the game's fires as they are; else a scale for the hot air and the embers
     float k = (float)std::atof(fire);
@@ -687,6 +691,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       std::memcpy(fire_pos + fire_count * 4, f.pos, sizeof(float) * 4);
       fire_seed[fire_count++] = f.seed;
     }
+    glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
     glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
     glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
@@ -1735,6 +1740,10 @@ void EnhancedPost::draw_menu() {
     }
     check("Luci dinamiche", &s.lights);
     check("Fuochi (calore, braci)", &s.fire);
+    bool light_shadows = s.light_shadow > 0.f;
+    if (check("Ombre delle luci", &light_shadows)) {
+      s.light_shadow = light_shadows ? 0.85f : 0.f;
+    }
     check("Normali della geometria", &s.geometry_normals);
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
@@ -1905,6 +1914,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Dynamic light reach (x glow)", &m_settings.light_reach, 1.f, 12.f);
     ImGui::SliderFloat("Lamp strength", &m_settings.lamp_strength, 0.f, 4.f);
     ImGui::SliderFloat("Lamp reach (x game)", &m_settings.lamp_reach, 0.25f, 3.f);
+    ImGui::SliderFloat("Dynamic light shadows", &m_settings.light_shadow, 0.f, 1.f);
     ImGui::Checkbox("Fires (flicker, hot air, embers)", &m_settings.fire);
     ImGui::SliderFloat("Fire hot air", &m_settings.fire_haze, 0.f, 0.05f, "%.3f");
     ImGui::SliderFloat("Fire embers", &m_settings.fire_embers, 0.f, 3.f);

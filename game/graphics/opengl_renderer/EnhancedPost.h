@@ -144,6 +144,7 @@ class EnhancedPost {
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
+    float light_shadow = 0.85f;  // dynamic lights' screen-space shadows (0 = none)
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
