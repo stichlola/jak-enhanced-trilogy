@@ -32,14 +32,14 @@ Laptop (the game stays at its 60 fps cap).
 | Depth of field | Light disk blur from 70 m to 350 m; sky, HUD and near objects stay sharp |
 | Bloom | Soft-knee bright pass, 6-level dual-filter blur |
 | Grading | Contrast-adaptive sharpen, highlight roll-off, saturation, S-curve, vignette |
-| Anti-aliasing | FXAA (Lottes' compact version) |
+| Anti-aliasing | TAA: the 3D world's shaders get a Halton(2,3) sub-pixel jitter per frame (wrapped `main()` in `Shader.cpp`, not the HUD or offscreen passes); `enh_taa` blends the frame into the history reprojected with the camera (depth for the world, rotation only for the sky), Catmull-Rom history fetch, variance clipping in YCoCg against trails, less history on fast pixels. FXAA (Lottes' compact version) when TAA is off |
 | Fog and heat haze | Distance + height fog in the game's fog color, thicker below the camera; shimmer over the far ground |
 | Motion blur | Camera only: each pixel reprojected into the previous frame's camera; sharp within 10 m (Jak), skipped on cuts |
 | Sea reflections | Screen-space rays on the far sea (depth kept right after OCEAN_MID_FAR) and the near sea (OceanNear made to write its surface, then the depth restored); ripples, Fresnel, sky fallback |
 | Desert sand | `scripts/enhanced/desert_sand.py`: the jak3-ue5 Tripo sand tile, color-matched to the Wang atlas, in `out/enhanced/desert_sand.png`; the hfrag dunes sample it in world space every 64 m instead of the Wang montage |
 | HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
 
-Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
+Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 

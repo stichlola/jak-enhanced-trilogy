@@ -63,6 +63,9 @@ class EnhancedPost {
     float shafts_strength = 0.6f;
     float shafts_threshold = 0.4f;
     bool fxaa = true;
+    bool taa = true;          // temporal anti-aliasing (FXAA is skipped while it runs)
+    float taa_history = 0.9f;  // history weight when still (fast motion: taa_history_fast)
+    float taa_history_fast = 0.75f;
     float fog_density = 0.0012f;   // per meter
     float fog_height = 0.02f;      // per meter above the camera
     float fog_amount = 0.35f;      // at most this much of the fog color
@@ -114,6 +117,12 @@ class EnhancedPost {
   Shader& activate_composite(SharedRenderState* render_state, int w, int h);
 
   bool active() const { return m_settings.enabled; }
+
+  /*!
+   * At the start of a frame: the sub-pixel jitter of the 3D world's shaders for this frame (a
+   * Halton 2,3 sequence of 8), zero when the temporal anti-aliasing is off.
+   */
+  void begin_frame(ShaderLibrary& shaders, int w, int h);
 
   /*!
    * Run every effect on the 3D scene in render_fbo (w x h) and draw the result back into it.
@@ -211,4 +220,14 @@ class EnhancedPost {
   int m_gi_h = 0;
   bool m_gi_ready = false;
   float m_sun_view[3] = {0, 0, 0};
+
+  // temporal anti-aliasing: two history buffers, written in turn
+  GLuint m_taa_fbo[2] = {0, 0};
+  GLuint m_taa_tex[2] = {0, 0};
+  int m_taa_w = 0;
+  int m_taa_h = 0;
+  int m_taa_cur = 0;
+  bool m_taa_history = false;
+  bool m_jittered = false;
+  u32 m_frame = 0;
 };

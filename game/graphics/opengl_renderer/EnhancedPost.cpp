@@ -54,6 +54,9 @@ EnhancedPost::EnhancedPost() {
   if (const char* wind = std::getenv("JAK_ENHANCED_WIND")) {
     g_enhanced_wind.strength = (float)std::atof(wind);
   }
+  if (const char* taa = std::getenv("JAK_ENHANCED_TAA")) {
+    m_settings.taa = std::strcmp(taa, "0") != 0;
+  }
   const char* ao_debug = std::getenv("JAK_ENHANCED_AO_DEBUG");
   if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
     m_settings.ssao_debug = true;
@@ -83,8 +86,42 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(2, m_gi_fbo);
     glDeleteTextures(2, m_gi_tex);
   }
+  if (m_taa_fbo[0]) {
+    glDeleteFramebuffers(2, m_taa_fbo);
+    glDeleteTextures(2, m_taa_tex);
+  }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
+}
+
+namespace {
+float halton(u32 i, u32 base) {
+  float f = 1.f;
+  float r = 0.f;
+  while (i > 0) {
+    f /= (float)base;
+    r += f * (float)(i % base);
+    i /= base;
+  }
+  return r;
+}
+}  // namespace
+
+void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
+  const bool on = m_settings.enabled && m_settings.taa && w > 0 && h > 0;
+  if (!on) {
+    if (m_jittered) {
+      shaders.set_jitter(0.f, 0.f);
+      m_jittered = false;
+    }
+    m_taa_history = false;
+    return;
+  }
+  m_frame++;
+  const u32 i = (m_frame % 8) + 1;
+  // pixels in [-0.5, 0.5] -> NDC offset
+  shaders.set_jitter((halton(i, 2) - 0.5f) * 2.f / w, (halton(i, 3) - 0.5f) * 2.f / h);
+  m_jittered = true;
 }
 
 void EnhancedPost::begin_ocean(GLuint render_fbo,
@@ -204,6 +241,99 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
+  const bool have_scene = m_ssao_ready;
+
+  // view -> previous view is R^T Rp, with the camera's move as an offset (motion blur, TAA)
+  float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
+  float offset[3];
+  bool reproject = false;
+  if (have_scene && m_prev_camera.valid && cam.valid) {
+    float moved = 0.f;
+    for (int k = 0; k < 3; k++) {
+      for (int c = 0; c < 3; c++) {
+        to_prev[k][c] = 0.f;
+        for (int r = 0; r < 3; r++) {
+          to_prev[k][c] += cam.rot[r][k] * m_prev_camera.rot[r][c];
+        }
+      }
+    }
+    for (int c = 0; c < 3; c++) {
+      offset[c] = 0.f;
+      for (int r = 0; r < 3; r++) {
+        offset[c] += (cam.trans[r] - m_prev_camera.trans[r]) * m_prev_camera.rot[r][c];
+      }
+      moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
+    }
+    // a cut or a teleport isn't motion
+    reproject = std::sqrt(moved) < 8.f * kMeter;
+  }
+
+  // temporal anti-aliasing: this frame blended into the reprojected history
+  GLuint scene_tex = m_scene_tex;
+  const bool taa = m_settings.taa && m_jittered && have_scene;
+  if (taa) {
+    if (w != m_taa_w || h != m_taa_h) {
+      if (m_taa_fbo[0]) {
+        glDeleteFramebuffers(2, m_taa_fbo);
+        glDeleteTextures(2, m_taa_tex);
+      }
+      m_taa_w = w;
+      m_taa_h = h;
+      glGenFramebuffers(2, m_taa_fbo);
+      glGenTextures(2, m_taa_tex);
+      for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, m_taa_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_taa_tex[i],
+                               0);
+      }
+      glBindTexture(GL_TEXTURE_2D, 0);
+      m_taa_history = false;
+    }
+    const int cur = m_taa_cur;
+    glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[cur]);
+    glViewport(0, 0, w, h);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+    glBindVertexArray(screen_vao);
+    auto& resolve = render_state->shaders[ShaderId::ENH_TAA];
+    resolve.activate();
+    auto rid = resolve.id();
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_taa_tex[1 - cur]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+    glUniform1i(glGetUniformLocation(rid, "tex_T0"), 0);
+    glUniform1i(glGetUniformLocation(rid, "tex_T1"), 1);
+    glUniform1i(glGetUniformLocation(rid, "tex_T3"), 3);
+    glUniform4f(glGetUniformLocation(rid, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+                m_last_proj[3]);
+    glUniform2f(glGetUniformLocation(rid, "texel"), 1.f / w, 1.f / h);
+    if (reproject) {
+      glUniformMatrix3fv(glGetUniformLocation(rid, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+      glUniform3f(glGetUniformLocation(rid, "to_prev_offset"), offset[0], offset[1], offset[2]);
+    }
+    glUniform2f(glGetUniformLocation(rid, "prev_f"), m_prev_camera.fx, m_prev_fy);
+    glUniform2f(glGetUniformLocation(rid, "keep"), m_settings.taa_history,
+                m_settings.taa_history_fast);
+    glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    prof.add_draw_call();
+    scene_tex = m_taa_tex[cur];
+    m_taa_cur = 1 - cur;
+    m_taa_history = true;
+  } else {
+    m_taa_history = false;
+  }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   glViewport(0, 0, w, h);
@@ -215,14 +345,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   auto& shader = activate_composite(render_state, w, h);
   auto id = shader.id();
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+  glBindTexture(GL_TEXTURE_2D, scene_tex);
   // the game's brightness/contrast is applied later, on the whole frame
   glUniform4f(glGetUniformLocation(id, "color_mult"), 1.f, 1.f, 1.f, 1.f);
   glUniform4f(glGetUniformLocation(id, "color_add"), 0.f, 0.f, 0.f, 0.f);
 
   // world up in view space, for the fog and the heat haze
   glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
-  const bool have_scene = m_ssao_ready;
   glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
               m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount : 0.f, 0.f);
   glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
@@ -230,7 +359,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   m_time += 1.0 / 60.0;
   glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength : 0.f,
               120.f * kMeter, 400.f * kMeter, (float)m_time);
-  glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa);
+  glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa && !taa);
 
   // water reflections: the ocean surface depth from begin/end_ocean this frame
   const bool near_water = have_scene && m_ocean_ready && m_settings.water_reflections;
@@ -270,31 +399,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
   float strength = 0.f;
-  if (have_scene && m_prev_camera.valid && cam.valid && m_settings.motion_blur > 0.f) {
-    float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
-    float offset[3];
-    float moved = 0.f;
-    for (int k = 0; k < 3; k++) {
-      for (int c = 0; c < 3; c++) {
-        to_prev[k][c] = 0.f;
-        for (int r = 0; r < 3; r++) {
-          to_prev[k][c] += cam.rot[r][k] * m_prev_camera.rot[r][c];
-        }
-      }
-    }
-    for (int c = 0; c < 3; c++) {
-      offset[c] = 0.f;
-      for (int r = 0; r < 3; r++) {
-        offset[c] += (cam.trans[r] - m_prev_camera.trans[r]) * m_prev_camera.rot[r][c];
-      }
-      moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
-    }
-    // a cut or a teleport isn't motion
-    if (std::sqrt(moved) < 8.f * kMeter) {
-      strength = m_settings.motion_blur;
-      glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
-      glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
-    }
+  if (reproject && m_settings.motion_blur > 0.f) {
+    strength = m_settings.motion_blur;
+    glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
   }
   glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy, strength, 0.02f);
   glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
@@ -788,6 +896,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("God rays strength", &m_settings.shafts_strength, 0.f, 2.f);
     ImGui::SliderFloat("God rays threshold", &m_settings.shafts_threshold, 0.f, 1.f);
     ImGui::Checkbox("FXAA", &m_settings.fxaa);
+    ImGui::Checkbox("TAA", &m_settings.taa);
+    ImGui::SliderFloat("TAA history (still)", &m_settings.taa_history, 0.5f, 0.97f);
+    ImGui::SliderFloat("TAA history (fast)", &m_settings.taa_history_fast, 0.3f, 0.95f);
     ImGui::SliderFloat("Fog density (/m)", &m_settings.fog_density, 0.f, 0.01f, "%.4f");
     ImGui::SliderFloat("Fog height falloff (/m)", &m_settings.fog_height, 0.f, 0.2f);
     ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);

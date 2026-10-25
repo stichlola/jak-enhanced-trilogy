@@ -996,6 +996,10 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     g_current_renderer = "frame-setup";
     auto prof = m_profiler.root()->make_scoped_child("frame-setup");
     setup_frame(settings);
+    if (m_enhanced_post) {
+      m_enhanced_post->begin_frame(m_render_state.shaders, m_render_state.render_fb_w,
+                                   m_render_state.render_fb_h);
+    }
     if (settings.gpu_sync) {
       glFinish();
     }
