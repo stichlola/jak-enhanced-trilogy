@@ -24,6 +24,10 @@ uniform float light_shadow;     // how dark what blocks a dynamic light makes it
 uniform int wake_count;         // Jak's recent path: world xyz (game units), age (s)
 uniform vec4 wake[16];
 uniform float wake_strength;
+uniform int print_count;        // footprints and ruts: world xyz (game units), heading (rad)
+uniform vec4 prints[48];
+uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
+uniform float prints_strength;
 uniform int blast_count;        // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 uniform float blast_age[4];
@@ -562,6 +566,50 @@ void main() {
     return;
   }
   c *= ao;
+
+  // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
+  // around them, not into grass, darker inside with a lighter rim of pushed-up sand, fading over
+  // half a minute
+  if (print_count > 0 && z > 0.0 && z < 40.0 * 4096.0 && wsurf == 0.0) {
+    float sandy = (1.0 - smoothstep(1.05, 1.2, c.g / max(c.r, 0.01))) *
+                  smoothstep(0.08, 0.2, dot(c, vec3(0.333)));
+    vec3 nn = surface_normal(tex_coord, p);
+    float level_ground = smoothstep(0.75, 0.9, dot(nn, up_view));
+    if (sandy * level_ground > 0.0) {
+      vec3 w = view_to_world * p + cam_pos;
+      float dent = 0.0, rim = 0.0;
+      for (int i = 0; i < print_count; i++) {
+        vec3 d = (w - prints[i].xyz) / 4096.0;  // meters
+        float kind = print_info[i].y;
+        // feet: the ground is at the print; wheels: under the seat
+        if (d.y > 0.4 || d.y < (kind > 1.5 ? -2.5 : -0.4) || dot(d.xz, d.xz) > 9.0) {
+          continue;
+        }
+        vec2 f = vec2(sin(prints[i].w), cos(prints[i].w));
+        float along = dot(d.xz, f);
+        float side = dot(d.xz, vec2(f.y, -f.x));
+        float fade = 1.0 - smoothstep(12.0, 30.0, print_info[i].x);
+        if (kind > 1.5) {
+          // two tracks 1.7 m apart, each piece reaching the next
+          float t = abs(abs(side) - 0.85);
+          float len = 1.0 - smoothstep(0.25, 0.4, abs(along));
+          dent = max(dent, (1.0 - smoothstep(0.07, 0.17, t)) * len * fade * 0.8);
+          rim = max(rim, smoothstep(0.12, 0.18, t) * (1.0 - smoothstep(0.18, 0.28, t)) * len * fade);
+        } else {
+          // a sole: heel behind, wider toes in front
+          float width = mix(0.06, 0.085, smoothstep(-0.1, 0.1, along));
+          float e = (along / 0.16) * (along / 0.16) + (side / width) * (side / width);
+          dent = max(dent, (1.0 - smoothstep(0.55, 1.0, e)) * fade);
+          rim = max(rim, smoothstep(0.9, 1.15, e) * (1.0 - smoothstep(1.15, 1.7, e)) * fade);
+        }
+      }
+      float k = sandy * level_ground * prints_strength;
+      // bright sand is over 1 here: brought down to 1 inside the print first, or darkening it
+      // still leaves it white
+      c = mix(c, min(c, vec3(1.0)), clamp(dent + rim, 0.0, 1.0) * k);
+      c *= 1.0 - k * (0.35 * dent - 0.06 * rim * (1.0 - dent));
+    }
+  }
 
   // sun shadow map: surfaces facing the sun but blocked from it lose some light (the game's light is
   // baked per vertex and knows nothing of what stands between them and the sun)

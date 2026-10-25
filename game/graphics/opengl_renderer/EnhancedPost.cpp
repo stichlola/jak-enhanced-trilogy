@@ -150,6 +150,10 @@ EnhancedPost::EnhancedPost() {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
   }
+  if (const char* prints = std::getenv("JAK_ENHANCED_PRINTS")) {
+    // footprints and ruts in the sand, 0 = off
+    m_settings.prints = (float)std::atof(prints);
+  }
   if (const char* wake = std::getenv("JAK_ENHANCED_WAKE")) {
     // rings on the water where Jak swims or rides, 0 = off
     m_settings.wake = (float)std::atof(wake);
@@ -790,6 +794,85 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1i(glGetUniformLocation(id, "wake_count"), wake_count);
       glUniform4fv(glGetUniformLocation(id, "wake"), kWake, wake);
       glUniform1f(glGetUniformLocation(id, "wake_strength"), m_settings.wake);
+    }
+    {
+      // footprints where Jak walks on soft ground (the game knows the ground's material), ruts where
+      // he drives; kept 30 s
+      constexpr int kPrints = 48;
+      const auto& pl = g_enhanced_player;
+      static bool test_prints = std::getenv("JAK_ENHANCED_PRINTS_TEST") != nullptr;
+      static double test_seeded = -1e9;
+      if (test_prints && pl.valid && m_time - test_seeded > 10.0) {
+        // test switch: footprints walking away from the camera beside Jak, ruts on his other side
+        // (again every 10 s, wherever he is by then)
+        test_seeded = m_time;
+        m_prints.clear();
+        float fx = pl.pos[0] - cam.trans[0], fz = pl.pos[2] - cam.trans[2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1.f);
+        fx /= len;
+        fz /= len;
+        for (int i = 0; i < 24; i++) {
+          bool rut = i >= 12;
+          float along = (-2.f + (i % 12) * (rut ? 0.5f : 0.7f)) * kMeter;
+          float side = (rut ? 2.5f : ((i % 2) ? -1.32f : -1.08f)) * kMeter;
+          Print p;
+          p.pos[0] = pl.pos[0] + fx * along + fz * side;
+          p.pos[1] = pl.pos[1] + (rut ? 1.f * kMeter : 0.f);
+          p.pos[2] = pl.pos[2] + fz * along - fx * side;
+          p.heading = std::atan2(fx, fz);
+          p.kind = rut ? 2 : (i % 2);
+          p.time = m_time;
+          m_prints.push_back(p);
+        }
+      }
+      if (pl.valid && m_settings.prints > 0.f && pl.state > 0) {
+        bool rut = pl.state == 2;
+        float stride = (rut ? 0.5f : 0.7f) * kMeter;
+        float dx = 0.f, dz = 0.f, moved = 1e9f;
+        if (m_last_print_valid) {
+          dx = pl.pos[0] - m_last_print[0];
+          dz = pl.pos[2] - m_last_print[2];
+          moved = std::sqrt(dx * dx + dz * dz);
+        }
+        if (moved > stride) {
+          if (moved < 4.f * stride) {  // a step, not a jump or a teleport
+            float fx = dx / moved, fz = dz / moved;
+            float side = rut ? 0.f : (m_print_left ? 0.12f : -0.12f) * kMeter;
+            Print p;
+            p.pos[0] = pl.pos[0] + fz * side;
+            p.pos[1] = pl.pos[1];
+            p.pos[2] = pl.pos[2] - fx * side;
+            p.heading = std::atan2(fx, fz);
+            p.kind = rut ? 2 : (m_print_left ? 0 : 1);
+            p.time = m_time;
+            m_prints.push_back(p);
+            m_print_left = !m_print_left;
+          }
+          std::memcpy(m_last_print, pl.pos, sizeof(m_last_print));
+          m_last_print_valid = true;
+        }
+      }
+      while (!m_prints.empty() &&
+             (m_time - m_prints.front().time > 30.0 || m_prints.size() > (size_t)kPrints)) {
+        m_prints.erase(m_prints.begin());
+      }
+      float prints[kPrints * 4] = {};
+      float print_info[kPrints * 2] = {};
+      int print_count = 0;
+      for (const auto& p : m_prints) {
+        if (m_settings.prints <= 0.f) {
+          break;
+        }
+        std::memcpy(prints + print_count * 4, p.pos, sizeof(float) * 3);
+        prints[print_count * 4 + 3] = p.heading;
+        print_info[print_count * 2] = (float)(m_time - p.time);
+        print_info[print_count * 2 + 1] = (float)p.kind;
+        print_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "print_count"), print_count);
+      glUniform4fv(glGetUniformLocation(id, "prints"), kPrints, prints);
+      glUniform2fv(glGetUniformLocation(id, "print_info"), kPrints, print_info);
+      glUniform1f(glGetUniformLocation(id, "prints_strength"), m_settings.prints);
     }
     // the nearest explosions in view for the shockwave: view space + radius, age
     {
@@ -1890,6 +1973,10 @@ void EnhancedPost::draw_menu() {
       s.light_shadow = light_shadows ? 0.85f : 0.f;
     }
     check("Normali della geometria", &s.geometry_normals);
+    bool prints = s.prints > 0.f;
+    if (check("Impronte nella sabbia", &prints)) {
+      s.prints = prints ? 1.f : 0.f;
+    }
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
     ImGui::SetNextItemWidth(200);
@@ -2004,6 +2091,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["fire"] = s.fire;
   j["light_shadow"] = s.light_shadow;
   j["geometry_normals"] = s.geometry_normals;
+  j["prints"] = s.prints;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
@@ -2041,6 +2129,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("fire", s.fire);
   get("light_shadow", s.light_shadow);
   get("geometry_normals", s.geometry_normals);
+  get("prints", s.prints);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
   if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
@@ -2070,6 +2159,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.lamp_strength = d.lamp_strength;
   s.fire = d.fire;
   s.geometry_normals = d.geometry_normals;
+  s.prints = d.prints;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;

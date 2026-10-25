@@ -330,6 +330,8 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 (define-extern enhanced-update-pushers (function none))
+
+(define *enhanced-player-vec* (new 'static 'vector))
 (define-extern *enhanced-pusher-count* int)
 
 (define *enhanced-census* (new 'static 'array int32 4))
@@ -2054,7 +2056,25 @@ capture exactly."
   (enhanced-menu-update)
   ;; Enhanced: grass bends away from Jak
   (when *target*
-    (pc-enhanced-set-player (the-as pointer (-> *target* control trans)))
+    ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts)
+    (let ((v *enhanced-player-vec*))
+      (vector-copy! v (-> *target* control trans))
+      (set! (-> v w) (cond
+                       ((focus-test? *target* pilot) 2.0)
+                       ((and (logtest? (-> *target* control status) (collide-status on-surface))
+                             (let ((m (-> *target* control ground-pat material)))
+                               (or (= m (pat-material sand)) (= m (pat-material quicksand)) (= m (pat-material dirt))
+                                   (= m (pat-material snow)) (= m (pat-material deepsnow)) (= m (pat-material swamp))
+                                   )
+                               )
+                             )
+                        1.0
+                        )
+                       (else 0.0)
+                       )
+            )
+      (pc-enhanced-set-player (the-as pointer v))
+      )
     )
   ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)
   (enhanced-update-pushers)

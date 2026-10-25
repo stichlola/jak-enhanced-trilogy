@@ -147,6 +147,7 @@ class EnhancedPost {
     float light_shadow = 0.85f;  // dynamic lights' screen-space shadows (0 = none)
     float blast = 1.0f;     // explosions: flash and shockwave (0 = the game's alone)
     float wake = 1.0f;      // rings on the water where Jak swims or rides
+    float prints = 1.0f;    // footprints and ruts in the sand
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
@@ -314,6 +315,17 @@ class EnhancedPost {
     double time;
   };
   std::vector<WakePoint> m_wake;
+  // Jak's footprints (a print every stride, left and right in turn) and the ruts of what he drives
+  struct Print {
+    float pos[3];
+    float heading;  // radians, atan2(x, z) of the way he went
+    int kind;       // 0 left foot, 1 right foot, 2 ruts
+    double time;
+  };
+  std::vector<Print> m_prints;
+  float m_last_print[3] = {};
+  bool m_last_print_valid = false;
+  bool m_print_left = true;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
 

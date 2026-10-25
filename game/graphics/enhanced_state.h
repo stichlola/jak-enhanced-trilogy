@@ -19,6 +19,7 @@ extern EnhancedSun g_enhanced_sun;
 // from it.
 struct EnhancedPlayer {
   float pos[3] = {0.f, 0.f, 0.f};
+  int state = 0;  // 0 elsewhere, 1 on foot on soft ground (sand, dirt, snow), 2 driving
   bool valid = false;
 };
 extern EnhancedPlayer g_enhanced_player;
