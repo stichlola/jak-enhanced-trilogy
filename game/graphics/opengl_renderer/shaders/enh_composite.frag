@@ -21,6 +21,9 @@ uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
 uniform vec4 light_color[32];
 uniform float light_shadow;     // how dark what blocks a dynamic light makes it (0 = no shadows)
+uniform int wake_count;         // Jak's recent path: world xyz (game units), age (s)
+uniform vec4 wake[16];
+uniform float wake_strength;
 uniform int blast_count;        // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 uniform float blast_age[4];
@@ -390,6 +393,24 @@ void main() {
       float s0 = water_swell(world, t);
       slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), t) - s0,
                                 water_swell(world + vec2(0.0, 0.5), t) - s0) / 0.5;
+    }
+    // wakes: rings spreading from where Jak touched the water lately (each point of his path near
+    // this water's height)
+    float water_y = dot(up_view, p) + cam_pos.y;
+    for (int i = 0; i < wake_count; i++) {
+      // (Jak's root is his feet: up to 2.5 m under the surface swimming, over it riding)
+      float above = wake[i].y - water_y;
+      if (above < -2.5 * 4096.0 || above > 1.0 * 4096.0) {
+        continue;
+      }
+      vec2 rel = world - wake[i].xz / 4096.0;  // meters
+      float dist = length(rel);
+      float age = wake[i].w;
+      float x = dist - (0.3 + 1.4 * age);
+      float band = exp(-x * x / 0.15) * (1.0 - age / 2.0);
+      if (band > 0.001) {
+        slope += rel / max(dist, 0.05) * (band * 0.45 * wake_strength * sin(x * 10.0));
+      }
     }
     vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
 

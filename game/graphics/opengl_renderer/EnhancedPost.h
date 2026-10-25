@@ -146,6 +146,7 @@ class EnhancedPost {
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
     float light_shadow = 0.85f;  // dynamic lights' screen-space shadows (0 = none)
     float blast = 1.0f;     // explosions: flash and shockwave (0 = the game's alone)
+    float wake = 1.0f;      // rings on the water where Jak swims or rides
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
@@ -300,6 +301,12 @@ class EnhancedPost {
     double start;
   };
   std::vector<Blast> m_blasts;
+  // where Jak was lately (world, game units): rings spread on the water from these
+  struct WakePoint {
+    float pos[3];
+    double time;
+  };
+  std::vector<WakePoint> m_wake;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
 

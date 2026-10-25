@@ -129,6 +129,10 @@ EnhancedPost::EnhancedPost() {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
   }
+  if (const char* wake = std::getenv("JAK_ENHANCED_WAKE")) {
+    // rings on the water where Jak swims or rides, 0 = off
+    m_settings.wake = (float)std::atof(wake);
+  }
   if (const char* blast = std::getenv("JAK_ENHANCED_BLAST")) {
     // explosions' flash and shockwave strength, 0 = off
     m_settings.blast = (float)std::atof(blast);
@@ -732,6 +736,40 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       fire_seed[fire_count++] = f.seed;
     }
     glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
+    {
+      // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
+      // the shader starts a ring on the water from each one that lies at the water's height
+      constexpr int kWake = 16;
+      const auto& pl = g_enhanced_player;
+      if (pl.valid && m_settings.wake > 0.f) {
+        double since = m_wake.empty() ? 1e9 : m_time - m_wake.back().time;
+        float moved = 1e9f;
+        if (!m_wake.empty()) {
+          const float* q = m_wake.back().pos;
+          float dx = pl.pos[0] - q[0], dz = pl.pos[2] - q[2];
+          moved = std::sqrt(dx * dx + dz * dz);
+        }
+        if ((since >= 0.1 && moved > 0.1f * kMeter) || since >= 0.5) {
+          m_wake.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time});
+        }
+      }
+      while (!m_wake.empty() && (m_time - m_wake.front().time > 2.0 || m_wake.size() > kWake)) {
+        m_wake.erase(m_wake.begin());
+      }
+      float wake[kWake * 4] = {};
+      int wake_count = 0;
+      for (const auto& w : m_wake) {
+        if (m_settings.wake <= 0.f) {
+          break;
+        }
+        std::memcpy(wake + wake_count * 4, w.pos, sizeof(float) * 3);
+        wake[wake_count * 4 + 3] = (float)(m_time - w.time);
+        wake_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "wake_count"), wake_count);
+      glUniform4fv(glGetUniformLocation(id, "wake"), kWake, wake);
+      glUniform1f(glGetUniformLocation(id, "wake_strength"), m_settings.wake);
+    }
     // the nearest explosions in view for the shockwave: view space + radius, age
     {
       constexpr int kBlasts = 4;
@@ -1994,6 +2032,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Lamp reach (x game)", &m_settings.lamp_reach, 0.25f, 3.f);
     ImGui::SliderFloat("Dynamic light shadows", &m_settings.light_shadow, 0.f, 1.f);
     ImGui::SliderFloat("Explosions (flash, shockwave)", &m_settings.blast, 0.f, 3.f);
+    ImGui::SliderFloat("Wake rings on the water", &m_settings.wake, 0.f, 3.f);
     ImGui::Checkbox("Fires (flicker, hot air, embers)", &m_settings.fire);
     ImGui::SliderFloat("Fire hot air", &m_settings.fire_haze, 0.f, 0.05f, "%.3f");
     ImGui::SliderFloat("Fire embers", &m_settings.fire_embers, 0.f, 3.f);
