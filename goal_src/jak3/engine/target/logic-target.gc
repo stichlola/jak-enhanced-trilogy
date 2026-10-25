@@ -247,6 +247,42 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   (none)
   )
 
+;; Enhanced: the in-game menu (\ key, EnhancedPost::draw_menu) asks for a time of day, a frozen
+;; clock, a continue point or a teleport; it's carried out here.
+(define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
+
+(defun enhanced-menu-update ()
+  (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((1)
+     (when *time-of-day*
+       (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-menu-buf*))
+       )
+     )
+    ((2)
+     (let ((cp (get-continue-by-name *game-info* *enhanced-menu-buf*)))
+       (if (and cp *target*)
+           (send-event *target* 'continue cp)
+           )
+       )
+     )
+    ((3)
+     (when *target*
+       (copy-string<-string *enhanced-tp-buf* *enhanced-menu-buf*)
+       (enhanced-teleport)
+       )
+     )
+    ((4)
+     (when *time-of-day*
+       (if (string= *enhanced-menu-buf* "0")
+           (send-event (ppointer->process *time-of-day*) 'change 'ratio 0.0)
+           (send-event (ppointer->process *time-of-day*) 'change 'ratio 1.0)
+           )
+       )
+     )
+    )
+  (none)
+  )
+
 (define *enhanced-census* (new 'static 'array int32 4))
 
 (defun enhanced-census ()
@@ -1965,6 +2001,7 @@ capture exactly."
   (enhanced-probe-update)
   (enhanced-piazza-autoload)
   (enhanced-review-update)
+  (enhanced-menu-update)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)

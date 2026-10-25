@@ -3,6 +3,7 @@
 #include <chrono>
 
 #include "common/goal_constants.h"
+#include "game/graphics/enhanced_state.h"
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
 
@@ -1096,6 +1097,10 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   if (settings.draw_loader_window) {
     g_current_renderer = "loader-window";
     m_render_state.loader->draw_debug_window();
+  }
+
+  if (g_enhanced_menu.open && m_enhanced_post) {
+    m_enhanced_post->draw_menu();
   }
 
   m_profiler.finish();

@@ -42,7 +42,14 @@ Laptop (the game stays at its 60 fps cap).
 | Desert sand | `scripts/enhanced/desert_sand.py`: the jak3-ue5 Tripo sand tile, color-matched to the Wang atlas, in `out/enhanced/desert_sand.png`; the hfrag dunes sample it in world space every 64 m instead of the Wang montage |
 | HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
 
-Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
+**In-game menu: `\`** opens and closes it (EnhancedPost::draw_menu): every effect on/off, lamp
+strength, the time of day (six hours, a slider, a frozen clock) and quick travel to nine continue
+points (the piazza, port, Hip Hog, slums, industrial zone, central sector, Metal Head city, Spargus,
+desert). The renderer queues one request, the game polls it each frame
+(`pc-enhanced-poll-request`, `enhanced-menu-update` in logic-target.gc). The cursor is freed from
+the mouse camera while it's open.
+
+Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_MENU=1` or `<kind>:<value>` (menu open from the start, plus one queued request: `1:23` hour, `2:<continue point>`, `3:x,y,z,yaw`, `4:0` frozen clock), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 

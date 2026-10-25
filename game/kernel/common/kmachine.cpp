@@ -1108,6 +1108,20 @@ void pc_enhanced_set_lights(u32 vec_ptr, u32 count) {
   g_enhanced_game_lights.count = n;
 }
 
+// Enhanced: the in-game menu's pending request (see EnhancedMenu): its kind (0 = none), the value
+// copied into dest (a GOAL string of max_len chars)
+u64 pc_enhanced_poll_request(u32 dest, u32 max_len) {
+  std::lock_guard<std::mutex> lock(g_enhanced_menu.mutex);
+  int kind = g_enhanced_menu.request;
+  if (kind) {
+    auto* data = Ptr<String>(dest).c()->data();
+    strncpy(data, g_enhanced_menu.arg.c_str(), max_len - 1);
+    data[max_len - 1] = '\0';
+    g_enhanced_menu.request = 0;
+  }
+  return kind;
+}
+
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
@@ -1262,6 +1276,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
+  make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

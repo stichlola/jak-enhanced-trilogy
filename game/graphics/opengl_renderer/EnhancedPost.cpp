@@ -21,6 +21,7 @@ EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
+EnhancedMenu g_enhanced_menu;
 
 namespace {
 GLuint make_1x1(u32 rgba) {
@@ -76,6 +77,15 @@ EnhancedPost::EnhancedPost() {
     m_settings.volume = std::atof(vol) > 0.0;
     if (m_settings.volume) {
       m_settings.mist_density = (float)std::atof(vol);
+    }
+  }
+  if (const char* menu = std::getenv("JAK_ENHANCED_MENU")) {
+    // test runs: the in-game menu open from the start; "<kind>:<value>" also queues one request
+    // (e.g. 2:ctysluma-alley, 1:23)
+    g_enhanced_menu.open = true;
+    const char* colon = std::strchr(menu, ':');
+    if (colon) {
+      g_enhanced_menu.ask(std::atoi(menu), colon + 1);
     }
   }
   if (const char* ws = std::getenv("JAK_ENHANCED_WATER_SIM")) {
@@ -1345,6 +1355,122 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "vignette"), m_settings.vignette);
   glUniform1f(glGetUniformLocation(id, "sharpen"), m_settings.sharpen);
   return shader;
+}
+
+void EnhancedPost::draw_menu() {
+  ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowBgAlpha(0.85f);
+  // no close button: \ closes it (and gives the mouse back to the camera)
+  if (!ImGui::Begin("Jak 3 Enhanced  ( \\ chiude )", nullptr,
+                    ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::End();
+    return;
+  }
+  auto& s = m_settings;
+  if (ImGui::CollapsingHeader("Grafica", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::Checkbox("Grafica Enhanced (tutto)", &s.enabled);
+    ImGui::BeginDisabled(!s.enabled);
+    // two columns of switches
+    int n = 0;
+    auto check = [&](const char* label, bool* value) {
+      if (n++ % 2) {
+        ImGui::SameLine(260);
+      }
+      return ImGui::Checkbox(label, value);
+    };
+    check("Antialiasing (TAA)", &s.taa);
+    check("Nebbia volumetrica", &s.volume);
+    check("Ombre del sole", &s.shadow_map);
+    check("Ombre di contatto", &s.sun_shadows);
+    check("Occlusione (SSAO)", &s.ssao);
+    check("Luce indiretta (SSGI)", &s.gi);
+    check("Luce sui personaggi", &g_enhanced_merc.enabled);
+    check("Bloom", &s.bloom);
+    check("Raggi di luce", &s.shafts);
+    check("Profondita' di campo", &s.dof);
+    bool blur = s.motion_blur > 0.f;
+    if (check("Motion blur", &blur)) {
+      s.motion_blur = blur ? 0.5f : 0.f;
+    }
+    check("Luci dinamiche", &s.lights);
+    ImGui::BeginDisabled(!s.lights);
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");
+    ImGui::EndDisabled();
+    ImGui::SeparatorText("Acqua");
+    n = 0;
+    bool swell = s.water_swell > 0.f, refr = s.water_refraction > 0.f, caus = s.water_caustics > 0.f;
+    check("Riflessi", &s.water_reflections);
+    if (check("Onde lunghe", &swell)) {
+      s.water_swell = swell ? 1.f : 0.f;
+    }
+    if (check("Rifrazione", &refr)) {
+      s.water_refraction = refr ? 0.012f : 0.f;
+    }
+    if (check("Caustiche", &caus)) {
+      s.water_caustics = caus ? 0.8f : 0.f;
+    }
+    ImGui::EndDisabled();
+  }
+  if (ImGui::CollapsingHeader("Ora del giorno", ImGuiTreeNodeFlags_DefaultOpen)) {
+    struct Hour {
+      const char* name;
+      int hour;
+    };
+    static const Hour hours[] = {{"Alba", 6},     {"Mattina", 9}, {"Mezzogiorno", 12},
+                                 {"Tramonto", 18}, {"Sera", 20},  {"Notte", 23}};
+    for (int i = 0; i < 6; i++) {
+      if (i % 3) {
+        ImGui::SameLine();
+      }
+      if (ImGui::Button(hours[i].name, ImVec2(159, 0))) {
+        g_enhanced_menu.ask(1, std::to_string(hours[i].hour));
+      }
+    }
+    static int hour = 12;
+    ImGui::SetNextItemWidth(260);
+    ImGui::SliderInt("##ora", &hour, 0, 23, "ore %d");
+    ImGui::SameLine();
+    if (ImGui::Button("Imposta")) {
+      g_enhanced_menu.ask(1, std::to_string(hour));
+    }
+    static bool frozen = false;
+    if (ImGui::Checkbox("Ferma il tempo", &frozen)) {
+      g_enhanced_menu.ask(4, frozen ? "0" : "1");
+    }
+  }
+  if (ImGui::CollapsingHeader("Teletrasporto", ImGuiTreeNodeFlags_DefaultOpen)) {
+    struct Place {
+      const char* name;
+      const char* continue_point;
+    };
+    static const Place places[] = {
+        {"Piazza (Jak 2)", "piazza-start"},
+        {"Porto", "ctyport-start"},
+        {"Hip Hog", "ctyport-hiphog"},
+        {"Vicolo degli slum", "ctysluma-alley"},
+        {"Zona industriale", "ctyinda-start"},
+        {"Settore centrale", "ctygenb-start"},
+        {"Teste di Metallo", "mhcitya-near-ctyport"},
+        {"Spargus", "wascitya-start"},
+        {"Deserto", "desert-facing-wasdoors"},
+    };
+    for (int i = 0; i < (int)(sizeof(places) / sizeof(places[0])); i++) {
+      const auto& p = places[i];
+      if (i % 2) {
+        ImGui::SameLine();
+      }
+      if (ImGui::Button(p.name, ImVec2(240, 0))) {
+        g_enhanced_menu.ask(2, p.continue_point);
+      }
+    }
+    const auto& cam = g_enhanced_camera;
+    if (cam.valid) {
+      ImGui::TextDisabled("camera %.0f %.0f %.0f m", cam.trans[0] / kMeter, cam.trans[1] / kMeter,
+                          cam.trans[2] / kMeter);
+    }
+  }
+  ImGui::End();
 }
 
 void EnhancedPost::draw_debug_window() {

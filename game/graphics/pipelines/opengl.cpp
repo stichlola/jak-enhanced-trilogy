@@ -25,6 +25,7 @@
 #include "game/graphics/opengl_renderer/debug_gui.h"
 #include "game/graphics/screenshot.h"
 #include "game/graphics/texture/TexturePool.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/runtime.h"
 #include "game/sce/libscf.h"
 #include "game/system/hid/input_manager.h"
@@ -331,6 +332,19 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
   m_input_manager->register_command(
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
+  // Enhanced: \ opens and closes the in-game Enhanced menu
+  m_input_manager->register_command(
+      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_BACKSLASH, [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
+          g_enhanced_menu.open = !g_enhanced_menu.open;
+          // free the cursor to click the menu (the mouse camera locks it), lock it again after
+          if (m_input_manager->mouse_controls_camera()) {
+            SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
+          }
+          m_input_manager->hide_cursor(!g_enhanced_menu.open &&
+                                       m_input_manager->auto_hiding_cursor());
+        }
+      }));
 
   const auto& bind = Gfx::g_debug_settings.toggle_fullscreen_key;
 

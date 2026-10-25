@@ -294,6 +294,7 @@
 (define-extern pc-enhanced-set-sun (function pointer none))
 (define-extern pc-enhanced-getenv (function string string int symbol))
 (define-extern pc-enhanced-set-lights (function pointer int none))
+(define-extern pc-enhanced-poll-request (function string int int))
 
 (define-extern pc-encode-utf8-string (function string string none))
 

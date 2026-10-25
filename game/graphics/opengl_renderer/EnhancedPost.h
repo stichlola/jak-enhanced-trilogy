@@ -166,6 +166,8 @@ class EnhancedPost {
                       SharedRenderState* render_state,
                       ScopedProfilerNode& prof);
   void draw_debug_window();
+  // the in-game menu (\ key): the main switches, time of day, quick travel
+  void draw_menu();
 
  private:
   static constexpr int kLevels = 6;

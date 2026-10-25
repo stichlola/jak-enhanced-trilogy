@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <string>
 
 /*!
  * Jak 3 Enhanced: values the game hands to the renderer through the kernel (kmachine.cpp).
@@ -51,3 +52,20 @@ struct EnhancedGameLights {
   std::mutex mutex;
 };
 extern EnhancedGameLights g_enhanced_game_lights;
+
+// The in-game Enhanced menu (opened with the \ key): its open state, and the one request it hands
+// to the game (polled each frame by pc-enhanced-poll-request). Kinds: 1 hour of the day,
+// 2 continue point name, 3 teleport "x,y,z,yaw" (meters, degrees), 4 time running ("1") or
+// frozen ("0").
+struct EnhancedMenu {
+  bool open = false;
+  std::mutex mutex;
+  int request = 0;
+  std::string arg;
+  void ask(int kind, const std::string& value) {
+    std::lock_guard<std::mutex> lock(mutex);
+    request = kind;
+    arg = value;
+  }
+};
+extern EnhancedMenu g_enhanced_menu;
