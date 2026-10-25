@@ -1,4 +1,4 @@
-#include "EnhancedPost.h"
+﻿#include "EnhancedPost.h"
 
 #include <algorithm>
 #include <cmath>
@@ -106,6 +106,17 @@ EnhancedPost::EnhancedPost() {
   // bound in place of the bloom / occlusion when they're off, so the composite always samples
   m_black_tex = make_1x1(0);
   m_white_tex = make_1x1(0xffffffff);
+  // stands in for the sun shadow map until it's drawn: a shadow sampler must always see a depth
+  // texture with compare mode on (depth 1 = nothing in the way)
+  glGenTextures(1, &m_no_shadow_tex);
+  glBindTexture(GL_TEXTURE_2D, m_no_shadow_tex);
+  const float one = 1.f;
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, 1, 1, 0, GL_DEPTH_COMPONENT, GL_FLOAT, &one);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+  glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 EnhancedPost::~EnhancedPost() {
@@ -148,6 +159,7 @@ EnhancedPost::~EnhancedPost() {
     }
   }
   glDeleteTextures(1, &m_black_tex);
+  glDeleteTextures(1, &m_no_shadow_tex);
   glDeleteTextures(1, &m_white_tex);
 }
 
@@ -977,7 +989,7 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
               m_settings.mist_noise, m_settings.mist_sun, m_settings.mist_aniso);
   glUniform1f(glGetUniformLocation(id, "frame"), (float)(m_frame % 64));
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : 0);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : m_no_shadow_tex);
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
   glUniform1i(glGetUniformLocation(id, "shadow_on"), m_shadow_ready);
@@ -1282,7 +1294,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glActiveTexture(GL_TEXTURE8);
   glBindTexture(GL_TEXTURE_2D, m_vol_ready ? m_vol_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE9);
-  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : 0);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : m_no_shadow_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();

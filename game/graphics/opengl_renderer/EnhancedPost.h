@@ -188,6 +188,7 @@ class EnhancedPost {
   int m_w = 0;
   int m_h = 0;
   GLuint m_black_tex = 0;
+  GLuint m_no_shadow_tex = 0;
   GLuint m_white_tex = 0;
 
   // full-res depth copy and occlusion (raw + blurred)
