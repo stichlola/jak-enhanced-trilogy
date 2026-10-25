@@ -216,6 +216,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
   at(ShaderId::ENH_GI) = {"enh_gi", version};
   at(ShaderId::ENH_GI_BLUR) = {"enh_gi_blur", version};
   at(ShaderId::ENH_TAA) = {"enh_taa", version};
+  at(ShaderId::ENH_VOLUME) = {"enh_volume", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

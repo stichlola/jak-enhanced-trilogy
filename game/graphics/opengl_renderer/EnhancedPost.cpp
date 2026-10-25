@@ -54,6 +54,16 @@ EnhancedPost::EnhancedPost() {
   if (const char* wind = std::getenv("JAK_ENHANCED_WIND")) {
     g_enhanced_wind.strength = (float)std::atof(wind);
   }
+  if (const char* vol = std::getenv("JAK_ENHANCED_MIST")) {
+    // 0 = off, otherwise the density at the ground (/m)
+    m_settings.volume = std::atof(vol) > 0.0;
+    if (m_settings.volume) {
+      m_settings.mist_density = (float)std::atof(vol);
+    }
+  }
+  if (const char* mist_sun = std::getenv("JAK_ENHANCED_MIST_SUN")) {
+    m_settings.mist_sun = (float)std::atof(mist_sun);
+  }
   if (const char* taa = std::getenv("JAK_ENHANCED_TAA")) {
     m_settings.taa = std::strcmp(taa, "0") != 0;
   }
@@ -89,6 +99,10 @@ EnhancedPost::~EnhancedPost() {
   if (m_taa_fbo[0]) {
     glDeleteFramebuffers(2, m_taa_fbo);
     glDeleteTextures(2, m_taa_tex);
+  }
+  if (m_vol_fbo) {
+    glDeleteFramebuffers(1, &m_vol_fbo);
+    glDeleteTextures(1, &m_vol_tex);
   }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
@@ -568,6 +582,78 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   m_gi_ready = true;
 }
 
+void EnhancedPost::do_volume(SharedRenderState* render_state,
+                             GLuint screen_vao,
+                             ScopedProfilerNode& prof) {
+  int w = std::max(1, m_ssao_w / 2);
+  int h = std::max(1, m_ssao_h / 2);
+  if (w != m_vol_w || h != m_vol_h) {
+    if (m_vol_fbo) {
+      glDeleteFramebuffers(1, &m_vol_fbo);
+      glDeleteTextures(1, &m_vol_tex);
+    }
+    m_vol_w = w;
+    m_vol_h = h;
+    glGenFramebuffers(1, &m_vol_fbo);
+    glGenTextures(1, &m_vol_tex);
+    glBindTexture(GL_TEXTURE_2D, m_vol_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_vol_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_vol_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  const auto& cam = g_enhanced_camera;
+  glDisable(GL_DEPTH_TEST);
+  glDisable(GL_BLEND);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_vol_fbo);
+  glViewport(0, 0, w, h);
+  auto& shader = render_state->shaders[ShaderId::ENH_VOLUME];
+  shader.activate();
+  auto id = shader.id();
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  // view -> world is the transpose of world -> view
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
+  glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
+  {
+    float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
+                          m_sun_view[2] * m_sun_view[2]);
+    float up = len > 0.f ? (m_sun_view[0] * cam.rot[1][0] + m_sun_view[1] * cam.rot[1][1] +
+                            m_sun_view[2] * cam.rot[1][2]) / len
+                         : 0.f;
+    const bool sun = g_enhanced_sun.valid && len > 0.f && up > 0.f;
+    static int debug_counter = 0;
+    if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
+      lg::info("[enhanced] mist sun valid {} up {} view {} {} {}", g_enhanced_sun.valid, up,
+               m_sun_view[0], m_sun_view[1], m_sun_view[2]);
+    }
+    glUniform4f(glGetUniformLocation(id, "sun_dir"), sun ? m_sun_view[0] / len : 0.f,
+                sun ? m_sun_view[1] / len : 0.f, sun ? m_sun_view[2] / len : 0.f,
+                sun ? std::min(1.f, up * 4.f) : 0.f);
+  }
+  glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
+              render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
+  glUniform4f(glGetUniformLocation(id, "mist"), m_settings.mist_density, m_settings.mist_height,
+              m_settings.mist_distance, (float)m_time);
+  glUniform4f(glGetUniformLocation(id, "mist_shape"), m_settings.mist_ground,
+              m_settings.mist_noise, m_settings.mist_sun, m_settings.mist_aniso);
+  glUniform1f(glGetUniformLocation(id, "frame"), (float)(m_frame % 64));
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  prof.add_draw_call();
+  glBindVertexArray(0);
+  m_vol_ready = true;
+}
+
 void EnhancedPost::free_ssao() {
   if (m_depth_fbo) {
     glDeleteFramebuffers(1, &m_depth_fbo);
@@ -660,10 +746,20 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glUniform1f(glGetUniformLocation(id, "max_distance"), m_settings.ssao_max_distance * kMeter);
   {
     // sun direction into the view space the shader rebuilds from depth
+    // test switch: JAK_ENHANCED_SUN_YAW=<degrees> turns the sun around the world's up axis
+    static const float yaw = [] {
+      const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
+      return env ? (float)std::atof(env) * 3.14159265f / 180.f : 0.f;
+    }();
+    float world_sun[3] = {g_enhanced_sun.dir[0], g_enhanced_sun.dir[1], g_enhanced_sun.dir[2]};
+    if (yaw != 0.f) {
+      world_sun[0] = std::cos(yaw) * g_enhanced_sun.dir[0] + std::sin(yaw) * g_enhanced_sun.dir[2];
+      world_sun[2] = -std::sin(yaw) * g_enhanced_sun.dir[0] + std::cos(yaw) * g_enhanced_sun.dir[2];
+    }
     float sun[3] = {0, 0, 0};
     for (int col = 0; col < 3; col++) {
       for (int row = 0; row < 3; row++) {
-        sun[col] += g_enhanced_sun.dir[row] * cam.rot[row][col];
+        sun[col] += world_sun[row] * cam.rot[row][col];
       }
     }
     // test switch: JAK_ENHANCED_SUN_FLIP=1 puts the sun on the other side (god rays, shadows)
@@ -762,8 +858,12 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_ssao_ready = false;
   m_shafts_ready = false;
   m_gi_ready = false;
+  m_vol_ready = false;
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
+    if (m_settings.volume && m_ssao_ready) {
+      do_volume(render_state, screen_vao, prof);
+    }
     if (m_settings.gi && m_ssao_ready) {
       do_gi(scene_tex, screen_vao, render_state, prof);
     }
@@ -848,6 +948,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_shafts_ready ? m_shaft_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE7);
   glBindTexture(GL_TEXTURE_2D, m_gi_ready ? m_gi_tex[0] : m_black_tex);
+  glActiveTexture(GL_TEXTURE8);
+  glBindTexture(GL_TEXTURE_2D, m_vol_ready ? m_vol_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -858,6 +960,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
   glUniform1i(glGetUniformLocation(id, "tex_T7"), 7);
+  glUniform1i(glGetUniformLocation(id, "tex_T8"), 8);
+  glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
+  glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
+              m_vol_h ? 1.f / m_vol_h : 0.f);
   glUniform1f(glGetUniformLocation(id, "gi_strength"), m_gi_ready ? m_settings.gi_strength : 0.f);
   glUniform1f(glGetUniformLocation(id, "shafts_strength"),
               m_shafts_ready ? m_settings.shafts_strength : 0.f);
@@ -903,6 +1009,14 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Fog height falloff (/m)", &m_settings.fog_height, 0.f, 0.2f);
     ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
     ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
+    ImGui::Checkbox("Volumetric mist", &m_settings.volume);
+    ImGui::SliderFloat("Mist density (/m)", &m_settings.mist_density, 0.f, 0.1f, "%.4f");
+    ImGui::SliderFloat("Mist height (m)", &m_settings.mist_height, 0.5f, 30.f);
+    ImGui::SliderFloat("Mist distance (m)", &m_settings.mist_distance, 20.f, 400.f);
+    ImGui::SliderFloat("Mist ground below camera (m)", &m_settings.mist_ground, -5.f, 20.f);
+    ImGui::SliderFloat("Mist patches", &m_settings.mist_noise, 0.f, 1.f);
+    ImGui::SliderFloat("Mist sunlight", &m_settings.mist_sun, 0.f, 4.f);
+    ImGui::SliderFloat("Mist forward scattering", &m_settings.mist_aniso, 0.f, 0.95f);
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::SliderFloat("Sun relight", &m_settings.relight, 0.f, 2.f);
     ImGui::Checkbox("Indirect light (SSGI)", &m_settings.gi);

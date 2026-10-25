@@ -70,6 +70,14 @@ class EnhancedPost {
     float fog_height = 0.02f;      // per meter above the camera
     float fog_amount = 0.35f;      // at most this much of the fog color
     float haze_strength = 0.0009f;  // heat shimmer over the far ground (uv)
+    bool volume = true;            // volumetric mist lit by the sun, with light shafts
+    float mist_density = 0.004f;   // per meter, at the ground
+    float mist_height = 4.0f;      // meters: density falls by e every this much higher
+    float mist_distance = 120.f;   // meters marched
+    float mist_ground = 1.5f;      // meters: where the ground is assumed below the camera
+    float mist_noise = 0.7f;       // drifting patches
+    float mist_sun = 1.0f;         // sunlight in the mist
+    float mist_aniso = 0.5f;       // forward scattering (brighter looking toward the sun)
     float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
     bool water_reflections = true;
     float water_reflection_strength = 0.6f;
@@ -220,6 +228,14 @@ class EnhancedPost {
   int m_gi_h = 0;
   bool m_gi_ready = false;
   float m_sun_view[3] = {0, 0, 0};
+
+  // volumetric mist, half resolution
+  void do_volume(SharedRenderState* render_state, GLuint screen_vao, ScopedProfilerNode& prof);
+  GLuint m_vol_fbo = 0;
+  GLuint m_vol_tex = 0;
+  int m_vol_w = 0;
+  int m_vol_h = 0;
+  bool m_vol_ready = false;
 
   // temporal anti-aliasing: two history buffers, written in turn
   GLuint m_taa_fbo[2] = {0, 0};

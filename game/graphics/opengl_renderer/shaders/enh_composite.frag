@@ -11,6 +11,9 @@ uniform sampler2D tex_T2;  // ambient occlusion and sun shadows
 uniform sampler2D tex_T3;  // depth (black when no 3D scene this frame)
 uniform sampler2D tex_T4;  // god rays
 uniform sampler2D tex_T7;  // indirect light (SSGI)
+uniform sampler2D tex_T8;  // volumetric mist, half resolution (rgb scattered, a transmittance)
+uniform int volume;
+uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
 uniform vec4 proj;  // a, b, fx, fy (see enh_ssao.frag)
@@ -358,6 +361,28 @@ void main() {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
     c = mix(c, fog_color, amount * fog.z);
+  }
+
+  // volumetric mist: the half-resolution march, upsampled with weights from the depth so the mist
+  // behind Jak doesn't bleed over him
+  if (volume != 0) {
+    vec2 base = (floor(tex_coord / vol_texel - 0.5) + 0.5) * vol_texel;
+    vec2 f = (tex_coord - base) / vol_texel;
+    vec4 sum = vec4(0.0);
+    float wsum = 0.0;
+    for (int j = 0; j < 2; j++) {
+      for (int i = 0; i < 2; i++) {
+        vec2 tuv = base + vec2(i, j) * vol_texel;
+        float tz = view_z(texture(tex_T3, tuv).r);
+        float bw = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
+        float dz = (z > 0.0 && tz > 0.0) ? abs(tz - z) / max(z, 1.0) : (z == tz ? 0.0 : 1.0);
+        float w = bw * exp(-dz * 20.0) + 1e-4;
+        sum += texture(tex_T8, tuv) * w;
+        wsum += w;
+      }
+    }
+    vec4 v = sum / wsum;
+    c = c * v.a + v.rgb;
   }
 
   // bloom and god rays
