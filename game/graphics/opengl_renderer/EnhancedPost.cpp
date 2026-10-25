@@ -237,6 +237,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
   g_enhanced_casters.draws.clear();
+  g_enhanced_casters.next_mod_copy = 0;
   g_enhanced_casters.capture =
       m_settings.enabled && m_settings.shadow_map && m_settings.shadow_casters;
   g_enhanced_normals.enabled = m_settings.enabled && m_settings.geometry_normals;
@@ -1023,7 +1024,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   glDisableVertexAttribArray(1);
   glBindVertexArray(0);
-  if (m_settings.shadow_casters) {
+  // characters only with the sun (or moon) above ~20 degrees: lower, a 2 m character casts a band
+  // tens of meters long that follows it around (the game's own short shadow stays)
+  if (m_settings.shadow_casters && sun[1] / len > 0.34f) {
     draw_shadow_casters(render_state, prof);
   }
   glDisable(GL_POLYGON_OFFSET_FILL);

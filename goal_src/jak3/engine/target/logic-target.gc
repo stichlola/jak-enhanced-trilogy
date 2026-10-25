@@ -279,6 +279,13 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
            )
        )
      )
+    ((5)
+     ;; on the jetboard (granted if the save doesn't have it yet)
+     (when *target*
+       (logior! (-> *game-info* features) (game-feature board))
+       (send-event *target* 'change-mode 'board #f)
+       )
+     )
     )
   (none)
   )

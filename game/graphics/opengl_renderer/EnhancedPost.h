@@ -75,6 +75,14 @@ struct EnhancedCasters {
   u32 alignment = 1;     // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
+  // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2
+  // reuses its own ones within the frame, before the shadow pass replays the draws
+  struct ModCopy {
+    GLuint buffer = 0;
+    GLint size = 0;
+  };
+  std::vector<ModCopy> mod_copies;
+  size_t next_mod_copy = 0;
 };
 extern EnhancedCasters g_enhanced_casters;
 

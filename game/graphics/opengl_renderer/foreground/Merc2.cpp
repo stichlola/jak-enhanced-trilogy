@@ -1,6 +1,7 @@
 #include "Merc2.h"
 
 #include "common/global_profiler/GlobalProfiler.h"
+#include "common/log/log.h"
 #include "common/util/fnv.h"
 #include "common/util/simd_util.h"
 
@@ -1241,19 +1242,51 @@ void Merc2::enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones
     m_enhanced_bone_base = base;
   }
   const auto* lev = bucket.level;
+  // the draws on modified vertices index their own buffer, which Merc2 reuses later in the frame:
+  // copy it now (once per buffer)
+  GLuint last_mod = 0, last_copy = 0;
+  auto mod_copy = [&](GLuint mod_vertices) {
+    if (mod_vertices == last_mod) {
+      return last_copy;
+    }
+    GLint size = 0;
+    glBindBuffer(GL_COPY_READ_BUFFER, mod_vertices);
+    glGetBufferParameteriv(GL_COPY_READ_BUFFER, GL_BUFFER_SIZE, &size);
+    if (cs.next_mod_copy == cs.mod_copies.size()) {
+      cs.mod_copies.emplace_back();
+      glGenBuffers(1, &cs.mod_copies.back().buffer);
+    }
+    auto& copy = cs.mod_copies[cs.next_mod_copy++];
+    glBindBuffer(GL_COPY_WRITE_BUFFER, copy.buffer);
+    if (copy.size < size) {
+      copy.size = size;
+      glBufferData(GL_COPY_WRITE_BUFFER, size, nullptr, GL_DYNAMIC_COPY);
+    }
+    if (size > 0) {
+      glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, 0, size);
+    }
+    last_mod = mod_vertices;
+    last_copy = copy.buffer;
+    return copy.buffer;
+  };
   for (u32 i = 0; i < bucket.next_free_draw; i++) {
     const auto& draw = bucket.draws[i];
-    if (!draw.mode.get_depth_write_enable()) {
-      continue;  // transparent: no shadow
+    const auto blend = draw.mode.get_alpha_blend();
+    const bool blended =
+        draw.mode.get_ab_enable() && blend != DrawMode::AlphaBlend::DISABLED;
+    if (!draw.mode.get_depth_write_enable() ||
+        (blended && blend != DrawMode::AlphaBlend::SRC_DST_SRC_DST)) {
+      continue;  // see-through, glows, additive effects (board trails, flashes): no shadow
     }
     EnhancedCasters::Draw d;
-    d.vertices = lev->merc_vertices;
+    d.vertices = (draw.flags & MOD_VTX) ? mod_copy(draw.mod_vtx_buffer.vertex) : lev->merc_vertices;
     d.indices = lev->merc_indices;
     d.first_index = draw.first_index;
     d.index_count = draw.index_count;
     d.first_bone = m_enhanced_bone_base + draw.first_bone;
     d.strip = !draw.no_strip;
-    if (draw.mode.get_at_enable() && draw.texture >= 0 &&
+    // alpha-tested or alpha-blended: only where the texture is solid
+    if ((draw.mode.get_at_enable() || blended) && draw.texture >= 0 &&
         draw.texture < (int)lev->textures.size()) {
       d.tex = lev->textures[draw.texture];
     }
