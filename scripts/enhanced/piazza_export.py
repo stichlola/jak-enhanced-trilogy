@@ -16,8 +16,9 @@ import math
 import os
 import sys
 
-import bpy
 import bmesh
+import bpy
+import numpy as np
 from mathutils import Vector
 from mathutils.bvhtree import BVHTree
 
@@ -111,15 +112,34 @@ for me in ({o.data for o in objects} if not os.environ.get("JAK_NO_UVSHIFT") els
     for layer in me.uv_layers:
         if not len(layer.data):
             continue
-        for poly in me.polygons:
-            uvs = [layer.data[i].uv for i in poly.loop_indices]
-            du = math.floor(min(u.x for u in uvs))
-            dv = math.floor(min(u.y for u in uvs))
-            if abs(du) >= 2 or abs(dv) >= 2:  # clamped textures near 0 stay as they are
-                for i in poly.loop_indices:
-                    u = layer.data[i].uv
-                    layer.data[i].uv = (u.x - du, u.y - dv)
-                shifted += 1
+        # whole mesh, not per face: the builder welds vertices by position, so UV jumps between
+        # faces (a per-face shift) turned into stretched streaks. Generated meshes must therefore
+        # get small, continuous UVs at the source (planar from a nearby origin), this is a guard.
+        uv = [d.uv.copy() for d in layer.data]
+        du = math.floor(min(u.x for u in uv))
+        dv = math.floor(min(u.y for u in uv))
+        if abs(du) >= 2 or abs(dv) >= 2:  # clamped textures near 0 stay as they are
+            for d, u in zip(layer.data, uv):
+                d.uv = (u.x - du, u.y - dv)
+            shifted += 1
+
+# Haven's palette on the Jak 2 plaza's own textures only (desaturated, cooler, a little darker),
+# baked into the exported images: the renderer's whole-level grade also dulled the Jak 3 surfaces
+# placed in the plaza (port pavement, Metal Head skin) into flat dark grey.
+GRADE = [float(x) for x in os.environ.get("JAK_PLAZA_GRADE", "0.45,0.72,0.72,0.9").split(",")]
+jak2_images = {n.image for o in bpy.data.collections["Jak2 palazzo"].all_objects if o.type == 'MESH'
+               for m in o.data.materials if m and m.node_tree
+               for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image}
+graded = 0
+for img in jak2_images:
+    if not img.pixels:
+        continue
+    px = np.array(img.pixels[:], np.float32).reshape(-1, img.channels)
+    lum = px[:, :3] @ np.array([0.299, 0.587, 0.114], np.float32)
+    px[:, :3] = (lum[:, None] + (px[:, :3] - lum[:, None]) * GRADE[0]) * np.array(GRADE[1:4], np.float32)
+    img.pixels[:] = px.ravel()
+    graded += 1
+print(f"[piazza_export] {graded} Jak 2 plaza textures graded to Haven's palette")
 
 for o in bpy.context.view_layer.objects:
     o.select_set(False)
@@ -132,5 +152,5 @@ bpy.ops.export_scene.gltf(filepath=out, use_selection=True, export_extras=True, 
                           export_apply=True, export_vertex_color="ACTIVE", export_format="GLB")
 faces = sum(len(o.data.polygons) for o in objects)
 print(f"[piazza_export] {len(objects)} objects, {faces} faces, {opaque} alpha links cut, "
-      f"{flipped} faces flipped, {doubled} doubled, {shifted} faces UV-shifted -> {out} "
+      f"{flipped} faces flipped, {doubled} doubled, {shifted} UV sets shifted -> {out} "
       f"({os.path.getsize(out) // 1024} KB)")

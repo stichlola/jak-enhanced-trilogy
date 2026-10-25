@@ -285,7 +285,7 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
               g_enhanced_bg_level == "mhcitya" || g_enhanced_bg_level == "ctyport");
   // Enhanced: the plaza's final grade (saturation, tint), JAK_ENHANCED_PIAZZA_LOOK=sat,r,g,b
   static math::Vector4f piazza_look = [] {
-    math::Vector4f g(0.70f, 0.69f, 0.92f, 0.45f);  // cool, low-saturation: the port's palette
+    math::Vector4f g(1.0f, 1.0f, 1.0f, 1.0f);  // neutral: the Jak 2 textures are graded at export (piazza_export.py)
     if (const char* env = std::getenv("JAK_ENHANCED_PIAZZA_LOOK")) {
       sscanf(env, "%f,%f,%f,%f", &g.w(), &g.x(), &g.y(), &g.z());
     }
