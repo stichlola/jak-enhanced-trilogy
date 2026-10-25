@@ -246,6 +246,13 @@ class EnhancedPost {
                ScopedProfilerNode& prof);
 
   Settings m_settings;
+  // the menu's choices, kept in enhanced-settings.json in the game's settings folder
+  int m_population = 2;  // 0..3, see enhanced-population-count in the game
+  std::string m_saved_settings;
+  std::string menu_settings_json() const;
+  void apply_menu_settings(const std::string& text);
+  void apply_preset(int preset);
+  void save_menu_settings();
   std::array<Level, kLevels> m_levels;
   int m_w = 0;
   int m_h = 0;

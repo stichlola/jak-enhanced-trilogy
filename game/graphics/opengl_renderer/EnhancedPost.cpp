@@ -7,12 +7,15 @@
 #include <vector>
 
 #include "common/log/log.h"
+#include "common/util/FileUtil.h"
+#include "common/util/json_util.h"
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
 #include "game/graphics/pipelines/opengl.h"
+#include "game/runtime.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -82,6 +85,23 @@ void sun_world(float out[3]) {
 }  // namespace
 
 EnhancedPost::EnhancedPost() {
+  // the menu's choices from the last session first, the test switches below win over them
+  try {
+    auto path = file_util::get_user_settings_dir(g_game_version) / "enhanced-settings.json";
+    if (file_util::file_exists(path.string())) {
+      m_saved_settings = file_util::read_text_file(path);
+      apply_menu_settings(m_saved_settings);
+      lg::info("[enhanced] settings loaded from {}", path.string());
+    }
+  } catch (std::exception& e) {
+    lg::error("[enhanced] could not load the saved settings: {}", e.what());
+  }
+  if (const char* pop = std::getenv("JAK_ENHANCED_POPULATION")) {
+    // the game reads the same variable at boot
+    m_population = std::clamp(std::atoi(pop), 0, 3);
+  } else if (m_population != 2) {
+    g_enhanced_menu.ask(6, std::to_string(m_population));
+  }
   const char* env = std::getenv("JAK_ENHANCED");
   if (env && std::strcmp(env, "0") == 0) {
     m_settings.enabled = false;
@@ -1829,6 +1849,14 @@ void EnhancedPost::draw_menu() {
   }
   auto& s = m_settings;
   if (ImGui::CollapsingHeader("Grafica", ImGuiTreeNodeFlags_DefaultOpen)) {
+    static const char* presets[] = {"Classico", "Medio", "Massimo"};
+    ImGui::TextUnformatted("Preset:");
+    for (int i = 0; i < 3; i++) {
+      ImGui::SameLine();
+      if (ImGui::Button(presets[i], ImVec2(120, 0))) {
+        apply_preset(i);
+      }
+    }
     ImGui::Checkbox("Grafica Enhanced (tutto)", &s.enabled);
     ImGui::BeginDisabled(!s.enabled);
     // two columns of switches
@@ -1864,7 +1892,7 @@ void EnhancedPost::draw_menu() {
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
     ImGui::SetNextItemWidth(200);
-    ImGui::Combo("Vegetazione", &g_enhanced_vegetation, "Classica Media Rigogliosa ");
+    ImGui::Combo("Vegetazione", &g_enhanced_vegetation, "Classica\0Media\0Rigogliosa\0");
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");
@@ -1887,15 +1915,12 @@ void EnhancedPost::draw_menu() {
   if (ImGui::CollapsingHeader("Citta'", ImGuiTreeNodeFlags_DefaultOpen)) {
     // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
     // enhanced-population-count); the game reads the same variable at boot
-    static int population = [] {
-      const char* env = std::getenv("JAK_ENHANCED_POPULATION");
-      return env ? std::clamp(std::atoi(env), 0, 3) : 2;
-    }();
     ImGui::SetNextItemWidth(200);
-    if (ImGui::Combo("Popolazione", &population, "Bassa Media Alta Estrema ")) {
-      g_enhanced_menu.ask(6, std::to_string(population));
+    if (ImGui::Combo("Popolazione", &m_population, "Bassa\0Media\0Alta\0Estrema\0")) {
+      g_enhanced_menu.ask(6, std::to_string(m_population));
     }
   }
+  save_menu_settings();
   if (ImGui::CollapsingHeader("Ora del giorno", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Hour {
       const char* name;
@@ -1955,6 +1980,127 @@ void EnhancedPost::draw_menu() {
     }
   }
   ImGui::End();
+}
+
+std::string EnhancedPost::menu_settings_json() const {
+  const auto& s = m_settings;
+  nlohmann::json j;
+  j["enabled"] = s.enabled;
+  j["taa"] = s.taa;
+  j["volume"] = s.volume;
+  j["shadow_map"] = s.shadow_map;
+  j["shadow_casters"] = s.shadow_casters;
+  j["sun_shadows"] = s.sun_shadows;
+  j["ssao"] = s.ssao;
+  j["gi"] = s.gi;
+  j["characters"] = g_enhanced_merc.enabled;
+  j["bloom"] = s.bloom;
+  j["shafts"] = s.shafts;
+  j["dof"] = s.dof;
+  j["motion_blur"] = s.motion_blur;
+  j["lights"] = s.lights;
+  j["lamp_strength"] = s.lamp_strength;
+  j["fire"] = s.fire;
+  j["light_shadow"] = s.light_shadow;
+  j["geometry_normals"] = s.geometry_normals;
+  j["wind"] = g_enhanced_wind.enabled;
+  j["grass_push"] = g_enhanced_wind.push;
+  j["vegetation"] = g_enhanced_vegetation;
+  j["water_reflections"] = s.water_reflections;
+  j["water_swell"] = s.water_swell;
+  j["water_refraction"] = s.water_refraction;
+  j["water_caustics"] = s.water_caustics;
+  j["population"] = m_population;
+  return j.dump(2);
+}
+
+void EnhancedPost::apply_menu_settings(const std::string& text) {
+  auto j = parse_commented_json(text, "enhanced-settings.json");
+  auto get = [&](const char* key, auto& value) {
+    if (j.contains(key)) {
+      value = j.at(key).get<std::decay_t<decltype(value)>>();
+    }
+  };
+  auto& s = m_settings;
+  get("enabled", s.enabled);
+  get("taa", s.taa);
+  get("volume", s.volume);
+  get("shadow_map", s.shadow_map);
+  get("shadow_casters", s.shadow_casters);
+  get("sun_shadows", s.sun_shadows);
+  get("ssao", s.ssao);
+  get("gi", s.gi);
+  get("characters", g_enhanced_merc.enabled);
+  get("bloom", s.bloom);
+  get("shafts", s.shafts);
+  get("dof", s.dof);
+  get("motion_blur", s.motion_blur);
+  get("lights", s.lights);
+  get("lamp_strength", s.lamp_strength);
+  get("fire", s.fire);
+  get("light_shadow", s.light_shadow);
+  get("geometry_normals", s.geometry_normals);
+  get("wind", g_enhanced_wind.enabled);
+  get("grass_push", g_enhanced_wind.push);
+  if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
+    get("vegetation", g_enhanced_vegetation);
+    g_enhanced_vegetation = std::clamp(g_enhanced_vegetation, 0, 2);
+  }
+  get("water_reflections", s.water_reflections);
+  get("water_swell", s.water_swell);
+  get("water_refraction", s.water_refraction);
+  get("water_caustics", s.water_caustics);
+  get("population", m_population);
+  m_population = std::clamp(m_population, 0, 3);
+}
+
+// Classico: the game as it was (the enhanced pass off), Medio: the costly passes off (mist, indirect
+// light, depth of field, the lights' shadows...), Massimo: everything on
+void EnhancedPost::apply_preset(int preset) {
+  auto& s = m_settings;
+  const Settings d;
+  s.enabled = preset > 0;
+  s.taa = d.taa;
+  s.shadow_map = d.shadow_map;
+  s.sun_shadows = d.sun_shadows;
+  s.ssao = d.ssao;
+  s.bloom = d.bloom;
+  s.lights = d.lights;
+  s.lamp_strength = d.lamp_strength;
+  s.fire = d.fire;
+  s.geometry_normals = d.geometry_normals;
+  s.water_reflections = d.water_reflections;
+  s.water_swell = d.water_swell;
+  bool all = preset == 2;
+  s.volume = all && d.volume;
+  s.shadow_casters = all && d.shadow_casters;
+  s.gi = all && d.gi;
+  s.shafts = all && d.shafts;
+  s.dof = all && d.dof;
+  s.motion_blur = all ? d.motion_blur : 0.f;
+  s.light_shadow = all ? d.light_shadow : 0.f;
+  s.water_refraction = all ? d.water_refraction : 0.f;
+  s.water_caustics = all ? d.water_caustics : 0.f;
+  g_enhanced_merc.enabled = preset > 0;
+  g_enhanced_wind.enabled = preset > 0;
+  g_enhanced_wind.push = preset > 0;
+  g_enhanced_vegetation = preset;
+}
+
+// written only when something changed (the menu calls it every frame it is open)
+void EnhancedPost::save_menu_settings() {
+  auto text = menu_settings_json();
+  if (text == m_saved_settings) {
+    return;
+  }
+  m_saved_settings = text;
+  try {
+    auto path = file_util::get_user_settings_dir(g_game_version) / "enhanced-settings.json";
+    file_util::create_dir_if_needed_for_file(path);
+    file_util::write_text_file(path, text);
+  } catch (std::exception& e) {
+    lg::error("[enhanced] could not save the settings: {}", e.what());
+  }
 }
 
 // A warm glow this frame: merged with the one seen at the same spot (a flame is often several
