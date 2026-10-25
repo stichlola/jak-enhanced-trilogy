@@ -24,6 +24,7 @@ EnhancedWind g_enhanced_wind;
 EnhancedCasters g_enhanced_casters;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
+EnhancedExplosions g_enhanced_explosions;
 EnhancedMenu g_enhanced_menu;
 EnhancedNormals g_enhanced_normals;
 
@@ -127,6 +128,10 @@ EnhancedPost::EnhancedPost() {
   if (const char* ls = std::getenv("JAK_ENHANCED_LIGHT_SHADOWS")) {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
+  }
+  if (const char* blast = std::getenv("JAK_ENHANCED_BLAST")) {
+    // explosions' flash and shockwave strength, 0 = off
+    m_settings.blast = (float)std::atof(blast);
   }
   if (const char* fire = std::getenv("JAK_ENHANCED_FIRE")) {
     // 0 = the game's fires as they are; else a scale for the hot air and the embers
@@ -618,6 +623,41 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
+    // explosions: a bright flash fading in half a second (sorted first: the score is huge)
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_explosions.mutex);
+      for (int i = 0; i < g_enhanced_explosions.count; i++) {
+        const float* e = g_enhanced_explosions.pending[i];
+        if (m_blasts.size() < 16) {
+          m_blasts.push_back({{e[0], e[1], e[2]}, std::max(e[3], 1.f * kMeter), m_time});
+        }
+      }
+      g_enhanced_explosions.count = 0;
+    }
+    m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
+                                  [&](const Blast& b) { return m_time - b.start > 0.6; }),
+                   m_blasts.end());
+    for (const auto& b : m_blasts) {
+      if (!on || m_settings.blast <= 0.f) {
+        break;
+      }
+      float age = (float)(m_time - b.start);
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (b.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      c.pos[3] = std::clamp(b.radius * 4.f, 8.f * kMeter, 30.f * kMeter);
+      float k = 4.f * std::exp(-age * 5.f) * m_settings.blast * m_settings.light_strength;
+      c.color[0] = 1.f * k;
+      c.color[1] = 0.62f * k;
+      c.color[2] = 0.3f * k;
+      c.color[3] = 0.f;
+      c.score = 1e6f;
+      candidates.push_back(c);
+    }
     // the levels' own lamps (light spheres), sent by the game with their time-of-day palette
     int lamps = 0;
     if (on) {
@@ -692,6 +732,34 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       fire_seed[fire_count++] = f.seed;
     }
     glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
+    // the nearest explosions in view for the shockwave: view space + radius, age
+    {
+      constexpr int kBlasts = 4;
+      float blast_pos[kBlasts * 4] = {};
+      float blast_age[kBlasts] = {};
+      int blast_count = 0;
+      for (const auto& b : m_blasts) {
+        if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
+          break;
+        }
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (b.pos[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        if (v[2] < 1.f * kMeter) {
+          continue;
+        }
+        std::memcpy(blast_pos + blast_count * 4, v, sizeof(v));
+        blast_pos[blast_count * 4 + 3] = b.radius;
+        blast_age[blast_count++] = (float)(m_time - b.start);
+      }
+      glUniform1i(glGetUniformLocation(id, "blast_count"), blast_count);
+      glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
+      glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
+      glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
+    }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
     glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
     glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
@@ -1925,6 +1993,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Lamp strength", &m_settings.lamp_strength, 0.f, 4.f);
     ImGui::SliderFloat("Lamp reach (x game)", &m_settings.lamp_reach, 0.25f, 3.f);
     ImGui::SliderFloat("Dynamic light shadows", &m_settings.light_shadow, 0.f, 1.f);
+    ImGui::SliderFloat("Explosions (flash, shockwave)", &m_settings.blast, 0.f, 3.f);
     ImGui::Checkbox("Fires (flicker, hot air, embers)", &m_settings.fire);
     ImGui::SliderFloat("Fire hot air", &m_settings.fire_haze, 0.f, 0.05f, "%.3f");
     ImGui::SliderFloat("Fire embers", &m_settings.fire_embers, 0.f, 3.f);

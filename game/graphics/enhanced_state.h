@@ -64,7 +64,7 @@ extern EnhancedGameLights g_enhanced_game_lights;
 // The in-game Enhanced menu (opened with the \ key): its open state, and the one request it hands
 // to the game (polled each frame by pc-enhanced-poll-request). Kinds: 1 hour of the day,
 // 2 continue point name, 3 teleport "x,y,z,yaw" (meters, degrees), 4 time running ("1") or
-// frozen ("0").
+// frozen ("0"), 5 on the jetboard, 6 population ("0".."3").
 struct EnhancedMenu {
   bool open = false;
   std::mutex mutex;
@@ -77,3 +77,13 @@ struct EnhancedMenu {
   }
 };
 extern EnhancedMenu g_enhanced_menu;
+
+// Explosions the game spawned (pc-enhanced-explosion, from explosion-init-by-other): world
+// position and radius (game units), picked up by the post pass for a flash and a shockwave.
+struct EnhancedExplosions {
+  static constexpr int kMax = 16;
+  float pending[kMax][4];
+  int count = 0;
+  std::mutex mutex;
+};
+extern EnhancedExplosions g_enhanced_explosions;

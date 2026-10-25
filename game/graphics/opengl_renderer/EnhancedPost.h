@@ -145,6 +145,7 @@ class EnhancedPost {
     float relight = 1.0f;  // sun shading from depth normals
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
     float light_shadow = 0.85f;  // dynamic lights' screen-space shadows (0 = none)
+    float blast = 1.0f;     // explosions: flash and shockwave (0 = the game's alone)
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
@@ -292,6 +293,13 @@ class EnhancedPost {
     int hits;
   };
   std::vector<FireMemory> m_fires;
+  // explosions of the last moment (world, game units): a flash of light and a shockwave
+  struct Blast {
+    float pos[3];
+    float radius;
+    double start;
+  };
+  std::vector<Blast> m_blasts;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
 

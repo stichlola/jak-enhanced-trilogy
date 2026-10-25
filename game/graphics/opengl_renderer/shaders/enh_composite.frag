@@ -21,6 +21,10 @@ uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
 uniform vec4 light_color[32];
 uniform float light_shadow;     // how dark what blocks a dynamic light makes it (0 = no shadows)
+uniform int blast_count;        // explosions: view space + radius (game units), age (s)
+uniform vec4 blast_pos[4];
+uniform float blast_age[4];
+uniform float blast_strength;
 uniform int fire_count;         // the nearest fires: view space, flame size (game units)
 uniform vec4 fire_pos[4];
 uniform float fire_seed[4];
@@ -272,6 +276,21 @@ void main() {
       height = dot(up_view, p);
     }
   }
+  // explosions: a shockwave ring racing out from each one bends the picture for half a second
+  for (int i = 0; i < blast_count; i++) {
+    vec3 bp = blast_pos[i].xyz;
+    float age = blast_age[i];
+    float ring = blast_pos[i].w * (1.0 + 14.0 * age);  // game units
+    vec2 cuv = vec2(bp.x * proj.z / bp.z, bp.y * proj.w / bp.z) * 0.5 + 0.5;
+    vec2 size = abs(vec2(proj.z, proj.w)) * 0.5 * ring / bp.z;  // the ring's radii in uv
+    vec2 rel = tex_coord - cuv;
+    float r = length(rel / size);
+    float band = exp(-pow((r - 1.0) / 0.12, 2.0)) * (1.0 - smoothstep(0.1, 0.5, age));
+    if (band > 0.001) {
+      uv += normalize(rel + 1e-6) * band * 0.012 * blast_strength;
+    }
+  }
+
   // fires: the hot air over each flame bends what's seen through it
   vec2 fire_axis[4];  // the flame's up in uv, one flame size long
   vec2 fire_uv[4];

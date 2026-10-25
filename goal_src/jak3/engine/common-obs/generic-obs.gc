@@ -2889,6 +2889,12 @@
   )
 
 (defbehavior explosion-init-by-other explosion ((arg0 explosion-init-params))
+  ;; Enhanced: the renderer gives explosions a flash of light and a shockwave
+  (let ((v (new 'stack-no-clear 'vector)))
+    (vector-copy! v (-> arg0 spawn-point))
+    (set! (-> v w) (-> arg0 radius))
+    (pc-enhanced-explosion (the-as pointer v))
+    )
   (mem-copy! (the-as pointer (-> self params)) (the-as pointer arg0) 72)
   (logclear! (-> self mask) (process-mask actor-pause movie))
   (let ((s5-0 (new 'process 'collide-shape self (collide-list-enum hit-by-player))))
