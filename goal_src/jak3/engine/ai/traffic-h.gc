@@ -224,3 +224,27 @@
   (set! (-> v1-5 traffic-object-type-from-vehicle-type 7) (traffic-type guard-car))
   (set! (-> v1-5 traffic-object-type-from-vehicle-type 11) (traffic-type kg-pickup))
   )
+
+;; Enhanced: how crowded the city is (passers-by, traffic, guards, Metal Heads): 0 low, 1 the game's,
+;; 2 high (default), 3 extreme. JAK_ENHANCED_POPULATION=0..3 or the in-game menu.
+(define *enhanced-population-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-population* (if (pc-enhanced-getenv "JAK_ENHANCED_POPULATION" *enhanced-population-buf* 8)
+                                  (max 0 (min 3 (string->int *enhanced-population-buf*)))
+                                  2
+                                  )
+  )
+
+(defun enhanced-population-count ((count int))
+  "The game's wanted count of a kind of citizen scaled by the population setting: never down to
+   zero (or up from it), at most 20 (each kind keeps 20 inactive slots)."
+  (if (<= count 0)
+      count
+      (max 1 (min 20 (the int (+ 0.5 (* (the float count)
+                                          (case *enhanced-population* ((0) 0.5) ((1) 1.0) ((2) 2.0) (else 3.5))
+                                          )
+                                    )
+                          )
+                  )
+           )
+      )
+  )

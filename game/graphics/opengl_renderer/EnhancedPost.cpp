@@ -1693,6 +1693,18 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::EndDisabled();
   }
+  if (ImGui::CollapsingHeader("Citta'", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
+    // enhanced-population-count); the game reads the same variable at boot
+    static int population = [] {
+      const char* env = std::getenv("JAK_ENHANCED_POPULATION");
+      return env ? std::clamp(std::atoi(env), 0, 3) : 2;
+    }();
+    ImGui::SetNextItemWidth(200);
+    if (ImGui::Combo("Popolazione", &population, "Bassa Media Alta Estrema ")) {
+      g_enhanced_menu.ask(6, std::to_string(population));
+    }
+  }
   if (ImGui::CollapsingHeader("Ora del giorno", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Hour {
       const char* name;

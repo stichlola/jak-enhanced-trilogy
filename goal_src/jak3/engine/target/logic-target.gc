@@ -248,7 +248,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 ;; Enhanced: the in-game menu (\ key, EnhancedPost::draw_menu) asks for a time of day, a frozen
-;; clock, a continue point or a teleport; it's carried out here.
+;; clock, a continue point, a teleport, the jetboard or the population; it's carried out here.
 (define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
 
 (defun enhanced-menu-update ()
@@ -285,6 +285,11 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
        (logior! (-> *game-info* features) (game-feature board))
        (send-event *target* 'change-mode 'board #f)
        )
+     )
+    ((6)
+     ;; population 0..3: the traffic manager rescales its wanted counts every frame
+     (set! *enhanced-population* (max 0 (min 3 (string->int *enhanced-menu-buf*))))
+     (format 0 "[enhanced] population ~D~%" *enhanced-population*)
      )
     )
   (none)
