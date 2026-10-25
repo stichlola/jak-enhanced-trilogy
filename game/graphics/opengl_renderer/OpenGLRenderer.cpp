@@ -1017,6 +1017,12 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     if (m_enhanced_post) {
       m_enhanced_post->begin_frame(m_render_state.shaders, m_render_state.render_fb_w,
                                    m_render_state.render_fb_h);
+      // Enhanced: far view = no occlusion culling (things no longer pop in round corners)
+      static bool far_view = false;
+      if (m_enhanced_post->far_view() != far_view) {
+        far_view = m_enhanced_post->far_view();
+        m_render_state.use_occlusion_culling = !far_view;
+      }
     }
     if (settings.gpu_sync) {
       glFinish();

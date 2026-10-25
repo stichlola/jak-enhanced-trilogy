@@ -151,6 +151,10 @@ EnhancedPost::EnhancedPost() {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
   }
+  if (const char* far_view = std::getenv("JAK_ENHANCED_FAR_VIEW")) {
+    // 0 = the game's occlusion culling (precomputed visibility) as it was
+    m_settings.far_view = std::atoi(far_view) != 0;
+  }
   if (const char* smoke = std::getenv("JAK_ENHANCED_LIT_SMOKE")) {
     // how much the dynamic lights brighten and tint the smoke and dust near them, 0 = off
     m_settings.lit_smoke = (float)std::atof(smoke);
@@ -2007,6 +2011,7 @@ void EnhancedPost::draw_menu() {
     if (check("Fumo illuminato", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
     }
+    check("Distanza visiva estesa", &s.far_view);
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
     ImGui::SetNextItemWidth(200);
@@ -2123,6 +2128,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["geometry_normals"] = s.geometry_normals;
   j["prints"] = s.prints;
   j["lit_smoke"] = s.lit_smoke;
+  j["far_view"] = s.far_view;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
@@ -2162,6 +2168,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("geometry_normals", s.geometry_normals);
   get("prints", s.prints);
   get("lit_smoke", s.lit_smoke);
+  get("far_view", s.far_view);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
   if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
@@ -2193,6 +2200,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.geometry_normals = d.geometry_normals;
   s.prints = d.prints;
   s.lit_smoke = d.lit_smoke;
+  s.far_view = d.far_view;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;
