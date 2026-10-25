@@ -54,6 +54,8 @@ extern EnhancedMerc g_enhanced_merc;
 struct EnhancedWind {
   bool enabled = true;
   float strength = 1.0f;
+  bool push = true;          // grass bends away from Jak
+  float push_radius = 1.3f;  // meters
 };
 extern EnhancedWind g_enhanced_wind;
 

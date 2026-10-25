@@ -2002,6 +2002,10 @@ capture exactly."
   (enhanced-piazza-autoload)
   (enhanced-review-update)
   (enhanced-menu-update)
+  ;; Enhanced: grass bends away from Jak
+  (when *target*
+    (pc-enhanced-set-player (the-as pointer (-> *target* control trans)))
+    )
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)

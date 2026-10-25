@@ -17,6 +17,7 @@
 
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
+EnhancedPlayer g_enhanced_player;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
 EnhancedLights g_enhanced_lights;
@@ -101,6 +102,11 @@ EnhancedPost::EnhancedPost() {
     if (m_settings.volume) {
       m_settings.mist_density = (float)std::atof(vol);
     }
+  }
+  if (const char* push = std::getenv("JAK_ENHANCED_GRASS_PUSH")) {
+    // the radius (m) the grass bends away from Jak in, 0 = off
+    g_enhanced_wind.push_radius = (float)std::atof(push);
+    g_enhanced_wind.push = g_enhanced_wind.push_radius > 0.f;
   }
   if (const char* normals = std::getenv("JAK_ENHANCED_NORMALS")) {
     // 0 = normals rebuilt from depth only, 2 = show them
@@ -1467,6 +1473,8 @@ void EnhancedPost::draw_menu() {
     }
     check("Luci dinamiche", &s.lights);
     check("Normali della geometria", &s.geometry_normals);
+    check("Vento sull'erba", &g_enhanced_wind.enabled);
+    check("Erba che si piega", &g_enhanced_wind.push);
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");

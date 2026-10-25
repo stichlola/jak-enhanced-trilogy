@@ -2,6 +2,7 @@
 
 #include <chrono>
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 
 #include "common/log/log.h"
@@ -312,6 +313,11 @@ void Shrub::render_tree(int idx,
     static const auto start = clock::now();
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_time"),
                 std::chrono::duration<float>(clock::now() - start).count());
+    // Jak, and how far around him the grass bends (0 = off)
+    const auto& pl = g_enhanced_player;
+    glUniform4f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_player"),
+                pl.pos[0], pl.pos[1], pl.pos[2],
+                pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * 4096.f : 0.f);
   }
 
   glBindVertexArray(tree.vao);
@@ -374,6 +380,8 @@ void Shrub::render_tree(int idx,
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_wind"),
                 draw.mode.get_at_enable() && g_enhanced_wind.enabled ? g_enhanced_wind.strength
                                                                       : 0.f);
+    glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_foliage"),
+                draw.mode.get_at_enable() ? 1.f : 0.f);
 
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, ShaderId::SHRUB);
 

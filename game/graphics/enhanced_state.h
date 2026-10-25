@@ -15,6 +15,14 @@ struct EnhancedSun {
 };
 extern EnhancedSun g_enhanced_sun;
 
+// Jak's position (world, game units), set every frame by pc-enhanced-set-player: grass bends away
+// from it.
+struct EnhancedPlayer {
+  float pos[3] = {0.f, 0.f, 0.f};
+  bool valid = false;
+};
+extern EnhancedPlayer g_enhanced_player;
+
 // Light sources of the current frame: the game's glow sprites (lamps, torches, shots,
 // explosions), recorded by the sprite renderer (Sprite3_Glow.cpp), used as point lights by the
 // post pass. World positions in game units, colors 0..~2.

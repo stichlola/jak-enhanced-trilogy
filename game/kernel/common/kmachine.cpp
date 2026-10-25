@@ -1096,6 +1096,15 @@ void pc_enhanced_set_sun(u32 vec_ptr) {
   g_enhanced_sun.valid = true;
 }
 
+// Enhanced: Jak's position, for the grass that bends away from him
+void pc_enhanced_set_player(u32 vec_ptr) {
+  auto* v = Ptr<float>(vec_ptr).c();
+  g_enhanced_player.pos[0] = v[0];
+  g_enhanced_player.pos[1] = v[1];
+  g_enhanced_player.pos[2] = v[2];
+  g_enhanced_player.valid = true;
+}
+
 // Enhanced: the lamps near the camera, count pairs of vectors (position + radius, color)
 void pc_enhanced_set_lights(u32 vec_ptr, u32 count) {
   auto* v = Ptr<float>(vec_ptr).c();
@@ -1274,6 +1283,7 @@ void init_common_pc_port_functions(
   // RNG
   make_func_symbol_func("pc-rand", (void*)pc_rand);
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
+  make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);

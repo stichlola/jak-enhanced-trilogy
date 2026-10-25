@@ -17,6 +17,8 @@ uniform mat4 pc_camera;
 uniform sampler1D tex_T10; // note, sampled in the vertex shader on purpose.
 uniform float enh_wind;  // Enhanced: wind strength on this draw (0 = none)
 uniform float enh_time;  // seconds
+uniform float enh_foliage;  // Enhanced: 1 on grass and leaves (cutout draws)
+uniform vec4 enh_player;    // Jak (world, game units), w: the radius the grass bends in (0 = off)
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -51,6 +53,18 @@ void main() {
     float flutter = sin(enh_time * 7.0 + wp.x * 1.7 + wp.y * 1.3) * 0.25;
     float amount = enh_wind * tip * tip * 0.12 * 4096.0;  // up to ~12 cm at the tips
     world.xz += vec2(0.8, 0.6) * (gust + flutter) * amount;
+  }
+  if (enh_foliage > 0.0 && enh_player.w > 0.0) {
+    // pushed aside and pressed down where Jak walks: the tips most, the feet not at all
+    float tip = clamp(1.0 - tex_coord_in.y / 4096.0, 0.0, 1.0);
+    vec3 d = position_in - enh_player.xyz;
+    float hd = length(d.xz);
+    float near = 1.0 - smoothstep(enh_player.w * 0.25, enh_player.w, hd);
+    near *= 1.0 - smoothstep(1.5 * 4096.0, 3.0 * 4096.0, abs(d.y));
+    float push = near * tip * tip;
+    vec2 away = hd > 1.0 ? d.xz / hd : vec2(1.0, 0.0);
+    world.xz += away * push * 0.45 * 4096.0;
+    world.y -= push * 0.25 * 4096.0;
   }
   vec3 vert = world - cam_trans.xyz;
   vec4 transformed = -pc_camera[3];
