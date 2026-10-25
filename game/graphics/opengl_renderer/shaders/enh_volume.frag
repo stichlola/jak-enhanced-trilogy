@@ -17,6 +17,9 @@ uniform vec3 fog_color;
 uniform vec4 mist;         // density at the ground (/m), height scale (m), max distance (m), time (s)
 uniform vec4 mist_shape;   // ground below the camera (m), noise amount, sun intensity, anisotropy
 uniform float frame;
+uniform sampler2DShadow tex_T1;  // sun shadow map
+uniform int shadow_on;
+uniform mat4 light_mvp;          // world (game units) -> shadow map
 
 in vec2 tex_coord;
 out vec4 color;
@@ -60,6 +63,13 @@ float density(vec3 p) {
 
 // is the sun hidden from this view-space point? (screen-space march through the depth buffer)
 float sun_visible(vec3 p) {
+  if (shadow_on != 0) {
+    vec4 l = light_mvp * vec4(view_to_world * p + cam_pos, 1.0);
+    vec3 s = l.xyz * 0.5 + 0.5;
+    if (all(greaterThan(s, vec3(0.0))) && all(lessThan(s, vec3(1.0)))) {
+      return texture(tex_T1, vec3(s.xy, s.z - 0.0002));
+    }
+  }
   const float lengths[8] = float[](0.5, 1.5, 3.0, 5.0, 8.0, 12.0, 18.0, 26.0);
   for (int i = 0; i < 8; i++) {
     vec3 q = p + sun_dir.xyz * lengths[i] * METER;

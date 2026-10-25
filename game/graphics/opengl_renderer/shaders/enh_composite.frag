@@ -13,6 +13,10 @@ uniform sampler2D tex_T4;  // god rays
 uniform sampler2D tex_T7;  // indirect light (SSGI)
 uniform sampler2D tex_T8;  // volumetric mist, half resolution (rgb scattered, a transmittance)
 uniform int volume;
+uniform sampler2DShadow tex_T9;  // sun shadow map
+uniform float shadow_strength;   // 0 = no shadow map this frame
+uniform mat4 light_mvp;          // world (game units) -> shadow map
+uniform mat3 view_to_world;
 uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
@@ -100,6 +104,26 @@ vec3 view_pos(vec2 uv, float d) {
   float z = proj.y / (d * 2.0 - 1.0 - proj.x);
   vec2 ndc = uv * 2.0 - 1.0;
   return vec3(ndc.x * z / proj.z, ndc.y * z / proj.w, z);
+}
+
+// how much of the sun the shadow map says is blocked at a world point (game units), 0..1
+float sun_shadow(vec3 w) {
+  vec4 l = light_mvp * vec4(w, 1.0);
+  vec3 s = l.xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return 0.0;
+  }
+  vec2 t = vec2(1.0 / 4096.0);
+  float lit = 0.0;
+  for (int y = -1; y <= 2; y++) {
+    for (int x = -1; x <= 2; x++) {
+      lit += texture(tex_T9, vec3(s.xy + (vec2(x, y) - 0.5) * t, s.z - 0.00012));
+    }
+  }
+  // fade out toward the edge of the map
+  vec2 e = abs(s.xy * 2.0 - 1.0);
+  float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
+  return (1.0 - lit / 16.0) * fade;
 }
 
 // FXAA (Lottes' compact version): blend along the edge direction where the luma jumps
@@ -331,6 +355,28 @@ void main() {
     return;
   }
   c *= ao;
+
+  // sun shadow map: surfaces facing the sun but blocked from it lose some light (the game's light is
+  // baked per vertex and knows nothing of what stands between them and the sun)
+  if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
+    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
+    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
+    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
+    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
+    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+    vec3 nn = normalize(cross(dx, dy));
+    if (dot(nn, -p) < 0.0) {
+      nn = -nn;
+    }
+    float ndl = dot(nn, sun_dir.xyz);
+    if (ndl > 0.0) {
+      // pushed off the surface along its normal (more far away, where a texel is bigger)
+      vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
+      float sh = sun_shadow(w) * smoothstep(0.0, 0.3, ndl);
+      c *= 1.0 - shadow_strength * sh;
+    }
+  }
 
   // indirect light: what the surroundings send, tinted by this surface's own color
   if (gi_strength > 0.0 && wsurf == 0.0) {

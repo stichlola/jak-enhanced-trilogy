@@ -1,6 +1,8 @@
-#pragma once
+﻿#pragma once
 
 #include <array>
+#include <unordered_map>
+#include <vector>
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 
@@ -52,6 +54,9 @@ class EnhancedPost {
     float ssao_intensity = 1.4f;
     float ssao_max_distance = 250.f;  // meters, faded out beyond
     bool sun_shadows = true;          // screen-space shadows toward the sun, in the same pass
+    bool shadow_map = true;           // real sun shadows: the levels drawn from the sun
+    float shadow_strength = 0.35f;    // how much light a shadow takes off sunlit surfaces
+    float shadow_range = 80.f;        // meters: half the side of the square around the camera
     float sun_shadow_strength = 0.45f;
     float sun_shadow_length = 3.0f;   // meters marched toward the sun
     bool ssao_debug = false;       // show the occlusion alone
@@ -71,12 +76,12 @@ class EnhancedPost {
     float fog_amount = 0.35f;      // at most this much of the fog color
     float haze_strength = 0.0009f;  // heat shimmer over the far ground (uv)
     bool volume = true;            // volumetric mist lit by the sun, with light shafts
-    float mist_density = 0.004f;   // per meter, at the ground
+    float mist_density = 0.006f;   // per meter, at the ground
     float mist_height = 4.0f;      // meters: density falls by e every this much higher
     float mist_distance = 120.f;   // meters marched
     float mist_ground = 1.5f;      // meters: where the ground is assumed below the camera
     float mist_noise = 0.7f;       // drifting patches
-    float mist_sun = 1.0f;         // sunlight in the mist
+    float mist_sun = 1.5f;         // sunlight in the mist
     float mist_aniso = 0.5f;       // forward scattering (brighter looking toward the sun)
     float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
     bool water_reflections = true;
@@ -228,6 +233,24 @@ class EnhancedPost {
   int m_gi_h = 0;
   bool m_gi_ready = false;
   float m_sun_view[3] = {0, 0, 0};
+
+  // sun shadow map: the static geometry of the loaded levels (tfrag, tie) drawn from the sun
+  void do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  struct ShadowDraw {
+    GLuint vertices = 0;
+    GLuint indices = 0;
+    bool own_indices = false;  // tfrag: built here
+    u32 count = 0;
+    GLenum mode = GL_TRIANGLES;
+    bool cut = false;
+  };
+  std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
+  GLuint m_shadow_fbo = 0;
+  GLuint m_shadow_tex = 0;
+  GLuint m_shadow_vao = 0;
+  int m_shadow_res = 0;
+  bool m_shadow_ready = false;
+  float m_light_mvp[16] = {};  // world (game units) -> shadow map clip space, row-major
 
   // volumetric mist, half resolution
   void do_volume(SharedRenderState* render_state, GLuint screen_vao, ScopedProfilerNode& prof);

@@ -8,6 +8,7 @@
 #include "common/log/log.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/loader/common.h"
 
 #include "game/graphics/pipelines/opengl.h"
 
@@ -34,6 +35,19 @@ GLuint make_1x1(u32 rgba) {
 constexpr float kScissorHeightScale = (512.f / 416.f) * 0.5f;
 // GOAL distance units per meter
 constexpr float kMeter = 4096.f;
+
+// the key light in world space; test switch: JAK_ENHANCED_SUN_YAW=<degrees> turns it around the
+// world's up axis
+void sun_world(float out[3]) {
+  static const float yaw = [] {
+    const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
+    return env ? (float)std::atof(env) * 3.14159265f / 180.f : 0.f;
+  }();
+  const float* d = g_enhanced_sun.dir;
+  out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
+  out[1] = d[1];
+  out[2] = -std::sin(yaw) * d[0] + std::cos(yaw) * d[2];
+}
 }  // namespace
 
 EnhancedPost::EnhancedPost() {
@@ -59,6 +73,13 @@ EnhancedPost::EnhancedPost() {
     m_settings.volume = std::atof(vol) > 0.0;
     if (m_settings.volume) {
       m_settings.mist_density = (float)std::atof(vol);
+    }
+  }
+  if (const char* sm = std::getenv("JAK_ENHANCED_SHADOWS")) {
+    // 0 = off (screen-space shadows only), otherwise the strength
+    m_settings.shadow_map = std::atof(sm) > 0.0;
+    if (m_settings.shadow_map) {
+      m_settings.shadow_strength = (float)std::atof(sm);
     }
   }
   if (const char* mist_sun = std::getenv("JAK_ENHANCED_MIST_SUN")) {
@@ -103,6 +124,18 @@ EnhancedPost::~EnhancedPost() {
   if (m_vol_fbo) {
     glDeleteFramebuffers(1, &m_vol_fbo);
     glDeleteTextures(1, &m_vol_tex);
+  }
+  if (m_shadow_fbo) {
+    glDeleteFramebuffers(1, &m_shadow_fbo);
+    glDeleteTextures(1, &m_shadow_tex);
+    glDeleteVertexArrays(1, &m_shadow_vao);
+  }
+  for (auto& [id, draws] : m_shadow_draws) {
+    for (auto& d : draws) {
+      if (d.own_indices) {
+        glDeleteBuffers(1, &d.indices);
+      }
+    }
   }
   glDeleteTextures(1, &m_black_tex);
   glDeleteTextures(1, &m_white_tex);
@@ -393,6 +426,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3f(glGetUniformLocation(id, "right_view"), cam.rot[0][0], cam.rot[0][1], cam.rot[0][2]);
   glUniform3f(glGetUniformLocation(id, "fwd_view"), cam.rot[2][0], cam.rot[2][1], cam.rot[2][2]);
   glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
   glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, m_settings.water_deep);
   glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
   glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
@@ -582,6 +616,182 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   m_gi_ready = true;
 }
 
+void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  m_shadow_ready = false;
+  float sun[3];
+  sun_world(sun);
+  const float len = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
+  const auto& cam = g_enhanced_camera;
+  if (!g_enhanced_sun.valid || len < 1e-6f || sun[1] / len < 0.05f || !cam.valid) {
+    return;  // no sun, or below the horizon
+  }
+
+  constexpr int kRes = 4096;
+  if (m_shadow_res != kRes) {
+    m_shadow_res = kRes;
+    glGenFramebuffers(1, &m_shadow_fbo);
+    glGenTextures(1, &m_shadow_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // hardware comparison: sampler2DShadow, 2x2 filtered
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glGenVertexArrays(1, &m_shadow_vao);
+  }
+
+  // what to draw: geometry 0 (the most detailed) of every tfrag and tie tree of the levels in use;
+  // tfrag keeps its indices on the CPU (they're streamed after culling), so they get a buffer here
+  auto levels = render_state->loader->get_in_use_levels();
+  std::vector<u64> in_use;
+  for (auto* lev : levels) {
+    in_use.push_back(lev->load_id);
+    if (m_shadow_draws.count(lev->load_id)) {
+      continue;
+    }
+    auto& draws = m_shadow_draws[lev->load_id];
+    const auto& name = lev->level->level_name;
+    const bool cut = name == "mhcitya" || name == "ctyport";
+    const auto& tfrags = lev->level->tfrag_trees[0];
+    for (size_t i = 0; i < tfrags.size() && i < lev->tfrag_vertex_data[0].size(); i++) {
+      const auto& tree = tfrags[i];
+      if (tree.kind == tfrag3::TFragmentTreeKind::WATER ||
+          tree.kind == tfrag3::TFragmentTreeKind::LOWRES ||
+          tree.kind == tfrag3::TFragmentTreeKind::LOWRES_TRANS || tree.unpacked.indices.empty()) {
+        continue;
+      }
+      ShadowDraw d;
+      d.vertices = lev->tfrag_vertex_data[0][i];
+      glGenBuffers(1, &d.indices);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, tree.unpacked.indices.size() * sizeof(u32),
+                   tree.unpacked.indices.data(), GL_STATIC_DRAW);
+      d.own_indices = true;
+      d.count = tree.unpacked.indices.size();
+      d.mode = tree.use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      d.cut = cut;
+      draws.push_back(d);
+    }
+    const auto& ties = lev->level->tie_trees[0];
+    for (size_t i = 0; i < ties.size() && i < lev->tie_data[0].size(); i++) {
+      if (ties[i].unpacked.indices.empty()) {
+        continue;
+      }
+      ShadowDraw d;
+      d.vertices = lev->tie_data[0][i].vertex_buffer;
+      d.indices = lev->tie_data[0][i].index_buffer;
+      d.count = ties[i].unpacked.indices.size();
+      d.mode = ties[i].use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      d.cut = cut;
+      draws.push_back(d);
+    }
+  }
+  for (auto it = m_shadow_draws.begin(); it != m_shadow_draws.end();) {
+    if (std::find(in_use.begin(), in_use.end(), it->first) == in_use.end()) {
+      for (auto& d : it->second) {
+        if (d.own_indices) {
+          glDeleteBuffers(1, &d.indices);
+        }
+      }
+      it = m_shadow_draws.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  // the light's frame: f from the sun down, right and up across; a square of 2 * range around a
+  // point ahead of the camera, snapped to whole texels so the edges don't crawl as it moves
+  float f[3] = {-sun[0] / len, -sun[1] / len, -sun[2] / len};
+  float hint[3] = {0.f, 0.f, 1.f};
+  if (std::abs(f[2]) > 0.9f) {
+    hint[0] = 1.f;
+    hint[2] = 0.f;
+  }
+  float right[3] = {hint[1] * f[2] - hint[2] * f[1], hint[2] * f[0] - hint[0] * f[2],
+                    hint[0] * f[1] - hint[1] * f[0]};
+  float rl = std::sqrt(right[0] * right[0] + right[1] * right[1] + right[2] * right[2]);
+  for (auto& r : right) {
+    r /= rl;
+  }
+  float up[3] = {f[1] * right[2] - f[2] * right[1], f[2] * right[0] - f[0] * right[2],
+                 f[0] * right[1] - f[1] * right[0]};
+  const float range = m_settings.shadow_range * kMeter;
+  const float depth = 300.f * kMeter;
+  float center[3];
+  for (int i = 0; i < 3; i++) {
+    // the camera looks down view +z: its forward in world is column 2 of the rotation
+    center[i] = cam.trans[i] + cam.rot[i][2] * range * 0.5f;
+  }
+  const float texel = 2.f * range / kRes;
+  float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
+  float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
+  float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
+  cr = std::floor(cr / texel) * texel;
+  cu = std::floor(cu / texel) * texel;
+  const float rows[3][4] = {{right[0] / range, right[1] / range, right[2] / range, -cr / range},
+                            {up[0] / range, up[1] / range, up[2] / range, -cu / range},
+                            {f[0] / depth, f[1] / depth, f[2] / depth, -cf / depth}};
+  for (int r = 0; r < 3; r++) {
+    for (int c = 0; c < 4; c++) {
+      m_light_mvp[r * 4 + c] = rows[r][c];
+    }
+  }
+  m_light_mvp[12] = m_light_mvp[13] = m_light_mvp[14] = 0.f;
+  m_light_mvp[15] = 1.f;
+
+  GLfloat old_clear_depth = 0.f;
+  GLint old_depth_func = GL_GEQUAL;
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+  glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
+  glViewport(0, 0, kRes, kRes);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glClearDepth(1.0);
+  glClear(GL_DEPTH_BUFFER_BIT);
+  glEnable(GL_POLYGON_OFFSET_FILL);
+  glPolygonOffset(1.5f, 3.f);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+
+  auto& shader = render_state->shaders[ShaderId::ENH_SHADOW];
+  shader.activate();
+  auto id = shader.id();
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  GLint u_cut = glGetUniformLocation(id, "enh_cut");
+  glBindVertexArray(m_shadow_vao);
+  glEnableVertexAttribArray(0);
+  for (auto& [lid, draws] : m_shadow_draws) {
+    for (auto& d : draws) {
+      glUniform1i(u_cut, d.cut);
+      glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex), (void*)0);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+      glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, nullptr);
+      prof.add_draw_call();
+    }
+  }
+  glBindVertexArray(0);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glDisable(GL_PRIMITIVE_RESTART);
+  glClearDepth(old_clear_depth);
+  glDepthFunc(old_depth_func);
+  m_shadow_ready = true;
+}
+
 void EnhancedPost::do_volume(SharedRenderState* render_state,
                              GLuint screen_vao,
                              ScopedProfilerNode& prof) {
@@ -648,6 +858,12 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   glUniform4f(glGetUniformLocation(id, "mist_shape"), m_settings.mist_ground,
               m_settings.mist_noise, m_settings.mist_sun, m_settings.mist_aniso);
   glUniform1f(glGetUniformLocation(id, "frame"), (float)(m_frame % 64));
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : 0);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(id, "shadow_on"), m_shadow_ready);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
   glBindVertexArray(0);
@@ -746,16 +962,8 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glUniform1f(glGetUniformLocation(id, "max_distance"), m_settings.ssao_max_distance * kMeter);
   {
     // sun direction into the view space the shader rebuilds from depth
-    // test switch: JAK_ENHANCED_SUN_YAW=<degrees> turns the sun around the world's up axis
-    static const float yaw = [] {
-      const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
-      return env ? (float)std::atof(env) * 3.14159265f / 180.f : 0.f;
-    }();
-    float world_sun[3] = {g_enhanced_sun.dir[0], g_enhanced_sun.dir[1], g_enhanced_sun.dir[2]};
-    if (yaw != 0.f) {
-      world_sun[0] = std::cos(yaw) * g_enhanced_sun.dir[0] + std::sin(yaw) * g_enhanced_sun.dir[2];
-      world_sun[2] = -std::sin(yaw) * g_enhanced_sun.dir[0] + std::cos(yaw) * g_enhanced_sun.dir[2];
-    }
+    float world_sun[3];
+    sun_world(world_sun);
     float sun[3] = {0, 0, 0};
     for (int col = 0; col < 3; col++) {
       for (int row = 0; row < 3; row++) {
@@ -773,6 +981,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       }
       m_sun_view[i] = sun[i];
     }
+    // kept with the shadow map: characters aren't in the map, these give them their shadows
     const bool on = m_settings.sun_shadows && g_enhanced_sun.valid;
     glUniform4f(glGetUniformLocation(id, "sun"), sun[0], sun[1], sun[2],
                 on ? m_settings.sun_shadow_strength : 0.f);
@@ -859,6 +1068,10 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_shafts_ready = false;
   m_gi_ready = false;
   m_vol_ready = false;
+  m_shadow_ready = false;
+  if (m_settings.shadow_map && g_enhanced_camera.valid) {
+    do_shadow_map(render_state, prof);
+  }
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
     if (m_settings.volume && m_ssao_ready) {
@@ -950,6 +1163,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_gi_ready ? m_gi_tex[0] : m_black_tex);
   glActiveTexture(GL_TEXTURE8);
   glBindTexture(GL_TEXTURE_2D, m_vol_ready ? m_vol_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE9);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : 0);
   glActiveTexture(GL_TEXTURE0);
 
   auto id = shader.id();
@@ -961,6 +1176,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
   glUniform1i(glGetUniformLocation(id, "tex_T7"), 7);
   glUniform1i(glGetUniformLocation(id, "tex_T8"), 8);
+  glUniform1i(glGetUniformLocation(id, "tex_T9"), 9);
+  glUniform1f(glGetUniformLocation(id, "shadow_strength"),
+              m_shadow_ready ? m_settings.shadow_strength : 0.f);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
   glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
               m_vol_h ? 1.f / m_vol_h : 0.f);
@@ -991,6 +1210,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("SSAO intensity", &m_settings.ssao_intensity, 0.f, 3.f);
     ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
     ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
+    ImGui::Checkbox("Sun shadow map", &m_settings.shadow_map);
+    ImGui::SliderFloat("Shadow map strength", &m_settings.shadow_strength, 0.f, 1.f);
+    ImGui::SliderFloat("Shadow map range (m)", &m_settings.shadow_range, 20.f, 200.f);
     ImGui::Checkbox("Sun shadows", &m_settings.sun_shadows);
     ImGui::SliderFloat("Sun shadow strength", &m_settings.sun_shadow_strength, 0.f, 1.f);
     ImGui::SliderFloat("Sun shadow length (m)", &m_settings.sun_shadow_length, 0.5f, 10.f);
