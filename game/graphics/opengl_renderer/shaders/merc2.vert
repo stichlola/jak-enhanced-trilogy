@@ -28,11 +28,12 @@ out vec4 vtx_color;
 out vec2 vtx_st;
 
 out float fog;
-// Enhanced: normal, key light and view direction in the normals' (world) space
+// Enhanced: normal, key light and view direction in the normals' (view) space
 out vec3 vtx_nrm;
 out vec3 vtx_key;
 out vec3 vtx_view;
 out vec3 vtx_key_color;
+out vec3 enh_pos;  // world offset from the camera (for the face normal)
 uniform mat3 enh_world_to_view;
 
 struct MercMatrixData {
@@ -110,7 +111,9 @@ void main() {
   // the light matrix holds the lights' directions in its columns' components
   vtx_key = vec3(light_dir0_fade.x, light_dir1_fade_en.x, light_dir2.x);
   vtx_key_color = light_col0.rgb;
-  // camera space here has x right, y down and z forward like the background's view space
-  vtx_view = -(transpose(enh_world_to_view) * normalize(vtx_pos.xyz));
+  // toward the camera, in the view space the normals and lights are in (vtx_pos is the view
+  // position negated)
+  vtx_view = normalize(vtx_pos.xyz);
+  enh_pos = transpose(enh_world_to_view) * vtx_pos.xyz;
   vtx_st = st_in;
 }

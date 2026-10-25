@@ -1,6 +1,7 @@
 #version 410 core
 
-out vec4 color;
+layout (location = 0) out vec4 color;
+layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
 in vec4 vtx_color;
 in vec2 vtx_st;
 in float fog;
@@ -20,6 +21,8 @@ in vec3 vtx_nrm;
 in vec3 vtx_key;
 in vec3 vtx_view;
 in vec3 vtx_key_color;
+in vec3 enh_pos;
+uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
 
 void main() {
@@ -51,6 +54,21 @@ void main() {
 
   if (ignore_alpha == 0 && color.w < 0.128) {
     discard;
+  }
+  // Enhanced: the normal for the post pass (world), as the levels write it: the smooth one (view
+  // space here) where it stays near the triangle's own face, else the face's
+  {
+    vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
+    float flen = length(f);
+    vec3 sn = transpose(enh_world_to_view) * vtx_nrm;
+    float len = length(sn);
+    vec3 n = vec3(0.0);
+    if (flen > 0.0) {
+      f /= flen;
+      float d = len > 0.1 ? dot(sn / len, f) : 0.0;
+      n = abs(d) > 0.82 ? sn / len * sign(d) : f;
+    }
+    enh_normal_out = flen > 0.0 ? vec4(n * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
   // Enhanced: a rim of the key light around the silhouette, brighter on the lit side, and a soft

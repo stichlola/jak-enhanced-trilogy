@@ -1301,6 +1301,9 @@ void Merc2::do_draws(const Draw* draw_array,
                      ScopedProfilerNode& prof,
                      bool set_fade,
                      SharedRenderState* render_state) {
+  // Enhanced: characters write their normals too (opaque, depth-writing draws: see
+  // setup_opengl_from_draw_mode), else they'd keep the normal of the level behind them
+  EnhancedNormalTarget normals;
   glBindVertexArray(m_vao);
   s32 last_tex = INT32_MIN;
   int last_light = -1;
