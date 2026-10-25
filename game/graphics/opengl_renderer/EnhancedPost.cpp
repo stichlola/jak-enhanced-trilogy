@@ -22,6 +22,7 @@
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
+EnhancedPushers g_enhanced_pushers;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
 EnhancedCasters g_enhanced_casters;

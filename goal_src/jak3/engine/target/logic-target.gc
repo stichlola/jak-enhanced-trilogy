@@ -329,6 +329,9 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   (none)
   )
 
+(define-extern enhanced-update-pushers (function none))
+(define-extern *enhanced-pusher-count* int)
+
 (define *enhanced-census* (new 'static 'array int32 4))
 
 (defun enhanced-census ()
@@ -363,6 +366,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
     (format 0 "[census] kg ~D mh ~D ff ~D citizens ~D "
             (-> *enhanced-census* 0) (-> *enhanced-census* 1) (-> *enhanced-census* 2) (-> *enhanced-census* 3)
             )
+    (format 0 "pushers ~D " *enhanced-pusher-count*)
     (format 0 "at ~,,1f ~,,1f ~,,1f~%" (/ (-> pos x) 4096.0) (/ (-> pos y) 4096.0) (/ (-> pos z) 4096.0))
     )
   (none)
@@ -2052,6 +2056,8 @@ capture exactly."
   (when *target*
     (pc-enhanced-set-player (the-as pointer (-> *target* control trans)))
     )
+  ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)
+  (enhanced-update-pushers)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)

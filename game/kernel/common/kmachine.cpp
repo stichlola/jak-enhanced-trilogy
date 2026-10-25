@@ -1105,6 +1105,18 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   g_enhanced_player.valid = true;
 }
 
+// Enhanced: the enemies and vehicles near Jak (count x y z radius), for the grass too
+void pc_enhanced_set_pushers(u32 data_ptr, u32 count) {
+  auto* v = Ptr<float>(data_ptr).c();
+  auto& p = g_enhanced_pushers;
+  p.count = std::min((int)count, EnhancedPushers::kMax);
+  for (int i = 0; i < p.count; i++) {
+    for (int k = 0; k < 4; k++) {
+      p.pos[i][k] = v[i * 4 + k];
+    }
+  }
+}
+
 // Enhanced: an explosion went off (position, w = radius; game units)
 void pc_enhanced_explosion(u32 vec_ptr) {
   auto* v = Ptr<float>(vec_ptr).c();
@@ -1293,6 +1305,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-rand", (void*)pc_rand);
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
+  make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);

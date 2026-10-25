@@ -23,6 +23,15 @@ struct EnhancedPlayer {
 };
 extern EnhancedPlayer g_enhanced_player;
 
+// The enemies, passers-by and vehicles near Jak (world, game units; w = the radius the grass bends
+// in), set every frame by pc-enhanced-set-pushers
+struct EnhancedPushers {
+  static constexpr int kMax = 8;
+  float pos[kMax][4] = {};
+  int count = 0;
+};
+extern EnhancedPushers g_enhanced_pushers;
+
 // Light sources of the current frame: the game's glow sprites (lamps, torches, shots,
 // explosions), recorded by the sprite renderer (Sprite3_Glow.cpp), used as point lights by the
 // post pass. World positions in game units, colors 0..~2.
