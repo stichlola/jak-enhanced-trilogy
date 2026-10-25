@@ -23,6 +23,7 @@ EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
 EnhancedPushers g_enhanced_pushers;
+EnhancedSmokeLights g_enhanced_smoke_lights;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
 EnhancedCasters g_enhanced_casters;
@@ -150,6 +151,10 @@ EnhancedPost::EnhancedPost() {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
   }
+  if (const char* smoke = std::getenv("JAK_ENHANCED_LIT_SMOKE")) {
+    // how much the dynamic lights brighten and tint the smoke and dust near them, 0 = off
+    m_settings.lit_smoke = (float)std::atof(smoke);
+  }
   if (const char* prints = std::getenv("JAK_ENHANCED_PRINTS")) {
     // footprints and ruts in the sand, 0 = off
     m_settings.prints = (float)std::atof(prints);
@@ -203,6 +208,9 @@ EnhancedPost::EnhancedPost() {
   if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
     m_settings.ssao_debug = true;
   }
+  // what's set now (saved choices plus test switches) counts as saved: the file is written only
+  // when the player changes something in the menu, so a test run's switches don't stick
+  m_saved_settings = menu_settings_json();
 
   // bound in place of the bloom / occlusion when they're off, so the composite always samples
   m_black_tex = make_1x1(0);
@@ -595,6 +603,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     };
     std::vector<Fire> fires;
     const bool on = m_settings.lights && have_scene && cam.valid;
+    g_enhanced_smoke_lights.count = 0;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
       const auto& l = g_enhanced_lights.lights[i];
       Candidate c;
@@ -725,6 +734,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     for (int i = 0; i < n; i++) {
       std::memcpy(pos + i * 4, candidates[i].pos, sizeof(float) * 4);
       std::memcpy(color + i * 4, candidates[i].color, sizeof(float) * 4);
+    }
+    {
+      // the strongest few back in world space for the smoke particles, drawn next frame
+      auto& sl = g_enhanced_smoke_lights;
+      sl.count = std::min(n, EnhancedSmokeLights::kMax);
+      for (int i = 0; i < sl.count; i++) {
+        const auto& c = candidates[i];
+        for (int row = 0; row < 3; row++) {
+          sl.pos[i][row] = cam.trans[row];
+          for (int col = 0; col < 3; col++) {
+            sl.pos[i][row] += cam.rot[row][col] * c.pos[col];
+          }
+        }
+        sl.pos[i][3] = c.pos[3];
+        std::memcpy(sl.color[i], c.color, sizeof(float) * 4);
+      }
+      sl.strength = m_settings.lit_smoke;
     }
     // the fires: forget the ones not seen for a second, the nearest few for the hot air and embers
     m_fires.erase(std::remove_if(m_fires.begin(), m_fires.end(),
@@ -1977,6 +2003,10 @@ void EnhancedPost::draw_menu() {
     if (check("Impronte nella sabbia", &prints)) {
       s.prints = prints ? 1.f : 0.f;
     }
+    bool smoke = s.lit_smoke > 0.f;
+    if (check("Fumo illuminato", &smoke)) {
+      s.lit_smoke = smoke ? 0.8f : 0.f;
+    }
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
     ImGui::SetNextItemWidth(200);
@@ -2092,6 +2122,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["light_shadow"] = s.light_shadow;
   j["geometry_normals"] = s.geometry_normals;
   j["prints"] = s.prints;
+  j["lit_smoke"] = s.lit_smoke;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
@@ -2130,6 +2161,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("light_shadow", s.light_shadow);
   get("geometry_normals", s.geometry_normals);
   get("prints", s.prints);
+  get("lit_smoke", s.lit_smoke);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
   if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
@@ -2160,6 +2192,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.fire = d.fire;
   s.geometry_normals = d.geometry_normals;
   s.prints = d.prints;
+  s.lit_smoke = d.lit_smoke;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;

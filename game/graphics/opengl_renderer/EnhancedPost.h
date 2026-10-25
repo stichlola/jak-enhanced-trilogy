@@ -148,6 +148,7 @@ class EnhancedPost {
     float blast = 1.0f;     // explosions: flash and shockwave (0 = the game's alone)
     float wake = 1.0f;      // rings on the water where Jak swims or rides
     float prints = 1.0f;    // footprints and ruts in the sand
+    float lit_smoke = 0.8f; // the dynamic lights brighten and tint the smoke and dust near them
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;

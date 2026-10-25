@@ -33,6 +33,17 @@ struct EnhancedPushers {
 };
 extern EnhancedPushers g_enhanced_pushers;
 
+// The strongest dynamic lights of the last frame (world, game units; w: radius / strength), for the
+// smoke and dust particles they light (Sprite3)
+struct EnhancedSmokeLights {
+  static constexpr int kMax = 8;
+  float pos[kMax][4] = {};
+  float color[kMax][4] = {};
+  int count = 0;
+  float strength = 0.8f;  // 0 = off
+};
+extern EnhancedSmokeLights g_enhanced_smoke_lights;
+
 // Light sources of the current frame: the game's glow sprites (lamps, torches, shots,
 // explosions), recorded by the sprite renderer (Sprite3_Glow.cpp), used as point lights by the
 // post pass. World positions in game units, colors 0..~2.

@@ -2,6 +2,7 @@
 
 #include "common/log/log.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
 
@@ -630,6 +631,19 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SPRITE3].id(), "alpha_max"),
                 10.f);
     glUniform1i(glGetUniformLocation(render_state->shaders[ShaderId::SPRITE3].id(), "tex_T0"), 0);
+    {
+      // Enhanced: smoke and dust (the normally blended particles) lit by the lights near them
+      const auto& sl = g_enhanced_smoke_lights;
+      auto shader = render_state->shaders[ShaderId::SPRITE3].id();
+      bool lit = mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST && sl.count > 0 &&
+                 sl.strength > 0.f;
+      glUniform1i(glGetUniformLocation(shader, "enh_light_count"), lit ? sl.count : 0);
+      if (lit) {
+        glUniform4fv(glGetUniformLocation(shader, "enh_light_pos"), sl.count, &sl.pos[0][0]);
+        glUniform4fv(glGetUniformLocation(shader, "enh_light_color"), sl.count, &sl.color[0][0]);
+        glUniform1f(glGetUniformLocation(shader, "enh_smoke"), sl.strength);
+      }
+    }
 
     prof.add_draw_call();
     prof.add_tri(2 * (bucket->ids.size() / 5));

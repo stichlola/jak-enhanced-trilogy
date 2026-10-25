@@ -24,6 +24,11 @@ uniform vec4 xy_array[8];
 uniform vec4 xyz_array[4];
 uniform vec4 st_array[4];
 
+uniform int enh_light_count;     // Enhanced: lights near the smoke (world, radius), 0 = unlit
+uniform vec4 enh_light_pos[8];
+uniform vec4 enh_light_color[8];
+uniform float enh_smoke;         // how much they brighten and tint it
+
 flat out vec4 fragment_color;
 out vec3 tex_coord;
 flat out uvec2 tex_info;
@@ -169,6 +174,18 @@ void main() {
   // scissoring area adjust
   transformed.y *= SCISSOR_ADJUST * HEIGHT_SCALE;
   gl_Position = transformed;
+
+  if (enh_light_count > 0 && rendermode != 2u) {
+    // Enhanced: a puff near a lamp or a fire takes its color, by the falloff the post pass uses
+    vec3 added = vec3(0.0);
+    for (int i = 0; i < enh_light_count; i++) {
+      vec3 d = position - enh_light_pos[i].xyz;
+      float r = enh_light_pos[i].w;
+      float k = max(1.0 - dot(d, d) / (r * r), 0.0);
+      added += enh_light_color[i].rgb * (k * k);
+    }
+    fragment_color.rgb *= 1.0 + min(added, vec3(2.0)) * enh_smoke;
+  }
 
   fragment_color *= 2;
   fragment_color.w *= 2;
