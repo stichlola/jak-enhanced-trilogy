@@ -8,6 +8,7 @@
 // Output: rgb = light scattered toward the camera, a = how much of the scene still shows through.
 
 uniform sampler2D tex_T0;  // depth (full resolution)
+uniform sampler2D tex_T2;  // the near sea's surface depth (0 where there's none)
 uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
 uniform mat3 view_to_world;
 uniform vec3 cam_pos;      // world, game units
@@ -92,7 +93,7 @@ float sun_visible(vec3 p) {
 
 void main() {
   vec2 uv = tex_coord;
-  float z = view_z(texture(tex_T0, uv).r);
+  float z = view_z(max(texture(tex_T0, uv).r, texture(tex_T2, uv).r));
   float max_z = mist.z * METER;
   vec2 ndc = uv * 2.0 - 1.0;
   vec3 dir = vec3(ndc.x / proj.z, ndc.y / proj.w, 1.0);  // view ray with z = 1

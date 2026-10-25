@@ -968,6 +968,12 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  // the near sea isn't in the scene depth: the mist stops at its surface, not on the sea bed
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D,
+                m_ocean_ready && m_settings.water_reflections ? m_ocean_depth[1] : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
               m_last_proj[3]);
   // view -> world is the transpose of world -> view

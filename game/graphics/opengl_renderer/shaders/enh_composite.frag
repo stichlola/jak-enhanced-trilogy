@@ -491,7 +491,7 @@ void main() {
     for (int j = 0; j < 2; j++) {
       for (int i = 0; i < 2; i++) {
         vec2 tuv = base + vec2(i, j) * vol_texel;
-        float tz = view_z(texture(tex_T3, tuv).r);
+        float tz = view_z(max(texture(tex_T3, tuv).r, texture(tex_T5, tuv).r));  // near sea too
         float bw = (i == 0 ? 1.0 - f.x : f.x) * (j == 0 ? 1.0 - f.y : f.y);
         float dz = (z > 0.0 && tz > 0.0) ? abs(tz - z) / max(z, 1.0) : (z == tz ? 0.0 : 1.0);
         float w = bw * exp(-dz * 20.0) + 1e-4;
