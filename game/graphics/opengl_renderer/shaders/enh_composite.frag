@@ -55,6 +55,9 @@ uniform vec4 sun_dir;     // toward the sun in view space, w: glint strength (0 
 uniform vec3 water_deep_color;
 uniform vec3 water_shallow_color;
 uniform float water_unify;
+uniform float water_swell_strength;  // open-sea swell (0 = ripples only)
+uniform float water_refraction;      // how far shallow water bends what's under it (uv per slope)
+uniform float water_caustics;        // caustics on the shallow sea bed
 uniform float relight;      // sun relight strength (0 = off)  // how much of our water color replaces the game's
 
 uniform vec4 color_mult;
@@ -97,6 +100,20 @@ float water_height(vec2 w, float t, float foot) {
     q = turn * q;
   }
   return h;
+}
+
+// open-sea swell (m): long waves crossing at an angle, only in deep water (calm in the shallows)
+float water_swell(vec2 w, float t) {
+  return 0.22 * sin(dot(w, vec2(0.13, 0.07)) + t * 0.8) +
+         0.12 * sin(dot(w, vec2(-0.09, 0.17)) + t * 1.1) +
+         0.06 * sin(dot(w, vec2(0.27, -0.21)) + t * 1.7);
+}
+
+// caustics: the bright net that waves focus on a shallow sea bed (0..1), two drifting layers
+float caustics(vec2 w, float t) {
+  float a = 1.0 - abs(gnoise(w * 1.3 + vec2(t * 0.30, t * 0.17)));
+  float b = 1.0 - abs(gnoise(w * 1.7 * mat2(0.8, -0.6, 0.6, 0.8) - vec2(t * 0.21, -t * 0.26)));
+  return pow(a, 6.0) * pow(b, 6.0) * 4.0 + pow(min(a, b), 10.0);
 }
 
 float view_z(float d) {
@@ -238,11 +255,6 @@ void main() {
     float h0 = water_height(world, t, water_foot);
     vec2 slope = vec2(water_height(world + vec2(e, 0.0), t, water_foot) - h0,
                       water_height(world + vec2(0.0, e), t, water_foot) - h0) / e;
-    vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
-    vec3 vdir = normalize(p);
-    vec3 r = reflect(vdir, n);
-    float facing = clamp(dot(-vdir, n), 0.0, 1.0);
-    float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
 
     // how deep the water is here (meters), from the sea bed seen through it (near sea only)
     float depth_m = 40.0;
@@ -250,6 +262,36 @@ void main() {
       depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
     }
     float clear_water = exp(-depth_m / 2.0);
+
+    // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth
+    float swell_amt = water_swell_strength * smoothstep(1.0, 6.0, depth_m) *
+                      (1.0 - smoothstep(0.3, 1.5, water_foot));
+    if (swell_amt > 0.0) {
+      float s0 = water_swell(world, t);
+      slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), t) - s0,
+                                water_swell(world + vec2(0.0, 0.5), t) - s0) / 0.5;
+    }
+    vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
+
+    // what's under shallow water, bent by the waves (refraction), where the bent ray still lands
+    // under water (not on something above the surface); lit by caustics where the sun gets in
+    if (!water_deep && clear_water > 0.02) {
+      vec2 ruv = uv + slope * water_refraction * min(depth_m, 2.0) * far;
+      float rwd = texture(tex_T5, ruv).r;
+      if (rwd > texture(tex_T3, ruv).r + 1e-7) {
+        c = texture(tex_T0, ruv).rgb;
+      }
+      if (sun_dir.w > 0.0 && seabed_level && water_caustics > 0.0) {
+        vec2 bed = vec2(dot(right_view, seabed_p) + cam_pos.x, dot(fwd_view, seabed_p) + cam_pos.z) / 4096.0;
+        float k = caustics(bed, t) * water_caustics * sun_dir.w * smoothstep(0.05, 0.4, depth_m) *
+                  exp(-depth_m / 3.0) * (1.0 - smoothstep(0.3, 1.0, water_foot));
+        c += c * k * vec3(0.9, 1.0, 0.95);
+      }
+    }
+    vec3 vdir = normalize(p);
+    vec3 r = reflect(vdir, n);
+    float facing = clamp(dot(-vdir, n), 0.0, 1.0);
+    float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
 
     // the water's body: one color for the near and far sea (the game draws them differently),
     // shaded a little by the ripples so it keeps some texture; clearer where it's shallow, where

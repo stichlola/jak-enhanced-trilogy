@@ -78,6 +78,12 @@ EnhancedPost::EnhancedPost() {
       m_settings.mist_density = (float)std::atof(vol);
     }
   }
+  if (const char* ws = std::getenv("JAK_ENHANCED_WATER_SIM")) {
+    // 0 = the water without swell, refraction and caustics
+    if (std::atof(ws) <= 0.0) {
+      m_settings.water_swell = m_settings.water_refraction = m_settings.water_caustics = 0.f;
+    }
+  }
   if (const char* lights = std::getenv("JAK_ENHANCED_LIGHTS")) {
     // 0 = off, otherwise the strength
     m_settings.lights = std::atof(lights) > 0.0;
@@ -453,6 +459,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, m_settings.water_deep);
   glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
   glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
+  glUniform1f(glGetUniformLocation(id, "water_swell_strength"), m_settings.water_swell);
+  glUniform1f(glGetUniformLocation(id, "water_refraction"), m_settings.water_refraction);
+  glUniform1f(glGetUniformLocation(id, "water_caustics"), m_settings.water_caustics);
   glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
   {
     // dynamic lights: the glows in view space, the brightest and nearest first, at most kLights
@@ -1389,6 +1398,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::ColorEdit3("Deep water", m_settings.water_deep);
     ImGui::ColorEdit3("Shallow water", m_settings.water_shallow);
     ImGui::SliderFloat("Water color (ours vs game)", &m_settings.water_unify, 0.f, 1.f);
+    ImGui::SliderFloat("Water swell", &m_settings.water_swell, 0.f, 3.f);
+    ImGui::SliderFloat("Water refraction", &m_settings.water_refraction, 0.f, 0.05f);
+    ImGui::SliderFloat("Water caustics", &m_settings.water_caustics, 0.f, 3.f);
     ImGui::SliderFloat("Sun glints", &m_settings.water_glint, 0.f, 3.f);
     ImGui::Checkbox("Bloom", &m_settings.bloom);
     ImGui::SliderFloat("Bloom threshold", &m_settings.bloom_threshold, 0.f, 1.f);

@@ -89,6 +89,9 @@ class EnhancedPost {
     float water_deep[3] = {0.035f, 0.17f, 0.2f};
     float water_shallow[3] = {0.16f, 0.42f, 0.4f};
     float water_unify = 1.0f;
+    float water_swell = 1.0f;       // open-sea swell
+    float water_refraction = 0.012f;  // shallow water bends what is under it
+    float water_caustics = 0.8f;    // caustics on the shallow sea bed
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings

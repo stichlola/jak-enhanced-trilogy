@@ -204,6 +204,49 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 
+;; Enhanced: JAK_ENHANCED_TP=<x,y,z>[,yaw] (meters, degrees) moves Jak there shortly after a test
+;; boot, to look at a spot no continue point shows
+(define *enhanced-tp-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-tp-wanted* (pc-enhanced-getenv "JAK_ENHANCED_TP" *enhanced-tp-buf* 64))
+(define *enhanced-tp-tmp* (new 'global 'string 32 (the-as string #f)))
+
+(defun enhanced-teleport ()
+  (let ((vals (new 'stack-no-clear 'vector))
+        (n 0)
+        (tmp *enhanced-tp-tmp*)
+        (k 0)
+        )
+    (set! (-> vals w) 0.0)
+    ;; split the value at the commas
+    (dotimes (i (+ (length *enhanced-tp-buf*) 1))
+      (let ((ch (if (< i (length *enhanced-tp-buf*)) (-> *enhanced-tp-buf* data i) (the-as uint 0))))
+        (cond
+          ((or (= ch 44) (zero? ch))
+           (set! (-> tmp data k) (the-as uint 0))
+           (when (< n 4)
+             (set! (-> vals data n) (string->float tmp))
+             (+! n 1)
+             )
+           (set! k 0)
+           )
+          (else
+            (set! (-> tmp data k) ch)
+            (+! k 1)
+            )
+          )
+        )
+      )
+    (let ((pos (new 'stack-no-clear 'vector)))
+      (set-vector! pos (* 4096.0 (-> vals x)) (* 4096.0 (-> vals y)) (* 4096.0 (-> vals z)) 1.0)
+      (move-to-point! (-> *target* control) pos)
+      (quaternion-axis-angle! (-> *target* control quat-for-control) 0.0 1.0 0.0 (* 182.04445 (-> vals w)))
+      (quaternion-copy! (-> *target* control quat) (-> *target* control quat-for-control))
+      (format 0 "[enhanced] teleport ~,,1f ~,,1f ~,,1f yaw ~,,1f~%" (-> vals x) (-> vals y) (-> vals z) (-> vals w))
+      )
+    )
+  (none)
+  )
+
 (define *enhanced-census* (new 'static 'array int32 4))
 
 (defun enhanced-census ()
@@ -261,6 +304,10 @@ capture exactly."
       )
     (when (zero? (mod *enhanced-camlog-frames* 300))
       (enhanced-census)
+      )
+    (when (and *enhanced-tp-wanted* *target* (= *enhanced-camlog-frames* 90))
+      (set! *enhanced-tp-wanted* #f)
+      (enhanced-teleport)
       )
     (when (zero? (mod *enhanced-camlog-frames* 120))
       (let ((cam (-> *math-camera* trans))
