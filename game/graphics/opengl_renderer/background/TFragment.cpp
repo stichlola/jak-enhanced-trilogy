@@ -153,7 +153,8 @@ void TFragment::render(DmaFollower& dma,
 
     settings.camera = m_pc_port_data.camera;
     settings.tree_idx = 0;
-    if (render_state->occlusion_vis[m_level_id].valid) {
+    if (render_state->occlusion_vis[m_level_id].valid &&
+        !enhanced_skip_occlusion(m_level_name, settings.camera)) {
       settings.occlusion_culling = render_state->occlusion_vis[m_level_id].data;
     }
 

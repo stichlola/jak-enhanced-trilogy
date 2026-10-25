@@ -283,6 +283,17 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   // Enhanced: the Jak 2 plaza's passages through the Metal Head city and the port
   glUniform1i(glGetUniformLocation(id, "enh_cut"),
               g_enhanced_bg_level == "mhcitya" || g_enhanced_bg_level == "ctyport");
+  // Enhanced: the plaza's final grade (saturation, tint), JAK_ENHANCED_PIAZZA_LOOK=sat,r,g,b
+  static math::Vector4f piazza_look = [] {
+    math::Vector4f g(0.70f, 0.69f, 0.92f, 0.45f);  // cool, low-saturation: the port's palette
+    if (const char* env = std::getenv("JAK_ENHANCED_PIAZZA_LOOK")) {
+      sscanf(env, "%f,%f,%f,%f", &g.w(), &g.x(), &g.y(), &g.z());
+    }
+    return g;
+  }();
+  glUniform1i(glGetUniformLocation(id, "enh_grade_on"), g_enhanced_bg_level == "piazza");
+  glUniform4f(glGetUniformLocation(id, "enh_grade"), piazza_look.x(), piazza_look.y(),
+              piazza_look.z(), piazza_look.w());
   for (int i = 0; i < 3; i++) {
     g_enhanced_camera.trans[i] = settings.trans[i];
   }
@@ -300,7 +311,7 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
 }
 
 namespace {
-// running mean of the time-of-day colors of the city levels around the plaza, and of the plaza
+// running mean of the time-of-day colors of the levels next to the plaza, and of the plaza
 float g_enhanced_city_mean[3] = {0, 0, 0};
 float g_enhanced_piazza_mean[3] = {0, 0, 0};
 
@@ -321,10 +332,19 @@ void enhanced_track_mean(float* mean, const math::Vector<u8, 4>* colors, u32 cou
 }
 }  // namespace
 
+bool enhanced_skip_occlusion(const std::string& level, const GoalBackgroundCameraData& camera) {
+  if (level != "ctyport" && level != "mhcitya") {
+    return false;
+  }
+  float x = camera.trans.x() / 4096.f, z = camera.trans.z() / 4096.f;
+  return x > -30.f && x < 410.f && z > 790.f && z < 1260.f;
+}
+
 void enhanced_grade_custom_level(const std::string& level,
                                  math::Vector<u8, 4>* colors,
                                  u32 count) {
-  if (level.rfind("cty", 0) == 0 || level.rfind("mhcity", 0) == 0) {
+  // the plaza's neighbours: the port and the Metal Head city (not the whole city's backdrop)
+  if (level == "ctyport" || level == "mhcitya") {
     enhanced_track_mean(g_enhanced_city_mean, colors, count);
     return;
   }

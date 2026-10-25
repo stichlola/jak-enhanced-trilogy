@@ -40,7 +40,8 @@ CUT_LEVELS = ("Jak3 mhcitya", "Jak3 ctyport")
 # canvas region, GOAL x and z ranges: the whole plaza and both passages
 REGIONS = (((-20.0, 405.0), (360.0, 1260.0)),)
 # walkways, GOAL (x, z) segment + half width: nothing lower than 6 m above the floor may enter them
-PATHS = (((24.0, 959.0), (104.0, 959.0), 12.0), ((238.0, 1131.0), (198.0, 1208.0), 8.0),
+PATHS = (((24.0, 959.0), (104.0, 959.0), 6.0),  # the middle of the 22 m ramp; its edges take rubble
+         ((238.0, 1131.0), (198.0, 1208.0), 8.0),
          # into the north part of the plaza, up to the palace steps
          ((190.0, 900.0), (200.0, 800.0), 6.0), ((200.0, 800.0), (150.0, 765.0), 6.0))
 CELL = 2.5
@@ -204,8 +205,13 @@ def paint_junctions(context, canvas, paths=None):
                                 math.sin(math.radians(el))))
                     hit = scene.ray(eye, d, 80.0)
                     if hit is None:
-                        if el < 0:  # no ground where there should be: a hole
-                            spots.append((eye + d * (1.6 / math.sin(math.radians(-el))), 1.0))
+                        if el < 0:  # no ground where there should be: walk out to where it ends
+                            flat = Vector((d.x, d.y, 0)).normalized()
+                            for k in range(1, 60):
+                                q = eye + flat * (0.5 * k)
+                                if scene.ground(q, above=1.0, depth=8.0) is None:
+                                    spots.append((q, 1.0))
+                                    break
                         continue
                     loc, nrm, _name = hit
                     if nrm.dot(d) > 0.05 and (loc - eye).length < 45:  # inside of a shell
@@ -228,16 +234,18 @@ def placed_names():
 
 
 def wall_tree(scene, bounds):
-    """BVH of the wall triangles drawn around the canvas, world space: steep and at least 1.2 m tall
-(curbs, steps and planter edges don't count)."""
+    """BVH of the wall triangles drawn around the canvas, world space: the steep faces of objects at
+least 1.2 m tall (curbs, steps and planter edges don't count; pillars and cornices do)."""
     lo, hi = bounds
     verts, tris, normals, centers = [], [], [], []
     for o in bpy.data.objects:
         if o.type != 'MESH' or o.name in scene.ignore or o.name == CANVAS:
             continue
-        if any(w in o.name.lower() for w in ("rub", "shard", "debris")):
-            continue  # rubble against rubble is fine
+        if o.get("macerie_batch") or o.name.startswith(("grande_", "nuovo_", "pass", "Passaggio rampa")):
+            continue  # our own rubble is tested piece by piece (Obstacles), not as walls
         bb = [o.matrix_world @ Vector(c) for c in o.bound_box]
+        if max(v.z for v in bb) - min(v.z for v in bb) < 1.2:
+            continue  # curbs, steps, planter edges
         if (max(v.x for v in bb) < lo.x or min(v.x for v in bb) > hi.x or
                 max(v.y for v in bb) < lo.y or min(v.y for v in bb) > hi.y):
             continue
@@ -255,8 +263,6 @@ def wall_tree(scene, bounds):
             n = np.cross(b - a, c - a)
             ln = np.linalg.norm(n)
             if ln < 1e-6 or abs(n[2] / ln) > 0.6:
-                continue
-            if max(a[2], b[2], c[2]) - min(a[2], b[2], c[2]) < 1.2:
                 continue
             base = len(verts)
             verts += [Vector(a), Vector(b), Vector(c)]
@@ -330,7 +336,7 @@ class Obstacles:
         return n
 
 
-def settle(scene, me, m, sink, rejected, lean):
+def settle(scene, me, m, sink, rejected, lean, fallback_z=None):
     """Drop a posed piece onto the ground: the median of its lowest points touches it, sunk a
     little. None if it would sit on one edge (a leaning slab instead rests on its low edge)."""
     pts = [m @ vv.co for vv in me.vertices]
@@ -338,10 +344,12 @@ def settle(scene, me, m, sink, rejected, lean):
     h = max(q.z for q in pts) - zmin
     band = [q for q in pts if q.z < zmin + 0.2 * h + 0.05] or pts
     gaps = []
-    for q in band[:16]:
+    for q in band[::max(1, len(band) // 16)]:
         gq = scene.ground(q, above=h + 2.0, depth=h + 10.0)
         if gq:
             gaps.append(q.z - gq[0].z)
+        elif fallback_z is not None:  # over a hole: rest on the level of the floor around it
+            gaps.append(q.z - fallback_z)
     if not gaps:
         rejected["no ground"] += 1
         return None
@@ -350,10 +358,13 @@ def settle(scene, me, m, sink, rejected, lean):
     if not lean and max(gaps) + dz > 0.3 * h + 0.3:
         rejected["edge"] += 1
         return None
+    if min(gaps) + dz < -(0.15 * h + 0.05):  # a corner buried deep in a rise or a step
+        rejected["buried"] += 1
+        return None
     return Matrix.Translation((0, 0, dz)) @ m
 
 
-def place(context, canvas, props):
+def place(context, canvas, props, only=None, lean_prob=0.4, bits_on=True, flat_tilt=6.0, walkway_ok=False):
     """Add one batch of pieces over the current paint, then move the paint to LAST_GROUP.
 
     Style "Crollo" (like Jak 3's fallen city): slabs and beams lie on their flat side, a third of
@@ -370,7 +381,11 @@ def place(context, canvas, props):
     shapes = {o.name: template_shape(o) for o in pool}
     templates = [o for o in pool if props.macerie_min <= max(o.dimensions) <= props.macerie_max * 1.2]
     slab_names = ("lastra_", "muro_", "trave_")
-    if crollo:  # thick broken slabs and beams, a few of the ripped panels and girders, no spiky rocks
+    if only:  # one family only (e.g. "porto_" pavement, "crosta_" Metal Head skin)
+        templates = [o for o in pool if o.name.startswith(only)
+                     and props.macerie_min <= max(o.dimensions) <= props.macerie_max * 1.2]
+        bits = []
+    elif crollo:  # thick broken slabs and beams, a few of the ripped panels and girders, no spiky rocks
         others = [o for o in templates if not o.name.startswith(slab_names + ("frammento_",))
                   and not any(k in o.name for k in ("rubble-pile", "shard", "rebar", "brick", "crater"))
                   and shapes[o.name][3] != "block"]
@@ -418,14 +433,14 @@ def place(context, canvas, props):
         lean = False
         if crollo and kind != "block":
             base = lie_flat(thin)
-            if kind == "slab" and not small and rng.random() < 0.4:
+            if kind == "slab" and not small and rng.random() < lean_prob:
                 # lift one long edge: turn about the slab's long axis (once lying flat)
                 axis = base @ Vector([1.0 if i == long_axis else 0.0 for i in range(3)])
                 tilt = Quaternion(axis, math.radians(rng.uniform(15, 60)) * rng.choice((-1, 1)))
                 lean = True
             else:
                 tilt = Quaternion(Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)).normalized(),
-                                  math.radians(rng.uniform(0, 6)))
+                                  math.radians(rng.uniform(0, flat_tilt)))
             rot = Vector((0, 0, 1)).rotation_difference(up) @ yaw @ tilt @ base
         else:
             tilt_axis = Vector((rng.uniform(-1, 1), rng.uniform(-1, 1), 0)).normalized()
@@ -437,7 +452,8 @@ def place(context, canvas, props):
                    rejected, lean)
         if m is None:
             return None
-        if any(path_distance(q.x, -q.y) < 0.5 and q.z < gp.z + 6.0 for q in (m @ vv.co for vv in me.vertices)):
+        if not walkway_ok and any(path_distance(q.x, -q.y) < 0.5 and q.z < gp.z + 6.0
+                                  for q in (m @ vv.co for vv in me.vertices)):
             rejected["walkway"] += 1
             return None
         # through a wall: slide it away from the wall, up to 4.5 m
@@ -458,17 +474,22 @@ def place(context, canvas, props):
             if hits:
                 rejected["wall"] += 1
                 return None
-            if any(path_distance(q.x, -q.y) < 0.5 and q.z < gp.z + 6.0
-                   for q in (m @ vv.co for vv in me.vertices)):
+            m = settle(scene, me, m, 0.02 if (crollo and kind != "block") else props.macerie_affonda,
+                       rejected, lean)
+            if m is None:
+                return None
+            if not walkway_ok and any(path_distance(q.x, -q.y) < 0.5 and q.z < gp.z + 6.0
+                                      for q in (m @ vv.co for vv in me.vertices)):
                 rejected["walkway"] += 1
                 return None
         box = aabb(me, m)
         tree = piece_tree(me, m)
         # touching is fine (a leaning slab rests on its neighbour), going through is not
-        if obstacles.hits(box, tree) > (0 if small else 6):
+        if obstacles.hits(box, tree) > 0:
             rejected["overlap"] += 1
             return None
-        ob = bpy.data.objects.new("macerie_" + tpl.name.split("_", 1)[-1], me)
+        family = tpl.name.startswith(("lastra_", "muro_", "trave_", "frammento_", "porto_", "crosta_"))
+        ob = bpy.data.objects.new("macerie_" + (tpl.name if family else tpl.name.split("_", 1)[-1]), me)
         ob.matrix_world = m
         ob["set_collision"] = 1
         ob["ignore"] = 1
@@ -483,7 +504,7 @@ def place(context, canvas, props):
             u, v = rng.random(), rng.random()
             c0, c1, c2, c3 = (co[i] for i in vs)
             p = (c0 * (1 - u) + c1 * u) * (1 - v) + (c3 * (1 - u) + c2 * u) * v
-            if path_distance(p.x, -p.y) < 1.0:
+            if not walkway_ok and path_distance(p.x, -p.y) < 1.0:
                 rejected["walkway"] += 1
                 continue
             # bigger pieces where the paint is stronger
@@ -495,7 +516,7 @@ def place(context, canvas, props):
                 continue
             made += 1
             # small flat bits scattered around it
-            if crollo and bits:
+            if crollo and bits and bits_on:
                 r = max(ob.dimensions) * 0.6 + 1.0
                 for _b in range(rng.randint(1, 3)):
                     a = rng.uniform(0, 2 * math.pi)
@@ -509,6 +530,52 @@ def place(context, canvas, props):
     write_weights(canvas, w, LAST_GROUP)
     write_weights(canvas, np.zeros_like(w))
     return made, rejected
+
+
+def audit_support(context, max_gap=0.6, flat_gap=0.35):
+    """Remove brush pieces that rest on nothing: the median gap under their lowest points must be
+    small, against the level (flat transition pieces) or the level and other pieces (the rest).
+    Repeats until nothing changes, as removing a piece can leave the ones on it floating."""
+    col = bpy.data.collections.get(OUT_COLLECTION)
+    if not col:
+        return 0
+
+    def gap(o, scene):
+        pts = sorted((o.matrix_world @ v.co for v in o.data.vertices), key=lambda q: q.z)[:8]
+        gaps = []
+        for q in pts:
+            g = scene.ground(q + Vector((0, 0, 0.05)), above=0.5, depth=40.0)
+            gaps.append(q.z - g[0].z if g else 99.0)
+        gaps.sort()
+        # resting: most of its low points touch (lying), or a whole edge does (leaning: at least 3
+        # low points), not a single point (a cantilever)
+        touching = sum(1 for g in gaps if g <= 0.3)
+        return 0.0 if touching >= 3 else gaps[len(gaps) // 2]
+
+    removed = 0
+    while True:
+        names = {o.name for o in col.objects}
+        level = Scene(context, extra_ignore={CANVAS} | names)
+        with_pieces = Scene(context, extra_ignore={CANVAS})
+        gone = []
+        for o in list(col.objects):
+            flat = o.data.name.startswith(("porto_", "crosta_"))  # the mesh keeps the family name
+            g = gap(o, level)
+            if flat:
+                if g > flat_gap:
+                    gone.append(o)
+                continue
+            if g > max_gap:
+                with_pieces.ignore.add(o.name)
+                g2 = gap(o, with_pieces)
+                with_pieces.ignore.discard(o.name)
+                if g2 > max_gap:
+                    gone.append(o)
+        for o in gone:
+            bpy.data.objects.remove(o)
+        removed += len(gone)
+        if not gone:
+            return removed
 
 
 def repaint_from_pieces(canvas):
@@ -557,12 +624,14 @@ FLOOR_MATERIALS = ("city-pal-ground-01", "ctyn-ground-raised-01")
 WALL_MATERIALS = ("ctyn-blue-wall-lower-02", "ctyn-green-wall-lower-01", "ctyn-beige-wall-upper-02",
                   "ctyn-black-wall-lower-01", "ctyn-wall-2")
 BEAM_MATERIALS = ("ctyn-beams", "ctyn-generic-metal")
+PORT_MATERIAL = "city-port-pavmnt-01"  # the port's floor (Jak 3)
+MH_MATERIAL = "mhcity-skin-ground-01.001"  # the Metal Head city's floor (Jak 3)
 
 
 def meters_per_uv(material_name):
     """How many meters one UV unit spans where the plaza uses this material (median)."""
     ratios = []
-    for o in bpy.data.collections["Jak2 palazzo"].all_objects:
+    for o in bpy.data.objects:
         if o.type != 'MESH' or material_name not in [m.name for m in o.data.materials if m]:
             continue
         me = o.data
@@ -591,7 +660,6 @@ def build_slab(name, outline, thickness, top_mat, side_mat, mpu_top, mpu_side, r
     """A thick broken slab: outline (x, y) in meters, bottom at z 0, top textured."""
     bm = bmesh.new()
     uv = bm.loops.layers.uv.new("UVMap")
-    colr = bm.loops.layers.color.new("Color")
     ox, oy = rng.uniform(0, 1), rng.uniform(0, 1)
     top_z = [thickness * rng.uniform(0.9, 1.1) for _ in outline]
     bot = [bm.verts.new((x, y, 0.0)) for x, y in outline]
@@ -617,12 +685,14 @@ def build_slab(name, outline, thickness, top_mat, side_mat, mpu_top, mpu_side, r
                 lp[uv].uv = ((co.x * d.x + co.y * d.y) / mpu_side + ox, co.z / mpu_side + oy)
             else:
                 lp[uv].uv = (co.x / mpu_top + ox, co.y / mpu_top + oy)
-            lp[colr] = (0.54, 0.54, 0.54, 1.0)  # the plaza's mean baked light
     me = bpy.data.meshes.new(name)
     bm.to_mesh(me)
     bm.free()
-    # the materials read the active color attribute: without it they render black
-    me.color_attributes.active_color = me.color_attributes[0]
+    # byte corner colors like the ripped levels (float ones come out black in the game), active:
+    # the materials read the active color attribute
+    ca = me.color_attributes.new("Color", 'BYTE_COLOR', 'CORNER')
+    ca.data.foreach_set("color", [0.54, 0.54, 0.54, 1.0] * len(ca.data))  # the plaza's mean light
+    me.color_attributes.active_color = ca
     me.color_attributes.render_color_index = 0
     me.materials.append(bpy.data.materials[top_mat])
     me.materials.append(bpy.data.materials[side_mat])
@@ -649,7 +719,8 @@ def make_slab_templates(seed=11):
         bpy.context.scene.collection.children.link(col)
     for o in list(col.objects):
         bpy.data.objects.remove(o)
-    mpu = {m: meters_per_uv(m) for m in FLOOR_MATERIALS + WALL_MATERIALS + BEAM_MATERIALS + (SIDE_MATERIAL,)}
+    mpu = {m: meters_per_uv(m) for m in FLOOR_MATERIALS + WALL_MATERIALS + BEAM_MATERIALS +
+           (SIDE_MATERIAL, PORT_MATERIAL, MH_MATERIAL)}
     made = []
 
     def add(name, me):
@@ -664,22 +735,35 @@ def make_slab_templates(seed=11):
         L = rng.uniform(3, 14)
         mat = FLOOR_MATERIALS[0] if rng.random() < 0.75 else FLOOR_MATERIALS[1]
         add(f"lastra_{i:02d}", build_slab(f"lastra_{i:02d}", broken_outline(L, L * rng.uniform(0.45, 0.9), rng),
-                                          rng.uniform(0.5, 1.3), mat, SIDE_MATERIAL, mpu[mat], mpu[SIDE_MATERIAL], rng))
+                                          min(1.6, max(0.35, L * rng.uniform(0.08, 0.14))), mat, SIDE_MATERIAL,
+                                          mpu[mat], mpu[SIDE_MATERIAL], rng))
     for i in range(14):  # wall chunks, 4-12 m
         L = rng.uniform(4, 12)
         mat = rng.choice(WALL_MATERIALS)
         add(f"muro_{i:02d}", build_slab(f"muro_{i:02d}", broken_outline(L, L * rng.uniform(0.35, 0.7), rng),
-                                        rng.uniform(0.4, 0.9), mat, SIDE_MATERIAL, mpu[mat], mpu[SIDE_MATERIAL], rng))
+                                        min(1.4, max(0.35, L * rng.uniform(0.08, 0.13))), mat, SIDE_MATERIAL,
+                                        mpu[mat], mpu[SIDE_MATERIAL], rng))
     for i in range(8):  # beams, 6-20 m
         L, t = rng.uniform(6, 20), rng.uniform(0.6, 1.3)
         mat = rng.choice(BEAM_MATERIALS)
         outline = [(-L / 2, -t / 2), (L / 2, -t / 2 * rng.uniform(0.6, 1)), (L / 2, t / 2), (-L / 2, t / 2 * rng.uniform(0.6, 1))]
         add(f"trave_{i:02d}", build_slab(f"trave_{i:02d}", outline, t * rng.uniform(0.7, 1.1), mat, mat, mpu[mat], mpu[mat], rng))
+    for i in range(20):  # the port's pavement, broken over the plaza side of the seam
+        L = rng.uniform(2.5, 9)
+        mat = PORT_MATERIAL
+        add(f"porto_{i:02d}", build_slab(f"porto_{i:02d}", broken_outline(L, L * rng.uniform(0.5, 0.95), rng),
+                                         rng.uniform(0.15, 0.45), mat, SIDE_MATERIAL, mpu[mat], mpu[SIDE_MATERIAL], rng))
+    for i in range(16):  # Metal Head skin creeping onto the plaza from mhcity
+        L = rng.uniform(3, 12)
+        mat = MH_MATERIAL
+        add(f"crosta_{i:02d}", build_slab(f"crosta_{i:02d}", broken_outline(L, L * rng.uniform(0.4, 0.9), rng, rng.randint(7, 10)),
+                                          rng.uniform(0.08, 0.25), mat, mat, mpu[mat], mpu[mat], rng))
     for i in range(30):  # small fragments, 0.6-3 m
         L = rng.uniform(0.6, 3.0)
         mat = FLOOR_MATERIALS[0] if rng.random() < 0.6 else rng.choice(WALL_MATERIALS)
         add(f"frammento_{i:02d}", build_slab(f"frammento_{i:02d}", broken_outline(L, L * rng.uniform(0.4, 0.9), rng, rng.randint(4, 6)),
-                                             rng.uniform(0.12, 0.4), mat, SIDE_MATERIAL, mpu[mat], mpu[SIDE_MATERIAL], rng))
+                                             max(0.2, L * rng.uniform(0.2, 0.4)), mat, SIDE_MATERIAL,
+                                             mpu[mat], mpu[SIDE_MATERIAL], rng))
     return made, mpu
 
 

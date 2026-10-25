@@ -59,6 +59,11 @@ void interp_time_of_day(const math::Vector<s32, 4> itimes[4],
 // tint of the palette weights (yellow, too bright in Haven). The city levels' mean color is tracked
 // and the plaza's colors are scaled per channel to the same mean: it follows the city's grading
 // at every time of day. Call after interp_time_of_day for every level.
+// Enhanced: the port and the Metal Head city seen from the Jak 2 plaza (a place the original game
+// never put the camera): their precomputed visibility hides walls that are in plain sight there
+// and leaves bits floating in the sky. Inside the plaza's area they are drawn without it.
+bool enhanced_skip_occlusion(const std::string& level, const GoalBackgroundCameraData& camera);
+
 void enhanced_grade_custom_level(const std::string& level, math::Vector<u8, 4>* colors, u32 count);
 
 void cull_check_all_slow(const math::Vector4f* planes,

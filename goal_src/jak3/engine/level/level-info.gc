@@ -20725,10 +20725,10 @@
       (new 'static 'continue-point
         :name "piazza-varco-porto"
         :level 'piazza
-        :trans (static-vectorm 233 8.5 1137)
-        :camera-trans (static-vectorm 237.5 13 1128)
-        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -7528 0 31890))
-        :camera-rot (new 'static 'array int16 9 29308 0 14654 -1758 32530 3517 -14548 -3932 29096)
+        :trans (static-vectorm 224 8.2 1157)
+        :camera-trans (static-vectorm 227.5 14 1149)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 -6709 0 32073))
+        :camera-rot (new 'static 'array int16 9 30020 0 13134 -1970 32396 4503 -12985 -4915 29680)
         :on-goto #f
         :vis-nick 'pzz
         :vehicle-type #x1b
@@ -20744,10 +20744,10 @@
       (new 'static 'continue-point
         :name "piazza-test-dal-porto"
         :level 'ctyport
-        :trans (static-vectorm 203 2.5 1199)
-        :camera-trans (static-vectorm 198.5 7 1208)
-        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 31890 0 7528))
-        :camera-rot (new 'static 'array int16 9 -29308 0 -14654 1758 32530 -3517 14548 -3932 -29096)
+        :trans (static-vectorm 204 3.0 1197)
+        :camera-trans (static-vectorm 197 7.5 1212)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 31989 0 7097))
+        :camera-rot (new 'static 'array int16 9 -29693 0 -13857 -554 32741 1188 13846 1311 -29669)
         :on-goto #f
         :vis-nick 'ctyport
         :vehicle-type #x1b
@@ -20774,6 +20774,23 @@
           (new 'static 'level-buffer-state-small :name 'ctyport :display? 'display)
           (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
           (new 'static 'level-buffer-state-small :name 'piazza :display? 'display)
+          )
+        :want-sound (new 'static 'array symbol 3 #f #f #f)
+        )
+      (new 'static 'continue-point
+        :name "piazza-test-da-mhcity"
+        :level 'mhcitya
+        :trans (static-vectorm 32 14.6 959)
+        :camera-trans (static-vectorm 21 20 959)
+        :quat (new 'static 'vector4h :data (new 'static 'array int16 4 0 23170 0 23170))
+        :camera-rot (new 'static 'array int16 9 0 0 -32767 4915 32396 0 32396 -4915 0)
+        :on-goto #f
+        :vis-nick 'mhcitya
+        :vehicle-type #x1b
+        :want-count 2
+        :want (new 'static 'inline-array level-buffer-state-small 2
+          (new 'static 'level-buffer-state-small :name 'ctywide :display? 'display)
+          (new 'static 'level-buffer-state-small :name 'mhcitya :display? 'display)
           )
         :want-sound (new 'static 'array symbol 3 #f #f #f)
         )

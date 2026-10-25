@@ -64,8 +64,14 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
         "  vec2 ab = b - a; float t = clamp(dot(p.xz - a, ab) / dot(ab, ab), 0.0, 1.0);\n"
         "  return length(p.xz - (a + ab * t)) < 6.5 && p.y > 4.6 && p.y < 16.0;\n"
         "}\n"
+        // a final grade for the levels that need it (the Jak 2 plaza: sit with Haven's palette)
+        "uniform int enh_grade_on;\nuniform vec4 enh_grade;\n"
         "void main() {\n  if (enh_cut != 0 && enh_in_cut(enh_world)) discard;\n"
-        "  enh_cut_frag_main();\n}\n";
+        "  enh_cut_frag_main();\n"
+        "  if (enh_grade_on != 0) {\n"
+        "    float l = dot(color.rgb, vec3(0.299, 0.587, 0.114));\n"
+        "    color.rgb = mix(vec3(l), color.rgb, enh_grade.a) * enh_grade.rgb;\n"
+        "  }\n}\n";
   }
 
   // Enhanced TAA: wrap main() to add the frame's sub-pixel jitter to the final position

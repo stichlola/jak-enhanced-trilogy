@@ -352,7 +352,8 @@ bool Tie3::set_up_common_data_from_dma(DmaFollower& dma, SharedRenderState* rend
 
   m_common_data.settings.tree_idx = 0;
 
-  if (render_state->occlusion_vis[m_level_id].valid) {
+  if (render_state->occlusion_vis[m_level_id].valid &&
+      !enhanced_skip_occlusion(m_level_name, m_common_data.settings.camera)) {
     m_common_data.settings.occlusion_culling = render_state->occlusion_vis[m_level_id].data;
   } else {
     m_common_data.settings.occlusion_culling = 0;
