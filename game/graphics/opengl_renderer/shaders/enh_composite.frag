@@ -17,6 +17,9 @@ uniform sampler2DShadow tex_T9;  // sun shadow map
 uniform float shadow_strength;   // 0 = no shadow map this frame
 uniform mat4 light_mvp;          // world (game units) -> shadow map
 uniform mat3 view_to_world;
+uniform int light_count;        // dynamic lights (the game's glows), view space
+uniform vec4 light_pos[32];     // xyz, radius (game units)
+uniform vec4 light_color[32];
 uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
@@ -376,6 +379,33 @@ void main() {
       float sh = sun_shadow(w) * smoothstep(0.0, 0.3, ndl);
       c *= 1.0 - shadow_strength * sh;
     }
+  }
+
+  // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
+  // own color (the scene's color stands in for its albedo), with a smooth falloff to its radius
+  if (light_count > 0 && z > 0.0 && wsurf == 0.0) {
+    vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
+    vec3 pl = view_pos(tex_coord - vec2(texel.x, 0), texture(tex_T3, tex_coord - vec2(texel.x, 0)).r);
+    vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
+    vec3 pd = view_pos(tex_coord - vec2(0, texel.y), texture(tex_T3, tex_coord - vec2(0, texel.y)).r);
+    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+    vec3 nn = normalize(cross(dx, dy));
+    if (dot(nn, -p) < 0.0) {
+      nn = -nn;
+    }
+    vec3 added = vec3(0.0);
+    for (int i = 0; i < light_count; i++) {
+      vec3 to_light = light_pos[i].xyz - p;
+      float d = length(to_light);
+      float r = light_pos[i].w;
+      if (d < r) {
+        float k = 1.0 - (d * d) / (r * r);
+        float ndl = dot(nn, to_light / max(d, 1.0));
+        added += light_color[i].rgb * (k * k) * clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
+      }
+    }
+    c += (c + 0.12) * added * ao;
   }
 
   // indirect light: what the surroundings send, tinted by this surface's own color

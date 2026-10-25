@@ -29,6 +29,7 @@ Laptop (the game stays at its 60 fps cap).
 | Ambient occlusion | Depth buffer → view-space positions with the game's own projection (saved in `make_new_cam_mat`), Alchemy AO, depth-aware blur |
 | Sun shadows | `pc-enhanced-set-sun` hands the time-of-day key light to the renderer; screen-space rays toward it, 3 m |
 | Sun shadow map | Every frame the static geometry of the loaded levels (tfrag and tie, most detailed LOD; their vertex buffers are already in world space) is drawn depth-only from the sun into a 4096x4096 orthographic map over 160 m around the camera, snapped to whole texels; the passages cut into mhcitya/ctyport are cut here too. The composite darkens sun-facing surfaces the map says are blocked (normal offset, 4x4 hardware PCF, faded at the edge; 35 %), the screen-space sun shadows stay on for the characters, and the volumetric mist uses it for crisp light shafts. Characters (merc) don't cast into it: Jak keeps the game's own shadow |
+| Dynamic lights | The levels' own lamps (their light spheres, with the time-of-day palette: night lamps switch on at night) sent by the game each frame (`pc-enhanced-set-lights`, within 80 m of the camera), plus the glow sprites (lamps, torches, shots, explosions) recorded by the sprite renderer: up to 32 point lights, nearest and brightest first, shaded in the composite with normals rebuilt from depth and a smooth falloff. No shadows from these lights |
 | God rays | Bright sky smeared toward the sun's screen position (half resolution) |
 | Depth of field | Light disk blur from 70 m to 350 m; sky, HUD and near objects stay sharp |
 | Bloom | Soft-knee bright pass, 6-level dual-filter blur |
@@ -41,7 +42,7 @@ Laptop (the game stays at its 60 fps cap).
 | Desert sand | `scripts/enhanced/desert_sand.py`: the jak3-ue5 Tripo sand tile, color-matched to the Wang atlas, in `out/enhanced/desert_sand.png`; the hfrag dunes sample it in world space every 64 m instead of the Wang montage |
 | HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
 
-Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
+Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 
@@ -62,6 +63,6 @@ window. Useful forms: `(send-event (ppointer->process *time-of-day*) 'change 'ho
 
 ## Not done (yet)
 
-- Normals for the baked levels (they have none; lighting is in the vertex colors: no dynamic
-  lights yet), characters and wind-swayed props in the shadow map, and ray tracing (OpenGL has no hardware RT: it would need a compute-shader
+- Normals for the baked levels (they have none; lighting is in the vertex colors, the dynamic
+  lights use normals rebuilt from depth), shadows from the dynamic lights, characters and wind-swayed props in the shadow map, and ray tracing (OpenGL has no hardware RT: it would need a compute-shader
   BVH or Vulkan interop).

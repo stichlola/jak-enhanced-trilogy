@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 #include "common/log/log.h"
 
@@ -18,6 +19,8 @@ EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
+EnhancedLights g_enhanced_lights;
+EnhancedGameLights g_enhanced_game_lights;
 
 namespace {
 GLuint make_1x1(u32 rgba) {
@@ -73,6 +76,13 @@ EnhancedPost::EnhancedPost() {
     m_settings.volume = std::atof(vol) > 0.0;
     if (m_settings.volume) {
       m_settings.mist_density = (float)std::atof(vol);
+    }
+  }
+  if (const char* lights = std::getenv("JAK_ENHANCED_LIGHTS")) {
+    // 0 = off, otherwise the strength
+    m_settings.lights = std::atof(lights) > 0.0;
+    if (m_settings.lights) {
+      m_settings.light_strength = (float)std::atof(lights);
     }
   }
   if (const char* sm = std::getenv("JAK_ENHANCED_SHADOWS")) {
@@ -155,6 +165,7 @@ float halton(u32 i, u32 base) {
 }  // namespace
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
+  g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   const bool on = m_settings.enabled && m_settings.taa && w > 0 && h > 0;
   if (!on) {
     if (m_jittered) {
@@ -431,6 +442,113 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
   glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
   glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
+  {
+    // dynamic lights: the glows in view space, the brightest and nearest first, at most kLights
+    constexpr int kLights = 32;
+    struct Candidate {
+      float pos[4];  // view space, radius
+      float color[4];
+      float score;
+    };
+    std::vector<Candidate> candidates;
+    const bool on = m_settings.lights && have_scene && cam.valid;
+    for (int i = 0; on && i < g_enhanced_lights.count; i++) {
+      const auto& l = g_enhanced_lights.lights[i];
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (l.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      float radius = std::clamp(l.size * m_settings.light_reach, 4.f * kMeter, 30.f * kMeter);
+      c.pos[3] = radius;
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // behind the camera beyond its reach, or far away (the moon is a glow too)
+      if (c.pos[2] < -radius || dist > 150.f * kMeter) {
+        continue;
+      }
+      // the glow's hue at full value; its brightness (glows are faint, 0.1-0.3) scaled up
+      float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+      float bright = l.color[0] + l.color[1] + l.color[2];
+      if (peak <= 0.f) {
+        continue;
+      }
+      float intensity = std::min(1.5f, bright * 4.f) * m_settings.light_strength;
+      for (int k = 0; k < 3; k++) {
+        c.color[k] = l.color[k] / peak * intensity;
+      }
+      c.color[3] = 0.f;
+      c.score = bright * radius / (dist + radius);
+      // a light is often drawn as two glows at the same spot: keep the one
+      bool dup = false;
+      for (auto& o : candidates) {
+        float dx = o.pos[0] - c.pos[0], dy = o.pos[1] - c.pos[1], dz = o.pos[2] - c.pos[2];
+        if (dx * dx + dy * dy + dz * dz < 0.25f * kMeter * kMeter) {
+          dup = true;
+          if (c.score > o.score) {
+            o = c;
+          }
+          break;
+        }
+      }
+      if (!dup) {
+        candidates.push_back(c);
+      }
+    }
+    // the levels' own lamps (light spheres), sent by the game with their time-of-day palette
+    int lamps = 0;
+    if (on) {
+      std::lock_guard<std::mutex> lock(g_enhanced_game_lights.mutex);
+      lamps = g_enhanced_game_lights.count;
+      for (int i = 0; i < lamps; i++) {
+        const float* lp = g_enhanced_game_lights.pos[i];
+        const float* lc = g_enhanced_game_lights.color[i];
+        Candidate c;
+        for (int col = 0; col < 3; col++) {
+          c.pos[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += (lp[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        float radius = std::clamp(lp[3] * m_settings.lamp_reach, 2.f * kMeter, 30.f * kMeter);
+        c.pos[3] = radius;
+        float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+        if (c.pos[2] < -radius || dist > 150.f * kMeter) {
+          continue;
+        }
+        float bright = lc[0] + lc[1] + lc[2];
+        for (int k = 0; k < 3; k++) {
+          c.color[k] = lc[k] * m_settings.light_strength * m_settings.lamp_strength;
+        }
+        c.color[3] = 0.f;
+        c.score = bright * radius / (dist + radius);
+        candidates.push_back(c);
+      }
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+    const int n = std::min((int)candidates.size(), kLights);
+    float pos[kLights * 4] = {};
+    float color[kLights * 4] = {};
+    for (int i = 0; i < n; i++) {
+      std::memcpy(pos + i * 4, candidates[i].pos, sizeof(float) * 4);
+      std::memcpy(color + i * 4, candidates[i].color, sizeof(float) * 4);
+    }
+    glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
+    glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
+    static int debug_counter = 0;
+    if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
+      lg::info("[enhanced] lights: {} glows, {} lamps, {} used", g_enhanced_lights.count, lamps, n);
+      for (int i = 0; i < std::min(n, 6); i++) {
+        const auto& c = candidates[i];
+        lg::info("[enhanced]   light at {:.1f} {:.1f} {:.1f} m (view), radius {:.1f} m, color {:.2f} {:.2f} {:.2f}",
+                 c.pos[0] / kMeter, c.pos[1] / kMeter, c.pos[2] / kMeter, c.pos[3] / kMeter,
+                 c.color[0], c.color[1], c.color[2]);
+      }
+    }
+  }
   {
     // the sun for the glints, only when it's above the horizon
     float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
@@ -1241,6 +1359,11 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Mist forward scattering", &m_settings.mist_aniso, 0.f, 0.95f);
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::SliderFloat("Sun relight", &m_settings.relight, 0.f, 2.f);
+    ImGui::Checkbox("Dynamic lights (glows)", &m_settings.lights);
+    ImGui::SliderFloat("Dynamic light strength", &m_settings.light_strength, 0.f, 4.f);
+    ImGui::SliderFloat("Dynamic light reach (x glow)", &m_settings.light_reach, 1.f, 12.f);
+    ImGui::SliderFloat("Lamp strength", &m_settings.lamp_strength, 0.f, 4.f);
+    ImGui::SliderFloat("Lamp reach (x game)", &m_settings.lamp_reach, 0.25f, 3.f);
     ImGui::Checkbox("Indirect light (SSGI)", &m_settings.gi);
     ImGui::SliderFloat("Indirect strength", &m_settings.gi_strength, 0.f, 3.f);
     ImGui::SliderFloat("Indirect radius (m)", &m_settings.gi_radius, 0.5f, 10.f);

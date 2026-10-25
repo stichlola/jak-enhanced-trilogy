@@ -1,5 +1,7 @@
 #include "kmachine.h"
 
+#include <algorithm>
+#include <cstring>
 #include <random>
 
 #include "common/global_profiler/GlobalProfiler.h"
@@ -1094,6 +1096,18 @@ void pc_enhanced_set_sun(u32 vec_ptr) {
   g_enhanced_sun.valid = true;
 }
 
+// Enhanced: the lamps near the camera, count pairs of vectors (position + radius, color)
+void pc_enhanced_set_lights(u32 vec_ptr, u32 count) {
+  auto* v = Ptr<float>(vec_ptr).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_game_lights.mutex);
+  int n = std::min((int)count, EnhancedGameLights::kMax);
+  for (int i = 0; i < n; i++) {
+    std::memcpy(g_enhanced_game_lights.pos[i], v + i * 8, sizeof(float) * 4);
+    std::memcpy(g_enhanced_game_lights.color[i], v + i * 8 + 4, sizeof(float) * 4);
+  }
+  g_enhanced_game_lights.count = n;
+}
+
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
@@ -1247,6 +1261,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-rand", (void*)pc_rand);
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
+  make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

@@ -16,6 +16,10 @@
 (define *enhanced-probe-wanted* (pc-enhanced-getenv "JAK_ENHANCED_PROBE" *enhanced-probe-buf* 64))
 (define *enhanced-probe-frames* 0)
 
+;; Enhanced: JAK_ENHANCED_HOUR=<0..23> sets the time of day shortly after a test boot
+(define *enhanced-hour-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-hour-wanted* (pc-enhanced-getenv "JAK_ENHANCED_HOUR" *enhanced-hour-buf* 64))
+
 ;; routes: start floor height, then x z pairs (meters)
 (define *enhanced-probe-routes*
   (new 'static 'boxed-array :type (array float)
@@ -206,6 +210,16 @@ On test boots (JAK_ENHANCED_START) also log the camera every 2 s, so a Blender c
 capture exactly."
   (when (nonzero? (length *enhanced-start-name*))
     (+! *enhanced-camlog-frames* 1)
+    (when (and *enhanced-hour-wanted* (= *enhanced-camlog-frames* 60) *time-of-day*)
+      (set! *enhanced-hour-wanted* #f)
+      (let ((hour 0))
+        (dotimes (i (length *enhanced-hour-buf*))
+          (set! hour (+ (* hour 10) (- (the int (-> *enhanced-hour-buf* data i)) 48)))
+          )
+        (send-event (ppointer->process *time-of-day*) 'change 'hour hour)
+        (format 0 "[enhanced] hour ~D~%" hour)
+        )
+      )
     (when (zero? (mod *enhanced-camlog-frames* 120))
       (let ((cam (-> *math-camera* trans))
             (fwd (-> *math-camera* inv-camera-rot fvec))

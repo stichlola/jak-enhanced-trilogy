@@ -1,3 +1,5 @@
+#include <algorithm>
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/sprite/Sprite3.h"
 
 struct SpriteGlowData {
@@ -59,6 +61,11 @@ bool glow_math(const SpriteGlowConsts* consts,
   rgba.y() *= rgba.w() * fade / 128.f;
   rgba.z() *= rgba.w() * fade / 128.f;
   out->flare_draw_color = rgba;
+  // Enhanced: every glow is a light source for the post pass's dynamic lights
+  if (fade > 0.f && rgba.x() + rgba.y() + rgba.z() > 8.f) {
+    g_enhanced_lights.add(in->pos, std::max(in->size_x, in->size_y), rgba.x() / 255.f,
+                          rgba.y() / 255.f, rgba.z() / 255.f);
+  }
 
   // Apply an offset. This moves the point along a line between its original position, and the
   // camera (so this offset doesn't make the thing move up/down/left/right on screen, just "toward"

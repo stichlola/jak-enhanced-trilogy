@@ -91,6 +91,11 @@ class EnhancedPost {
     float water_unify = 1.0f;
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
+    bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
+    float light_strength = 1.0f;
+    float light_reach = 6.0f;  // light radius as a multiple of the glow's size
+    float lamp_strength = 0.75f;  // the levels' lamps (light spheres)
+    float lamp_reach = 1.0f;     // their radius as a multiple of the game's
     bool gi = true;         // one-bounce screen-space indirect light
     float gi_strength = 1.5f;
     float gi_radius = 3.0f;  // meters
