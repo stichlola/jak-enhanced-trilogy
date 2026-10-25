@@ -102,6 +102,25 @@ for o in objects:
         doubled += len(near)
     bm.free()
 
+# UVs near 0, face by face: the level builder stores UVs with little precision, so world-planar
+# UVs of a few hundred (port pavement, Metal Head skin, box-projected ramps: each face projected on
+# its own axis) came out as one flat colour in the game. Each face far from 0 is moved by whole
+# tiles, which keeps a tiling texture exactly as it was (also across neighbouring faces).
+shifted = 0
+for me in ({o.data for o in objects} if not os.environ.get("JAK_NO_UVSHIFT") else ()):
+    for layer in me.uv_layers:
+        if not len(layer.data):
+            continue
+        for poly in me.polygons:
+            uvs = [layer.data[i].uv for i in poly.loop_indices]
+            du = math.floor(min(u.x for u in uvs))
+            dv = math.floor(min(u.y for u in uvs))
+            if abs(du) >= 2 or abs(dv) >= 2:  # clamped textures near 0 stay as they are
+                for i in poly.loop_indices:
+                    u = layer.data[i].uv
+                    layer.data[i].uv = (u.x - du, u.y - dv)
+                shifted += 1
+
 for o in bpy.context.view_layer.objects:
     o.select_set(False)
 for o in objects:
@@ -113,4 +132,5 @@ bpy.ops.export_scene.gltf(filepath=out, use_selection=True, export_extras=True, 
                           export_apply=True, export_vertex_color="ACTIVE", export_format="GLB")
 faces = sum(len(o.data.polygons) for o in objects)
 print(f"[piazza_export] {len(objects)} objects, {faces} faces, {opaque} alpha links cut, "
-      f"{flipped} faces flipped, {doubled} doubled -> {out} ({os.path.getsize(out) // 1024} KB)")
+      f"{flipped} faces flipped, {doubled} doubled, {shifted} faces UV-shifted -> {out} "
+      f"({os.path.getsize(out) // 1024} KB)")

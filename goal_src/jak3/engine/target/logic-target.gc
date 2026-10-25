@@ -157,6 +157,48 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 (define *enhanced-camlog-frames* 0)
+;; Enhanced: review captures in one boot (JAK_ENHANCED_REVIEW=1): Jak goes through the standard
+;; review points by himself; at each one, once the plaza has been active for 15 s, "[review] ready
+;; <point>" goes to the log (local/scripts/review_shots.ps1 captures the window), 3 s later the next.
+(define *enhanced-review-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-review-wanted* (pc-enhanced-getenv "JAK_ENHANCED_REVIEW" *enhanced-review-buf* 64))
+(define *enhanced-review-points*
+  '("piazza-start" "piazza-test-dal-porto" "piazza-test-da-mhcity" "piazza-varco-mhcity" "piazza-varco-porto")
+  )
+(define *enhanced-review-idx* 0)
+(define *enhanced-review-frames* 0)
+
+(defun enhanced-review-update ()
+  (when (and *enhanced-review-wanted* *target* (level-get *level* 'piazza)
+             (= (-> (level-get *level* 'piazza) status) 'active)
+             )
+    (+! *enhanced-review-frames* 1)
+    (cond
+      ((= *enhanced-review-frames* 900)
+       (format 0 "[review] ready ~A~%" (ref *enhanced-review-points* *enhanced-review-idx*))
+       )
+      ((= *enhanced-review-frames* 1080)
+       (+! *enhanced-review-idx* 1)
+       (set! *enhanced-review-frames* 0)
+       (cond
+         ((< *enhanced-review-idx* ((method-of-type pair length) *enhanced-review-points*))
+          (let ((cp (get-continue-by-name *game-info* (the-as string (ref *enhanced-review-points* *enhanced-review-idx*)))))
+            (if cp
+                (send-event *target* 'continue cp)
+                )
+            )
+          )
+         (else
+           (format 0 "[review] done~%")
+           (set! *enhanced-review-wanted* #f)
+           )
+         )
+       )
+      )
+    )
+  (none)
+  )
+
 
 (defun enhanced-probe-update ()
   "Run the passage probes once, a few seconds after the plaza and its neighbours are up.
@@ -1819,6 +1861,7 @@ capture exactly."
   (enhanced-unlock-all)
   (enhanced-probe-update)
   (enhanced-piazza-autoload)
+  (enhanced-review-update)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
   (when (and *enhanced-unlock-all*
              (cpad-hold? (-> self control cpad number) l3)
