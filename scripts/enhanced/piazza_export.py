@@ -126,7 +126,7 @@ for me in ({o.data for o in objects} if not os.environ.get("JAK_NO_UVSHIFT") els
 # Haven's palette on the Jak 2 plaza's own textures only (desaturated, cooler, a little darker),
 # baked into the exported images: the renderer's whole-level grade also dulled the Jak 3 surfaces
 # placed in the plaza (port pavement, Metal Head skin) into flat dark grey.
-GRADE = [float(x) for x in os.environ.get("JAK_PLAZA_GRADE", "0.45,0.72,0.72,0.9").split(",")]
+GRADE = [float(x) for x in os.environ.get("JAK_PLAZA_GRADE", "0.40,0.62,0.63,0.80").split(",")]
 jak2_images = {n.image for o in bpy.data.collections["Jak2 palazzo"].all_objects if o.type == 'MESH'
                for m in o.data.materials if m and m.node_tree
                for n in m.node_tree.nodes if n.type == 'TEX_IMAGE' and n.image}
