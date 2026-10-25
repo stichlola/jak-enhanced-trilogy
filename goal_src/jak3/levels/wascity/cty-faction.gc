@@ -55,6 +55,18 @@
 
 (define *default-faction-strength-mod* (new 'static 'cty-faction-strength))
 
+;; Enhanced: JAK_ENHANCED_ENEMIES=0 keeps the story's city on debug boots
+(define *enhanced-enemies-buf* (new 'global 'string 8 (the-as string #f)))
+
+(defun enhanced-living-city? ()
+  (and *debug-segment*
+       (not (and (pc-enhanced-getenv "JAK_ENHANCED_ENEMIES" *enhanced-enemies-buf* 8)
+                 (string= *enhanced-enemies-buf* "0")
+                 )
+            )
+       )
+  )
+
 (defun setup-city-task-faction ()
   (cond
     ((task-node-closed? (game-task-node city-power-game-resolution))
@@ -89,6 +101,18 @@
      (cty-faction-evaluate-commands
        '((faction-strength mh -5) (faction-strength ff ind -5) (faction-spawn mh off))
        )
+     )
+    ((enhanced-living-city?)
+     ;; Enhanced: debug boots start with no story done, where the game keeps the Krimson Guard and
+     ;; the Metal Heads out of the city. Use the late-game city instead (as after the power game):
+     ;; all three factions out in the streets and fighting at the borders.
+     (cty-faction-evaluate-commands '((faction-strength ff ind 5)
+                                      (faction-strength mh ind 5)
+                                      (faction-strength kg slum 5)
+                                      (faction-strength kg port 1)
+                                      (faction-strength mh port 1)
+                                      )
+                                    )
      )
     (else
       (cty-faction-evaluate-commands '((faction-strength ff ind -5)

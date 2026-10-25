@@ -204,6 +204,45 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 
+(define *enhanced-census* (new 'static 'array int32 4))
+
+(defun enhanced-census ()
+  "Test boots: log how many Krimson Guards, Metal Heads and Freedom League guards are alive."
+  (dotimes (i 4)
+    (set! (-> *enhanced-census* i) 0)
+    )
+  (iterate-process-tree
+    *active-pool*
+    (lambda ((p process))
+      (let ((name (symbol->string-debug (-> p type symbol))))
+        (cond
+          ((or (>= (string-position "metalhead" name) 0) (>= (string-position "mh-" name) 0))
+           (+! (-> *enhanced-census* 1) 1)
+           )
+          ((or (>= (string-position "kg-" name) 0) (= (string-position "guard" name) 0))
+           (+! (-> *enhanced-census* 0) 1)
+           )
+          ((>= (string-position "ff-" name) 0)
+           (+! (-> *enhanced-census* 2) 1)
+           )
+          ((>= (string-position "citizen" name) 0)
+           (+! (-> *enhanced-census* 3) 1)
+           )
+          )
+        )
+      #f
+      )
+    *kernel-context*
+    )
+  (let ((pos (target-pos 0)))
+    (format 0 "[census] kg ~D mh ~D ff ~D citizens ~D "
+            (-> *enhanced-census* 0) (-> *enhanced-census* 1) (-> *enhanced-census* 2) (-> *enhanced-census* 3)
+            )
+    (format 0 "at ~,,1f ~,,1f ~,,1f~%" (/ (-> pos x) 4096.0) (/ (-> pos y) 4096.0) (/ (-> pos z) 4096.0))
+    )
+  (none)
+  )
+
 (defun enhanced-probe-update ()
   "Run the passage probes once, a few seconds after the plaza and its neighbours are up.
 On test boots (JAK_ENHANCED_START) also log the camera every 2 s, so a Blender camera can match a
@@ -219,6 +258,9 @@ capture exactly."
         (send-event (ppointer->process *time-of-day*) 'change 'hour hour)
         (format 0 "[enhanced] hour ~D~%" hour)
         )
+      )
+    (when (zero? (mod *enhanced-camlog-frames* 300))
+      (enhanced-census)
       )
     (when (zero? (mod *enhanced-camlog-frames* 120))
       (let ((cam (-> *math-camera* trans))
