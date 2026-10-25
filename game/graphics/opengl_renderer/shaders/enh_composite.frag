@@ -20,6 +20,10 @@ uniform mat3 view_to_world;
 uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
 uniform vec4 light_color[32];
+uniform int fire_count;         // the nearest fires: view space, flame size (game units)
+uniform vec4 fire_pos[4];
+uniform float fire_seed[4];
+uniform vec3 fire;              // hot air strength, embers strength, time (s)
 uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
@@ -238,6 +242,34 @@ void main() {
       height = dot(up_view, p);
     }
   }
+  // fires: the hot air over each flame bends what's seen through it
+  vec2 fire_axis[4];  // the flame's up in uv, one flame size long
+  vec2 fire_uv[4];
+  for (int i = 0; i < fire_count; i++) {
+    vec3 fp = fire_pos[i].xyz;
+    float fs = fire_pos[i].w;
+    vec3 top = fp + up_view * fs;
+    fire_uv[i] = vec2(fp.x * proj.z / fp.z, fp.y * proj.w / fp.z) * 0.5 + 0.5;
+    fire_axis[i] = vec2(top.x * proj.z / top.z, top.y * proj.w / top.z) * 0.5 + 0.5 - fire_uv[i];
+    if (fp.z < 0.5 * 4096.0 || top.z < 0.5 * 4096.0 || fire.x <= 0.0) {
+      continue;
+    }
+    vec2 a = fire_axis[i];
+    float aa = max(dot(a, a), 1e-10);
+    vec2 rel = tex_coord - fire_uv[i];
+    float along = dot(rel, a) / aa;                      // flame sizes up
+    float across = (rel.x * a.y - rel.y * a.x) / aa;     // and sideways
+    float column = exp(-across * across * 1.2) * smoothstep(-0.3, 0.6, along) *
+                   (1.0 - smoothstep(1.5, 4.5, along));
+    // only what's behind the fire
+    if (column > 0.0 && (z == 0.0 || z > fp.z - fs)) {
+      float t = fire.z;
+      vec2 wob = vec2(sin(along * 9.0 - t * 9.0 + across * 3.0) + 0.5 * sin(along * 21.0 - t * 14.0),
+                      cos(along * 7.0 - t * 8.0 + across * 5.0));
+      uv += wob * length(a) * fire.x * column;
+    }
+  }
+
   // the water's world position and pixel footprint, here in uniform control flow (derivatives)
   vec2 water_world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
   float water_foot = clamp(length(fwidth(water_world)), 0.0005, 50.0);
@@ -534,6 +566,51 @@ void main() {
     }
     vec4 v = sum / wsum;
     c = c * v.a + v.rgb;
+  }
+
+  // embers rising from the fires: small sparks drifting up and fading, hidden behind the scene
+  for (int i = 0; i < fire_count; i++) {
+    vec3 fp = fire_pos[i].xyz;
+    float fs = fire_pos[i].w;
+    if (fp.z < 1.0 * 4096.0 || fire.y <= 0.0) {
+      continue;
+    }
+    // skip fires far from this pixel on screen (embers rise up to ~5 flame sizes)
+    vec2 rel = tex_coord - fire_uv[i];
+    if (dot(rel, rel) > dot(fire_axis[i], fire_axis[i]) * 36.0) {
+      continue;
+    }
+    for (int j = 0; j < 18; j++) {
+      float s = fire_seed[i] * 17.0 + float(j) * 7.31;
+      float h1 = fract(sin(s * 12.9898) * 43758.5453);
+      float h2 = fract(sin(s * 78.233) * 43758.5453);
+      float h3 = fract(sin(s * 37.719) * 43758.5453);
+      float h4 = fract(sin(s * 93.989) * 43758.5453);
+      float life = 1.4 + h1 * 1.6;  // seconds
+      float phase = fract(fire.z / life + h2);
+      // a new ember each cycle starts somewhere else in the flame
+      float cycle = floor(fire.z / life + h2);
+      float k1 = fract(sin((s + cycle) * 41.17) * 43758.5453) - 0.5;
+      float k2 = fract(sin((s + cycle) * 19.31) * 43758.5453) - 0.5;
+      float rise = phase * fs * (2.0 + 3.0 * h3);
+      float sway = sin(fire.z * (1.5 + h4 * 2.0) + h1 * 6.283) * fs * 0.3 * phase;
+      vec3 ep = fp + up_view * (rise + fs * 0.2) + right_view * (k1 * fs * 0.9 + sway) +
+                fwd_view * (k2 * fs * 0.9);
+      if (ep.z < 0.3 * 4096.0 || (z > 0.0 && ep.z > z)) {
+        continue;
+      }
+      vec2 euv = vec2(ep.x * proj.z / ep.z, ep.y * proj.w / ep.z) * 0.5 + 0.5;
+      vec2 dpx = (tex_coord - euv) / texel;
+      float radius = clamp(0.07 * 4096.0 * abs(proj.z) * 0.5 / (ep.z * texel.x), 1.0, 3.5);
+      float glow = exp(-dot(dpx, dpx) / (radius * radius));
+      if (glow < 0.01) {
+        continue;
+      }
+      float fade = (1.0 - phase) * smoothstep(0.0, 0.08, phase);
+      float flick = 0.75 + 0.25 * sin(fire.z * (20.0 + h3 * 15.0) + h4 * 50.0);
+      vec3 hot = mix(vec3(1.0, 0.32, 0.04), vec3(1.0, 0.7, 0.25), h4);
+      c += hot * (glow * fade * flick * fire.y * 2.4);
+    }
   }
 
   // bloom and god rays

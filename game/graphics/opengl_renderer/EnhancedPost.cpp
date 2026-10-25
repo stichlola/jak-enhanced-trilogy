@@ -124,6 +124,13 @@ EnhancedPost::EnhancedPost() {
       g_enhanced_menu.ask(std::atoi(menu), colon + 1);
     }
   }
+  if (const char* fire = std::getenv("JAK_ENHANCED_FIRE")) {
+    // 0 = the game's fires as they are; else a scale for the hot air and the embers
+    float k = (float)std::atof(fire);
+    m_settings.fire = k > 0.f;
+    m_settings.fire_haze *= k;
+    m_settings.fire_embers *= k;
+  }
   if (const char* ws = std::getenv("JAK_ENHANCED_WATER_SIM")) {
     // 0 = the water without swell, refraction and caustics
     if (std::atof(ws) <= 0.0) {
@@ -543,6 +550,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float score;
     };
     std::vector<Candidate> candidates;
+    struct Fire {
+      float pos[4];  // view space, flame size
+      float seed;
+      float dist;
+    };
+    std::vector<Fire> fires;
     const bool on = m_settings.lights && have_scene && cam.valid;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
       const auto& l = g_enhanced_lights.lights[i];
@@ -567,6 +580,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         continue;
       }
       float intensity = std::min(1.5f, bright * 4.f) * m_settings.light_strength;
+      // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
+      // far beacons and the sky's glows are bigger), and staying put
+      const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&
+                        l.color[1] > 0.1f * l.color[0] && l.color[1] < 0.9f * l.color[0] &&
+                        l.size > 0.3f * kMeter && l.size < 6.f * kMeter && dist < 60.f * kMeter;
+      if (const auto* f = warm ? note_fire_glow(l.pos, l.size) : nullptr) {
+        // its light flickers on top of the game's own (a seed from where it stands)
+        float seed = std::fmod(std::abs(f->pos[0] * 0.013f + f->pos[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        float n = 0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                  0.2f * std::sin(t * 37.f + 2.3f * seed);
+        intensity *= 0.82f + 0.18f * n;
+      }
       for (int k = 0; k < 3; k++) {
         c.color[k] = l.color[k] / peak * intensity;
       }
@@ -627,6 +653,45 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       std::memcpy(pos + i * 4, candidates[i].pos, sizeof(float) * 4);
       std::memcpy(color + i * 4, candidates[i].color, sizeof(float) * 4);
     }
+    // the fires: forget the ones not seen for a second, the nearest few for the hot air and embers
+    m_fires.erase(std::remove_if(m_fires.begin(), m_fires.end(),
+                                 [&](const FireMemory& f) { return m_time - f.last > 1.0; }),
+                  m_fires.end());
+    for (const auto& f : m_fires) {
+      if (!on || !is_fire(f)) {
+        continue;
+      }
+      Fire v;
+      for (int col = 0; col < 3; col++) {
+        v.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          v.pos[col] += (f.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      v.pos[3] = f.size;
+      v.dist = std::sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1] + v.pos[2] * v.pos[2]);
+      v.seed = std::fmod(std::abs(f.pos[0] * 0.013f + f.pos[2] * 0.007f), 6.2832f);
+      if (v.dist < 45.f * kMeter && v.pos[2] > -f.size) {
+        fires.push_back(v);
+      }
+    }
+    std::sort(fires.begin(), fires.end(), [](const Fire& a, const Fire& b) { return a.dist < b.dist; });
+    constexpr int kFires = 4;
+    float fire_pos[kFires * 4] = {};
+    float fire_seed[kFires] = {};
+    int fire_count = 0;
+    for (const auto& f : fires) {
+      if (fire_count == kFires) {
+        break;
+      }
+      std::memcpy(fire_pos + fire_count * 4, f.pos, sizeof(float) * 4);
+      fire_seed[fire_count++] = f.seed;
+    }
+    glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
+    glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
+    glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
+    glUniform3f(glGetUniformLocation(id, "fire"), m_settings.fire_haze, m_settings.fire_embers,
+                (float)std::fmod(m_time, 1000.0));
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
@@ -1669,6 +1734,7 @@ void EnhancedPost::draw_menu() {
       s.motion_blur = blur ? 0.5f : 0.f;
     }
     check("Luci dinamiche", &s.lights);
+    check("Fuochi (calore, braci)", &s.fire);
     check("Normali della geometria", &s.geometry_normals);
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
@@ -1766,6 +1832,34 @@ void EnhancedPost::draw_menu() {
   ImGui::End();
 }
 
+// A warm glow this frame: merged with the one seen at the same spot (a flame is often several
+// glows, and its glow comes and goes), the memory entry if it has been there long enough to be a fire
+// A fire has been glowing at its spot for a second, in most frames (a gun fired from where a
+// guard stands glows there too, but in bursts)
+bool EnhancedPost::is_fire(const FireMemory& f) const {
+  double age = m_time - f.first;
+  return age >= 1.0 && f.hits >= 0.6 * age * 60.0;
+}
+
+const EnhancedPost::FireMemory* EnhancedPost::note_fire_glow(const float* pos, float size) {
+  constexpr float kSame = 1.5f * kMeter;
+  for (auto& f : m_fires) {
+    float dx = f.pos[0] - pos[0], dy = f.pos[1] - pos[1], dz = f.pos[2] - pos[2];
+    if (dx * dx + dy * dy + dz * dz < kSame * kSame) {
+      if (f.last != m_time) {
+        f.hits++;
+        f.last = m_time;
+      }
+      f.size = std::max(f.size * 0.98f, size);
+      return is_fire(f) ? &f : nullptr;
+    }
+  }
+  if (m_fires.size() < 64) {
+    m_fires.push_back({{pos[0], pos[1], pos[2]}, size, m_time, m_time, 1});
+  }
+  return nullptr;
+}
+
 void EnhancedPost::draw_debug_window() {
   if (ImGui::TreeNode("Enhanced Post")) {
     ImGui::Checkbox("Enabled", &m_settings.enabled);
@@ -1811,6 +1905,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Dynamic light reach (x glow)", &m_settings.light_reach, 1.f, 12.f);
     ImGui::SliderFloat("Lamp strength", &m_settings.lamp_strength, 0.f, 4.f);
     ImGui::SliderFloat("Lamp reach (x game)", &m_settings.lamp_reach, 0.25f, 3.f);
+    ImGui::Checkbox("Fires (flicker, hot air, embers)", &m_settings.fire);
+    ImGui::SliderFloat("Fire hot air", &m_settings.fire_haze, 0.f, 0.05f, "%.3f");
+    ImGui::SliderFloat("Fire embers", &m_settings.fire_embers, 0.f, 3.f);
     ImGui::Checkbox("Indirect light (SSGI)", &m_settings.gi);
     ImGui::SliderFloat("Indirect strength", &m_settings.gi_strength, 0.f, 3.f);
     ImGui::SliderFloat("Indirect radius (m)", &m_settings.gi_radius, 0.5f, 10.f);

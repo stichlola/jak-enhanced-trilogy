@@ -144,6 +144,9 @@ class EnhancedPost {
     float water_glint = 1.0f;
     float relight = 1.0f;  // sun shading from depth normals
     bool lights = true;     // the glows (lamps, torches, shots) light their surroundings
+    bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
+    float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
+    float fire_embers = 1.0f;
     bool geometry_normals = true;  // the levels' own normals (else rebuilt from depth)
     bool normal_debug = false;     // show the normals the post pass uses
     float light_strength = 1.0f;
@@ -279,6 +282,17 @@ class EnhancedPost {
   EnhancedCamera m_prev_camera;
   float m_prev_fy = 1.f;
   double m_time = 0;
+  // warm glows seen at the same spot (world, game units): the ones that stay are fires, the shots
+  // and muzzle flashes move on or die out
+  struct FireMemory {
+    float pos[3];
+    float size;
+    double first, last;
+    int hits;
+  };
+  std::vector<FireMemory> m_fires;
+  const FireMemory* note_fire_glow(const float* pos, float size);
+  bool is_fire(const FireMemory& f) const;
 
   // god rays, half resolution
   void do_shafts(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,
