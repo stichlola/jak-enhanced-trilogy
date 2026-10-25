@@ -865,6 +865,11 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glActiveTexture(GL_TEXTURE11);
+  glBindTexture(GL_TEXTURE_2D, m_normals_ready ? m_normal_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &g_enhanced_camera.rot[0][0]);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
               m_last_proj[3]);
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / m_ssao_w, 1.f / m_ssao_h);
@@ -1451,6 +1456,11 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glActiveTexture(GL_TEXTURE11);
+  glBindTexture(GL_TEXTURE_2D, m_normals_ready ? m_normal_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
   glUniform4f(glGetUniformLocation(id, "proj"), cam.depth_a, cam.depth_b, cam.fx, fy);
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);
   glUniform1f(glGetUniformLocation(id, "radius"), m_settings.ssao_radius * kMeter);

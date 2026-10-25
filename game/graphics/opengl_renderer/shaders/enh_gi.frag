@@ -6,6 +6,8 @@
 
 uniform sampler2D tex_T0;  // depth
 uniform sampler2D tex_T1;  // scene
+uniform sampler2D tex_T11;   // the geometry's world normals (a = 0: none, rebuilt from depth)
+uniform mat3 view_to_world;
 uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;        // of the depth texture
 uniform float radius;      // game units
@@ -46,6 +48,10 @@ void main() {
   vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
   vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
   vec3 n = normalize(cross(dx, dy));
+  vec4 g = texture(tex_T11, uv);
+  if (g.a > 0.5) {
+    n = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
+  }
   if (dot(n, -p) < 0.0) {
     n = -n;
   }
