@@ -197,12 +197,16 @@ void main() {
   float z = view_z(d);
   vec3 p = d > 1e-7 ? view_pos(uv, d) : vec3(0.0);
   float height = dot(up_view, p);  // above (+) or below (-) the camera
+  // is the scene level here (a floor, a decal lying on the water)? (uniform control flow)
+  vec3 scene_dp = view_pos(uv, max(d, 1e-6));
+  bool scene_level = abs(dot(normalize(cross(dFdx(scene_dp), dFdy(scene_dp))), up_view)) > 0.9;
 
   // water: the near sea's surface in front of the scene, or the far sea still showing. From here
   // on the surface is this pixel's depth (fog, blur, ...); seabed_d keeps what's under it.
   float wsurf = 0.0;
   float seabed_d = d;
   bool water_deep = true;
+  bool water_decal = false;  // something flat lying on the water (splash and ripple discs)
   if (water_strength > 0.0) {
     float wd = texture(tex_T5, uv).r;
     float fd = texture(tex_T6, uv).r;
@@ -212,6 +216,20 @@ void main() {
       water_deep = under_is_sea || d <= 1e-7;
     } else if (under_is_sea) {
       wsurf = fd;
+    } else {
+      // a flat effect a few cm over the water (splashes draw see-through discs that write depth):
+      // still water, with the game's color only where it's brighter (the foam)
+      // (the near sea only: the far one is a plane under the whole level, docks included)
+      float ws = wd;
+      // (level and up to 40 cm over it, or anything within 12 cm: the discs' edges; the sea must
+      // be drawn behind it: where something solid hid the sea, its depth is the scene's own)
+      if (ws > 1e-7 && d > ws + 1e-7) {
+        float above = dot(up_view, p - view_pos(uv, ws));
+        if (above > 0.0 && above < (scene_level ? 0.4 : 0.12) * 4096.0) {
+          wsurf = ws;
+          water_decal = true;
+        }
+      }
     }
     if (wsurf > 0.0) {
       d = wsurf;
@@ -373,7 +391,11 @@ void main() {
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
       wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
     }
-    c = wc;
+    // the game's effects drawn over the water (foam, splashes, wakes) show through where they're
+    // clearly brighter than our water; on a disc lying on the water, anything brighter does
+    const vec3 luma = vec3(0.299, 0.587, 0.114);
+    float over = dot(c, luma) - dot(wc, luma);
+    c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
   }
 
   // light depth of field on the far distance (samples nearer than the pixel are skipped)
