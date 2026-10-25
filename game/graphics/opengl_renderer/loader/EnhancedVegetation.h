@@ -5,7 +5,8 @@
 /*!
  * Jak 3 Enhanced: vegetation density. When a level loads, its grass and small plants (cutout
  * shrubs made of crossed cards, standing on the level's floor) get copies scattered around them,
- * turned, scaled and set down on the floor below. The copies go in extra shrub draws with a tier
+ * turned, scaled and set down on the floor below, and tufts of their own cards grow on the grassy
+ * floor around them. The copies go in extra shrub draws with a tier
  * (1 = moderate, 2 = lush); the shrub renderer draws the tiers up to g_enhanced_vegetation, so the
  * density changes without reloading.
  */
