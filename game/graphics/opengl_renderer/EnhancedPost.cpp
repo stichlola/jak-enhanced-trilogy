@@ -9,6 +9,7 @@
 #include "common/log/log.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
 #include "game/graphics/pipelines/opengl.h"
@@ -1475,6 +1476,8 @@ void EnhancedPost::draw_menu() {
     check("Normali della geometria", &s.geometry_normals);
     check("Vento sull'erba", &g_enhanced_wind.enabled);
     check("Erba che si piega", &g_enhanced_wind.push);
+    ImGui::SetNextItemWidth(200);
+    ImGui::Combo("Vegetazione", &g_enhanced_vegetation, "Classica Media Rigogliosa ");
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");

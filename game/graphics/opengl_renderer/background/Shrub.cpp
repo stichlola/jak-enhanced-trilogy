@@ -4,6 +4,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 
 #include "common/log/log.h"
 
@@ -354,7 +355,7 @@ void Shrub::render_tree(int idx,
 
   for (size_t draw_idx = 0; draw_idx < tree.draws->size(); draw_idx++) {
     const auto& draw = tree.draws->operator[](draw_idx);
-    if (!tree.proto_vis_mask.at(draw.proto_idx)) {
+    if (!tree.proto_vis_mask.at(draw.proto_idx) || draw.enh_tier > g_enhanced_vegetation) {
       continue;
     }
     const auto& multidraw_indices = m_cache.multidraw_offset_per_stripdraw[draw_idx];

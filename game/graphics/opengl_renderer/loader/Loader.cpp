@@ -5,6 +5,8 @@
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/util/FileUtil.h"
 #include "common/util/Timer.h"
+
+#include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "common/util/compress.h"
 
 #include "game/graphics/opengl_renderer/loader/LoaderStages.h"
@@ -282,6 +284,11 @@ void Loader::loader_thread() {
         for (auto& shrub_tree : result->shrub_trees) {
           shrub_tree.unpack();
         }
+      }
+
+      {
+        auto p = scoped_prof("enhanced-vegetation");
+        enhanced_add_vegetation(*result, lev);
       }
 
       fmt::print(

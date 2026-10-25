@@ -236,6 +236,8 @@ struct ShrubDraw {
   u32 num_triangles = 0;
 
   u16 proto_idx = 0;
+  // Enhanced: 0 = the game's, 1/2 = extra vegetation for the moderate/lush density (not saved)
+  u8 enh_tier = 0;
   void serialize(Serializer& ser);
 };
 
