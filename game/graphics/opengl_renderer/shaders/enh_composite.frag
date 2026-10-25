@@ -28,6 +28,7 @@ uniform int print_count;        // footprints and ruts: world xyz (game units), 
 uniform vec4 prints[48];
 uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
 uniform float prints_strength;
+uniform float relief;           // relief from the textures' shading under the sun (0 = off; 2 = left half)
 uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
 uniform int blast_count;        // explosions: view space + radius (game units), age (s)
@@ -736,6 +737,29 @@ void main() {
         c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
         c += vec3(1.0, 0.95, 0.85) * pow(sr, 300.0) * 2.0 * sunlit * mk;
       }
+    }
+  }
+
+  // relief: the texture's light and dark read as small bumps (bright = raised), lit by the sun:
+  // the normal tilts along the brightness slope on the surface; near only, not across edges
+  float rk = relief > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : relief;
+  if (rk > 0.0 && sun_dir.w > 0.0 && z > 0.0 && z < 30.0 * 4096.0 && wsurf == 0.0) {
+    vec2 tx = vec2(texel.x, 0.0), ty = vec2(0.0, texel.y);
+    float dr = texture(tex_T3, tex_coord + tx).r, dl = texture(tex_T3, tex_coord - tx).r;
+    float du = texture(tex_T3, tex_coord + ty).r, dd = texture(tex_T3, tex_coord - ty).r;
+    vec3 pr = view_pos(tex_coord + tx, dr), pl = view_pos(tex_coord - tx, dl);
+    vec3 pu = view_pos(tex_coord + ty, du), pd = view_pos(tex_coord - ty, dd);
+    float span = 0.004 * z + 0.05 * 4096.0;
+    if (abs(pr.z - pl.z) < span && abs(pu.z - pd.z) < span) {
+      vec3 nn = surface_normal(tex_coord, p);
+      float gx = luma(texture(tex_T0, tex_coord + tx).rgb) - luma(texture(tex_T0, tex_coord - tx).rgb);
+      float gy = luma(texture(tex_T0, tex_coord + ty).rgb) - luma(texture(tex_T0, tex_coord - ty).rgb);
+      vec3 t = normalize(pr - pl), b = normalize(pu - pd);
+      // slope per pixel, a little more where the surface is seen at an angle (its texels stretch)
+      vec3 nb = normalize(nn - (t * gx + b * gy) * 1.6);
+      float fade = 1.0 - smoothstep(12.0 * 4096.0, 30.0 * 4096.0, z);
+      float shade = dot(nb, sun_dir.xyz) - dot(nn, sun_dir.xyz);
+      c *= 1.0 + clamp(shade, -0.5, 0.5) * 0.75 * rk * fade * ao;
     }
   }
 

@@ -151,6 +151,10 @@ EnhancedPost::EnhancedPost() {
     // how dark the dynamic lights' shadows are, 0 = none
     m_settings.light_shadow = (float)std::atof(ls);
   }
+  if (const char* relief = std::getenv("JAK_ENHANCED_RELIEF")) {
+    // the textures' small bumps under the sun, 0 = off, 2 = left half only (A/B)
+    m_settings.relief = (float)std::atof(relief);
+  }
   if (const char* mat = std::getenv("JAK_ENHANCED_MATERIALS")) {
     // metal and glossy surfaces' reflections and highlights, 0 = off
     m_settings.materials = (float)std::atof(mat);
@@ -796,6 +800,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
     glUniform1f(glGetUniformLocation(id, "materials"), m_settings.materials);
+    glUniform1f(glGetUniformLocation(id, "relief"), m_settings.relief);
     {
       // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
       // the shader starts a ring on the water from each one that lies at the water's height
@@ -2017,6 +2022,10 @@ void EnhancedPost::draw_menu() {
       s.lit_smoke = smoke ? 0.8f : 0.f;
     }
     check("Distanza visiva estesa", &s.far_view);
+    bool relief = s.relief > 0.f;
+    if (check("Rilievo delle superfici", &relief)) {
+      s.relief = relief ? 1.f : 0.f;
+    }
     bool mats = s.materials > 0.f;
     if (check("Metallo e vetro riflettenti", &mats)) {
       s.materials = mats ? 1.f : 0.f;
@@ -2139,6 +2148,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
   j["materials"] = s.materials;
+  j["relief"] = s.relief;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
@@ -2180,6 +2190,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
   get("materials", s.materials);
+  get("relief", s.relief);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
   if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
@@ -2213,6 +2224,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.lit_smoke = d.lit_smoke;
   s.far_view = d.far_view;
   s.materials = d.materials;
+  s.relief = d.relief;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;

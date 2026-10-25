@@ -150,6 +150,7 @@ class EnhancedPost {
     float prints = 1.0f;    // footprints and ruts in the sand
     float lit_smoke = 0.8f; // the dynamic lights brighten and tint the smoke and dust near them
     bool far_view = true;   // no occlusion culling from the game's precomputed visibility
+    float relief = 1.0f;    // the textures' shading read as small bumps under the sun
     float materials = 1.0f; // metal and glossy surfaces (by texture name): reflections, highlights
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
