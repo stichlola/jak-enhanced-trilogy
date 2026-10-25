@@ -1,6 +1,7 @@
 #include "TFragment.h"
 
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
 
 #include "third-party/imgui/imgui.h"
@@ -393,6 +394,7 @@ bool TFragment::setup_for_level(const std::vector<tfrag3::TFragmentTreeKind>& tr
     update_load(tree_kinds, lev_data);
     m_has_level = true;
     m_textures = &lev_data->textures;
+    m_materials = &enhanced_level_materials(lev_data);
     m_level_name = level;
   } else {
     m_has_level = true;
@@ -490,6 +492,7 @@ void TFragment::render_tree(int geom,
     }
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, ShaderId::TFRAG3);
     glUniform1i(m_uniforms.decal, draw.mode.get_decal() ? 1 : 0);
+    enhanced_set_material(render_state, ShaderId::TFRAG3, m_materials, tex_idx);
     tree.tris_this_frame += draw.num_triangles;
     tree.draws_this_frame++;
 

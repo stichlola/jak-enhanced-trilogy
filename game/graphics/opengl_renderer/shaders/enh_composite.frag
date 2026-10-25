@@ -28,6 +28,8 @@ uniform int print_count;        // footprints and ruts: world xyz (game units), 
 uniform vec4 prints[48];
 uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
 uniform float prints_strength;
+uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
+                                // < 0: show them, metal red, glossy blue; 2: left half only)
 uniform int blast_count;        // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 uniform float blast_age[4];
@@ -179,7 +181,7 @@ vec3 view_pos(vec2 uv, float d) {
 vec3 surface_normal(vec2 uv, vec3 p) {
   vec3 nn;
   vec4 g = texture(tex_T11, uv);
-  if (g.a > 0.5) {
+  if (g.a > 0.17) {
     nn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
   } else {
     vec3 pr = view_pos(uv + vec2(texel.x, 0), texture(tex_T3, uv + vec2(texel.x, 0)).r);
@@ -191,6 +193,42 @@ vec3 surface_normal(vec2 uv, vec3 p) {
     nn = normalize(cross(dx, dy));
   }
   return dot(nn, -p) < 0.0 ? -nn : nn;
+}
+
+// what a surface reflects along r (view space): the scene where the ray meets the depth buffer
+// (a short march), else the screen where the ray vanishes (the sky, far hills); hit: how sure
+vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
+  hit = 0.0;
+  vec3 refl = fog_color;
+  if (r.z > 1e-3) {
+    vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
+    refl = texture(tex_T0, env_uv).rgb;
+  }
+  float step_len = 0.15 * 4096.0 + z * 0.01;
+  vec3 q = p + r * (0.05 * 4096.0 + z * 0.002);
+  for (int i = 0; i < 20; i++) {
+    q += r * step_len;
+    step_len *= 1.15;
+    if (q.z <= 0.0) {
+      break;
+    }
+    vec2 quv = 0.5 * vec2(proj.z * q.x, proj.w * q.y) / q.z + 0.5;
+    if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+      break;
+    }
+    float sd = texture(tex_T3, quv).r;
+    if (sd <= 1e-7) {
+      continue;
+    }
+    float scene_z = view_z(sd);
+    if (q.z > scene_z && q.z - scene_z < step_len + 2048.0) {
+      vec2 edge = min(quv, 1.0 - quv);
+      hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
+      refl = mix(refl, texture(tex_T0, quv).rgb, hit);
+      break;
+    }
+  }
+  return refl;
 }
 
 float sun_shadow(vec3 w) {
@@ -553,7 +591,7 @@ void main() {
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
     // depth-rebuilt ones in color, to compare
     vec3 nn = surface_normal(tex_coord, p);
-    bool own = texture(tex_T11, tex_coord).a > 0.5;
+    bool own = texture(tex_T11, tex_coord).a > 0.17;
     if (tex_coord.x > 0.5) {
       vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
       vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
@@ -655,6 +693,50 @@ void main() {
   if (gi_strength > 0.0 && wsurf == 0.0) {
     vec3 gi = texture(tex_T7, tex_coord).rgb;
     c += gi * gi_strength * (0.35 + c) * ao;
+  }
+
+  // materials (from the texture names, in the normals' alpha): metal reflects its surroundings
+  // tinted by its own color with a broad highlight; glass, marble and tiles reflect them untinted
+  // at grazing angles with a tight highlight
+  if (materials < 0.0 && z > 0.0) {
+    float ga = texture(tex_T11, tex_coord).a;
+    int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
+    c = mat == 1 ? vec3(1.0, 0.1, 0.1) : (mat == 2 ? vec3(0.1, 0.3, 1.0) : c * 0.4);
+  }
+  float mk = materials > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : materials;
+  if (mk > 0.0 && z > 0.0 && z < 120.0 * 4096.0 && wsurf == 0.0) {
+    float ga = texture(tex_T11, tex_coord).a;
+    int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
+    if (mat != 0) {
+      vec3 nn = surface_normal(tex_coord, p);
+      vec3 vdir = normalize(p);
+      vec3 r = reflect(vdir, nn);
+      float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
+      float hit;
+      vec3 refl = trace_reflection(p, r, z, hit);
+      float fade = 1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z);
+      // the sun's highlight, where the sun reaches
+      float sunlit = 0.0;
+      if (sun_dir.w > 0.0 && dot(nn, sun_dir.xyz) > 0.0) {
+        sunlit = 1.0;
+        if (shadow_strength > 0.0) {
+          sunlit -= sun_shadow(view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos);
+        }
+        sunlit *= ao;
+      }
+      float sr = max(dot(r, sun_dir.xyz), 0.0);
+      float lum = max(dot(c, vec3(0.3, 0.59, 0.11)), 0.02);
+      if (mat == 1) {
+        vec3 tint = clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5;
+        float f = 0.5 + 0.5 * pow(1.0 - facing, 5.0);
+        c = mix(c, refl * tint * (0.5 + lum), f * 0.55 * mk * fade);
+        c += c * tint * (pow(sr, 64.0) * 2.0 + pow(sr, 12.0) * 0.45) * sunlit * mk;
+      } else {
+        float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
+        c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
+        c += vec3(1.0, 0.95, 0.85) * pow(sr, 300.0) * 2.0 * sunlit * mk;
+      }
+    }
   }
 
   // sun relight: the game's light is baked per vertex; shade each pixel a little more by how it

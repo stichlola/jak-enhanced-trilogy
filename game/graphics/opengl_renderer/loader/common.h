@@ -12,6 +12,7 @@ struct LevelData {
   std::unique_ptr<tfrag3::Level> level;
   std::vector<GLuint> textures;
   u64 load_id = UINT64_MAX;
+  mutable std::vector<u8> enh_materials;  // Enhanced: see EnhancedMaterials.h
 
   struct TieOpenGL {
     GLuint vertex_buffer;

@@ -143,6 +143,7 @@ class Tie3 : public BucketRenderer {
   std::array<std::vector<Tree>, 4> m_trees;  // includes 4 lods!
   std::string m_level_name;
   const std::vector<GLuint>* m_textures;
+  const std::vector<u8>* m_materials = nullptr;  // Enhanced: per texture
   u64 m_load_id = -1;
 
   std::vector<math::Vector<u8, 4>> m_color_result;
