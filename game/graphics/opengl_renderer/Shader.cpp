@@ -218,6 +218,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
   at(ShaderId::ENH_TAA) = {"enh_taa", version};
   at(ShaderId::ENH_VOLUME) = {"enh_volume", version};
   at(ShaderId::ENH_SHADOW) = {"enh_shadow", version};
+  at(ShaderId::ENH_SHADOW_MERC) = {"enh_shadow_merc", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

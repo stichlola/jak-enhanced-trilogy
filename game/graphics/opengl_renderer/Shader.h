@@ -84,6 +84,7 @@ enum class ShaderId {
   ENH_TAA = 53,
   ENH_VOLUME = 54,
   ENH_SHADOW = 55,
+  ENH_SHADOW_MERC = 56,
   MAX_SHADERS
 };
 

@@ -21,6 +21,7 @@ EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
+EnhancedCasters g_enhanced_casters;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedMenu g_enhanced_menu;
@@ -143,6 +144,10 @@ EnhancedPost::EnhancedPost() {
       m_settings.shadow_strength = (float)std::atof(sm);
     }
   }
+  if (const char* casters = std::getenv("JAK_ENHANCED_SHADOW_CASTERS")) {
+    // 0 = only the static level geometry casts sun shadows
+    m_settings.shadow_casters = std::atoi(casters) != 0;
+  }
   if (const char* mist_sun = std::getenv("JAK_ENHANCED_MIST_SUN")) {
     m_settings.mist_sun = (float)std::atof(mist_sun);
   }
@@ -229,6 +234,11 @@ float halton(u32 i, u32 base) {
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
+  // the characters of this frame add themselves (Merc2), for the sun shadow map
+  g_enhanced_casters.bones.clear();
+  g_enhanced_casters.draws.clear();
+  g_enhanced_casters.capture =
+      m_settings.enabled && m_settings.shadow_map && m_settings.shadow_casters;
   g_enhanced_normals.enabled = m_settings.enabled && m_settings.geometry_normals;
   if (g_enhanced_normals.enabled && g_enhanced_normals.fbo) {
     // a = 0: no normal (the post pass rebuilds one from depth there)
@@ -815,6 +825,11 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   m_gi_ready = true;
 }
 
+namespace {
+// texture alpha under this doesn't cast a shadow (leaf cards, cutouts)
+constexpr float kShadowAlphaRef = 0.25f;
+}  // namespace
+
 void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof) {
   m_shadow_ready = false;
   float sun[3];
@@ -893,12 +908,16 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       d.cut = cut;
       draws.push_back(d);
     }
+    add_wind_shadow_draws(lev, cut, &draws);
   }
   for (auto it = m_shadow_draws.begin(); it != m_shadow_draws.end();) {
     if (std::find(in_use.begin(), in_use.end(), it->first) == in_use.end()) {
       for (auto& d : it->second) {
         if (d.own_indices) {
           glDeleteBuffers(1, &d.indices);
+        }
+        if (d.own_vertices) {
+          glDeleteBuffers(1, &d.vertices);
         }
       }
       it = m_shadow_draws.erase(it);
@@ -971,24 +990,197 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   auto id = shader.id();
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   GLint u_cut = glGetUniformLocation(id, "enh_cut");
+  GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glActiveTexture(GL_TEXTURE0);
   glBindVertexArray(m_shadow_vao);
   glEnableVertexAttribArray(0);
   for (auto& [lid, draws] : m_shadow_draws) {
     for (auto& d : draws) {
+      if (d.wind && !m_settings.shadow_casters) {
+        continue;
+      }
       glUniform1i(u_cut, d.cut);
       glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
-      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex), (void*)0);
+      if (d.own_vertices || d.wind) {
+        // x, y, z, s, t
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                              (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(1);
+      } else {
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex), (void*)0);
+        glDisableVertexAttribArray(1);
+      }
+      glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
+      if (d.tex) {
+        glBindTexture(GL_TEXTURE_2D, d.tex);
+      }
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
-      glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, nullptr);
+      glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, (void*)(d.first * sizeof(u32)));
       prof.add_draw_call();
     }
   }
+  glDisableVertexAttribArray(1);
   glBindVertexArray(0);
+  if (m_settings.shadow_casters) {
+    draw_shadow_casters(render_state, prof);
+  }
   glDisable(GL_POLYGON_OFFSET_FILL);
   glDisable(GL_PRIMITIVE_RESTART);
   glClearDepth(old_clear_depth);
   glDepthFunc(old_depth_func);
   m_shadow_ready = true;
+}
+
+// The wind-blown ties (trees) of a level for the shadow map: the game draws them per instance with
+// a matrix it sways each frame; the shadow uses the still matrices, baked into world positions once.
+void EnhancedPost::add_wind_shadow_draws(const LevelData* lev,
+                                         bool cut,
+                                         std::vector<ShadowDraw>* draws) {
+  const auto& ties = lev->level->tie_trees[0];
+  size_t instances = 0;
+  for (const auto& tree : ties) {
+    instances += tree.wind_instance_info.size();
+  }
+  if (instances) {
+    lg::info("[enhanced] shadow map {}: {} wind-blown tie instances", lev->level->level_name,
+             instances);
+  }
+  for (const auto& tree : ties) {
+    if (tree.instanced_wind_draws.empty()) {
+      continue;
+    }
+    std::vector<float> verts;  // x, y, z, s, t
+    std::vector<u32> indices;
+    std::vector<ShadowDraw> tree_draws;
+    for (const auto& draw : tree.instanced_wind_draws) {
+      if (!draw.mode.get_depth_write_enable()) {
+        continue;
+      }
+      ShadowDraw d;
+      d.first = indices.size();
+      d.mode = tree.use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      d.cut = cut;
+      d.wind = true;
+      if (draw.mode.get_at_enable() && draw.tree_tex_id >= 0 &&
+          draw.tree_tex_id < (int)lev->textures.size()) {
+        d.tex = lev->textures[draw.tree_tex_id];
+      }
+      u32 off = 0;
+      for (const auto& grp : draw.instance_groups) {
+        const auto& m = tree.wind_instance_info.at(grp.instance_idx).matrix;
+        for (u32 k = off; k < off + grp.num && k < draw.vertex_index_stream.size(); k++) {
+          u32 vi = draw.vertex_index_stream[k];
+          if (vi == UINT32_MAX || vi >= tree.unpacked.vertices.size()) {
+            indices.push_back(UINT32_MAX);
+            continue;
+          }
+          const auto& v = tree.unpacked.vertices[vi];
+          for (int c = 0; c < 3; c++) {
+            verts.push_back(m[0][c] * v.x + m[1][c] * v.y + m[2][c] * v.z + m[3][c]);
+          }
+          verts.push_back(v.s);
+          verts.push_back(v.t);
+          indices.push_back(verts.size() / 5 - 1);
+        }
+        // strips of different instances must not join
+        indices.push_back(UINT32_MAX);
+        off += grp.num;
+      }
+      d.count = indices.size() - d.first;
+      if (d.count) {
+        tree_draws.push_back(d);
+      }
+    }
+    if (tree_draws.empty()) {
+      continue;
+    }
+    GLuint vb = 0, ib = 0;
+    glGenBuffers(1, &vb);
+    glBindBuffer(GL_ARRAY_BUFFER, vb);
+    glBufferData(GL_ARRAY_BUFFER, verts.size() * sizeof(float), verts.data(), GL_STATIC_DRAW);
+    glGenBuffers(1, &ib);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(u32), indices.data(),
+                 GL_STATIC_DRAW);
+    for (auto& d : tree_draws) {
+      d.vertices = vb;
+      d.indices = ib;
+    }
+    // the first one owns the buffers
+    tree_draws[0].own_vertices = true;
+    tree_draws[0].own_indices = true;
+    draws->insert(draws->end(), tree_draws.begin(), tree_draws.end());
+  }
+}
+
+// The characters drawn this frame (see EnhancedCasters), skinned again with their bones and drawn
+// into the shadow map. Their bones put them in camera space: back to the world with the camera.
+void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
+                                       ScopedProfilerNode& prof) {
+  auto& cs = g_enhanced_casters;
+  cs.capture = false;  // later merc draws (HUD) don't cast
+  if (cs.draws.empty()) {
+    return;
+  }
+  // a bound range always spans 128 bones: room past the last one
+  constexpr size_t kBoneBlock = 128 * 8 * 4;  // floats
+  const size_t size = (cs.bones.size() + kBoneBlock) * sizeof(float);
+  if (!m_caster_bones) {
+    glGenBuffers(1, &m_caster_bones);
+    glGenVertexArrays(1, &m_caster_vao);
+  }
+  glBindBuffer(GL_UNIFORM_BUFFER, m_caster_bones);
+  if (size > m_caster_bones_size) {
+    m_caster_bones_size = size * 3 / 2;
+    glBufferData(GL_UNIFORM_BUFFER, m_caster_bones_size, nullptr, GL_DYNAMIC_DRAW);
+  }
+  glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  auto& shader = render_state->shaders[ShaderId::ENH_SHADOW_MERC];
+  shader.activate();
+  const auto id = shader.id();
+  const auto& cam = g_enhanced_camera;
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  // world = cam - rot * merc camera space (the view space negated; rot as stored, see EnhancedCamera)
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
+  glUniform3f(glGetUniformLocation(id, "cam_trans"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
+  glBindVertexArray(m_caster_vao);
+  glEnableVertexAttribArray(0);
+  glEnableVertexAttribArray(2);
+  glEnableVertexAttribArray(3);
+  glEnableVertexAttribArray(5);
+  GLuint last_vertices = 0;
+  for (const auto& d : cs.draws) {
+    if (d.vertices != last_vertices) {
+      glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+      constexpr GLsizei kStride = sizeof(tfrag3::MercVertex);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, pos));
+      glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, weights[0]));
+      glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, st[0]));
+      glVertexAttribIPointer(5, 4, GL_UNSIGNED_BYTE, kStride,
+                             (void*)offsetof(tfrag3::MercVertex, mats[0]));
+      last_vertices = d.vertices;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+    glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
+    if (d.tex) {
+      glBindTexture(GL_TEXTURE_2D, d.tex);
+    }
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_caster_bones, d.first_bone * 4 * sizeof(float),
+                      kBoneBlock * sizeof(float));
+    glDrawElements(d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES, d.index_count, GL_UNSIGNED_INT,
+                   (void*)(sizeof(u32) * d.first_index));
+    prof.add_draw_call();
+  }
+  glBindVertexArray(0);
 }
 
 void EnhancedPost::do_volume(SharedRenderState* render_state,
@@ -1461,6 +1653,7 @@ void EnhancedPost::draw_menu() {
     check("Antialiasing (TAA)", &s.taa);
     check("Nebbia volumetrica", &s.volume);
     check("Ombre del sole", &s.shadow_map);
+    check("Ombre di personaggi e alberi", &s.shadow_casters);
     check("Ombre di contatto", &s.sun_shadows);
     check("Occlusione (SSAO)", &s.ssao);
     check("Luce indiretta (SSGI)", &s.gi);
@@ -1567,6 +1760,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
     ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
     ImGui::Checkbox("Sun shadow map", &m_settings.shadow_map);
+    ImGui::Checkbox("Characters and wind trees cast", &m_settings.shadow_casters);
     ImGui::SliderFloat("Shadow map strength", &m_settings.shadow_strength, 0.f, 1.f);
     ImGui::SliderFloat("Shadow map range (m)", &m_settings.shadow_range, 20.f, 200.f);
     ImGui::Checkbox("Sun shadows", &m_settings.sun_shadows);

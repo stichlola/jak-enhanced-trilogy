@@ -59,6 +59,25 @@ struct EnhancedWind {
 };
 extern EnhancedWind g_enhanced_wind;
 
+// Enhanced: the characters (merc) drawn this frame, kept for the sun shadow map. Merc2 copies its
+// bones (camera space) and opaque draws here as it flushes; the shadow pass replays them.
+struct EnhancedCasters {
+  struct Draw {
+    GLuint vertices = 0;
+    GLuint indices = 0;
+    u32 first_index = 0;
+    u32 index_count = 0;
+    u32 first_bone = 0;  // in bone vectors (vec4)
+    GLuint tex = 0;      // 0: no alpha test
+    bool strip = true;
+  };
+  bool capture = false;  // set at the start of a frame when the shadow map wants them
+  u32 alignment = 1;     // bone vectors per uniform buffer offset alignment
+  std::vector<float> bones;  // 4 floats per bone vector
+  std::vector<Draw> draws;
+};
+extern EnhancedCasters g_enhanced_casters;
+
 /*!
  * Jak 3 Enhanced post-processing, run on the finished game frame before it goes to the window:
  * screen-space ambient occlusion from the depth buffer, a light depth of field on the far
@@ -76,6 +95,7 @@ class EnhancedPost {
     float ssao_max_distance = 250.f;  // meters, faded out beyond
     bool sun_shadows = true;          // screen-space shadows toward the sun, in the same pass
     bool shadow_map = true;           // real sun shadows: the levels drawn from the sun
+    bool shadow_casters = true;       // characters and wind-blown trees in it too
     float shadow_strength = 0.35f;    // how much light a shadow takes off sunlit surfaces
     float shadow_range = 80.f;        // meters: half the side of the square around the camera
     float sun_shadow_strength = 0.45f;
@@ -280,8 +300,17 @@ class EnhancedPost {
     u32 count = 0;
     GLenum mode = GL_TRIANGLES;
     bool cut = false;
+    bool own_vertices = false;  // wind ties: world positions built here
+    bool wind = false;          // a caster (drawn with shadow_casters only)
+    u32 first = 0;              // first index
+    GLuint tex = 0;             // alpha tested with this texture (0 = solid)
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
+  void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
+  void draw_shadow_casters(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_caster_bones = 0;
+  size_t m_caster_bones_size = 0;
+  GLuint m_caster_vao = 0;
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;

@@ -245,6 +245,8 @@ class Merc2 {
   u32 m_next_free_level_bucket = 0;
   u32 m_next_free_bone_vector = 0;
   size_t m_opengl_buffer_alignment = 0;
+  void enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones);
+  u32 m_enhanced_bone_base = 0;
 
   void flush_draw_buckets(SharedRenderState* render_state,
                           ScopedProfilerNode& prof,

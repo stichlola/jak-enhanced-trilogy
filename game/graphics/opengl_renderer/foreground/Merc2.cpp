@@ -1207,6 +1207,7 @@ void Merc2::flush_draw_buckets(SharedRenderState* render_state,
     glBufferSubData(GL_UNIFORM_BUFFER, 0, m_next_free_bone_vector * sizeof(math::Vector4f),
                     m_shader_bone_vector_buffer);
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
+    enhanced_keep_casters(lev_bucket, li == 0);
 
     switch_to_merc2(render_state);
     do_draws(lev_bucket.draws.data(), lev, lev_bucket.next_free_draw, m_merc_uniforms, prof, false,
@@ -1222,6 +1223,42 @@ void Merc2::flush_draw_buckets(SharedRenderState* render_state,
   m_next_free_bone_vector = 0;
   m_next_free_level_bucket = 0;
   m_next_mod_vtx_buffer = 0;
+}
+
+// Enhanced: the opaque draws and the bones of this flush, for the sun shadow map
+void Merc2::enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones) {
+  auto& cs = g_enhanced_casters;
+  if (!cs.capture || !m_next_free_bone_vector) {
+    return;
+  }
+  // the bones go in once per flush (all level buckets share them), at an aligned offset
+  cs.alignment = std::max<u32>(1, m_opengl_buffer_alignment);
+  if (copy_bones) {
+    u32 base = (cs.bones.size() / 4 + cs.alignment - 1) / cs.alignment * cs.alignment;
+    cs.bones.resize(base * 4);
+    const float* src = &m_shader_bone_vector_buffer[0].x();
+    cs.bones.insert(cs.bones.end(), src, src + m_next_free_bone_vector * 4);
+    m_enhanced_bone_base = base;
+  }
+  const auto* lev = bucket.level;
+  for (u32 i = 0; i < bucket.next_free_draw; i++) {
+    const auto& draw = bucket.draws[i];
+    if (!draw.mode.get_depth_write_enable()) {
+      continue;  // transparent: no shadow
+    }
+    EnhancedCasters::Draw d;
+    d.vertices = lev->merc_vertices;
+    d.indices = lev->merc_indices;
+    d.first_index = draw.first_index;
+    d.index_count = draw.index_count;
+    d.first_bone = m_enhanced_bone_base + draw.first_bone;
+    d.strip = !draw.no_strip;
+    if (draw.mode.get_at_enable() && draw.texture >= 0 &&
+        draw.texture < (int)lev->textures.size()) {
+      d.tex = lev->textures[draw.texture];
+    }
+    cs.draws.push_back(d);
+  }
 }
 
 void Merc2::do_draws(const Draw* draw_array,
