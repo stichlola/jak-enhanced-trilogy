@@ -33,7 +33,8 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
   and the surfaces show relief from their textures.
 - **Ray-traced reflections**: where the screen has nothing to reflect (off the edge, or hidden
   behind something), water, metal and glass trace the ray through the level's real geometry, lit by
-  the game's own light at that hour. Hits show the real textures.
+  the game's own light at that hour. Hits show the real textures. Off by default for now (it
+  still has artifacts): turn it on in the menu.
 - **Ray-traced ambient occlusion**: short rays from every pixel through the same geometry darken
   corners, recesses and alleys from what's really there, even off the screen. Off by default for
   now (too slow): turn it on in the menu.

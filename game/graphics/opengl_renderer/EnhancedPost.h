@@ -154,7 +154,7 @@ class EnhancedPost {
     float materials = 1.0f; // metal and glossy surfaces (by texture name): reflections, highlights
     // reflections on water, metal and glass traced through the levels' geometry where the
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
-    int ray_traced = 1;
+    int ray_traced = 0;  // off by default for now: still has artifacts
     // ambient occlusion traced through the levels' geometry (short rays from every pixel)
     bool rt_ao = false;  // off for now: too slow
     float rt_ao_length = 3.0f;     // meters
