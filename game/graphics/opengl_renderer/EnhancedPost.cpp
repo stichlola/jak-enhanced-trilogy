@@ -169,6 +169,13 @@ EnhancedPost::EnhancedPost() {
     // reflections traced through the levels: 0 off, 2 traced only (no screen-space)
     m_settings.ray_traced = std::clamp(std::atoi(rt), 0, 3);
   }
+  if (const char* rt_ao = std::getenv("JAK_ENHANCED_RT_AO")) {
+    // ambient occlusion traced through the levels, 0 = off
+    m_settings.rt_ao = std::atoi(rt_ao) != 0;
+  }
+  if (const char* len = std::getenv("JAK_ENHANCED_RT_AO_LENGTH")) {
+    m_settings.rt_ao_length = (float)std::atof(len);  // meters
+  }
   if (const char* far_view = std::getenv("JAK_ENHANCED_FAR_VIEW")) {
     // 0 = the game's occlusion culling (precomputed visibility) as it was
     m_settings.far_view = std::atoi(far_view) != 0;
@@ -1753,6 +1760,21 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
                 on ? m_settings.sun_shadow_strength : 0.f);
     glUniform1f(glGetUniformLocation(id, "sun_length"), m_settings.sun_shadow_length * kMeter);
   }
+  // traced occlusion
+  const bool rt_ao = m_settings.rt_ao && m_rt_ready;
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), rt_ao ? m_rt_count : 0);
+  if (rt_ao) {
+    for (int i = 0; i < 2; i++) {
+      glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+    }
+    glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+    glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+    glUniform3f(glGetUniformLocation(id, "rt_ao"), m_settings.rt_ao_length * kMeter,
+                m_settings.rt_ao_strength, m_settings.rt_ao_distance * kMeter);
+  }
+  if (m_settings.ssao_debug && (debug_counter % 300) == 1) {
+    lg::info("[enhanced] rt ao {} ready {} levels {}", m_settings.rt_ao, m_rt_ready, m_rt_count);
+  }
   glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
@@ -1838,6 +1860,8 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     do_shadow_map(render_state, prof);
   }
+  // the levels' ray tracing hierarchies (occlusion, reflections)
+  update_rt(render_state);
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
     if (m_settings.volume && m_ssao_ready) {
@@ -1915,7 +1939,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
 
 void EnhancedPost::update_rt(SharedRenderState* render_state) {
   m_rt_ready = false;
-  if (m_settings.ray_traced <= 0 || !render_state->loader) {
+  if ((m_settings.ray_traced <= 0 && !m_settings.rt_ao) || !render_state->loader) {
     return;
   }
   auto levels = render_state->loader->get_in_use_levels();
@@ -2080,8 +2104,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
   glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
   glUniform1i(glGetUniformLocation(id, "normal_debug"), m_settings.normal_debug);
-  // ray-traced reflections: the levels' hierarchies, and the time-of-day weights for the hits
-  update_rt(render_state);
+  // ray-traced reflections: the levels' hierarchies (update_rt), and the time-of-day weights
   const bool rt = m_settings.ray_traced > 0 && m_rt_ready && g_enhanced_tod.valid;
   glUniform1i(glGetUniformLocation(id, "rt_mode"), rt ? m_settings.ray_traced : 0);
   if (rt) {
@@ -2204,6 +2227,7 @@ void EnhancedPost::draw_menu() {
     if (check("Ray-traced reflections", &traced)) {
       s.ray_traced = traced ? 1 : 0;
     }
+    check("Ray-traced ambient occlusion", &s.rt_ao);
     if (check("Reflective metal and glass", &mats)) {
       s.materials = mats ? 1.f : 0.f;
     }
@@ -2358,6 +2382,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["far_view"] = s.far_view;
   j["materials"] = s.materials;
   j["ray_traced"] = s.ray_traced;
+  j["rt_ao"] = s.rt_ao;
   j["relief"] = s.relief;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
@@ -2402,6 +2427,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("far_view", s.far_view);
   get("materials", s.materials);
   get("ray_traced", s.ray_traced);
+  get("rt_ao", s.rt_ao);
   get("relief", s.relief);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
@@ -2447,6 +2473,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.materials = d.materials;
   s.relief = d.relief;
   s.ray_traced = all_on(preset) ? d.ray_traced : 0;
+  s.rt_ao = all_on(preset) && d.rt_ao;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;
@@ -2515,6 +2542,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("SSAO", &m_settings.ssao);
     ImGui::SliderFloat("SSAO radius (m)", &m_settings.ssao_radius, 0.2f, 5.f);
     ImGui::SliderFloat("SSAO intensity", &m_settings.ssao_intensity, 0.f, 3.f);
+    ImGui::SliderFloat("RT AO length (m)", &m_settings.rt_ao_length, 0.5f, 8.f);
+    ImGui::SliderFloat("RT AO strength", &m_settings.rt_ao_strength, 0.f, 2.f);
+    ImGui::SliderFloat("RT AO distance (m)", &m_settings.rt_ao_distance, 10.f, 300.f);
     ImGui::SliderFloat("SSAO max distance (m)", &m_settings.ssao_max_distance, 10.f, 500.f);
     ImGui::Checkbox("SSAO debug view", &m_settings.ssao_debug);
     ImGui::Checkbox("Sun shadow map", &m_settings.shadow_map);

@@ -1,4 +1,4 @@
-#version 410 core
+#version 430 core
 
 // Jak 3 Enhanced: screen-space ambient occlusion (Alchemy AO) from the game's depth buffer.
 // Positions are rebuilt with the projection saved by the background renderers:
@@ -14,6 +14,15 @@ uniform float intensity;
 uniform float max_distance;  // game units
 uniform vec4 sun;            // xyz: key light direction in view space, w: shadow strength
 uniform float sun_length;    // game units marched toward the light
+
+// ray-traced occlusion: short rays through the levels' hierarchies (see rt_trace in
+// enh_composite.frag for the layout), world space in game units
+layout(std430, binding = 0) readonly buffer RtNodes { vec4 rt_nodes[]; };
+layout(std430, binding = 1) readonly buffer RtTris { vec4 rt_tris[]; };
+uniform int rt_levels;       // 0: none (screen-space only)
+uniform ivec4 rt_base[16];   // per level: node, triangle base
+uniform vec3 cam_pos;        // world
+uniform vec3 rt_ao;          // ray length, strength, how far from the camera (game units, -, game units)
 
 in vec2 tex_coord;
 out float ao_out;
@@ -33,6 +42,94 @@ vec3 view_pos(vec2 uv, float d) {
 
 vec3 view_pos(vec2 uv) {
   return view_pos(uv, texture(tex_T0, uv).r);
+}
+
+// how far along o + d * t the nearest level triangle is (tmax: none)
+float rt_nearest(vec3 o, vec3 d, float tmax) {
+  vec3 dd = vec3(abs(d.x) < 1e-7 ? 1e-7 : d.x, abs(d.y) < 1e-7 ? 1e-7 : d.y,
+                 abs(d.z) < 1e-7 ? 1e-7 : d.z);
+  vec3 inv = 1.0 / dd;
+  float best = tmax;
+  int stack[32];
+  for (int l = 0; l < rt_levels; l++) {
+    int nb = rt_base[l].x;
+    int tb = rt_base[l].y;
+    int sp = 0;
+    stack[sp++] = 0;
+    int steps = 0;
+    while (sp > 0 && steps < 200) {
+      steps++;
+      int ni = stack[--sp];
+      vec4 a = rt_nodes[(nb + ni) * 2];
+      vec4 b = rt_nodes[(nb + ni) * 2 + 1];
+      vec3 t0 = (a.xyz - o) * inv;
+      vec3 t1 = (b.xyz - o) * inv;
+      vec3 tlo = min(t0, t1);
+      vec3 thi = max(t0, t1);
+      float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
+      float tf = min(min(thi.x, thi.y), min(thi.z, best));
+      if (tn > tf) {
+        continue;
+      }
+      int first = int(floatBitsToUint(a.w));
+      int count = int(floatBitsToUint(b.w));
+      if (count > 0) {
+        for (int k = 0; k < count; k++) {
+          int ti = (tb + first + k) * 5;
+          vec3 v0 = rt_tris[ti].xyz;
+          vec3 e1 = rt_tris[ti + 1].xyz;
+          vec3 e2 = rt_tris[ti + 2].xyz;
+          vec3 pv = cross(d, e2);
+          float det = dot(e1, pv);
+          if (abs(det) < 1e-4) {
+            continue;
+          }
+          float id = 1.0 / det;
+          vec3 tv = o - v0;
+          float u = dot(tv, pv) * id;
+          if (u < 0.0 || u > 1.0) {
+            continue;
+          }
+          vec3 qv = cross(tv, e1);
+          float v = dot(d, qv) * id;
+          if (v < 0.0 || u + v > 1.0) {
+            continue;
+          }
+          float t = dot(e2, qv) * id;
+          if (t > 0.0 && t < best) {
+            best = t;
+          }
+        }
+      } else if (sp < 31) {
+        stack[sp++] = first;
+        stack[sp++] = ni + 1;
+      }
+    }
+  }
+  return best;
+}
+
+const int RT_RAYS = 6;
+
+// the open sky seen from world point w with world normal n (1 open, 0 shut in): cosine-weighted
+// rays, a hit counts more the closer it is (linearly)
+float rt_occlusion(vec3 w, vec3 n, float noise, float dist) {
+  vec3 t = normalize(abs(n.y) < 0.9 ? cross(n, vec3(0.0, 1.0, 0.0)) : cross(n, vec3(1.0, 0.0, 0.0)));
+  vec3 b = cross(n, t);
+  // off the surface: the depth buffer's position is coarser further away
+  vec3 o = w + n * (0.03 * 4096.0 + 0.0015 * dist);
+  float noise2 = fract(noise * 7.31 + 0.37);
+  float sum = 0.0;
+  for (int i = 0; i < RT_RAYS; i++) {
+    float u1 = fract((float(i) + noise) / float(RT_RAYS));
+    float phi = 6.2831853 * fract(float(i) * 0.618034 + noise2);
+    float r = sqrt(u1);
+    vec3 d = normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + n * sqrt(1.0 - u1));
+    float h = rt_nearest(o, d, rt_ao.x);
+    float k = 1.0 - h / rt_ao.x;
+    sum += k;
+  }
+  return 1.0 - rt_ao.y * sum / float(RT_RAYS);
 }
 
 void main() {
@@ -93,6 +190,16 @@ void main() {
   }
 
   float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
+
+  // traced through the levels: corners and alleys darken from what's really there, on or off the
+  // screen (the screen-space one still gives the characters, which aren't traced, their contact)
+  if (rt_levels > 0 && dist < rt_ao.z) {
+    vec3 wn = normalize(view_to_world * n);
+    vec3 wp = view_to_world * p + cam_pos;
+    float rt = rt_occlusion(wp, wn, noise, dist);
+    rt = mix(rt, 1.0, smoothstep(0.7 * rt_ao.z, rt_ao.z, dist));
+    ao = min(ao, max(rt, 0.0));
+  }
 
   // screen-space sun shadow: march toward the light, shadowed if the depth buffer has a surface
   // in front of the ray (but not so far in front that it's just something unrelated)

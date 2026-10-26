@@ -155,6 +155,11 @@ class EnhancedPost {
     // reflections on water, metal and glass traced through the levels' geometry where the
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
     int ray_traced = 1;
+    // ambient occlusion traced through the levels' geometry (short rays from every pixel)
+    bool rt_ao = true;
+    float rt_ao_length = 3.0f;     // meters
+    float rt_ao_strength = 1.0f;
+    float rt_ao_distance = 80.f;   // meters from the camera
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
