@@ -106,6 +106,7 @@ uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night 
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
+uniform float sheet;            // sheet lightning: the whole sky lit from inside the clouds (0..1)
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
@@ -714,7 +715,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   vec3 under = mix(sky * 0.55, vec3(luma(sky)) * 0.5, 0.3) * (1.0 - 0.45 * weather.x - 0.3 * weather2.x);
   vec3 top = sky * 0.9 + 0.08;
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
-  vec3 flash = vec3(0.8, 0.85, 1.0) * weather2.w * (0.12 + 1.1 * near_bolt);
+  vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
   const int N = 18;
   float dt = (t1 - t0) / float(N);
   vec3 sum = vec3(0.0);
@@ -1408,7 +1409,8 @@ void main() {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
     // wide puddles: low-frequency dips with a ragged rim
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
-    float puddle = smoothstep(-0.12, 0.02, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
+    float spread = 0.22 * weather2.x;  // a thunderstorm floods them wider
+    float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
                    (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z));
     c *= 1.0 - 0.25 * puddle * wet;
     vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
@@ -1738,9 +1740,11 @@ void main() {
 
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky
-  if (weather2.w > 0.0 || bolt_light > 0.0) {
+  if (weather2.w > 0.0 || bolt_light > 0.0 || sheet > 0.0) {
     vec3 cold = vec3(0.85, 0.9, 1.0);
     c += cold * weather2.w * ((z == 0.0 ? 0.04 : 0.03) + c * 0.45);
+    // sheet lightning: the sky glows, the scene below catches it
+    c += cold * sheet * ((z == 0.0 ? 0.22 : 0.035) + c * 0.4);
     c += cold * bolt_light * 2.2;
   }
 

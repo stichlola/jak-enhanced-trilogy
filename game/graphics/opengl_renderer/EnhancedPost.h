@@ -450,6 +450,10 @@ class EnhancedPost {
   float m_flash = 0.f;  // lightning flash, 0..1
   float m_bolt[4] = {};  // the bolt: azimuth (rad), seed, age (s), strength
   double m_next_bolt = 0;
+  float m_sheet = 0.f;       // sheet lightning: the whole sky lit from inside the clouds
+  float m_sheet_age = 10.f;
+  float m_sheet_strength = 0.f;
+  double m_next_sheet = 0;
   double m_thunder_at = -1;  // when the last bolt's thunder arrives (s)
   int m_thunder_kind = 0;
   float m_wind[2] = {0.f, 1.f};  // the dust's wind direction (world xz)

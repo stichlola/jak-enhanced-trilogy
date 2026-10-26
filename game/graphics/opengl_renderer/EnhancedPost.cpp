@@ -1372,6 +1372,29 @@ void EnhancedPost::update_scene() {
     g_enhanced_thunder = m_thunder_kind * 1000 + deg;
   }
   m_bolt[2] += dt;
+  // sheet lightning: every few seconds the whole sky flickers from inside the clouds, two or three
+  // pulses
+  if (m_next_sheet == 0) {
+    m_next_sheet = m_time + 2.0;
+  }
+  if (m_storm > 0.3f && m_time >= m_next_sheet) {
+    m_sheet_age = 0.f;
+    m_sheet_strength = 0.5f + 0.5f * (float)(std::rand() % 1000) / 1000.f;
+    m_next_sheet = m_time + 2.0 + 4.0 * (std::rand() % 1000) / 1000.0;
+  }
+  m_sheet_age += dt;
+  // test: a sheet flash held at the age JAK_ENHANCED_SHEET_TEST says (s; screenshots)
+  if (const char* st = std::getenv("JAK_ENHANCED_SHEET_TEST")) {
+    m_sheet_age = (float)std::atof(st);
+    m_sheet_strength = 1.f;
+  }
+  {
+    const float a = m_sheet_age;
+    const float f = a < 0.6f ? std::exp(-a * 10.f) + 0.8f * std::exp(-(a - 0.14f) * (a - 0.14f) * 1500.f) +
+                                   0.5f * std::exp(-(a - 0.32f) * (a - 0.32f) * 1200.f)
+                             : 0.f;
+    m_sheet = std::min(1.f, f) * m_sheet_strength * std::min(1.f, m_storm * 1.5f);
+  }
   // test: a bolt held at its brightest (screenshots)
   static const bool bolt_test = std::getenv("JAK_ENHANCED_BOLT_TEST") != nullptr;
   if (bolt_test && m_storm > 0.3f) {
@@ -2635,6 +2658,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
                 (float)m_drift[0], (float)m_drift[1]);
   }
   glUniform1f(glGetUniformLocation(id, "sunny"), m_sunny * on);
+  glUniform1f(glGetUniformLocation(id, "sheet"), m_sheet * on);
   glUniform4f(glGetUniformLocation(id, "bolt"), m_bolt[0], m_bolt[1], m_bolt[2],
               m_bolt[3] * m_storm * on);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
