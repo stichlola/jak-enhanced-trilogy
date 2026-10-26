@@ -89,7 +89,7 @@ and a recent GPU.
 1. Get the code: install [Git](https://git-scm.com/download/win), then in a terminal
    (PowerShell):
    ```
-   git clone -b jak3-enhanced <this repository's URL> jak-project
+   git clone -b jak3-enhanced https://github.com/stichlola/jak3-enhanced.git jak-project
    cd jak-project
    ```
    Name the folder `jak-project`: the OpenGOAL tools look for that name.
