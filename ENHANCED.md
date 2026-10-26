@@ -1,4 +1,4 @@
-# Jak 3 Enhanced (branch `jak3-enhanced`)
+# Jak 3 Enhanced
 
 OpenGOAL's Jak 3 with a modern post-processing chain and a few gameplay changes, inspired by
 Ratchet & Clank Enhanced. Everything is code: the game data comes from your own copy (PAL here).
