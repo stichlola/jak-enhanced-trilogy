@@ -60,6 +60,10 @@ def main():
     shutil.copy2(ROOT / ".github/scripts/releases/error-code-metadata.json",
                  dest / "data/launcher/error-code-metadata.json")
     (dest / "data/log").mkdir(exist_ok=True)
+    # the launcher compiles the games again when this changes (an update over an old folder)
+    rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
+                         text=True).stdout.strip()
+    (dest / "data/VERSION").write_text(f"{args.version or 'dev'}-{rev}", encoding="ascii")
 
     shutil.copy2(ROOT / "Jak Enhanced Trilogy.bat", dest / "Jak Enhanced Trilogy.bat")
     (dest / "ISO").mkdir()

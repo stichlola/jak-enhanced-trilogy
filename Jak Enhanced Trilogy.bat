@@ -45,6 +45,11 @@ for %%F in ("%ROOT%\ISO\*.iso") do (
   if "!GAME!"=="" echo Not a Jak disc we know, skipped: %%~nxF
 )
 
+rem The release's version (data\VERSION): a game compiled by an older one is compiled again (an
+rem update unzipped over the old folder keeps the extracted discs)
+set "VER="
+if exist "%PROJ%\VERSION" set /p VER=<"%PROJ%\VERSION"
+
 rem What still needs setting up: the build once, then each new disc
 set "NEED_BUILD="
 if not exist "%BIN%\gk.exe" set "NEED_BUILD=1"
@@ -70,6 +75,7 @@ if defined NEED_EXTRACT (
     echo First start of Jak %%G: extracting your disc and compiling the game ^(20-40 minutes,
     echo only this once^). You can leave it running.
     "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -e -d -c "!JAK%%G_ISO!" || goto :failed
+    if defined VER echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
   )
 )
 
@@ -80,6 +86,19 @@ for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" if 
   echo HD textures found for Jak %%G: putting them in the game ^(20-40 minutes, only this once^).
   "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -d -c "!JAK%%G_ISO!" || goto :failed
   echo done> "%PROJ%\out\jak%%G\hd-textures.done"
+  if defined VER echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
+)
+
+rem An update: the games compiled by an older version are compiled again (a minute or two each)
+if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" (
+  set "BUILT="
+  if exist "%PROJ%\out\jak%%G\built-version.txt" set /p BUILT=<"%PROJ%\out\jak%%G\built-version.txt"
+  if not "!BUILT!"=="!VER!" (
+    echo.
+    echo Updating Jak %%G to !VER!: compiling the game again ^(a minute or two, only this once^).
+    "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -c "!JAK%%G_ISO!" || goto :failed
+    echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
+  )
 )
 
 rem Pick the game (straight in when only one is ready)

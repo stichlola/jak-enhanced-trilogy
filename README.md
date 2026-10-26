@@ -13,7 +13,7 @@ NTSC-J), about 30 GB free a game and a recent graphics card.
 
 ### Players: download and double-click
 
-1. Download **`Jak-Enhanced-Trilogy.zip`** from the
+1. Download **`Jak-Enhanced-Trilogy-<version>.zip`** from the
    [Releases page](https://github.com/stichlola/jak-enhanced-trilogy/releases/latest) and unzip it
    anywhere.
 2. Put your disc images (`.iso`) in its **`ISO`** folder.
@@ -22,6 +22,9 @@ NTSC-J), about 30 GB free a game and a recent graphics card.
 That's all: nothing else to install. It recognises which game each disc is. The first time you play
 a game it extracts your disc (20-40 minutes, only once); after that it asks which game to play and
 starts it.
+
+**Updating to a new release:** unzip it over your old folder (replace the files). Your extracted
+discs stay: the launcher only compiles each game again for the new version (a minute or two).
 
 **Optional HD textures** (4x AI upscale): download the pack for your game from
 [this folder](https://drive.google.com/drive/folders/18hjJ85N1T702fA--h_zcC9uUGmpo0oaz?usp=sharing) (`Jak-Enhanced-HD-Textures-jak1.zip`, `-jak2`, `-jak3`: 0.5, 2.6 and 3.7 GB),
