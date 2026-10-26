@@ -2,6 +2,7 @@
 
 #include "background_common.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 
 #include "common/util/os.h"
@@ -294,7 +295,8 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   glUniformMatrix4fv(glGetUniformLocation(id, "pc_camera"), 1, GL_FALSE, newcam[0].data());
   // Enhanced: the Jak 2 plaza's passages through the Metal Head city and the port
   glUniform1i(glGetUniformLocation(id, "enh_cut"),
-              g_enhanced_bg_level == "mhcitya" || g_enhanced_bg_level == "ctyport");
+              (g_enhanced_bg_level == "mhcitya" || g_enhanced_bg_level == "ctyport") &&
+                  enhanced_has_piazza());
   // Enhanced: the plaza's final grade (saturation, tint), JAK_ENHANCED_PIAZZA_LOOK=sat,r,g,b
   static math::Vector4f piazza_look = [] {
     math::Vector4f g(1.0f, 1.0f, 1.0f, 1.0f);  // neutral: the Jak 2 textures are graded at export (piazza_export.py)

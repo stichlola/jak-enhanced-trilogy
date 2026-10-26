@@ -146,3 +146,8 @@ struct EnhancedExplosions {
   std::mutex mutex;
 };
 extern EnhancedExplosions g_enhanced_explosions;
+
+// Is the Jak 2 plaza (Jak 3's custom level piazza) built? It's made from a Jak 2 disc by hand
+// (local/blender/piazza_jak2.blend), so most installs don't have it: then no passages are cut
+// into Haven and nothing tries to load it.
+bool enhanced_has_piazza();

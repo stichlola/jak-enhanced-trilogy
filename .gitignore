@@ -90,3 +90,12 @@ unifont-15.0.03.ttf
 goalc-report.html
 _new-all-types.gc
 Play-Jak*-Enhanced.bat
+
+# the one-click launcher reads your discs from here (never commit a disc image)
+*.iso
+ISO/*
+!ISO/PUT-YOUR-ISO-FILES-HERE.txt
+
+# the Jak 2 plaza is built only where it was made (from a Jak 2 disc)
+custom_assets/jak3/levels/piazza/piazza.glb
+custom_assets/jak3/levels/piazza/piazza-build.gp

@@ -116,10 +116,12 @@
     )
   )
 
+(define-extern *enhanced-has-piazza* symbol) ;; collide-cache.gc
+
 (defun enhanced-piazza-autoload ()
   "Keep the Jak 2 plaza (custom level piazza) in the wanted levels while Jak is around it in Haven:
 the city's load boundaries rewrite the list as he walks and know nothing of the plaza."
-  (when (and *target* (level-get *level* 'ctywide))
+  (when (and *enhanced-has-piazza* *target* (level-get *level* 'ctywide))
     (let* ((p (-> *target* control trans))
            (x (/ (-> p x) 4096.0))
            (z (/ (-> p z) 4096.0))

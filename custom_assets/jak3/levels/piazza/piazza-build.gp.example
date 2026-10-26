@@ -1,0 +1,4 @@
+;; The Jak 2 plaza's build steps, loaded by goal_src/jak3/game.gp when this is named piazza-build.gp
+;; (do it once piazza.glb is here: it's made by hand from a Jak 2 disc, see piazza.jsonc).
+(build-custom-level "piazza")
+(custom-level-cgo "PZZ.DGO" "piazza/piazza.gd")

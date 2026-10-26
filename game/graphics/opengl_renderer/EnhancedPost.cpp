@@ -39,6 +39,12 @@ EnhancedMenu g_enhanced_menu;
 EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
 
+bool enhanced_has_piazza() {
+  static const bool has =
+      fs::exists(file_util::get_jak_project_dir() / "out" / "jak3" / "iso" / "PZZ.DGO");
+  return has;
+}
+
 EnhancedNormalTarget::EnhancedNormalTarget() {
   if (!g_enhanced_normals.fbo || !g_enhanced_normals.enabled) {
     return;
@@ -1966,7 +1972,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     }
     auto& draws = m_shadow_draws[lev->load_id];
     const auto& name = lev->level->level_name;
-    const bool cut = name == "mhcitya" || name == "ctyport";
+    const bool cut = (name == "mhcitya" || name == "ctyport") && enhanced_has_piazza();
     const auto& tfrags = lev->level->tfrag_trees[0];
     for (size_t i = 0; i < tfrags.size() && i < lev->tfrag_vertex_data[0].size(); i++) {
       const auto& tree = tfrags[i];
@@ -3162,9 +3168,11 @@ void EnhancedPost::draw_menu() {
         {"Spargus", "wascitya-start"},
         {"Desert", "desert-facing-wasdoors"},
     };
-    for (int i = 0; i < (int)(sizeof(places) / sizeof(places[0])); i++) {
+    // (the plaza only where it's built, see enhanced_has_piazza)
+    int shown = 0;
+    for (int i = enhanced_has_piazza() ? 0 : 1; i < (int)(sizeof(places) / sizeof(places[0])); i++) {
       const auto& p = places[i];
-      if (i % 2) {
+      if (shown++ % 2) {
         ImGui::SameLine();
       }
       if (ImGui::Button(p.name, ImVec2(240, 0))) {

@@ -1,0 +1,2 @@
+Put your own Jak disc images here (.iso): Jak and Daxter: The Precursor Legacy, Jak II, Jak 3.
+One, two or all three. Then double-click "Jak Enhanced Trilogy.bat" in the folder above.

@@ -6,9 +6,13 @@
 ;; dgos: GAME
 
 ;; Enhanced: passages from the Metal Head city and the port into the Jak 2 plaza (custom level
-;; "piazza"). The same volumes are cut from the drawing in the renderer (Shader.cpp).
+;; "piazza"). The same volumes are cut from the drawing in the renderer (Shader.cpp). Only when the
+;; plaza is built: it's made by hand from a Jak 2 disc (see game.gp), most installs don't have it.
+(define *enhanced-piazza-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-has-piazza* (pc-enhanced-getenv "JAK_ENHANCED_HAS_PIAZZA" *enhanced-piazza-buf* 8))
+
 (defun enhanced-level-has-cuts? ((name symbol))
-  (or (= name 'mhcitya) (= name 'ctyport))
+  (and *enhanced-has-piazza* (or (= name 'mhcitya) (= name 'ctyport)))
   )
 
 (defun enhanced-in-cut? ((p vector))

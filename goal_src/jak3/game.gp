@@ -410,9 +410,10 @@
 (goal-src "levels/test-zone/test-zone-obs.gc" "process-focusable")
 (custom-level-cgo "TSZ.DGO" "test-zone/testzone.gd")
 
-;; Jak Enhanced Trilogy: Jak 2's palace plaza
-(build-custom-level "piazza")
-(custom-level-cgo "PZZ.DGO" "piazza/piazza.gd")
+;; Jak Enhanced Trilogy: Jak 2's palace plaza. Its geometry (piazza.glb) is made by hand from a Jak 2
+;; disc and isn't in git, so it's only built where piazza-build.gp sits next to it: copy
+;; piazza-build.gp.example to piazza-build.gp once piazza.glb is there.
+(try-load-file "custom_assets/jak3/levels/piazza/piazza-build.gp")
 
 ;; generate the art group for a custom actor.
 ;; requires a .glb model file in custom_assets/jak3/models/custom_levels

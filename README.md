@@ -1,11 +1,60 @@
 # Jak Enhanced Trilogy
 
-A personal, for-fun remaster of the **Jak and Daxter trilogy** (Jak 1, Jak 2 and Jak 3) on top of
-[OpenGOAL](https://opengoal.dev), inspired by *Ratchet & Clank Enhanced*. It started as *Jak 3
-Enhanced*: modern lighting and post-processing, living weather, denser vegetation and cities, a few
-gameplay tweaks and an in-game menu that turns every change on and off. Now the same improvements
-come to all three games, and the three are becoming **one game**: one program that goes from Jak 1
-to Jak 2 to Jak 3, with new bridge levels between them.
+A remaster of the **Jak and Daxter trilogy** for PC (Windows), built on [OpenGOAL](https://opengoal.dev):
+modern lighting, living weather, reflections, denser vegetation and cities, and an in-game menu
+that turns every change on and off. It plays each game on its own today. **If you have all three**,
+the plan is to join them into **one big game**: from Jak 1 to Jak 3 without stopping, with new
+bridge missions for what the games never showed.
+
+## Install and play
+
+You need **your own disc images** (.iso) of the PS2 games, one, two or all three (PAL, NTSC or
+NTSC-J), about 30 GB free a game and a recent graphics card.
+
+### Players: download and double-click
+
+1. Download **`Jak-Enhanced-Trilogy.zip`** from the
+   [Releases page](https://github.com/stichlola/jak-enhanced-trilogy/releases/latest) and unzip it
+   anywhere.
+2. Put your disc images (`.iso`) in its **`ISO`** folder.
+3. Double-click **`Jak Enhanced Trilogy.bat`**.
+
+That's all: nothing else to install. It recognises which game each disc is. The first time you play
+a game it extracts your disc (20-40 minutes, only once); after that it asks which game to play and
+starts it.
+
+**Optional HD textures** (4x AI upscale): download the pack for your game from
+[this folder](https://drive.google.com/drive/folders/18hjJ85N1T702fA--h_zcC9uUGmpo0oaz?usp=sharing) (`Jak-Enhanced-HD-Textures-jak1.zip`, `-jak2`, `-jak3`: 0.5, 2.6 and 3.7 GB),
+unzip it into the Jak Enhanced Trilogy folder and double-click the launcher again: it puts them in
+the game by itself (20-40 minutes, only once). They're made from the games' own textures, so they're
+only for people who own the games.
+
+> **Tip:** in the game, press **`\`** (the key left of `1`) for the **Enhanced menu**: graphics
+> presets, every effect, weather, time of day. **F9** switches to the next game of the trilogy.
+
+### Developers: from the source code
+
+1. Clone the repository: `git clone https://github.com/stichlola/jak-enhanced-trilogy.git`
+2. Put your disc images in its `ISO` folder and double-click `Jak Enhanced Trilogy.bat`. In the
+   source code it first installs what's missing with winget (Visual Studio 2022 Build Tools with
+   Clang, CMake, NASM) and builds the programs (about an hour the first time), then extracts and
+   plays like the release.
+3. Change things (see [Change it yourself](#change-it-yourself)): rebuild the C++ with
+   `cmake --build out\build\Release`, recompile a game's code with
+   `out\build\Release\bin\goalc.exe --user-auto --game jak3 --cmd "(mi)"` (or `jak1`, `jak2`).
+
+`scripts\enhanced\setup.ps1` does the same steps from PowerShell with explicit paths
+(`-Jak1Iso`, `-Jak2Iso`, `-Jak3Iso`, `-SkipBuild`...). **HD textures**: the
+[ready-made packs](https://drive.google.com/drive/folders/18hjJ85N1T702fA--h_zcC9uUGmpo0oaz?usp=sharing) go in the source code too (their `data\custom_assets` folder is the
+repository's `custom_assets`), or make them yourself with
+[Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN): `python scripts\enhanced\hd_textures.py
+--game jak1|jak2|jak3` (`make_hd_pack.py` zips them). Either way the launcher then extracts the
+levels again, once. They're never committed: they come from the games' own textures.
+
+## About
+
+It started as *Jak 3 Enhanced*, inspired by *Ratchet & Clank Enhanced*; now the same improvements
+come to all three games.
 
 Everything here is code: the games themselves come from **your own copies** of the PS2 discs. No
 game data is in this repository.
@@ -23,8 +72,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 | | Graphics | Weather | Gameplay | Status |
 |---|---|---|---|---|
 | **Jak 3** | everything below | Haven, Spargus, the desert, the forest | population, guns, jetboard, vehicles | the most complete |
-| **Jak 2** | everything below except the HD textures | Haven, the wilds, the forest | population, all guns and Dark Jak powers unlocked, twice the ammo | playable |
-| **Jak 1** | everything below except the HD textures | Sandover and the islands, the jungle, the swamp, Misty Island, Snowy Mountain, the volcano | | playable |
+| **Jak 2** | everything below, HD textures as an optional pack | Haven, the wilds, the forest | population, all guns and Dark Jak powers unlocked, twice the ammo | playable |
+| **Jak 1** | everything below, HD textures as an optional pack | Sandover and the islands, the jungle, the swamp, Misty Island, Snowy Mountain, the volcano | | playable |
 
 - **One program, three games**: press **F9** in a game to switch to the next one (Jak 1 → 2 → 3 → 1)
   without leaving the program. The next steps: the window kept across the switch, one trilogy menu
@@ -139,33 +188,6 @@ High.
 - HD textures cover only Jak 3's Spargus, the desert, the vehicles and the characters.
 - No hardware ray tracing (the renderer is OpenGL): the ray-traced reflections run in software on
   the GPU, and they don't show characters or vehicles yet.
-
-## Install and play (Windows)
-
-You need **your own disc images** (ISOs of the PS2 games: PAL, NTSC or NTSC-J) of the games you
-want to play, one, two or all three; about 30 GB free a game and a recent GPU.
-
-1. Get the code: install [Git](https://git-scm.com/download/win), then in a terminal
-   (PowerShell):
-   ```
-   git clone https://github.com/stichlola/jak-enhanced-trilogy.git jak-project
-   cd jak-project
-   ```
-   Name the folder `jak-project`: the OpenGOAL tools look for that name.
-2. Run the setup with your ISOs (any of the three):
-   ```
-   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Jak1Iso "C:\path\to\Jak 1.iso" -Jak2Iso "C:\path\to\Jak 2.iso" -Jak3Iso "C:\path\to\Jak 3.iso"
-   ```
-   It installs what's missing with winget (Visual Studio 2022 Build Tools with Clang, CMake, Ninja,
-   NASM), builds the program, extracts and compiles your discs' data, and writes
-   `Play-Jak1-Enhanced.bat`, `Play-Jak2-Enhanced.bat`, `Play-Jak3-Enhanced.bat` and
-   `Play-Jak-Enhanced-Trilogy.bat`. The first run takes about an hour, plus 20-40 minutes a game.
-3. Play: double-click one of them. Press `\` in the game for the Enhanced menu, F9 for the next
-   game.
-
-Optional HD textures (Jak 3): with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) installed,
-run `python scripts\enhanced\hd_textures.py`, then extract the levels again (the decompiler command
-in ENHANCED.md).
 
 ## Change it yourself
 

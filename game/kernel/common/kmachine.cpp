@@ -1192,6 +1192,10 @@ u64 pc_enhanced_minimap() {
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
+  // (not a real variable: whether the Jak 2 plaza is built, see enhanced_has_piazza)
+  if (std::strcmp(Ptr<String>(var).c()->data(), "JAK_ENHANCED_HAS_PIAZZA") == 0) {
+    return bool_to_symbol(enhanced_has_piazza());
+  }
   const char* name = std::getenv(Ptr<String>(var).c()->data());
   if (!name || !*name) {
     return bool_to_symbol(false);
