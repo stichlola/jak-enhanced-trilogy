@@ -152,6 +152,9 @@ class EnhancedPost {
     bool far_view = true;   // no occlusion culling from the game's precomputed visibility
     float relief = 1.0f;    // the textures' shading read as small bumps under the sun
     float materials = 1.0f; // metal and glossy surfaces (by texture name): reflections, highlights
+    // reflections on water, metal and glass traced through the levels' geometry where the
+    // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
+    int ray_traced = 1;
     bool fire = true;       // fires: their light flickers, hot air wobbles over them, embers rise
     float fire_haze = 0.012f;    // how far the hot air bends what's behind it (flame sizes)
     float fire_embers = 1.0f;
@@ -381,6 +384,20 @@ class EnhancedPost {
   int m_shadow_res = 0;
   bool m_shadow_ready = false;
   float m_light_mvp[16] = {};  // world (game units) -> shadow map clip space, row-major
+
+  // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
+  // own buffers, copied into one set of buffers for the levels in use whenever that set changes
+  void update_rt(SharedRenderState* render_state);
+  struct RtLevelGpu {
+    GLuint buf[3] = {0, 0, 0};  // nodes, triangles, palettes
+    u32 size[3] = {0, 0, 0};    // bytes
+  };
+  std::unordered_map<u64, RtLevelGpu> m_rt_levels;  // by level load id
+  std::vector<u64> m_rt_in_use;
+  GLuint m_rt_buf[3] = {0, 0, 0};
+  int m_rt_count = 0;                    // levels in the combined buffers
+  std::array<s32, 16 * 4> m_rt_base{};   // per level: node, triangle, palette base; root node
+  bool m_rt_ready = false;
 
   // volumetric mist, half resolution
   void do_volume(SharedRenderState* render_state, GLuint screen_vao, ScopedProfilerNode& prof);

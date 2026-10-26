@@ -6,6 +6,7 @@
 #include "common/util/FileUtil.h"
 #include "common/util/Timer.h"
 
+#include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "common/util/compress.h"
 
@@ -289,6 +290,11 @@ void Loader::loader_thread() {
       {
         auto p = scoped_prof("enhanced-vegetation");
         enhanced_add_vegetation(*result, lev);
+      }
+
+      {
+        auto p = scoped_prof("enhanced-ray-tracing");
+        enhanced_build_rt(*result, lev);
       }
 
       fmt::print(

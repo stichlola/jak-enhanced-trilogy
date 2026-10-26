@@ -11,6 +11,7 @@
 #include "common/util/json_util.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
@@ -31,6 +32,7 @@ EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedExplosions g_enhanced_explosions;
 EnhancedMenu g_enhanced_menu;
+EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
 
 EnhancedNormalTarget::EnhancedNormalTarget() {
@@ -162,6 +164,10 @@ EnhancedPost::EnhancedPost() {
   if (const char* mat = std::getenv("JAK_ENHANCED_MATERIALS")) {
     // metal and glossy surfaces' reflections and highlights, 0 = off
     m_settings.materials = (float)std::atof(mat);
+  }
+  if (const char* rt = std::getenv("JAK_ENHANCED_RT_REFLECTIONS")) {
+    // reflections traced through the levels: 0 off, 2 traced only (no screen-space)
+    m_settings.ray_traced = std::clamp(std::atoi(rt), 0, 3);
   }
   if (const char* far_view = std::getenv("JAK_ENHANCED_FAR_VIEW")) {
     // 0 = the game's occlusion culling (precomputed visibility) as it was
@@ -1907,6 +1913,100 @@ void EnhancedPost::prepare(GLuint scene_tex,
   glBindVertexArray(0);
 }
 
+void EnhancedPost::update_rt(SharedRenderState* render_state) {
+  m_rt_ready = false;
+  if (m_settings.ray_traced <= 0 || !render_state->loader) {
+    return;
+  }
+  auto levels = render_state->loader->get_in_use_levels();
+  std::vector<u64> in_use;
+  for (auto* lev : levels) {
+    if (!m_rt_levels.count(lev->load_id)) {
+      // the hierarchy the loader built for it (once: then it lives on the GPU)
+      auto rt = enhanced_take_rt(lev->level->level_name);
+      RtLevelGpu gpu;
+      if (rt) {
+        const void* data[3] = {rt->nodes.data(), rt->tris.data(), rt->palettes.data()};
+        gpu.size[0] = rt->nodes.size() * sizeof(EnhancedRtLevel::Node);
+        gpu.size[1] = rt->tris.size() * sizeof(EnhancedRtLevel::Tri);
+        gpu.size[2] = std::max<size_t>(rt->palettes.size(), 1) * sizeof(u32);
+        u32 none = 0;
+        if (rt->palettes.empty()) {
+          data[2] = &none;
+        }
+        glGenBuffers(3, gpu.buf);
+        for (int i = 0; i < 3; i++) {
+          glBindBuffer(GL_COPY_READ_BUFFER, gpu.buf[i]);
+          glBufferData(GL_COPY_READ_BUFFER, gpu.size[i], data[i], GL_STATIC_DRAW);
+        }
+        glBindBuffer(GL_COPY_READ_BUFFER, 0);
+      }
+      m_rt_levels[lev->load_id] = gpu;
+    }
+    if (m_rt_levels[lev->load_id].buf[0] && in_use.size() < 16) {
+      in_use.push_back(lev->load_id);
+    }
+  }
+  // forget the levels that went away
+  for (auto it = m_rt_levels.begin(); it != m_rt_levels.end();) {
+    bool used = false;
+    for (auto* lev : levels) {
+      used |= lev->load_id == it->first;
+    }
+    if (!used) {
+      if (it->second.buf[0]) {
+        glDeleteBuffers(3, it->second.buf);
+      }
+      it = m_rt_levels.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  if (in_use.empty()) {
+    m_rt_count = 0;
+    return;
+  }
+  if (in_use != m_rt_in_use) {
+    // one buffer of each kind for all of them (copied on the GPU)
+    m_rt_in_use = in_use;
+    u32 total[3] = {0, 0, 0};
+    for (auto id : in_use) {
+      for (int i = 0; i < 3; i++) {
+        total[i] += m_rt_levels[id].size[i];
+      }
+    }
+    if (!m_rt_buf[0]) {
+      glGenBuffers(3, m_rt_buf);
+    }
+    for (int i = 0; i < 3; i++) {
+      glBindBuffer(GL_COPY_WRITE_BUFFER, m_rt_buf[i]);
+      glBufferData(GL_COPY_WRITE_BUFFER, total[i], nullptr, GL_STATIC_DRAW);
+    }
+    u32 offset[3] = {0, 0, 0};
+    m_rt_count = 0;
+    for (auto id : in_use) {
+      const auto& gpu = m_rt_levels[id];
+      auto* base = &m_rt_base[m_rt_count * 4];
+      base[0] = offset[0] / sizeof(EnhancedRtLevel::Node);
+      base[1] = offset[1] / sizeof(EnhancedRtLevel::Tri);
+      base[2] = offset[2] / sizeof(u32) / 8;
+      base[3] = 0;
+      for (int i = 0; i < 3; i++) {
+        glBindBuffer(GL_COPY_READ_BUFFER, gpu.buf[i]);
+        glBindBuffer(GL_COPY_WRITE_BUFFER, m_rt_buf[i]);
+        glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, offset[i], gpu.size[i]);
+        offset[i] += gpu.size[i];
+      }
+      m_rt_count++;
+    }
+    glBindBuffer(GL_COPY_READ_BUFFER, 0);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
+    lg::info("[enhanced] ray tracing: {} levels, {:.0f} MB", m_rt_count,
+             (total[0] + total[1] + total[2]) / 1e6);
+  }
+  m_rt_ready = m_rt_count > 0;
+}
+
 Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w, int h) {
   auto& shader = render_state->shaders[ShaderId::ENH_COMPOSITE];
   shader.activate();
@@ -1936,6 +2036,27 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "ao_debug"), m_settings.ssao_debug);
   glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
   glUniform1i(glGetUniformLocation(id, "normal_debug"), m_settings.normal_debug);
+  // ray-traced reflections: the levels' hierarchies, and the time-of-day weights for the hits
+  update_rt(render_state);
+  const bool rt = m_settings.ray_traced > 0 && m_rt_ready && g_enhanced_tod.valid;
+  glUniform1i(glGetUniformLocation(id, "rt_mode"), rt ? m_settings.ray_traced : 0);
+  if (rt) {
+    for (int i = 0; i < 3; i++) {
+      glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+    }
+    glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+    glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+    // the same decoding as interp_time_of_day: palette p, channel ch, 64 = 1
+    float tod[8 * 4];
+    for (int p = 0; p < 8; p++) {
+      for (int ch = 0; ch < 4; ch++) {
+        u32 word = (u32)g_enhanced_tod.itimes[p / 2][(p % 2) * 2 + ch / 2];
+        u32 hw = (ch % 2) ? (word >> 16) : word;
+        tod[p * 4 + ch] = (hw & 0xff) / 64.f;
+      }
+    }
+    glUniform4fv(glGetUniformLocation(id, "rt_tod"), 8, tod);
+  }
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
   glUniform1i(glGetUniformLocation(id, "tex_T7"), 7);
@@ -2031,6 +2152,10 @@ void EnhancedPost::draw_menu() {
       s.relief = relief ? 1.f : 0.f;
     }
     bool mats = s.materials > 0.f;
+    bool traced = s.ray_traced > 0;
+    if (check("Ray-traced reflections", &traced)) {
+      s.ray_traced = traced ? 1 : 0;
+    }
     if (check("Reflective metal and glass", &mats)) {
       s.materials = mats ? 1.f : 0.f;
     }
@@ -2184,6 +2309,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
   j["materials"] = s.materials;
+  j["ray_traced"] = s.ray_traced;
   j["relief"] = s.relief;
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
@@ -2227,6 +2353,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
   get("materials", s.materials);
+  get("ray_traced", s.ray_traced);
   get("relief", s.relief);
   get("wind", g_enhanced_wind.enabled);
   get("grass_push", g_enhanced_wind.push);
@@ -2244,6 +2371,12 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("minimap", map);
   g_enhanced_menu.minimap = map;
 }
+
+namespace {
+bool all_on(int preset) {
+  return preset == 2;
+}
+}  // namespace
 
 // Classico: the game as it was (the enhanced pass off), Medio: the costly passes off (mist, indirect
 // light, depth of field, the lights' shadows...), Massimo: everything on
@@ -2265,6 +2398,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.far_view = d.far_view;
   s.materials = d.materials;
   s.relief = d.relief;
+  s.ray_traced = all_on(preset) ? d.ray_traced : 0;
   s.water_reflections = d.water_reflections;
   s.water_swell = d.water_swell;
   bool all = preset == 2;

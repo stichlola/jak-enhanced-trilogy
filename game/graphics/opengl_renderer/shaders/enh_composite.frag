@@ -1,4 +1,4 @@
-#version 410 core
+#version 430 core
 
 // Jak 3 Enhanced: composite of the 3D scene, drawn back over it before the HUD buckets.
 // In order: heat haze, camera motion blur or FXAA, light depth of field, contrast-adaptive
@@ -43,6 +43,19 @@ uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
 uniform sampler2D tex_T11;  // the level geometry's world normals (a = 0: none, use depth)
+
+// ray-traced reflections: the loaded levels' bounding volume hierarchies (EnhancedRayTrace.h),
+// world space in game units. Nodes: 2 vec4 (min, w: right child or first triangle; max, w: 0 or
+// the leaf's triangle count). Triangles: 3 vec4 (v0, w: texture mean color; edge 1, w: time-of-day
+// color; edge 2). Palettes: 8 RGBA8 per time-of-day color.
+layout(std430, binding = 0) readonly buffer RtNodes { vec4 rt_nodes[]; };
+layout(std430, binding = 1) readonly buffer RtTris { vec4 rt_tris[]; };
+layout(std430, binding = 2) readonly buffer RtPalettes { uint rt_pal[]; };
+uniform int rt_mode;          // 0 off, 1 where the screen-space reflection misses, 2 traced only,
+                              // 3 debug: the traced color alone on the water (magenta: missed)
+uniform int rt_levels;
+uniform ivec4 rt_base[16];    // per level: node, triangle, palette base
+uniform vec4 rt_tod[8];       // the time-of-day palettes' weights (per channel)
 uniform int normal_debug;
 uniform vec4 proj;  // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;
@@ -196,15 +209,122 @@ vec3 surface_normal(vec2 uv, vec3 p) {
   return dot(nn, -p) < 0.0 ? -nn : nn;
 }
 
+// the nearest level triangle along o + d * t (world, game units, d unit length), up to tmax:
+// its color in the game's own baked light at this hour, and how far it is
+bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
+  vec3 dd = vec3(abs(d.x) < 1e-7 ? 1e-7 : d.x, abs(d.y) < 1e-7 ? 1e-7 : d.y,
+                 abs(d.z) < 1e-7 ? 1e-7 : d.z);
+  vec3 inv = 1.0 / dd;
+  float best = tmax;
+  int best_tri = -1;
+  int best_level = 0;
+  int stack[32];
+  for (int l = 0; l < rt_levels; l++) {
+    int nb = rt_base[l].x;
+    int tb = rt_base[l].y;
+    int sp = 0;
+    stack[sp++] = 0;
+    int steps = 0;
+    while (sp > 0 && steps < 400) {
+      steps++;
+      int ni = stack[--sp];
+      vec4 a = rt_nodes[(nb + ni) * 2];
+      vec4 b = rt_nodes[(nb + ni) * 2 + 1];
+      vec3 t0 = (a.xyz - o) * inv;
+      vec3 t1 = (b.xyz - o) * inv;
+      vec3 tlo = min(t0, t1);
+      vec3 thi = max(t0, t1);
+      float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
+      float tf = min(min(thi.x, thi.y), min(thi.z, best));
+      if (tn > tf) {
+        continue;
+      }
+      int first = int(floatBitsToUint(a.w));
+      int count = int(floatBitsToUint(b.w));
+      if (count > 0) {
+        for (int k = 0; k < count; k++) {
+          int ti = (tb + first + k) * 3;
+          vec3 v0 = rt_tris[ti].xyz;
+          vec3 e1 = rt_tris[ti + 1].xyz;
+          vec3 e2 = rt_tris[ti + 2].xyz;
+          vec3 pv = cross(d, e2);
+          float det = dot(e1, pv);
+          if (abs(det) < 1e-4) {
+            continue;
+          }
+          float id = 1.0 / det;
+          vec3 tv = o - v0;
+          float u = dot(tv, pv) * id;
+          if (u < 0.0 || u > 1.0) {
+            continue;
+          }
+          vec3 qv = cross(tv, e1);
+          float v = dot(d, qv) * id;
+          if (v < 0.0 || u + v > 1.0) {
+            continue;
+          }
+          float t = dot(e2, qv) * id;
+          if (t > 0.0 && t < best) {
+            best = t;
+            best_tri = ti;
+            best_level = l;
+          }
+        }
+      } else if (sp < 31) {
+        stack[sp++] = first;   // the right child (the farther one, usually: later)
+        stack[sp++] = ni + 1;  // the left child, next
+      }
+    }
+  }
+  if (best_tri < 0) {
+    return false;
+  }
+  vec3 tex = unpackUnorm4x8(floatBitsToUint(rt_tris[best_tri].w)).rgb;
+  int pi = (rt_base[best_level].z + int(floatBitsToUint(rt_tris[best_tri + 1].w))) * 8;
+  vec4 tod = vec4(0.0);
+  for (int k = 0; k < 8; k++) {
+    tod += unpackUnorm4x8(rt_pal[pi + k]) * rt_tod[k];
+  }
+  // as the game's background shader: (time-of-day color * 2) * texture
+  color = min(tod.rgb, vec3(1.0)) * 2.0 * tex;
+  // the distance haze the game would put on it
+  color = mix(color, fog_color, smoothstep(40.0 * 4096.0, 450.0 * 4096.0, best) * 0.85);
+  dist = best;
+  return true;
+}
+
+// a reflection: the screen-space one where it found something (ssr_hit), else what the ray meets
+// in the levels (rt_mode), else env (the screen where the ray vanishes, or the fog color)
+vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float tmax) {
+  if (rt_mode >= 2) {
+    ssr_hit = 0.0;
+  }
+  if (rt_mode == 3) {
+    env = vec3(1.0, 0.0, 1.0);
+  }
+  if (rt_mode > 0 && ssr_hit < 0.99) {
+    vec3 o = view_to_world * p + cam_pos;
+    vec3 d = normalize(view_to_world * r);
+    vec3 rc;
+    float rd;
+    // start a little off the surface, so it doesn't find itself
+    if (rt_trace(o + d * (0.1 * 4096.0), d, tmax, rc, rd)) {
+      env = rc;
+    }
+  }
+  return mix(env, ssr, ssr_hit);
+}
+
 // what a surface reflects along r (view space): the scene where the ray meets the depth buffer
 // (a short march), else the screen where the ray vanishes (the sky, far hills); hit: how sure
 vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   hit = 0.0;
-  vec3 refl = fog_color;
+  vec3 env = fog_color;
   if (r.z > 1e-3) {
     vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
-    refl = texture(tex_T0, env_uv).rgb;
+    env = texture(tex_T0, env_uv).rgb;
   }
+  vec3 ssr = env;
   float step_len = 0.15 * 4096.0 + z * 0.01;
   vec3 q = p + r * (0.05 * 4096.0 + z * 0.002);
   for (int i = 0; i < 20; i++) {
@@ -225,9 +345,13 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
     if (q.z > scene_z && q.z - scene_z < step_len + 2048.0) {
       vec2 edge = min(quv, 1.0 - quv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
-      refl = mix(refl, texture(tex_T0, quv).rgb, hit);
+      ssr = texture(tex_T0, quv).rgb;
       break;
     }
+  }
+  vec3 refl = reflection_with_rt(p, r, env, ssr, hit, 60.0 * 4096.0);
+  if (rt_mode > 0) {
+    hit = 1.0;  // traced or not, it's the best there is
   }
   return refl;
 }
@@ -492,6 +616,8 @@ void main() {
       vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
       refl = texture(tex_T0, env_uv).rgb;
     }
+    vec3 ssr = refl;
+    float ssr_hit = 0.0;
     if (z < 80.0 * 4096.0) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
       vec3 q = p;
@@ -513,14 +639,17 @@ void main() {
         float scene_z = view_z(sd);
         if (q.z > scene_z && q.z - scene_z < step_len + 4096.0) {
           vec2 edge = min(quv, 1.0 - quv);
-          float hit = smoothstep(0.0, 0.05, min(edge.x, edge.y)) *
-                      (1.0 - smoothstep(50.0 * 4096.0, 80.0 * 4096.0, z));
-          refl = mix(refl, texture(tex_T0, quv).rgb, hit);
+          ssr_hit = smoothstep(0.0, 0.05, min(edge.x, edge.y)) *
+                    (1.0 - smoothstep(50.0 * 4096.0, 80.0 * 4096.0, z));
+          ssr = texture(tex_T0, quv).rgb;
           break;
         }
       }
     }
-    wc = mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
+    // what the screen doesn't have: traced through the levels (near water only, it's costly)
+    refl = z < 200.0 * 4096.0 ? reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0)
+                              : mix(refl, ssr, ssr_hit);
+    wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
 
     // sun glints: a tight highlight plus a broad sheen toward the sun
     if (sun_dir.w > 0.0) {

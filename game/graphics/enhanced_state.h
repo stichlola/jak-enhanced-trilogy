@@ -4,6 +4,8 @@
 #include <mutex>
 #include <string>
 
+#include "common/common_types.h"
+
 /*!
  * Jak 3 Enhanced: values the game hands to the renderer through the kernel (kmachine.cpp).
  */
@@ -87,6 +89,14 @@ extern EnhancedGameLights g_enhanced_game_lights;
 // to the game (polled each frame by pc-enhanced-poll-request). Kinds: 1 hour of the day,
 // 2 continue point name, 3 teleport "x,y,z,yaw" (meters, degrees), 4 time running ("1") or
 // frozen ("0"), 5 on the jetboard, 6 population ("0".."3").
+// The time-of-day weights of the current frame (the background's itimes: 8 palettes, 4 channels,
+// 0..255 where 64 = 1), captured by TFragment for the ray-traced reflections' hits.
+struct EnhancedTimeOfDay {
+  bool valid = false;
+  s32 itimes[4][4] = {};
+};
+extern EnhancedTimeOfDay g_enhanced_tod;
+
 struct EnhancedMenu {
   bool open = false;
   std::atomic<bool> minimap = false;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)

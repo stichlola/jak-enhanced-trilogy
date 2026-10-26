@@ -31,6 +31,9 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
   shallow water, and rings spreading where Jak swims or rides.
 - **Materials**: metal and glass pick up reflections and highlights (found from the texture names),
   and the surfaces show relief from their textures.
+- **Ray-traced reflections**: where the screen has nothing to reflect (off the edge, or hidden
+  behind something), water, metal and glass trace the ray through the level's real geometry, lit by
+  the game's own light at that hour.
 - **Vegetation**: more grass and plants around the original ones, and climbing plants on the walls
   near the level's own vines. Grass sways in the wind and bends away from Jak, enemies and vehicles.
 - **Desert**: footprints and tire ruts in the sand, and a new sand texture on the dunes.
@@ -84,7 +87,8 @@ High.
   there.
 - The Jak 2 plaza has no passers-by or enemies yet (it has no navigation mesh for them).
 - HD textures cover only Spargus, the desert, the vehicles and the characters.
-- No hardware ray tracing (the renderer is OpenGL).
+- No hardware ray tracing (the renderer is OpenGL): the ray-traced reflections run in software on
+  the GPU, and they don't show characters or vehicles yet.
 
 ## Install and play (Windows)
 

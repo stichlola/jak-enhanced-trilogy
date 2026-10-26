@@ -1,5 +1,8 @@
 #include "TFragment.h"
 
+#include <cstring>
+
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
@@ -432,6 +435,8 @@ void TFragment::render_tree(int geom,
     m_color_result.resize(tree.colors->color_count);
   }
   interp_time_of_day(settings.camera.itimes, *tree.colors, m_color_result.data());
+  std::memcpy(g_enhanced_tod.itimes, settings.camera.itimes, sizeof(g_enhanced_tod.itimes));
+  g_enhanced_tod.valid = true;
   enhanced_grade_custom_level(m_level_name, m_color_result.data(), tree.colors->color_count);
   glActiveTexture(GL_TEXTURE10);
   glBindTexture(GL_TEXTURE_1D, tree.time_of_day_texture);
