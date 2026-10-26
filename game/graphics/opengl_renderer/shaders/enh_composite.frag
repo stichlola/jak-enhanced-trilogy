@@ -1127,14 +1127,20 @@ void main() {
                    (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z));
     c *= 1.0 - 0.2 * puddle * wet;
     vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
-    vec3 n2 = normalize(wet_n + (right_view * rip.x + fwd_view * rip.y) * (0.15 + 0.6 * puddle));
+    // outside the puddles the wet ground is rough: a fine noise breaks its reflection up
+    vec2 rough = vec2(gnoise(ww.xz * 9.0), gnoise(ww.xz * 9.0 + 5.3)) * (1.0 - puddle) *
+                 (1.0 - smoothstep(10.0 * 4096.0, 30.0 * 4096.0, z));
+    vec3 n2 = normalize(wet_n + (right_view * (rip.x * (0.15 + 0.6 * puddle) + rough.x * 0.35) +
+                                 fwd_view * (rip.y * (0.15 + 0.6 * puddle) + rough.y * 0.35)));
     vec3 vdir = normalize(p);
     vec3 r = reflect(vdir, n2);
     float facing = clamp(dot(-vdir, n2), 0.0, 1.0);
-    float f = 0.03 + 0.97 * pow(1.0 - facing, 5.0);
+    float f = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
     float hit;
     vec3 refl = trace_reflection(p, r, z, hit);
-    float amount = wet * (0.35 + 0.65 * puddle) * clamp(f * 2.0 + 0.3 * puddle + 0.05, 0.0, 1.0) *
+    // a sheen, not a mirror: the ground's own color stays, dimmer reflections outside the puddles
+    refl = mix(refl, c, 0.35 * (1.0 - puddle));
+    float amount = wet * (0.12 + 0.45 * puddle) * clamp(f * 1.3 + 0.12 * puddle, 0.0, 1.0) *
                    (1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z));
     c = mix(c, refl, amount);
   }
