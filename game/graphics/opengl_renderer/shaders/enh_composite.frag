@@ -1494,7 +1494,7 @@ void main() {
         bolt_light = d <= 1e-7 ? lightning_bolt(ray, pixel_rad) : 0.0;
       }
     }
-    c = mix(c, vec3(luma(c)) * 0.8, weather.x * 0.3);
+    c = mix(c, vec3(luma(c)) * 0.8 * vec3(0.82, 0.94, 1.15), weather.x * 0.3);
     c = mix(c0, c, sky_k);
     bolt_light *= sky_k;
     if (sky_k > 0.5) {
@@ -1512,14 +1512,11 @@ void main() {
   if (fog.z > 0.0 && z > 0.0) {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
-    c = mix(c, mix(fog_color, vec3(luma(fog_color)), 0.55 * weather.x), amount * fog.z);
+    c = mix(c, mix(fog_color, vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15), 0.55 * weather.x), amount * fog.z);
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
-    vec3 grey = vec3(luma(fog_color)) * vec3(0.92, 0.97, 1.06);  // the fog's brightness, not its tint
-    // the wet air washes the distance's colors out
-    float wash = (1.0 - exp(-z / 4096.0 * 0.01)) * weather.x;
-    c = mix(c, vec3(luma(c)), wash * 0.25);
+    vec3 grey = vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15);  // the fog's brightness, cold, not its tint
     c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.007 + 0.006 * weather2.x))) * (0.22 + 0.12 * weather2.x) * weather.x);
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
@@ -1565,7 +1562,7 @@ void main() {
     }
     vec4 v = sum / wsum;
     // under rain the mist is grey, whatever the area's fog tint
-    v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.95, 0.98, 1.05), weather.x * 0.6);
+    v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.82, 0.94, 1.15), weather.x * 0.6);
     c = c * v.a + v.rgb;
   }
 
@@ -1714,7 +1711,9 @@ void main() {
 
   // grading: the area's tint (shadows lifted toward one color, highlights toward another), then
   // saturation, gentle S-curve, warm highlights / cool shadows
-  c = mix(c, vec3(luma(c)) * vec3(0.95, 1.0, 1.07), 0.1 * weather.x);
+  // rain: colder, the colors kept (a touch richer, like the wet slums at night)
+  c *= mix(vec3(1.0), vec3(0.9, 0.98, 1.1), weather.x);
+  c = max(mix(vec3(luma(c)), c, 1.0 + 0.1 * weather.x), 0.0);
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
