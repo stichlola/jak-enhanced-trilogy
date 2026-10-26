@@ -1303,7 +1303,7 @@ void main() {
       }
       if (close < 1.0) {
         rain_hits += rain_sparkles(world, t, across) * 1.6 * (1.0 - close) *
-                     (1.0 - smoothstep(200.0 * 4096.0, 400.0 * 4096.0, z));
+                     (1.0 - smoothstep(350.0 * 4096.0, 600.0 * 4096.0, z));
       }
       rain_hits *= rain_amt;
       vec2 rw = world / clamp(water_foot * 4.0, 0.08, 2.0) + vec2(t * 2.0, -t * 1.7);
@@ -1706,13 +1706,13 @@ void main() {
       float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
       c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * 0.55;
     }
-    // further out: the drops as sparkles about a pixel big, on what faces up, out to 200 m
-    if (weather.x > 0.0 && z > 6.0 * 4096.0 && z < 200.0 * 4096.0) {
+    // further out: the drops as sparkles about a pixel big, on what faces up, out to 350 m
+    if (weather.x > 0.0 && z > 6.0 * 4096.0 && z < 350.0 * 4096.0) {
       float spk = rain_sparkles(ww.xz, weather.z, z / 4096.0 * pixel_rad);
       float fade = smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z) *
-                   (1.0 - smoothstep(120.0 * 4096.0, 200.0 * 4096.0, z)) *
+                   (1.0 - smoothstep(220.0 * 4096.0, 350.0 * 4096.0, z)) *
                    smoothstep(0.7, 0.9, dot(wet_n, up_view));
-      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * 0.45;
+      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * 0.6;
     }
   }
 
