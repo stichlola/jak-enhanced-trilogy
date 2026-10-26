@@ -499,43 +499,75 @@ vec4 cloud_layer(vec3 dv) {
   return vec4(col, alpha);
 }
 
-// rain: thin streaks at four distances in front of the camera, anchored to the world's directions
-// (they turn with the camera), falling and slanted by the wind; each layer hidden behind anything
-// nearer than it. dv: the view ray, scene_z: what's there (0 = sky)
-float rain_streaks(vec3 dv, float scene_z, float fw) {
-  vec3 wd = world_dir(dv);
-  float horiz = max(length(wd.xz), 1e-3);
-  float az = atan(wd.x, wd.z) / 6.2832;
-  float el = wd.y / horiz;
-  const float dist[4] = float[](1.5, 3.5, 7.0, 14.0);
-  const float cols[4] = float[](160.0, 300.0, 520.0, 850.0);
-  const float rows[4] = float[](2.2, 3.6, 5.5, 8.0);
-  const float speed[4] = float[](9.0, 8.0, 7.0, 6.0);
-  const float bright[4] = float[](0.55, 0.75, 0.85, 0.9);
+// rain: real drops in the world. Each cell of a horizontal grid holds a column where drops fall
+// (one every few meters, each a short streak, as a camera sees it); the view ray walks the cells
+// it crosses (2D DDA) and meets each column where it passes closest. So the drops stay put in the
+// world as the camera moves, the near ones pass by bigger, and the scene hides the ones behind it.
+// o: the camera (m), d: the ray (world, unit), far: where the scene is along it (m), px: the angle
+// of a pixel (radians). Returns how much rain covers the pixel.
+float rain_grid(vec3 o, vec3 d, float near, float far, float cell, float px, float seed) {
+  vec2 dh = d.xz;
+  float hl = length(dh);
+  if (hl < 1e-4) {
+    return 0.0;
+  }
+  vec2 start = o.xz + dh * near;
+  vec2 c = floor(start / cell);
+  vec2 stp = sign(dh);
+  vec2 inv = 1.0 / max(abs(dh), vec2(1e-5));
+  vec2 next = ((c + max(stp, 0.0)) * cell - o.xz) * stp * inv;  // ray t of the next cell edges
   float sum = 0.0;
-  float t = weather.z;
-  for (int i = 0; i < 4; i++) {
-    if (scene_z > 0.0 && scene_z < dist[i] * 4096.0) {
-      continue;
+  float t = near;
+  float t_rain = weather.z;
+  for (int i = 0; i < 28; i++) {
+    if (t > far) {
+      break;
     }
-    vec2 g = vec2(az * cols[i], el * rows[i] + t * speed[i]);
-    g.x += g.y * 0.08;  // the wind slants it
-    vec2 cell = floor(g);
-    vec2 f = fract(g);
-    float h = hash1(cell + float(i) * 31.7);
-    if (h > 0.55) {
-      continue;
+    float h = hash1(c + seed);
+    if (h < 0.9) {
+      // the column, somewhere in the cell
+      vec2 col = (c + 0.15 + 0.7 * vec2(fract(h * 13.7), fract(h * 71.3))) * cell;
+      float tc = dot(col - o.xz, dh) / (hl * hl);  // closest along the ray
+      if (tc > near && tc < far) {
+        float miss = length(o.xz + dh * tc - col);
+        float foot = tc * px;           // a pixel's size there (m)
+        float width = max(0.002, foot * 0.7);
+        float line = 1.0 - smoothstep(0.0, width, miss);
+        if (line > 0.0) {
+          // drops every 1.5 m down the column, falling 9 m/s, each 0.4 m long (motion blur)
+          float y = o.y + d.y * tc;
+          float v = fract((y + t_rain * 9.0) / 1.5 + fract(h * 37.1));
+          float len = 0.4 / 1.5;
+          float streak = smoothstep(0.0, len * 0.3, v) * (1.0 - smoothstep(len * 0.6, len, v));
+          // thin far drops are faint, not thick
+          // (not right at the lens: a drop there would cross the whole screen)
+          sum += line * streak * min(1.0, 0.005 / width) * 3.5 * smoothstep(0.8, 1.8, tc);
+        }
+      }
     }
-    float x0 = 0.15 + 0.7 * fract(h * 17.31);
-    float len = 0.35 + 0.35 * fract(h * 43.7);
-    float y0 = fract(h * 91.3) * (1.0 - len);
-    float width = fw * cols[i] * (1.6 - float(i) * 0.25);
-    float line = 1.0 - smoothstep(0.0, max(width, 1e-5), abs(f.x - x0));
-    float along = (f.y - y0) / len;
-    float seg = smoothstep(0.0, 0.2, along) * (1.0 - smoothstep(0.6, 1.0, along));
-    sum += line * seg * bright[i];
+    // the next cell
+    if (next.x < next.y) {
+      t = next.x;
+      next.x += cell * inv.x;
+      c.x += stp.x;
+    } else {
+      t = next.y;
+      next.y += cell * inv.y;
+      c.y += stp.y;
+    }
   }
   return sum;
+}
+
+float rain_drops(vec3 ray_view, float scene_z, float px) {
+  vec3 d = world_dir(ray_view);
+  vec3 o = cam_pos / 4096.0;
+  // along the ray to the scene (m); the sky is far
+  float far = scene_z > 0.0 ? scene_z / 4096.0 / max(ray_view.z, 1e-3) : 1e4;
+  // near drops on a fine grid, farther ones on a coarser one
+  return rain_grid(o, d, 0.8, min(far, 4.0), 0.25, px, 0.0) +
+         rain_grid(o, d, 4.0, min(far, 12.0), 0.7, px, 17.0) * 0.9 +
+         rain_grid(o, d, 12.0, min(far, 30.0), 1.6, px, 41.0) * 0.7;
 }
 
 // raindrops in the puddles: each 0.5 m cell gets a ring now and then, spreading and fading
@@ -593,9 +625,9 @@ void main() {
   float d = texture(tex_T3, uv).r;
   float z = view_z(d);
   vec3 p = d > 1e-7 ? view_pos(uv, d) : vec3(0.0);
-  // the view ray, and how much the rain's angle grid moves per pixel (uniform control flow)
+  // the view ray, and the angle a pixel spans
   vec3 ray = normalize(vec3((tex_coord.x * 2.0 - 1.0) / proj.z, (tex_coord.y * 2.0 - 1.0) / proj.w, 1.0));
-  float rain_fw = length(fwidth(ray)) / max(length(world_dir(ray).xz), 1e-3) / 6.2832;
+  float pixel_rad = 2.0 * texel.y / abs(proj.w);
   float height = dot(up_view, p);  // above (+) or below (-) the camera
   // is the scene level here (a floor, a decal lying on the water)? (uniform control flow)
   vec3 scene_dp = view_pos(uv, max(d, 1e-6));
@@ -974,7 +1006,7 @@ void main() {
     wet_n = surface_normal(tex_coord, p);
     wet = weather.x * smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
           (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
-    c *= 1.0 - 0.08 * weather.x - 0.25 * wet;
+    c *= 1.0 - 0.08 * weather.x - 0.3 * wet;
   }
 
   // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
@@ -1123,7 +1155,7 @@ void main() {
   if (wet > 0.01) {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
     float pd = gnoise(ww.xz * 0.45) + 0.5 * gnoise(ww.xz * 1.3 + 7.1);
-    float puddle = smoothstep(0.02, 0.3, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
+    float puddle = smoothstep(-0.05, 0.25, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
                    (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z));
     c *= 1.0 - 0.2 * puddle * wet;
     vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
@@ -1139,8 +1171,8 @@ void main() {
     float hit;
     vec3 refl = trace_reflection(p, r, z, hit);
     // a sheen, not a mirror: the ground's own color stays, dimmer reflections outside the puddles
-    refl = mix(refl, c, 0.35 * (1.0 - puddle));
-    float amount = wet * (0.12 + 0.45 * puddle) * clamp(f * 1.3 + 0.12 * puddle, 0.0, 1.0) *
+    refl = mix(refl, c, 0.25 * (1.0 - puddle));
+    float amount = wet * (0.2 + 0.55 * puddle) * clamp(f * 1.5 + 0.18 * puddle + 0.03, 0.0, 1.0) *
                    (1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z));
     c = mix(c, refl, amount);
   }
@@ -1347,10 +1379,10 @@ void main() {
 
   // rain streaks in front of everything, lit by the sky and by the lights around (the bloom)
   if (weather.x > 0.0) {
-    float streaks = rain_streaks(ray, z, rain_fw);
+    float streaks = rain_drops(ray, z, pixel_rad);
     if (streaks > 0.0) {
       vec3 lit = fog_color * 0.6 + vec3(0.18) + texture(tex_T1, tex_coord).rgb * 1.2;
-      c = mix(c, lit, clamp(streaks * 0.3 * weather.x, 0.0, 0.6));
+      c = mix(c, lit, clamp(streaks * 0.45 * weather.x, 0.0, 0.7));
     }
   }
 
