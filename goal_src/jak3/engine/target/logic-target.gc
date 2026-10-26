@@ -360,6 +360,10 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 
 (define *enhanced-census* (new 'static 'array int32 4))
 
+(define *enhanced-census-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-census-on* (pc-enhanced-getenv "JAK_ENHANCED_CENSUS" *enhanced-census-buf* 8))
+(define *enhanced-census-frames* 0)
+
 (defun enhanced-census ()
   "Test boots: log how many Krimson Guards, Metal Heads and Freedom League guards are alive."
   (dotimes (i 4)
@@ -369,11 +373,15 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
     *active-pool*
     (lambda ((p process))
       (let ((name (symbol->string-debug (-> p type symbol))))
+        ;; JAK_ENHANCED_CENSUS=2: also every process type, to find new names
+        (if (and *enhanced-census-on* (= (-> *enhanced-census-buf* data 0) #x32))
+            (format 0 "CENSUSDBG ~A~%" name)
+            )
         (cond
           ((or (>= (string-position "metalhead" name) 0) (>= (string-position "mh-" name) 0))
            (+! (-> *enhanced-census* 1) 1)
            )
-          ((or (>= (string-position "kg-" name) 0) (= (string-position "guard" name) 0))
+          ((or (>= (string-position "kg-" name) 0) (>= (string-position "guard" name) 0))
            (+! (-> *enhanced-census* 0) 1)
            )
           ((>= (string-position "ff-" name) 0)
@@ -402,6 +410,13 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   "Run the passage probes once, a few seconds after the plaza and its neighbours are up.
 On test boots (JAK_ENHANCED_START) also log the camera every 2 s, so a Blender camera can match a
 capture exactly."
+  ;; JAK_ENHANCED_CENSUS=1: the census every 5 s in any game (also the full one)
+  (when (and *enhanced-census-on* *target*)
+    (+! *enhanced-census-frames* 1)
+    (when (zero? (mod *enhanced-census-frames* 300))
+      (enhanced-census)
+      )
+    )
   (when (nonzero? (length *enhanced-start-name*))
     (+! *enhanced-camlog-frames* 1)
     (when (and *enhanced-hour-wanted* (= *enhanced-camlog-frames* 60) *time-of-day*)
