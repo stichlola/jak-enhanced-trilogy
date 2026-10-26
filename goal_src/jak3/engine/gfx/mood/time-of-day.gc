@@ -470,6 +470,15 @@
 ;; time-of-day palette, for the renderer's dynamic lights. Pairs of vectors: position + radius, color.
 (define *enhanced-light-buf* (new 'global 'inline-array 'vector 128))
 
+;; Enhanced: where Jak is, the hour and whether a cutscene plays, for the renderer's grading per
+;; area, weather and cutscene depth of field
+(defun enhanced-send-scene ((ctx time-of-day-context))
+  (let ((lev (level-get-target-inside *level*)))
+    (pc-enhanced-set-scene (if lev (symbol->string-debug (-> lev name)) "none") (-> ctx time) (movie?))
+    )
+  (none)
+  )
+
 (defun enhanced-send-lights ()
   (let ((cam (-> *math-camera* trans))
         (n 0)
@@ -775,6 +784,7 @@
     ;; Enhanced: the key light for the renderer's screen-space sun shadows
     (pc-enhanced-set-sun (the-as pointer (-> arg0 light-group 0 dir0 direction)))
     (enhanced-send-lights)
+    (enhanced-send-scene arg0)
     (let ((a0-109 (-> arg0 current-fog))
           (v1-156 *fog-texture-work*)
           )

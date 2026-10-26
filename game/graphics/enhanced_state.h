@@ -27,6 +27,17 @@ struct EnhancedPlayer {
 };
 extern EnhancedPlayer g_enhanced_player;
 
+// The level Jak is in, the hour (0-24, fractional) and whether a cutscene plays, set every frame by
+// pc-enhanced-set-scene: grading per area, weather, cutscene depth of field
+struct EnhancedScene {
+  std::string level;
+  float hour = 12.f;
+  bool movie = false;
+  bool valid = false;
+  std::mutex mutex;
+};
+extern EnhancedScene g_enhanced_scene;
+
 // The enemies, passers-by and vehicles near Jak (world, game units; w = the radius the grass bends
 // in), set every frame by pc-enhanced-set-pushers
 struct EnhancedPushers {

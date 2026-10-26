@@ -16,14 +16,23 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
 ## What's new
 
 ### Graphics
-- **Lighting**: sun shadow map (level, characters and wind-blown trees cast shadows), contact
-  shadows, ambient occlusion (SSAO), one bounce of indirect light (SSGI), and computed normals for the
+- **Lighting**: sun shadow map (level, characters and wind-blown trees cast shadows) with soft
+  shadows (sharp where they touch, softer further from what casts them), contact shadows, ambient occlusion (SSAO), one bounce of indirect light (SSGI), and computed normals for the
   levels, which originally had only baked vertex colors.
 - **Lights**: the levels' own lamps and every glow (torches, shots, explosions) light their
   surroundings and cast short shadows. Night lamps switch on at night.
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
-- **Explosions**: a flash of light and a shockwave that bends the picture. Smoke and dust are lit by
-  the lights near them.
+- **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
+  arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
+- **Weather**: rain in Haven at night, with wet streets that reflect the windows and signs, puddles
+  with raindrop rings and the lamps glinting on the ground; blowing dust in the desert, or a full
+  sandstorm. Menu: Clear / By area / Rain / Sandstorm.
+- **Sky**: a drifting cloud layer lit by the sun, orange at sunset, grey under the rain.
+- **Color grade per area**: Haven (teal and warm by day, blue with vivid neon at night), the
+  desert (sun-baked), the forest (autumn gold), the Metal Head city, underground, the volcano and
+  the temples, easing from one to the next.
+- **Characters**: soft, warm light past the edge of the lit side, and a cool rim on the shadow side.
+- **Cutscenes**: depth of field with autofocus on who's in the middle of the shot.
 - **Atmosphere**: volumetric ground mist with light shafts, god rays, distance and height fog,
   heat haze, depth of field, bloom, camera motion blur and color grading.
 - **Anti-aliasing**: TAA (temporal), with FXAA as the fallback.

@@ -23,6 +23,7 @@
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
+EnhancedScene g_enhanced_scene;
 EnhancedPushers g_enhanced_pushers;
 EnhancedSmokeLights g_enhanced_smoke_lights;
 EnhancedMerc g_enhanced_merc;
@@ -237,6 +238,27 @@ EnhancedPost::EnhancedPost() {
   if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
     m_settings.ssao_debug = true;
   }
+  if (const char* weather = std::getenv("JAK_ENHANCED_WEATHER")) {
+    // 0 clear, 1 by area, 2 rain, 3 sandstorm
+    m_settings.weather = std::clamp(std::atoi(weather), 0, 3);
+  }
+  if (const char* clouds = std::getenv("JAK_ENHANCED_CLOUDS")) {
+    // the cloud layer's strength, 0 = off
+    m_settings.cloud_amount = (float)std::atof(clouds);
+    m_settings.clouds = m_settings.cloud_amount > 0.f;
+  }
+  if (const char* grade = std::getenv("JAK_ENHANCED_GRADE")) {
+    // 0 = one grade everywhere
+    m_settings.area_grading = std::atoi(grade) != 0;
+  }
+  if (const char* soft = std::getenv("JAK_ENHANCED_SOFT_SHADOWS")) {
+    // penumbra per meter from the caster, 0 = hard (4x4 filtered) shadows
+    m_settings.shadow_softness = (float)std::atof(soft);
+    m_settings.soft_shadows = m_settings.shadow_softness > 0.f;
+  }
+  if (const char* sparks = std::getenv("JAK_ENHANCED_SPARKS")) {
+    m_settings.blast_sparks = (float)std::atof(sparks);
+  }
   // what's set now (saved choices plus test switches) counts as saved: the file is written only
   // when the player changes something in the menu, so a test run's switches don't stick
   m_saved_settings = menu_settings_json();
@@ -260,6 +282,12 @@ EnhancedPost::EnhancedPost() {
 EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
+  if (m_focus_pbo[0]) {
+    glDeleteBuffers(2, m_focus_pbo);
+  }
+  if (m_shadow_raw_sampler) {
+    glDeleteSamplers(1, &m_shadow_raw_sampler);
+  }
   if (m_shaft_fbo) {
     glDeleteFramebuffers(1, &m_shaft_fbo);
     glDeleteTextures(1, &m_shaft_tex);
@@ -471,6 +499,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
   const bool have_scene = m_ssao_ready;
+  update_scene();
+  if (have_scene && m_cine > 0.f) {
+    read_focus(w, h);
+  } else if (m_cine <= 0.f) {
+    m_focus = 0.f;
+  }
 
   // view -> previous view is R^T Rp, with the camera's move as an offset (motion blur, TAA)
   float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
@@ -702,13 +736,16 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       g_enhanced_explosions.count = 0;
     }
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
-                                  [&](const Blast& b) { return m_time - b.start > 0.6; }),
+                                  [&](const Blast& b) { return m_time - b.start > 1.6; }),
                    m_blasts.end());
     for (const auto& b : m_blasts) {
       if (!on || m_settings.blast <= 0.f) {
         break;
       }
       float age = (float)(m_time - b.start);
+      if (age > 0.6f) {
+        continue;  // the flash is over (the sparks fly on)
+      }
       Candidate c;
       for (int col = 0; col < 3; col++) {
         c.pos[col] = 0.f;
@@ -936,6 +973,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       constexpr int kBlasts = 4;
       float blast_pos[kBlasts * 4] = {};
       float blast_age[kBlasts] = {};
+      float blast_seed[kBlasts] = {};
       int blast_count = 0;
       for (const auto& b : m_blasts) {
         if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
@@ -952,11 +990,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         std::memcpy(blast_pos + blast_count * 4, v, sizeof(v));
         blast_pos[blast_count * 4 + 3] = b.radius;
+        blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
         blast_age[blast_count++] = (float)(m_time - b.start);
       }
       glUniform1i(glGetUniformLocation(id, "blast_count"), blast_count);
       glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
       glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
+      glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
     }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
@@ -1004,6 +1044,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
+  glBindSampler(13, 0);
 
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
@@ -1014,6 +1055,190 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glDepthMask(GL_TRUE);
   glEnable(GL_BLEND);
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+}
+
+namespace {
+// the areas with a look of their own, from the name of the level Jak is in
+enum Zone { kZoneOther, kZoneHaven, kZoneDesert, kZoneForest, kZoneMetalHead, kZoneUnder,
+            kZoneVolcano, kZoneTemple, kZoneCount };
+
+int zone_of(const std::string& level) {
+  auto starts = [&](const char* prefix) { return level.rfind(prefix, 0) == 0; };
+  for (const char* p : {"for", "lfor"}) {
+    if (starts(p)) {
+      return kZoneForest;
+    }
+  }
+  for (const char* p : {"mhc", "nst", "lmh"}) {
+    if (starts(p)) {
+      return kZoneMetalHead;
+    }
+  }
+  for (const char* p : {"cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom",
+                        "piazza", "stadium", "intp"}) {
+    if (starts(p)) {
+      return kZoneHaven;
+    }
+  }
+  for (const char* p : {"was", "lwas", "des", "wca", "wcb", "hang", "arena"}) {
+    if (starts(p)) {
+      return kZoneDesert;
+    }
+  }
+  for (const char* p : {"sew", "fact", "mine", "tow", "rail", "prec", "comb"}) {
+    if (starts(p)) {
+      return kZoneUnder;
+    }
+  }
+  if (starts("vol")) {
+    return kZoneVolcano;
+  }
+  if (starts("temp")) {
+    return kZoneTemple;
+  }
+  return kZoneOther;
+}
+
+struct ZoneLook {
+  float lift[3], gain[3], saturation, contrast, warmth, clouds;
+};
+// per area, by day and by night: shadows lifted toward a tint, highlights tinted, saturation
+// (times the setting), contrast and warmth (plus the setting), sky cover
+const ZoneLook kZoneLooks[kZoneCount][2] = {
+    // other: as it was
+    {{{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f}, {{0, 0, 0.012f}, {1, 1, 1.02f}, 1.f, 0.02f, 0.f, 0.4f}},
+    // Haven: teal shadows and warm light by day; blue night, neon kept vivid
+    {{{-0.005f, 0.f, 0.012f}, {1.03f, 1.f, 0.96f}, 1.f, 0.04f, 0.02f, 0.5f},
+     {{0.f, 0.006f, 0.03f}, {1.06f, 0.98f, 1.02f}, 1.12f, 0.08f, -0.02f, 0.65f}},
+    // desert: sun-baked by day, cold blue night
+    {{{0.01f, 0.004f, -0.006f}, {1.05f, 1.f, 0.91f}, 1.04f, 0.05f, 0.04f, 0.2f},
+     {{0.f, 0.004f, 0.02f}, {0.98f, 0.98f, 1.05f}, 0.95f, 0.04f, -0.03f, 0.25f}},
+    // forest: autumn gold, a little green in the shade
+    {{{0.f, 0.008f, 0.004f}, {1.07f, 1.f, 0.86f}, 1.12f, 0.06f, 0.03f, 0.45f},
+     {{0.f, 0.006f, 0.022f}, {0.98f, 1.f, 1.04f}, 1.f, 0.05f, -0.02f, 0.5f}},
+    // Metal Heads: sickly purple shadows
+    {{{0.012f, 0.f, 0.02f}, {1.f, 0.96f, 1.04f}, 1.08f, 0.08f, 0.f, 0.6f},
+     {{0.012f, 0.f, 0.026f}, {1.f, 0.96f, 1.06f}, 1.1f, 0.09f, -0.01f, 0.6f}},
+    // underground (sewers, factory, mines, tower, rail, Precursor core): cool and contrasty
+    {{{-0.004f, 0.002f, 0.012f}, {1.f, 1.f, 1.02f}, 0.94f, 0.1f, -0.01f, 0.4f},
+     {{-0.004f, 0.002f, 0.012f}, {1.f, 1.f, 1.02f}, 0.94f, 0.1f, -0.01f, 0.4f}},
+    // volcano: hot
+    {{{0.015f, 0.f, -0.005f}, {1.08f, 0.96f, 0.85f}, 1.1f, 0.08f, 0.04f, 0.5f},
+     {{0.015f, 0.f, 0.f}, {1.06f, 0.95f, 0.9f}, 1.08f, 0.08f, 0.02f, 0.5f}},
+    // temples: golden
+    {{{0.006f, 0.004f, 0.f}, {1.04f, 1.02f, 0.92f}, 1.04f, 0.06f, 0.02f, 0.4f},
+     {{0.f, 0.004f, 0.018f}, {1.f, 1.f, 1.03f}, 1.f, 0.05f, -0.01f, 0.4f}},
+};
+}  // namespace
+
+// once a frame: the area Jak is in and the hour pick the grade and the weather, eased in over a
+// few seconds so a level change or nightfall doesn't snap
+void EnhancedPost::update_scene() {
+  std::string level;
+  float hour = 12.f;
+  bool movie = false;
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+    level = g_enhanced_scene.level;
+    hour = g_enhanced_scene.hour;
+    movie = g_enhanced_scene.movie;
+  }
+  static const bool cine_test = std::getenv("JAK_ENHANCED_CINE_TEST") != nullptr;
+  movie = movie || cine_test;
+  m_zone = zone_of(level);
+  // night from 19 to 21 in, from 5 to 7 out
+  auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
+  m_night = std::max(ramp(19.f, 21.f, hour), 1.f - ramp(5.f, 7.f, hour));
+
+  const auto& s = m_settings;
+  const ZoneLook& day = kZoneLooks[s.area_grading ? m_zone : kZoneOther][0];
+  const ZoneLook& night = kZoneLooks[s.area_grading ? m_zone : kZoneOther][1];
+  auto mix = [&](float a, float b) { return a + (b - a) * m_night; };
+  Grade want;
+  for (int i = 0; i < 3; i++) {
+    want.lift[i] = s.area_grading ? mix(day.lift[i], night.lift[i]) : 0.f;
+    want.gain[i] = s.area_grading ? mix(day.gain[i], night.gain[i]) : 1.f;
+  }
+  want.saturation = s.area_grading ? mix(day.saturation, night.saturation) : 1.f;
+  want.contrast = s.area_grading ? mix(day.contrast, night.contrast) : 0.f;
+  want.warmth = s.area_grading ? mix(day.warmth, night.warmth) : 0.f;
+  want.clouds = mix(day.clouds, night.clouds);
+
+  float rain = 0.f, dust = 0.f;
+  if (s.weather == 2) {
+    rain = 1.f;
+  } else if (s.weather == 3) {
+    dust = 1.f;
+  } else if (s.weather == 1) {
+    rain = m_zone == kZoneHaven ? m_night : 0.f;
+    dust = m_zone == kZoneDesert ? 0.45f * (1.f - 0.6f * m_night) : 0.f;
+  }
+  // rain brings its clouds
+  want.clouds = std::max(want.clouds, rain * 0.95f);
+
+  const float dt = 1.f / 60.f;
+  const float k_grade = 1.f - std::exp(-dt / 1.5f);
+  const float k_weather = 1.f - std::exp(-dt / 4.f);
+  auto ease = [](float& v, float target, float k) { v += (target - v) * k; };
+  for (int i = 0; i < 3; i++) {
+    ease(m_grade.lift[i], want.lift[i], k_grade);
+    ease(m_grade.gain[i], want.gain[i], k_grade);
+  }
+  ease(m_grade.saturation, want.saturation, k_grade);
+  ease(m_grade.contrast, want.contrast, k_grade);
+  ease(m_grade.warmth, want.warmth, k_grade);
+  ease(m_grade.clouds, want.clouds, k_weather);
+  ease(m_rain, rain * s.rain_strength, k_weather);
+  ease(m_dust, dust * s.dust_strength, k_weather);
+  ease(m_cine, movie && s.cine_dof ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
+}
+
+// cutscene autofocus: nine depth samples around the middle of the screen go into a pixel buffer;
+// the ones from the frame before are read (no stall) and the focus eases toward the nearest
+// thing near the middle (who's talking, usually)
+void EnhancedPost::read_focus(int w, int h) {
+  if (!m_focus_pbo[0]) {
+    glGenBuffers(2, m_focus_pbo);
+    for (int i = 0; i < 2; i++) {
+      glBindBuffer(GL_PIXEL_PACK_BUFFER, m_focus_pbo[i]);
+      glBufferData(GL_PIXEL_PACK_BUFFER, 9 * sizeof(float), nullptr, GL_STREAM_READ);
+    }
+  }
+  const int prev = 1 - m_focus_cur;
+  if (m_focus_pending[prev]) {
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_focus_pbo[prev]);
+    if (auto* d = (const float*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, 9 * sizeof(float),
+                                                 GL_MAP_READ_BIT)) {
+      float nearest = 1e12f;
+      for (int i = 0; i < 9; i++) {
+        // sky (0) is endless; nothing under half a meter (the camera brushing a wall)
+        float z = d[i] > 1e-7f ? m_last_proj[1] / (d[i] * 2.f - 1.f - m_last_proj[0]) : 1e12f;
+        z = std::abs(z);
+        if (z > 0.5f * kMeter) {
+          // the middle counts a little more
+          nearest = std::min(nearest, i == 4 ? z * 0.8f : z);
+        }
+      }
+      nearest = std::clamp(nearest, 0.5f * kMeter, 400.f * kMeter);
+      m_focus = m_focus <= 0.f ? nearest
+                               : std::exp(std::log(m_focus) +
+                                          (std::log(nearest) - std::log(m_focus)) * 0.1f);
+      glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    m_focus_pending[prev] = false;
+  }
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, m_depth_fbo);
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, m_focus_pbo[m_focus_cur]);
+  int i = 0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      glReadPixels(w / 2 + x * w / 12, h / 2 + y * h / 10, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT,
+                   (void*)(i++ * sizeof(float)));
+    }
+  }
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  m_focus_pending[m_focus_cur] = true;
+  m_focus_cur = prev;
 }
 
 void EnhancedPost::do_shafts(GLuint scene_tex,
@@ -2150,9 +2375,51 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);
   glUniform1f(glGetUniformLocation(id, "bloom_strength"),
               m_settings.bloom ? m_settings.bloom_strength : 0.f);
-  glUniform1f(glGetUniformLocation(id, "saturation"), m_settings.saturation);
-  glUniform1f(glGetUniformLocation(id, "contrast"), m_settings.contrast);
-  glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth);
+  // the area's grade on top of the settings (update_scene)
+  glUniform1f(glGetUniformLocation(id, "saturation"), m_settings.saturation * m_grade.saturation);
+  glUniform1f(glGetUniformLocation(id, "contrast"), m_settings.contrast + m_grade.contrast);
+  glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
+  glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
+  glUniform3fv(glGetUniformLocation(id, "grade_gain"), 1, m_grade.gain);
+  // soft shadows: the shadow map again, read as plain depths for the blocker search
+  if (!m_shadow_raw_sampler) {
+    glGenSamplers(1, &m_shadow_raw_sampler);
+    glSamplerParameteri(m_shadow_raw_sampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glSamplerParameteri(m_shadow_raw_sampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glSamplerParameteri(m_shadow_raw_sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(m_shadow_raw_sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glSamplerParameteri(m_shadow_raw_sampler, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+  }
+  glActiveTexture(GL_TEXTURE13);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready ? m_shadow_tex : m_no_shadow_tex);
+  glBindSampler(13, m_shadow_raw_sampler);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T13"), 13);
+  // the map's depth spans 2 x 300 m (do_shadow_map), its side 2 x range
+  glUniform4f(glGetUniformLocation(id, "shadow_params"), 600.f, 2.f * m_settings.shadow_range,
+              m_settings.shadow_softness, m_settings.soft_shadows ? 1.f : 0.f);
+  {
+    // the sun for the clouds, day or night (view space), and how high it stands (the camera's up:
+    // last frame's, near enough)
+    float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
+                          m_sun_view[2] * m_sun_view[2]);
+    float up = len > 0.f ? (m_sun_view[0] * m_prev_camera.rot[1][0] +
+                            m_sun_view[1] * m_prev_camera.rot[1][1] +
+                            m_sun_view[2] * m_prev_camera.rot[1][2]) / len
+                         : 0.5f;
+    glUniform4f(glGetUniformLocation(id, "sky_sun"), len > 0.f ? m_sun_view[0] / len : 0.f,
+                len > 0.f ? m_sun_view[1] / len : 0.f, len > 0.f ? m_sun_view[2] / len : 1.f, up);
+  }
+  // (no sky, clouds or weather without a 3D scene: loading screens, menus)
+  glUniform4f(glGetUniformLocation(id, "clouds"),
+              m_settings.clouds && m_ssao_ready ? m_settings.cloud_amount : 0.f, m_grade.clouds,
+              (float)std::fmod(m_time, 10000.0), m_night);
+  glUniform4f(glGetUniformLocation(id, "weather"), m_ssao_ready ? m_rain : 0.f,
+              m_ssao_ready ? m_dust : 0.f,
+              (float)std::fmod(m_time, 1000.0), 0.f);
+  glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
+              m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
   glUniform1f(glGetUniformLocation(id, "vignette"), m_settings.vignette);
   glUniform1f(glGetUniformLocation(id, "sharpen"), m_settings.sharpen);
   return shader;
@@ -2233,6 +2500,16 @@ void EnhancedPost::draw_menu() {
     }
     check("Wind on the grass", &g_enhanced_wind.enabled);
     check("Grass bends away", &g_enhanced_wind.push);
+    check("Color grade per area", &s.area_grading);
+    check("Soft shadows", &s.soft_shadows);
+    check("Clouds", &s.clouds);
+    check("Cutscene depth of field", &s.cine_dof);
+    bool sparks = s.blast_sparks > 0.f;
+    if (check("Explosion sparks", &sparks)) {
+      s.blast_sparks = sparks ? 1.f : 0.f;
+    }
+    ImGui::SetNextItemWidth(200);
+    ImGui::Combo("Weather", &s.weather, "Clear\0By area (rain in Haven at night)\0Rain\0Sandstorm\0");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::BeginDisabled(!s.lights);
@@ -2391,6 +2668,12 @@ std::string EnhancedPost::menu_settings_json() const {
   j["water_swell"] = s.water_swell;
   j["water_refraction"] = s.water_refraction;
   j["water_caustics"] = s.water_caustics;
+  j["area_grading"] = s.area_grading;
+  j["soft_shadows"] = s.soft_shadows;
+  j["clouds"] = s.clouds;
+  j["cine_dof"] = s.cine_dof;
+  j["blast_sparks"] = s.blast_sparks;
+  j["weather"] = s.weather;
   j["population"] = m_population;
   j["minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
@@ -2439,6 +2722,13 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("water_swell", s.water_swell);
   get("water_refraction", s.water_refraction);
   get("water_caustics", s.water_caustics);
+  get("area_grading", s.area_grading);
+  get("soft_shadows", s.soft_shadows);
+  get("clouds", s.clouds);
+  get("cine_dof", s.cine_dof);
+  get("blast_sparks", s.blast_sparks);
+  get("weather", s.weather);
+  s.weather = std::clamp(s.weather, 0, 3);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
   bool map = false;
@@ -2486,6 +2776,12 @@ void EnhancedPost::apply_preset(int preset) {
   s.light_shadow = all ? d.light_shadow : 0.f;
   s.water_refraction = all ? d.water_refraction : 0.f;
   s.water_caustics = all ? d.water_caustics : 0.f;
+  s.area_grading = d.area_grading;
+  s.clouds = d.clouds;
+  s.blast_sparks = d.blast_sparks;
+  s.weather = d.weather;
+  s.soft_shadows = all && d.soft_shadows;
+  s.cine_dof = all && d.cine_dof;
   g_enhanced_merc.enabled = preset > 0;
   g_enhanced_wind.enabled = preset > 0;
   g_enhanced_wind.push = preset > 0;
@@ -2617,6 +2913,19 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Warmth", &m_settings.warmth, -0.2f, 0.2f);
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Sharpen", &m_settings.sharpen, 0.f, 1.f);
+    ImGui::Checkbox("Grade per area", &m_settings.area_grading);
+    ImGui::Text("area %d, night %.2f, rain %.2f, dust %.2f, focus %.1f m", m_zone, m_night, m_rain,
+                m_dust, m_focus / kMeter);
+    ImGui::Checkbox("Soft shadows", &m_settings.soft_shadows);
+    ImGui::SliderFloat("Shadow softness (/m)", &m_settings.shadow_softness, 0.f, 0.08f, "%.3f");
+    ImGui::Checkbox("Clouds", &m_settings.clouds);
+    ImGui::SliderFloat("Cloud amount", &m_settings.cloud_amount, 0.f, 2.f);
+    ImGui::Combo("Weather##debug", &m_settings.weather, "Clear\0By area\0Rain\0Sandstorm\0");
+    ImGui::SliderFloat("Rain strength", &m_settings.rain_strength, 0.f, 2.f);
+    ImGui::SliderFloat("Dust strength", &m_settings.dust_strength, 0.f, 2.f);
+    ImGui::Checkbox("Cutscene depth of field", &m_settings.cine_dof);
+    ImGui::SliderFloat("Cutscene aperture", &m_settings.cine_aperture, 0.f, 3.f);
+    ImGui::SliderFloat("Explosion sparks", &m_settings.blast_sparks, 0.f, 3.f);
     ImGui::TreePop();
   }
 }

@@ -21,6 +21,7 @@ in vec3 vtx_nrm;
 in vec3 vtx_key;
 in vec3 vtx_view;
 in vec3 vtx_key_color;
+in vec3 enh_ambient;
 in vec3 enh_pos;
 uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
@@ -82,6 +83,13 @@ void main() {
     float spec = pow(max(dot(n, normalize(l + v)), 0.0), 40.0) * ndl;
     vec3 key = clamp(vtx_key_color, 0.0, 1.5);
     color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * (0.3 + 0.7 * color.rgb));
+    // soft light past the terminator, warm like light scattered under skin and cloth (the game's
+    // own light stops hard where the surface turns away)
+    float wrap = clamp((dot(n, l) + 0.45) / 1.45, 0.0, 1.0) - ndl;
+    color.rgb += color.rgb * key * wrap * vec3(1.0, 0.55, 0.4) * 0.35 * enh_rim_spec.x;
+    // and the shadow side catches the sky: a cool rim from the ambient light
+    float back = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 2.5) * (1.0 - ndl);
+    color.rgb += clamp(enh_ambient, 0.0, 1.0) * back * 0.35 * enh_rim_spec.x;
   }
 
    color.xyz = mix(color.xyz, fog_color.rgb, clamp(fog_color.a * fog, 0, 1));

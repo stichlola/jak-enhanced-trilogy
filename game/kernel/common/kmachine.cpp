@@ -1106,6 +1106,17 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   g_enhanced_player.valid = true;
 }
 
+// Enhanced: the level Jak is in, the hour (0-24) and whether a cutscene plays
+void pc_enhanced_set_scene(u32 name, u32 hour, u32 movie) {
+  float h;
+  memcpy(&h, &hour, 4);
+  std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+  g_enhanced_scene.level = Ptr<String>(name).c()->data();
+  g_enhanced_scene.hour = h;
+  g_enhanced_scene.movie = symbol_to_bool(movie);
+  g_enhanced_scene.valid = true;
+}
+
 // Enhanced: the enemies and vehicles near Jak (count x y z radius), for the grass too
 void pc_enhanced_set_pushers(u32 data_ptr, u32 count) {
   auto* v = Ptr<float>(data_ptr).c();
@@ -1311,6 +1322,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-rand", (void*)pc_rand);
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
+  make_func_symbol_func("pc-enhanced-set-scene", (void*)pc_enhanced_set_scene);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);

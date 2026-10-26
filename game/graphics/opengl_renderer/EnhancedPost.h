@@ -182,6 +182,18 @@ class EnhancedPost {
     float warmth = 0.0f;     // shifts toward warm highlights / cool shadows
     float vignette = 0.18f;
     float sharpen = 0.25f;
+    bool area_grading = true;      // a color grade per area (Haven, desert, forest...), day and night
+    bool soft_shadows = true;      // sun shadows sharp at the contact, softer further from the caster
+    float shadow_softness = 0.02f;  // penumbra per meter between caster and receiver
+    bool clouds = true;            // a drifting cloud layer in the sky, lit by the sun
+    float cloud_amount = 1.0f;
+    int weather = 1;               // 0 clear, 1 by area (rain in Haven at night, dust in the desert),
+                                   // 2 rain, 3 sandstorm
+    float rain_strength = 1.0f;
+    float dust_strength = 1.0f;
+    bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
+    float cine_aperture = 1.0f;
+    float blast_sparks = 1.0f;     // explosions throw sparks and leave hot air (0 = off)
   };
 
   EnhancedPost();
@@ -414,6 +426,32 @@ class EnhancedPost {
   int m_vol_w = 0;
   int m_vol_h = 0;
   bool m_vol_ready = false;
+
+  // the area's look and weather, eased toward the current area's each frame (update_scene)
+  struct Grade {
+    float lift[3] = {0.f, 0.f, 0.f};  // added in the shadows
+    float gain[3] = {1.f, 1.f, 1.f};  // multiplies the highlights
+    float saturation = 1.f;           // times the setting
+    float contrast = 0.f;             // plus the setting
+    float warmth = 0.f;
+    float clouds = 0.45f;             // sky cover, 0..1
+  };
+  void update_scene();
+  Grade m_grade;
+  float m_rain = 0.f;  // 0..1
+  float m_dust = 0.f;
+  float m_cine = 0.f;  // cutscene depth of field, eased in and out
+  int m_zone = 0;
+  float m_night = 0.f;
+  // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
+  // later (two pixel buffers in turn, no stall)
+  void read_focus(int w, int h);
+  GLuint m_focus_pbo[2] = {0, 0};
+  int m_focus_cur = 0;
+  bool m_focus_pending[2] = {false, false};
+  float m_focus = 0.f;  // view z (game units), 0 = none yet
+  // the shadow map read as plain depths (soft shadows' blocker search), not compared
+  GLuint m_shadow_raw_sampler = 0;
 
   // temporal anti-aliasing: two history buffers, written in turn
   GLuint m_taa_fbo[2] = {0, 0};
