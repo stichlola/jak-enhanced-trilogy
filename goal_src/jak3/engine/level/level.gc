@@ -76,15 +76,22 @@
       v-x-ride))
   )
 
-;; Enhanced: play as if the game were complete. *enhanced-unlock-all* (default #t) keeps every
-;; ability, gun and gun mode, vehicle and secret unlocked (bought in the secrets menu; the
-;; upgrades active, the toggles like big head left to the player), and fills ammo, health and
-;; eco once per boot.
-(define *enhanced-unlock-all* #t)
+;; Enhanced: play as if the game were complete. On a finished game (or always, with
+;; *enhanced-unlock-all* #t) this keeps every ability, gun and gun mode, vehicle and secret
+;; unlocked (bought in the secrets menu; the upgrades active, the toggles like big head left to
+;; the player), and fills ammo, health and eco once per boot. A new game starts as the original.
+(define *enhanced-unlock-all* #f)
 (define *enhanced-unlock-given* #f)
 
+(define-extern task-node-closed? (function game-task-node symbol))
+
+(defun enhanced-unlocked? ()
+  "Everything unlocked: always, or once the game is finished."
+  (or *enhanced-unlock-all* (task-node-closed? (game-task-node precursor-destroy-ship-resolution)))
+  )
+
 (defun enhanced-unlock-all ()
-  (when *enhanced-unlock-all*
+  (when (enhanced-unlocked?)
     (logior! (-> *game-info* features)
              (game-feature
                jakc

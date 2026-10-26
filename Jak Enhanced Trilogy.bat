@@ -110,6 +110,15 @@ echo.
 echo Starting Jak %PICK%.
 echo   \  (the key left of 1)  opens the Enhanced menu: graphics, weather, time of day...
 echo   F9                     switches to the next game of the trilogy
+rem Jak 3 comes with a save in slot 4: the whole game finished, everything unlocked. Only into an
+rem empty slot (delete or overwrite it in the game). The folder name has a "!": no delayed expansion.
+setlocal DisableDelayedExpansion
+set "SAVES=%APPDATA%\OpenGOAL\jak3\saves\BASCUS-97330AYBABTU!"
+if exist "%PROJ%\game\assets\jak3\enhanced-save\bank6.bin" if not exist "%SAVES%\bank6.bin" if not exist "%SAVES%\bank7.bin" (
+  if not exist "%SAVES%" mkdir "%SAVES%"
+  copy /y "%PROJ%\game\assets\jak3\enhanced-save\bank6.bin" "%SAVES%\bank6.bin" >nul
+)
+endlocal
 cd /d "%PROJ%"
 start "" "%BIN%\gk.exe" --game jak%PICK% -- -boot -fakeiso
 exit /b 0

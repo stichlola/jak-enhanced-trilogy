@@ -29,6 +29,10 @@ unzip it into the Jak Enhanced Trilogy folder and double-click the launcher agai
 the game by itself (20-40 minutes, only once). They're made from the games' own textures, so they're
 only for people who own the games.
 
+**Jak 3 save in slot 4**: the whole game finished, everything unlocked (guns, powers, vehicles,
+secrets) to try every feature at once. A new game starts as the original; delete or overwrite the
+slot when you like (the launcher only fills it while it's empty).
+
 > **Tip:** in the game, press **`\`** (the key left of `1`) for the **Enhanced menu**: graphics
 > presets, every effect, weather, time of day. **F9** switches to the next game of the trilogy.
 

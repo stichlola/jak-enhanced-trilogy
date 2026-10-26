@@ -10,6 +10,11 @@
 (declare-type gun-red-shot process-drawable)
 (define-extern gun-red-shot-init-by-other (function vector vector object :behavior gun-red-shot))
 
+;; Enhanced: holding fire charges the scattergun (gun-red-1). 0..1 while it's held (target-gun.gc)
+(define *enhanced-red-charge* 0.0)
+;; the charge of the shot being fired now (0: a normal shot)
+(define *enhanced-red-charged-shot* 0.0)
+
 ;; DECOMP BEGINS
 
 (deftype gun-red-shot (process-drawable)
@@ -23,6 +28,7 @@
    (start-dir    vector                :inline)
    (start-rot    vector                :inline)
    (probe-dir    vector                19 :inline)
+   (enhanced-scale float)
    )
   (:state-methods
     blocked
@@ -1833,6 +1839,28 @@
         )
       )
     (launch-particles (-> *part-id-table* 216) (-> gp-0 fire-point))
+    ;; Enhanced: the blast's light, shockwave and sparks in the renderer
+    (let ((pos (new 'stack-no-clear 'vector))
+          (dir (new 'stack-no-clear 'vector))
+          )
+      (vector-copy! pos (-> gp-0 fire-point))
+      (set! (-> pos w) (* 6144.0 (+ 1.0 (* 1.5 *enhanced-red-charged-shot*))))
+      (vector-copy! dir (-> gp-0 fire-dir-out))
+      (set! (-> dir w) 1.0)
+      (pc-enhanced-gun-blast (the-as pointer pos) (the-as pointer dir))
+      )
+    ;; Enhanced: a charged shot kicks Jak back (up to 16 m/s, fading after 0.15 s)
+    (when (< 0.0 *enhanced-red-charged-shot*)
+      (let ((kick (vector-normalize-copy! (new 'stack-no-clear 'vector) (-> gp-0 fire-dir-out) 1.0)))
+        (set! (-> kick y) 0.0)
+        (vector-normalize! kick (* -65536.0 *enhanced-red-charged-shot*))
+        (vector-copy! (-> self control additional-decaying-velocity) kick)
+        (set-time! (-> self control additional-decaying-velocity-end-time))
+        (set! (-> self control additional-decaying-velocity-decay-start-time) (+ (current-time) (seconds 0.15)))
+        )
+      (cpad-set-buzz! (-> *cpad-list* cpads 0) 0 (the int (* 255.0 *enhanced-red-charged-shot*)) (seconds 0.3))
+      (activate! *camera-smush-control* (* 1638.4 *enhanced-red-charged-shot*) 15 75 1.0 0.9 (-> *display* camera-clock))
+      )
     (let ((s5-3 (vector+*! (new 'stack-no-clear 'vector) (-> gp-0 fire-point) (-> gp-0 fire-dir-out) 24576.0)))
       (set! (-> s5-3 w) 24576.0)
       (when (and (sphere-in-view-frustum? (the-as sphere s5-3))
@@ -1857,6 +1885,10 @@
             (send-event (ppointer->process s5-4) 'anim-mode 'play1)
             (send-event (ppointer->process s5-4) 'anim "idle")
             (forward-up->quaternion (-> (the-as manipy (-> s5-4 0)) root quat) (-> gp-0 fire-dir-out) *up-vector*)
+            ;; Enhanced: a charged shot's cone is bigger
+            (let ((f0-0 (+ 1.0 (* 1.2 *enhanced-red-charged-shot*))))
+              (set-vector! (-> (the-as manipy (-> s5-4 0)) root scale) f0-0 f0-0 f0-0 1.0)
+              )
             (let ((f30-1
                     (vector-dot
                       (-> gp-0 fire-dir-out)
@@ -1919,10 +1951,12 @@
   (let ((v1-0 (as-type arg0 process-drawable)))
     (when v1-0
       (let* ((s5-2 (vector-! (new 'stack-no-clear 'vector) (-> v1-0 root trans) (-> this start-pos)))
-             (f30-0 (* (if (< (vector-length s5-2) 24576.0)
+             (f30-0 (* (if (< (vector-length s5-2) (* 24576.0 (-> this enhanced-scale)))
                            3.0
                            2.0
                            )
+                       ;; Enhanced: a charged shot hits harder
+                       (-> this enhanced-scale)
                        (if (logtest? (game-feature feature22) (-> *game-info* features))
                            2.0
                            1.0
@@ -2025,9 +2059,9 @@
          )
     (let ((s5-0 (new 'stack-no-clear 'vector)))
       (vector-copy! s5-0 (-> this start-dir))
-      (vector-float*! s5-0 s5-0 43417.6)
+      (vector-float*! s5-0 s5-0 (* 43417.6 (-> this enhanced-scale)))
       (vector+! s5-0 s5-0 (-> this start-pos))
-      (set! (-> s5-0 w) 43827.2)
+      (set! (-> s5-0 w) (* 43827.2 (-> this enhanced-scale)))
       (let ((s4-0 (-> this root root-prim prim-core collide-with)))
         (set! *actor-list-length* 0)
         (if (logtest? s4-0 (collide-spec hit-by-others-list))
@@ -2154,7 +2188,7 @@
       (let ((gp-0 (-> this root)))
         (let ((v1-0 (new 'stack-no-clear 'collide-query)))
           (vector-copy! (-> gp-0 trans) (-> this start-pos))
-          (vector-float*! (-> gp-0 transv) arg0 61440.0)
+          (vector-float*! (-> gp-0 transv) arg0 (* 61440.0 (-> this enhanced-scale)))
           (let ((a1-1 v1-0))
             (set! (-> a1-1 radius) (-> gp-0 root-prim local-sphere w))
             (set! (-> a1-1 collide-with) (-> gp-0 root-prim prim-core collide-with))
@@ -2274,6 +2308,8 @@
   (vector-copy! (-> self start-pos) arg0)
   (vector-copy! (-> self start-dir) arg1)
   (rot-zxy-from-vector! (-> self start-rot) arg1)
+  ;; Enhanced: a charged shot reaches up to 2.2x as far
+  (set! (-> self enhanced-scale) (+ 1.0 (* 1.2 *enhanced-red-charged-shot*)))
   (let* ((v1-2 *game-info*)
          (a0-7 (+ (-> v1-2 attack-id) 1))
          )

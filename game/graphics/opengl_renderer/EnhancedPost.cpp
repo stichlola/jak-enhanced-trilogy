@@ -1026,13 +1026,22 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       for (int i = 0; i < g_enhanced_explosions.count; i++) {
         const float* e = g_enhanced_explosions.pending[i];
         if (m_blasts.size() < 16) {
-          m_blasts.push_back({{e[0], e[1], e[2]}, std::max(e[3], 1.f * kMeter), m_time});
+          Blast b{{e[0], e[1], e[2]}, std::max(e[3], 1.f * kMeter), m_time};
+          b.dir[0] = e[4];
+          b.dir[1] = e[5];
+          b.dir[2] = e[6];
+          b.kind = (int)e[7];
+          m_blasts.push_back(b);
         }
       }
       g_enhanced_explosions.count = 0;
     }
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
-                                  [&](const Blast& b) { return m_time - b.start > 1.6; }),
+                                  [&](const Blast& b) {
+                                    // gun blasts are short: free their slots for the next ones
+                                    const double life = b.kind == 2 ? 0.3 : b.kind == 1 ? 0.7 : 1.6;
+                                    return m_time - b.start > life;
+                                  }),
                    m_blasts.end());
     for (const auto& b : m_blasts) {
       if (!on || m_settings.blast <= 0.f) {
@@ -1051,9 +1060,32 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       c.pos[3] = std::clamp(b.radius * 4.f, 8.f * kMeter, 30.f * kMeter);
       float k = 4.f * std::exp(-age * 5.f) * m_settings.blast * m_settings.light_strength;
-      c.color[0] = 1.f * k;
-      c.color[1] = 0.62f * k;
-      c.color[2] = 0.3f * k;
+      // the red gun: a short red-orange flash carried ahead of the muzzle with its wave
+      const float tint[3] = {1.f, b.kind == 1 ? 0.32f : 0.62f, b.kind == 1 ? 0.1f : 0.3f};
+      if (b.kind == 1) {
+        if (age > 0.35f) {
+          continue;
+        }
+        const float ahead = (1.f + 20.f * age) * kMeter;
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += b.dir[row] * ahead * cam.rot[row][col];
+          }
+        }
+        c.pos[3] = std::max(11.f * kMeter, b.radius * 7.f);
+        k = 5.f * std::exp(-age * 9.f) * m_settings.blast * m_settings.light_strength;
+      } else if (b.kind == 2) {
+        // charging: a small flicker on the gun, stronger as it charges (radius 0.5-1.5 m)
+        if (age > 0.2f) {
+          continue;
+        }
+        c.pos[3] = b.radius * 4.f;
+        k = 1.5f * (b.radius / kMeter) * std::exp(-age * 12.f) * m_settings.blast *
+            m_settings.light_strength;
+      }
+      c.color[0] = tint[0] * k;
+      c.color[1] = tint[1] * k;
+      c.color[2] = tint[2] * k;
       c.color[3] = 0.f;
       c.score = 1e6f;
       candidates.push_back(c);
@@ -1315,6 +1347,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float blast_pos[kBlasts * 4] = {};
       float blast_age[kBlasts] = {};
       float blast_seed[kBlasts] = {};
+      float blast_dir[kBlasts * 4] = {};
       int blast_count = 0;
       for (const auto& b : m_blasts) {
         if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
@@ -1331,6 +1364,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         std::memcpy(blast_pos + blast_count * 4, v, sizeof(v));
         blast_pos[blast_count * 4 + 3] = b.radius;
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            blast_dir[blast_count * 4 + col] += b.dir[row] * cam.rot[row][col];
+          }
+        }
+        blast_dir[blast_count * 4 + 3] = (float)b.kind;
         blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
         blast_age[blast_count++] = (float)(m_time - b.start);
       }
@@ -1338,6 +1377,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
       glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
       glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
+      glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
     }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);

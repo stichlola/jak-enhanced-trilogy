@@ -8,6 +8,9 @@
 ;; Enhanced: guns fire this many times faster (their fire-delay is divided by it). 1.0 = vanilla.
 (define *enhanced-gun-fire-rate* 1.5)
 
+(define-extern *enhanced-red-charge* float)
+(define-extern *enhanced-red-charged-shot* float)
+
 ;; DECOMP BEGINS
 
 (define *gun-walk-mods*
@@ -3279,6 +3282,46 @@
       (if (cpad-pressed? (-> self control cpad number) r1)
           (set-time! (-> gp-0 fire-start-time))
           )
+      ;; Enhanced: the scattergun fires on the press as usual; keep holding and it charges (full in
+      ;; 1.2 s), let go and it fires a charged shot: more reach, more damage, and a kick back
+      (when (= (-> gp-0 gun-type) (pickup-type gun-red-1))
+        (cond
+          ((and (cpad-hold? (-> self control cpad number) r1)
+                (-> gp-0 active?)
+                (time-elapsed? (-> gp-0 fire-start-time) (seconds 0.3))
+                )
+           (set! *enhanced-red-charge*
+                 (fmin 1.0 (/ (the float (- (current-time) (+ (-> gp-0 fire-start-time) (seconds 0.3))))
+                              (the float (seconds 1.2))
+                              )
+                       )
+                 )
+           ;; sparks crackle on the gun, bigger as it charges, and the pad hums
+           (when (zero? (logand (-> self clock integral-frame-counter) 3))
+             (let ((pos (new 'stack-no-clear 'vector))
+                   (dir (new 'stack-no-clear 'vector))
+                   )
+               (vector-copy! pos (-> gp-0 fire-point))
+               (set! (-> pos w) (lerp 2048.0 6144.0 *enhanced-red-charge*))
+               (vector-copy! dir (-> gp-0 fire-dir-out))
+               (set! (-> dir w) 2.0)
+               (pc-enhanced-gun-blast (the-as pointer pos) (the-as pointer dir))
+               )
+             )
+           (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 (the int (* 120.0 *enhanced-red-charge*)) (seconds 0.05))
+           )
+          (else
+            (when (< 0.15 *enhanced-red-charge*)
+              (set! *enhanced-red-charged-shot* *enhanced-red-charge*)
+              (if (send-event self 'gun (-> gp-0 gun-type))
+                  (set-time! (-> gp-0 fire-time))
+                  )
+              (set! *enhanced-red-charged-shot* 0.0)
+              )
+            (set! *enhanced-red-charge* 0.0)
+            )
+          )
+        )
       (case (-> gp-0 gun-control)
         ((1)
          (when (and (cpad-pressed? (-> self control cpad number) r1)

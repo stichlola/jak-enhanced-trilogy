@@ -6,6 +6,7 @@
 ;; dgos: GAME
 
 (define-extern enhanced-unlock-all (function none))
+(define-extern enhanced-unlocked? (function symbol))
 (define *enhanced-travel-to-city* #f)
 
 ;; Enhanced: walk-through probe of the passages into the Jak 2 plaza, for test runs
@@ -117,6 +118,7 @@
   )
 
 (define-extern *enhanced-has-piazza* symbol) ;; collide-cache.gc
+(define-extern *enhanced-red-charged-shot* float) ;; gun-red-shot.gc
 
 (defun enhanced-piazza-autoload ()
   "Keep the Jak 2 plaza (custom level piazza) in the wanted levels while Jak is around it in Haven:
@@ -521,11 +523,21 @@ capture exactly."
              (set! *enhanced-vehicle-frames* 0)
              )
            )
-          ((= kind #x67)
-           ;; every frame: the gun stays out
+          ((or (= kind #x67) (= kind #x66) (= kind #x63))
+           ;; every frame: the gun stays out ("f<n>": and fires every 40 frames, to look at its shots;
+           ;; "c<n>": a fully charged shot every 90 frames)
            (logior! (-> *game-info* features) (the-as game-feature (logior (ash 1 5) (ash 1 (- n 20)))))
            (set! (-> *game-info* gun-type) (the-as pickup-type n))
            (set! (-> *target* gun latch?) #t)
+           (when (and (= kind #x66) (zero? (mod *enhanced-camlog-frames* 40)))
+             (set! (-> *target* gun fire-pending) 1)
+             (set! (-> *target* gun fire-pending-time) (-> *target* clock frame-counter))
+             )
+           (when (and (= kind #x63) (zero? (mod *enhanced-camlog-frames* 90)))
+             (set! *enhanced-red-charged-shot* 1.0)
+             (send-event *target* 'gun (-> *target* gun gun-type))
+             (set! *enhanced-red-charged-shot* 0.0)
+             )
            )
           )
         )
@@ -2214,7 +2226,7 @@ capture exactly."
   ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)
   (enhanced-update-pushers)
   ;; Enhanced: quick travel between the desert and Haven City, L3 + R3 together
-  (when (and *enhanced-unlock-all*
+  (when (and (enhanced-unlocked?)
              (cpad-hold? (-> self control cpad number) l3)
              (cpad-pressed? (-> self control cpad number) r3)
              (not (focus-test? self dead teleporting))

@@ -298,6 +298,7 @@
 (define-extern pc-enhanced-thunder (function int))
 (define-extern pc-enhanced-set-pushers (function pointer int none))
 (define-extern pc-enhanced-explosion (function pointer none))
+(define-extern pc-enhanced-gun-blast (function pointer pointer none))
 (define-extern pc-enhanced-getenv (function string string int symbol))
 (define-extern pc-enhanced-set-lights (function pointer int none))
 (define-extern pc-enhanced-poll-request (function string int int))

@@ -1154,7 +1154,22 @@ void pc_enhanced_explosion(u32 vec_ptr) {
   auto* v = Ptr<float>(vec_ptr).c();
   std::lock_guard<std::mutex> lock(g_enhanced_explosions.mutex);
   if (g_enhanced_explosions.count < EnhancedExplosions::kMax) {
-    std::memcpy(g_enhanced_explosions.pending[g_enhanced_explosions.count++], v, sizeof(float) * 4);
+    float* e = g_enhanced_explosions.pending[g_enhanced_explosions.count++];
+    std::memcpy(e, v, sizeof(float) * 4);
+    std::memset(e + 4, 0, sizeof(float) * 4);
+  }
+}
+
+// Enhanced: a gun's blast at the muzzle: pos (w = radius) and the direction it's fired (w = kind,
+// see EnhancedExplosions)
+void pc_enhanced_gun_blast(u32 pos_ptr, u32 dir_ptr) {
+  auto* p = Ptr<float>(pos_ptr).c();
+  auto* d = Ptr<float>(dir_ptr).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_explosions.mutex);
+  if (g_enhanced_explosions.count < EnhancedExplosions::kMax) {
+    float* e = g_enhanced_explosions.pending[g_enhanced_explosions.count++];
+    std::memcpy(e, p, sizeof(float) * 4);
+    std::memcpy(e + 4, d, sizeof(float) * 4);
   }
 }
 
@@ -1351,6 +1366,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-thunder", (void*)pc_enhanced_thunder);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
+  make_func_symbol_func("pc-enhanced-gun-blast", (void*)pc_enhanced_gun_blast);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
