@@ -12,8 +12,8 @@ migliorie grafiche gioco per gioco, alla fine i livelli di raccordo.
   condiviso (`game/graphics/opengl_renderer`). Le migliorie Enhanced stanno in `EnhancedPost`, ma
   sono agganciate solo al percorso di Jak 3 (`dispatch_buckets_jak3`) e ai sorgenti GOAL di Jak 3
   (`goal_src/jak3`: `time-of-day.gc`, `kernel-defs.gc`, `cty-faction.gc`, …).
-- Dati: Jak 2 (ISO PAL nel repo, `iso_data/jak2_pal`, decompilato) e Jak 3 ci sono.
-  **Manca Jak 1**: serve la propria copia dell'ISO, da estrarre in `iso_data/jak1`, che ora è vuota.
+- Dati: ci sono tutti e tre i giochi. Jak 1 PAL (`SCES-50361`, `iso_data/jak1`, estratto e
+  compilato il 26/10/2026: parte fino al titolo dal nostro `gk`), Jak 2 PAL e Jak 3 PAL.
 - Impostazioni Enhanced per gioco: `%APPDATA%\OpenGOAL\jak3\settings\enhanced-settings.json`.
 
 ## La scelta di fondo: cosa vuol dire "un motore solo"
@@ -34,8 +34,9 @@ tempo di gioco e opzioni. Per chi gioca, il risultato è un solo gioco continuo.
 
 ## Fase 0 — Basi
 
-- [ ] Estrarre Jak 1 dalla propria copia (`extractor` → `iso_data/jak1`), compilare e provare
-      Jak 1 e Jak 2 dal fork, **senza** migliorie, come riferimento.
+- [x] Estrarre Jak 1 dalla propria copia (`extractor -g jak1 -e -d -c --proj-path <repo>`,
+      ~1 min), compilare e avviarlo dal fork (`gk --game jak1 -- -boot -fakeiso`).
+- [ ] Provare anche Jak 2 dal fork, **senza** migliorie, come riferimento.
 - [ ] Screenshot di riferimento degli stessi punti nei tre giochi (servono per la coerenza).
 
 ## Fase 1 — Un solo gioco (motore unificato)
@@ -132,6 +133,5 @@ Jak 3 non mostra in gioco come Jak finisce esiliato: lo racconta soltanto. Va ri
 
 ## Prossimi passi concreti
 
-1. Estrarre Jak 1 dalla propria copia del gioco.
-2. Prototipo del cambio gioco a caldo Jak 2 → Jak 3 (fase 1.6).
-3. In parallelo: `EnhancedPost` su Jak 2 (fase 2), a partire da Haven di notte con la pioggia.
+1. Prototipo del cambio gioco a caldo Jak 2 → Jak 3 (fase 1.6).
+2. In parallelo: `EnhancedPost` su Jak 2 (fase 2), a partire da Haven di notte con la pioggia.
