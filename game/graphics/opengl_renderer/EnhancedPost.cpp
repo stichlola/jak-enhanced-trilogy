@@ -645,8 +645,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3f(glGetUniformLocation(id, "fwd_view"), cam.rot[2][0], cam.rot[2][1], cam.rot[2][2]);
   glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
   glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
-  glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, m_settings.water_deep);
-  glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, m_settings.water_shallow);
+  {
+    // sunny: Jak 1's turquoise sea
+    const float deep[3] = {0.02f, 0.3f, 0.4f}, shallow[3] = {0.12f, 0.68f, 0.66f};
+    float d[3], sh[3];
+    for (int i = 0; i < 3; i++) {
+      d[i] = m_settings.water_deep[i] + (deep[i] - m_settings.water_deep[i]) * m_sunny;
+      sh[i] = m_settings.water_shallow[i] + (shallow[i] - m_settings.water_shallow[i]) * m_sunny;
+    }
+    glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, d);
+    glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, sh);
+  }
   glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
   glUniform1f(glGetUniformLocation(id, "water_swell_strength"), m_settings.water_swell);
   glUniform1f(glGetUniformLocation(id, "water_refraction"), m_settings.water_refraction);
@@ -1180,35 +1189,38 @@ void EnhancedPost::update_scene() {
                         m_zone == kZoneDesert;
   switch (s.weather) {
     case 1: {
-      // changing: a ten-minute cycle per area. Rain comes in Haven and the forest (clouds build,
+      // changing: a four-minute cycle per area. Rain comes in Haven and the forest (clouds build,
       // rain, a thunderstorm, the rain stops and the sun comes out on the wet streets, they dry),
       // sand blows up in the desert on top of the game's own storms, fog on early mornings
       static const double phase0 = [] {
         const char* e = std::getenv("JAK_ENHANCED_WEATHER_PHASE");
         return e ? std::atof(e) : 0.0;
       }();
-      const float ph = (float)std::fmod(m_time + phase0, 600.0);
+      const float ph = (float)std::fmod(m_time + phase0, 240.0);
       auto in = [&](float a, float b) {
-        return std::clamp((ph - a) / 30.f, 0.f, 1.f) * std::clamp((b - ph) / 30.f, 0.f, 1.f);
+        return std::clamp((ph - a) / 12.f, 0.f, 1.f) * std::clamp((b - ph) / 12.f, 0.f, 1.f);
       };
       m_weather_state = 0;
       if (m_zone == kZoneHaven || m_zone == kZoneForest) {
-        rain = in(240.f, 420.f);
-        storm = 0.f;  // (thunderstorms out of the cycle until they look right)
-        clear = in(420.f, 560.f);
-        wet = ph > 240.f && ph < 560.f ? 1.f : 0.f;
-        want.clouds = std::max(want.clouds, 0.95f * in(180.f, 430.f));
-        m_weather_state = ph < 180.f ? 0 : ph < 240.f ? 1 : ph < 330.f ? 2 : ph < 400.f ? 3
-                        : ph < 420.f ? 2 : ph < 560.f ? 4 : 0;
+        // sunny 0-60 s, clouds build, rain 80-160 with a thunderstorm 110-150, the sun back out on
+        // the wet ground 160-220, drying
+        sunny = in(-20.f, 60.f) + in(220.f, 260.f);
+        rain = in(80.f, 160.f);
+        storm = in(110.f, 150.f);
+        clear = in(160.f, 222.f);
+        wet = ph > 80.f && ph < 222.f ? 1.f : 0.f;
+        want.clouds = std::max(want.clouds, 0.95f * in(60.f, 168.f));
+        m_weather_state = ph < 60.f ? 6 : ph < 80.f ? 1 : ph < 110.f ? 2 : ph < 150.f ? 3
+                        : ph < 160.f ? 2 : ph < 220.f ? 4 : 6;
         const float h = hour;
         mist = std::clamp(h - 4.5f, 0.f, 1.f) * std::clamp((9.5f - h) / 1.5f, 0.f, 1.f) *
                (m_zone == kZoneForest ? 1.f : 0.6f);
       } else if (m_zone == kZoneDesert) {
-        dust = std::max(0.15f + 0.65f * in(300.f, 520.f), game_dust * 1.3f);
+        dust = std::max(0.15f + 0.65f * in(120.f, 210.f), game_dust * 1.3f);
         m_weather_state = 5;
       }
       if (!outdoors) {
-        rain = storm = clear = mist = dust = 0.f;
+        rain = storm = clear = mist = dust = sunny = 0.f;
         wet = 0.f;
       }
       break;
@@ -1246,21 +1258,22 @@ void EnhancedPost::update_scene() {
   // sunny: Jak 1's Sandover. Saturated greens and blues, warm highlights, shadows lifted toward
   // blue (the sky fills them), a few white clouds
   if (sunny > 0.f) {
-    const float gain[3] = {1.08f, 1.04f, 0.95f};
-    const float lift[3] = {0.008f, 0.014f, 0.03f};
+    const float gain[3] = {1.13f, 1.08f, 0.96f};
+    const float lift[3] = {0.012f, 0.02f, 0.045f};
+    auto toward = [&](float& v, float t) { v += (t - v) * std::min(sunny, 1.f); };
     for (int i = 0; i < 3; i++) {
-      want.gain[i] = gain[i];
-      want.lift[i] = lift[i];
+      toward(want.gain[i], gain[i]);
+      toward(want.lift[i], lift[i]);
     }
-    want.saturation = 1.38f;
-    want.contrast = 0.06f;
-    want.warmth = 0.07f;
-    want.clouds = 0.3f;
+    toward(want.saturation, 1.6f);
+    toward(want.contrast, 0.08f);
+    toward(want.warmth, 0.09f);
+    toward(want.clouds, 0.32f);
   }
 
   const float dt = 1.f / 60.f;
   const float k_grade = 1.f - std::exp(-dt / 1.5f);
-  const float k_weather = 1.f - std::exp(-dt / 4.f);
+  const float k_weather = 1.f - std::exp(-dt / 2.5f);
   auto ease = [](float& v, float target, float k) { v += (target - v) * k; };
   for (int i = 0; i < 3; i++) {
     ease(m_grade.lift[i], want.lift[i], k_grade);
@@ -1277,7 +1290,7 @@ void EnhancedPost::update_scene() {
   ease(m_clear, clear, k_weather);
   ease(m_sunny, sunny, k_weather);
   // the ground soaks in a few seconds and takes a minute and a half to dry
-  ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 6.f : 90.f)));
+  ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
 
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
@@ -1339,9 +1352,9 @@ void EnhancedPost::update_scene() {
     const float a = m_bolt[2];
     const float t = a - 0.09f;
     const float f = a < 0.09f ? 0.1f
-                    : a < 0.8f ? std::exp(-t * 12.f) + 0.7f * std::exp(-(t - 0.12f) * (t - 0.12f) * 2000.f) +
-                                     0.5f * std::exp(-(t - 0.27f) * (t - 0.27f) * 1600.f)
-                               : 0.f;
+                    : a < 0.42f ? std::exp(-t * 25.f) + 0.7f * std::exp(-(t - 0.08f) * (t - 0.08f) * 3600.f) +
+                                      0.45f * std::exp(-(t - 0.18f) * (t - 0.18f) * 3600.f)
+                                : 0.f;
     m_flash = std::min(1.f, f * m_bolt[3]) * std::min(1.f, m_storm * 1.5f);
   }
   ease(m_cine, movie && s.cine_dof ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));

@@ -30,8 +30,9 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
   glossy. Fog on early mornings. In the desert the game's own sandstorm now blows real clouds of
   sand through the world, carried by its wind. "Sunny" pumps the colors up like Jak 1's Sandover:
   deep blue sky, saturated greens, warm sun. Menu: Clear / Changing / Rain / Sandstorm /
-  Thunderstorm (work in progress) / After the rain / Morning fog / Sunny.
-- **Sky**: a drifting cloud layer lit by the sun, orange at sunset, grey under the rain.
+  Thunderstorm / After the rain / Morning fog / Sunny.
+- **Sky**: volumetric clouds lit by the sun (bright edges toward it, shaded undersides), a deep
+  blue sky by day, orange at sunset, grey and low under the rain.
 - **Color grade per area**: Haven (teal and warm by day, blue with vivid neon at night), the
   desert (sun-baked), the forest (autumn gold), the Metal Head city, underground, the volcano and
   the temples, easing from one to the next.

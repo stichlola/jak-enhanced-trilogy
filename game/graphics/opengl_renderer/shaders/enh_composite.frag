@@ -575,9 +575,10 @@ float bolt_jag(float u, float seed) {
 }
 
 float lightning_bolt(vec3 ray_view, float px) {
-  const float top = 0.6;  // the cloud base (sine of the elevation)
+  // the cloud base where it comes out (sine of the elevation): lower for a farther bolt
+  float top = 0.14 + 0.16 * fract(bolt.y * 0.37);
   float a = bolt.z;
-  if (bolt.w <= 0.0 || a > 0.75) {
+  if (bolt.w <= 0.0 || a > 0.42) {
     return 0.0;
   }
   vec3 wd = world_dir(ray_view);
@@ -619,8 +620,9 @@ float lightning_bolt(vec3 ray_view, float px) {
     bright = 0.3 + 2.0 * exp(-pow((u - lead) / 0.03, 2.0));
   } else {
     float t = a - 0.09;
-    bright = 1.6 * exp(-t * 12.0) + 1.1 * exp(-pow((t - 0.12) * 45.0, 2.0)) +
-             0.8 * exp(-pow((t - 0.27) * 40.0, 2.0)) + 0.25 * exp(-t * 4.0);
+    bright = 1.6 * exp(-t * 25.0) + 1.1 * exp(-pow((t - 0.08) * 60.0, 2.0)) +
+             0.7 * exp(-pow((t - 0.18) * 60.0, 2.0));
+    bright *= 1.0 - smoothstep(0.25, 0.33, t);
   }
   // out of the clouds at the top
   float in_cloud = smoothstep(0.0, 0.06, u);
@@ -646,45 +648,98 @@ vec3 rainbow(vec3 ray_view) {
   return col;
 }
 
-// the cloud layer along a view direction (view space): color, coverage. A sheet 900 m up, flattened
-// toward the horizon, drifting with the wind; lit by the sun through it (thinner toward the sun is
-// brighter), the dark sides in the sky's own color, silver edges looking toward the sun
-vec4 cloud_layer(vec3 dv) {
+// the sun's color by its height, the moon's at night
+vec3 sun_color() {
+  vec3 col = mix(vec3(1.0, 0.5, 0.28), vec3(1.0, 0.96, 0.9), smoothstep(0.05, 0.35, sky_sun.w));
+  return mix(col, vec3(0.13, 0.15, 0.22), clouds.w);
+}
+
+// our sky by day: the horizon in the fog's color (so the distance melts into it), deepening to blue
+// overhead, a glow and a disk for the sun; greyer the more overcast. Sunny: a deep summer blue.
+vec3 sky_color(vec3 dv) {
   vec3 wd = world_dir(dv);
-  if (wd.y < 0.005) {
-    return vec4(0.0);
+  float up = max(wd.y, 0.0);
+  vec3 zen = mix(vec3(0.2, 0.4, 0.78), vec3(0.08, 0.32, 0.9), sunny);
+  vec3 hor = mix(fog_color * 1.05, vec3(0.6, 0.8, 0.97), sunny * 0.8);
+  vec3 col = mix(hor, zen, pow(smoothstep(0.0, 0.75, up), 0.7));
+  // overcast: one grey
+  float over = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
+  col = mix(col, vec3(luma(hor)) * vec3(0.9, 0.94, 1.0) * (1.0 - 0.35 * weather2.x), over);
+  float sd = max(dot(dv, sky_sun.xyz), 0.0);
+  vec3 sc = sun_color();
+  col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
+  col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
+  return col;
+}
+
+// the cloud volume: a slab 1100-2000 m up, marched along the view ray (view space, unit). Rounded
+// heaps of 3D noise (the sky cover sets how much of it is cloud), drifting with the wind; each step
+// lit by the sun through the cloud above it toward the sun (two samples), forward scattering bright
+// around the sun, the shaded undersides in the sky's own color, and lit from inside by lightning.
+// Returns the light it adds (rgb) and what still shows through (a).
+float cloud_density(vec3 p, float lo, int octaves) {
+  float h = (p.y - 1100.0) / 900.0;
+  if (h <= 0.0 || h >= 1.0) {
+    return 0.0;
   }
-  float t = 900.0 / (wd.y + 0.05);
-  vec2 pos = cam_pos.xz / 4096.0 + wd.xz * t;
-  float time = clouds.z;
-  vec2 q = pos / 1800.0 + vec2(time * 0.006, time * 0.0025);
-  float cover = clouds.y;
-  float lo = 0.62 - cover * 0.55;
-  float n = 0.5 + fbm(q) * 0.95;
-  float dens = smoothstep(lo, lo + 0.3, n);
-  if (dens <= 0.0) {
-    return vec4(0.0);
+  vec3 q = p / 1300.0 + vec3(clouds.z * 0.0045, 0.0, clouds.z * 0.002);
+  float n = vnoise3(q) * 0.6 + vnoise3(q * 2.6 + 7.0) * 0.27;
+  if (octaves > 2) {
+    n += vnoise3(q * 7.3 + 3.0) * 0.13;
+  } else {
+    n += 0.065;
   }
+  // flat bottoms, heaped tops
+  float shape = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.35, 1.0, h));
+  return clamp((n * shape - lo) * 4.0, 0.0, 1.0);
+}
+
+vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
+  vec3 wd = world_dir(dv);
+  if (wd.y < 0.015) {
+    return vec4(0.0, 0.0, 0.0, 1.0);
+  }
+  float cam_y = cam_pos.y / 4096.0;
+  float t0 = max((1100.0 - cam_y) / wd.y, 0.0);
+  float t1 = min((2000.0 - cam_y) / wd.y, t0 + 9000.0);
+  if (t0 > 30000.0) {
+    return vec4(0.0, 0.0, 0.0, 1.0);
+  }
+  float lo = 0.6 - clouds.y * 0.42;
   vec3 sw = world_dir(sky_sun.xyz);
-  vec2 toward = normalize(sw.xz + vec2(1e-4)) * 0.035;
-  float dens2 = smoothstep(lo, lo + 0.3, 0.5 + fbm(q + toward) * 0.95);
-  float lit = clamp(0.62 + (dens - dens2) * 2.2, 0.15, 1.25);
-  // the sun's color by its height, the moon's at night
-  float e = sky_sun.w;
-  vec3 sun_col = mix(vec3(1.0, 0.5, 0.28), vec3(1.0, 0.96, 0.9), smoothstep(0.05, 0.35, e));
-  sun_col = mix(sun_col, vec3(0.13, 0.15, 0.22), clouds.w);
-  vec3 base = mix(fog_color, vec3(luma(fog_color)), 0.35) * 0.8;
-  vec3 col = mix(base * 0.7, sun_col, clamp(lit * 0.75, 0.0, 1.0));
-  float toward_sun = pow(max(dot(dv, sky_sun.xyz), 0.0), 10.0);
-  col += sun_col * toward_sun * (1.0 - dens) * 0.8;
-  // rain clouds: low and grey, darker in a thunderstorm, lit from inside by the lightning
-  col *= 1.0 - 0.45 * weather.x - 0.2 * weather2.x;
-  float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.25);
-  col += vec3(0.8, 0.85, 1.0) * weather2.w * (0.35 + 1.6 * near_bolt) * (0.4 + dens);
-  // into the haze at the horizon
-  col = mix(col, fog_color, (1.0 - smoothstep(0.02, 0.3, wd.y)) * 0.55);
-  float alpha = dens * smoothstep(0.005, 0.12, wd.y) * 0.92;
-  return vec4(col, alpha);
+  vec3 sc = sun_color() * (1.0 - 0.6 * weather2.x);
+  float cosang = dot(wd, sw);
+  // two-lobe phase: a bright rim around the sun, some back scattering
+  float phase = 0.6 + 1.6 * pow(max(cosang, 0.0), 6.0) + 0.25 * pow(max(-cosang, 0.0), 2.0);
+  vec3 under = mix(sky * 0.55, vec3(luma(sky)) * 0.5, 0.3) * (1.0 - 0.45 * weather.x - 0.3 * weather2.x);
+  vec3 top = sky * 0.9 + 0.08;
+  float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
+  vec3 flash = vec3(0.8, 0.85, 1.0) * weather2.w * (0.12 + 1.1 * near_bolt);
+  const int N = 18;
+  float dt = (t1 - t0) / float(N);
+  vec3 sum = vec3(0.0);
+  float trans = 1.0;
+  for (int i = 0; i < N; i++) {
+    vec3 p = cam_pos / 4096.0 + wd * (t0 + (float(i) + jitter) * dt);
+    float d = cloud_density(p, lo, 3);
+    if (d > 0.002) {
+      float dl = cloud_density(p + sw * 90.0, lo, 2) * 90.0 + cloud_density(p + sw * 300.0, lo, 2) * 210.0;
+      float lit = exp(-dl * 0.012);
+      float powder = 1.0 - exp(-d * 4.0);
+      float h = (p.y - 1100.0) / 900.0;
+      vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
+      float a = 1.0 - exp(-d * 0.022 * dt);
+      sum += trans * a * light;
+      trans *= 1.0 - a;
+      if (trans < 0.02) {
+        break;
+      }
+    }
+  }
+  // far clouds melt into the haze at the horizon
+  float haze = 1.0 - exp(-t0 / 14000.0);
+  sum = mix(sum, (1.0 - trans) * sky, haze);
+  return vec4(sum, trans);
 }
 
 // rain: real drops in the world. Each cell of a horizontal grid holds a column where drops fall
@@ -1164,7 +1219,9 @@ void main() {
   // ambient occlusion and sun shadows
   float ao = wsurf > 0.0 ? 1.0 : texture(tex_T2, tex_coord).r;
   if (ao_debug != 0) {
-    color = vec4(vec3(ao), 1.0);
+    // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
+    float lm = z > 0.0 ? log(z / 4096.0) / log(10.0) / 4.0 : -1.0;
+    color = tex_coord.x > 0.5 ? (z > 0.0 ? vec4(vec3(lm), 1.0) : vec4(0.0, 0.0, 1.0, 1.0)) : vec4(vec3(ao), 1.0);
     return;
   }
   if (normal_debug != 0 && z > 0.0) {
@@ -1417,25 +1474,32 @@ void main() {
     c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;
   }
 
-  // the sky: a drifting cloud layer over the game's own; greyer under rain
-  if (z == 0.0 && wsurf == 0.0) {
-    if (clouds.x > 0.0) {
-      vec4 cl = cloud_layer(ray);
-      c = mix(c, cl.rgb, clamp(cl.a * clouds.x, 0.0, 1.0));
-    }
-    c = mix(c, vec3(luma(c)) * 0.8, weather.x * 0.4);
-    if (sunny > 0.0) {
-      float up = clamp(world_dir(ray).y, 0.0, 1.0);
-      vec3 blue = mix(vec3(0.55, 0.78, 0.98), vec3(0.16, 0.42, 0.9), smoothstep(0.0, 0.6, up));
-      // the clouds stay white: blue only where the sky is clear (the game's sky + our clouds)
-      float cloud = smoothstep(0.55, 0.85, luma(c)) * (1.0 - smoothstep(0.0, 0.15, abs(c.b - c.r)));
-      c = mix(c, blue * (0.9 + 0.2 * luma(c)), sunny * 0.7 * (1.0 - cloud));
-    }
-  }
-  // the bolt, over the sky and the far distance
+  // the sky: ours by day over the game's (its painted clouds go), the game's at night; the lightning
+  // bolt behind the clouds; the cloud volume over both; greyer under rain
+  // (the game's painted cloud cards kilometers out above the horizon count as sky by day: ours
+  // replaces them)
   float bolt_light = 0.0;
-  if (bolt.w > 0.0 && z == 0.0 && wsurf == 0.0) {
-    bolt_light = lightning_bolt(ray, pixel_rad);
+  float sky_k = z == 0.0 ? 1.0
+                         : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
+                               smoothstep(0.04, 0.09, world_dir(ray).y) * (1.0 - clouds.w) *
+                               step(0.0, clouds.x - 0.001);
+  if (sky_k > 0.0 && wsurf == 0.0) {
+    vec3 c0 = c;
+    if (clouds.x > 0.0) {
+      vec3 sky = sky_color(ray);
+      c = mix(c, sky, clouds.x * (1.0 - clouds.w));
+      vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
+      c = mix(c, c * cl.a + cl.rgb, clouds.x);
+      if (bolt.w > 0.0) {
+        bolt_light = d <= 1e-7 ? lightning_bolt(ray, pixel_rad) : 0.0;
+      }
+    }
+    c = mix(c, vec3(luma(c)) * 0.8, weather.x * 0.3);
+    c = mix(c0, c, sky_k);
+    bolt_light *= sky_k;
+    if (sky_k > 0.5) {
+      z = 0.0;  // the weather below treats it as sky
+    }
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
@@ -1448,11 +1512,14 @@ void main() {
   if (fog.z > 0.0 && z > 0.0) {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
-    c = mix(c, fog_color, amount * fog.z);
+    c = mix(c, mix(fog_color, vec3(luma(fog_color)), 0.8 * weather.x), amount * fog.z);
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
     vec3 grey = vec3(luma(fog_color)) * vec3(0.92, 0.97, 1.06);  // the fog's brightness, not its tint
+    // the wet air washes the distance's colors out
+    float wash = (1.0 - exp(-z / 4096.0 * 0.01)) * weather.x;
+    c = mix(c, vec3(luma(c)), wash * 0.6);
     c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.008 + 0.01 * weather2.x))) * (0.28 + 0.2 * weather2.x) * weather.x);
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
@@ -1497,6 +1564,8 @@ void main() {
       }
     }
     vec4 v = sum / wsum;
+    // under rain the mist is grey, whatever the area's fog tint
+    v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.95, 0.98, 1.05), weather.x * 0.85);
     c = c * v.a + v.rgb;
   }
 
@@ -1613,12 +1682,15 @@ void main() {
         continue;
       }
       float cosang = dot(ray, lp / ld);
-      float spread = clamp(light_pos[i].w * 0.6 / ld, 0.01, 0.6);
-      float g = exp(-(1.0 - cosang) / (spread * spread * 0.5));
+      float spread = clamp(light_pos[i].w * 0.6 / ld, 0.01, 0.25);
+      // (not the lights right by the camera: their glow would fill the screen)
+      float g = exp(-(1.0 - cosang) / (spread * spread * 0.5)) *
+                smoothstep(4.0 * 4096.0, 10.0 * 4096.0, ld);
       if (g < 0.003) {
         continue;
       }
-      float hidden = scene_dist < ld - light_pos[i].w * 0.5 ? 0.3 : 1.0;
+      // dimmer where the scene is in front of the light, fading in over its radius (no hard edge)
+      float hidden = mix(0.3, 1.0, smoothstep(ld - light_pos[i].w * 1.5, ld, scene_dist));
       halo += light_color[i].rgb * g * hidden;
     }
     c += halo * min(air, 1.5) * 0.3;
@@ -1642,6 +1714,7 @@ void main() {
 
   // grading: the area's tint (shadows lifted toward one color, highlights toward another), then
   // saturation, gentle S-curve, warm highlights / cool shadows
+  c = mix(c, vec3(luma(c)) * vec3(0.95, 1.0, 1.07), 0.32 * weather.x);
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
@@ -1653,7 +1726,7 @@ void main() {
   // for an instant, the sky most, and the bolt over the sky
   if (weather2.w > 0.0 || bolt_light > 0.0) {
     vec3 cold = vec3(0.85, 0.9, 1.0);
-    c += cold * weather2.w * ((z == 0.0 ? 0.35 : 0.06) + c * 0.7);
+    c += cold * weather2.w * ((z == 0.0 ? 0.04 : 0.03) + c * 0.45);
     c += cold * bolt_light * 2.2;
   }
 
