@@ -340,7 +340,7 @@ class EnhancedPost {
     float radius;
     double start;
     float dir[3] = {0.f, 0.f, 0.f};  // gun blasts: where it's fired (world)
-    int kind = 0;  // 0: an explosion, 1: the red gun's blast, 2: the red gun charging
+    int kind = 0;  // 0: an explosion, 1: the red gun's blast, 2: the red gun charging, 3: charged
   };
   std::vector<Blast> m_blasts;
   // where Jak was lately (world, game units): rings spread on the water from these

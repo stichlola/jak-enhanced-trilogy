@@ -119,6 +119,9 @@
 
 (define-extern *enhanced-has-piazza* symbol) ;; collide-cache.gc
 (define-extern *enhanced-red-charged-shot* float) ;; gun-red-shot.gc
+(define-extern *enhanced-unlock-all* symbol) ;; level.gc
+(define-extern enhanced-recoil-update (function none :behavior target)) ;; gun-red-shot.gc
+(define-extern enhanced-charge-hint-draw (function none)) ;; task-control.gc
 
 (defun enhanced-piazza-autoload ()
   "Keep the Jak 2 plaza (custom level piazza) in the wanted levels while Jak is around it in Haven:
@@ -526,6 +529,8 @@ capture exactly."
           ((or (= kind #x67) (= kind #x66) (= kind #x63))
            ;; every frame: the gun stays out ("f<n>": and fires every 40 frames, to look at its shots;
            ;; "c<n>": a fully charged shot every 90 frames)
+           ;; (test poses: everything unlocked, a new game has no gun)
+           (set! *enhanced-unlock-all* #t)
            (logior! (-> *game-info* features) (the-as game-feature (logior (ash 1 5) (ash 1 (- n 20)))))
            (set! (-> *game-info* gun-type) (the-as pickup-type n))
            (set! (-> *target* gun latch?) #t)
@@ -2195,6 +2200,8 @@ capture exactly."
       (logior! (-> self game features) (game-feature board))
       )
   (enhanced-unlock-all)
+  (enhanced-recoil-update)
+  (enhanced-charge-hint-draw)
   (enhanced-probe-update)
   (enhanced-piazza-autoload)
   (enhanced-review-update)

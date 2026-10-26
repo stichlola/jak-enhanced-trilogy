@@ -14,6 +14,24 @@
 (define *enhanced-red-charge* 0.0)
 ;; the charge of the shot being fired now (0: a normal shot)
 (define *enhanced-red-charged-shot* 0.0)
+;; the kick back of a charged shot: its speed now (game units per second) and its direction
+(define *enhanced-recoil-speed* 0.0)
+(define *enhanced-recoil-dir* (new 'global 'vector))
+
+(defbehavior enhanced-recoil-update target ()
+  "Enhanced: carry Jak back after a charged shot (up to 3 m), slowing down evenly."
+  (when (< 0.0 *enhanced-recoil-speed*)
+    (vector-float*! (-> self control additional-decaying-velocity) *enhanced-recoil-dir* *enhanced-recoil-speed*)
+    (set! (-> self control additional-decaying-velocity-end-time) (+ (current-time) (seconds 0.1)))
+    (set! (-> self control additional-decaying-velocity-decay-start-time) (+ (current-time) (seconds 0.1)))
+    ;; 40 m/s^2
+    (set! *enhanced-recoil-speed* (fmax 0.0 (- *enhanced-recoil-speed* (* 163840.0 (seconds-per-frame)))))
+    (if (= *enhanced-recoil-speed* 0.0)
+        (vector-reset! (-> self control additional-decaying-velocity))
+        )
+    )
+  (none)
+  )
 
 ;; DECOMP BEGINS
 
@@ -29,6 +47,7 @@
    (start-rot    vector                :inline)
    (probe-dir    vector                19 :inline)
    (enhanced-scale float)
+   (enhanced-width float)
    )
   (:state-methods
     blocked
@@ -1827,6 +1846,40 @@
     )
   )
 
+;; Enhanced: a charged shot's spread: two more cones turned out to the sides, red going fuchsia
+(defbehavior enhanced-red-side-cones target ((pos vector) (dir vector) (charge float))
+  (dotimes (i 2)
+    (let ((cone (process-spawn
+                  manipy
+                  :init manipy-init
+                  pos
+                  (-> self entity)
+                  (art-group-get-by-name *level* "skel-gun-red-cone" (the-as (pointer level) #f))
+                  #f
+                  0
+                  :name "manipy"
+                  :to self
+                  :stack-size #x20000
+                  )
+                )
+          )
+      (when cone
+        (let ((side (new 'stack-no-clear 'vector)))
+          (vector-rotate-around-y! side dir (* (if (zero? i) 1.0 -1.0) 6371.5557 charge))
+          (send-event (ppointer->process cone) 'anim-mode 'play1)
+          (send-event (ppointer->process cone) 'anim "idle")
+          (forward-up->quaternion (-> (the-as manipy (-> cone 0)) root quat) side *up-vector*)
+          )
+        (set-vector! (-> (the-as manipy (-> cone 0)) root scale) (+ 1.0 (* 1.2 charge)) 1.0 (+ 1.0 (* 0.2 charge)) 1.0)
+        ;; fuchsia: the red cone with blue added
+        (set-vector! (-> (the-as manipy (-> cone 0)) draw color-mult) 1.0 0.5 1.0 1.0)
+        (set-vector! (-> (the-as manipy (-> cone 0)) draw color-emissive) 0.35 0.0 0.3 1.0)
+        )
+      )
+    )
+  (none)
+  )
+
 ;; WARN: Return type mismatch (pointer process) vs object.
 (defbehavior gun-fire-red-1 target ()
   (let ((gp-0 (-> self gun)))
@@ -1846,18 +1899,17 @@
       (vector-copy! pos (-> gp-0 fire-point))
       (set! (-> pos w) (* 6144.0 (+ 1.0 (* 1.5 *enhanced-red-charged-shot*))))
       (vector-copy! dir (-> gp-0 fire-dir-out))
-      (set! (-> dir w) 1.0)
+      ;; (kind 1: a shot, 3: a charged one, wide and fuchsia at its edges)
+      (set! (-> dir w) (if (< 0.0 *enhanced-red-charged-shot*) 3.0 1.0))
       (pc-enhanced-gun-blast (the-as pointer pos) (the-as pointer dir))
       )
-    ;; Enhanced: a charged shot kicks Jak back (up to 16 m/s, fading after 0.15 s)
+    ;; Enhanced: a charged shot kicks Jak back, up to 3 m (enhanced-recoil-update carries him)
     (when (< 0.0 *enhanced-red-charged-shot*)
-      (let ((kick (vector-normalize-copy! (new 'stack-no-clear 'vector) (-> gp-0 fire-dir-out) 1.0)))
-        (set! (-> kick y) 0.0)
-        (vector-normalize! kick (* -65536.0 *enhanced-red-charged-shot*))
-        (vector-copy! (-> self control additional-decaying-velocity) kick)
-        (set-time! (-> self control additional-decaying-velocity-end-time))
-        (set! (-> self control additional-decaying-velocity-decay-start-time) (+ (current-time) (seconds 0.15)))
-        )
+      (vector-normalize-copy! *enhanced-recoil-dir* (-> gp-0 fire-dir-out) 1.0)
+      (set! (-> *enhanced-recoil-dir* y) 0.0)
+      (vector-normalize! *enhanced-recoil-dir* -1.0)
+      ;; v = sqrt(2 a d), a = 40 m/s^2, d = 3 m at full charge
+      (set! *enhanced-recoil-speed* (* 4096.0 (sqrtf (* 240.0 *enhanced-red-charged-shot*))))
       (cpad-set-buzz! (-> *cpad-list* cpads 0) 0 (the int (* 255.0 *enhanced-red-charged-shot*)) (seconds 0.3))
       (activate! *camera-smush-control* (* 1638.4 *enhanced-red-charged-shot*) 15 75 1.0 0.9 (-> *display* camera-clock))
       )
@@ -1885,10 +1937,19 @@
             (send-event (ppointer->process s5-4) 'anim-mode 'play1)
             (send-event (ppointer->process s5-4) 'anim "idle")
             (forward-up->quaternion (-> (the-as manipy (-> s5-4 0)) root quat) (-> gp-0 fire-dir-out) *up-vector*)
-            ;; Enhanced: a charged shot's cone is bigger
-            (let ((f0-0 (+ 1.0 (* 1.2 *enhanced-red-charged-shot*))))
-              (set-vector! (-> (the-as manipy (-> s5-4 0)) root scale) f0-0 f0-0 f0-0 1.0)
+            ;; Enhanced: a charged shot's cone is very wide and a little deeper
+            (let ((f0-0 *enhanced-red-charged-shot*))
+              (set-vector!
+                (-> (the-as manipy (-> s5-4 0)) root scale)
+                (+ 1.0 (* 2.0 f0-0))
+                (+ 1.0 (* 0.5 f0-0))
+                (+ 1.0 (* 0.4 f0-0))
+                1.0
+                )
               )
+            (if (< 0.0 *enhanced-red-charged-shot*)
+                (enhanced-red-side-cones (-> gp-0 fire-point) (-> gp-0 fire-dir-out) *enhanced-red-charged-shot*)
+                )
             (let ((f30-1
                     (vector-dot
                       (-> gp-0 fire-dir-out)
@@ -1956,7 +2017,7 @@
                            2.0
                            )
                        ;; Enhanced: a charged shot hits harder
-                       (-> this enhanced-scale)
+                       (-> this enhanced-width)
                        (if (logtest? (game-feature feature22) (-> *game-info* features))
                            2.0
                            1.0
@@ -1974,9 +2035,9 @@
           (let ((f28-0 (deg- (-> s2-0 x) (-> this start-rot x)))
                 (f0-6 (deg- (-> s2-0 y) (-> this start-rot y)))
                 )
-            (when (or (< 2730.6667 (fabs f28-0)) (< 8192.0 (fabs f0-6)))
+            (when (or (< 2730.6667 (fabs f28-0)) (< (* 8192.0 (-> this enhanced-width)) (fabs f0-6)))
               (let ((f1-5 (fmax -2730.6667 (fmin 2730.6667 f28-0)))
-                    (f0-8 (fmax -8192.0 (fmin 8192.0 f0-6)))
+                    (f0-8 (fmax (* -8192.0 (-> this enhanced-width)) (fmin (* 8192.0 (-> this enhanced-width)) f0-6)))
                     )
                 (set! (-> s2-0 x) (+ (-> this start-rot x) f1-5))
                 (set! (-> s2-0 y) (+ (-> this start-rot y) f0-8))
@@ -2030,9 +2091,9 @@
           (let ((f30-0 (deg- (-> s3-2 x) (-> this start-rot x)))
                 (f0-4 (deg- (-> s3-2 y) (-> this start-rot y)))
                 )
-            (when (or (< 2730.6667 (fabs f30-0)) (< 8192.0 (fabs f0-4)))
+            (when (or (< 2730.6667 (fabs f30-0)) (< (* 8192.0 (-> this enhanced-width)) (fabs f0-4)))
               (let ((f1-3 (fmax -2730.6667 (fmin 2730.6667 f30-0)))
-                    (f0-6 (fmax -8192.0 (fmin 8192.0 f0-4)))
+                    (f0-6 (fmax (* -8192.0 (-> this enhanced-width)) (fmin (* 8192.0 (-> this enhanced-width)) f0-4)))
                     )
                 (set! (-> s3-2 x) (+ (-> this start-rot x) f1-3))
                 (set! (-> s3-2 y) (+ (-> this start-rot y) f0-6))
@@ -2061,7 +2122,7 @@
       (vector-copy! s5-0 (-> this start-dir))
       (vector-float*! s5-0 s5-0 (* 43417.6 (-> this enhanced-scale)))
       (vector+! s5-0 s5-0 (-> this start-pos))
-      (set! (-> s5-0 w) (* 43827.2 (-> this enhanced-scale)))
+      (set! (-> s5-0 w) (* 43827.2 (fmax (-> this enhanced-scale) (* 0.8 (-> this enhanced-width)))))
       (let ((s4-0 (-> this root root-prim prim-core collide-with)))
         (set! *actor-list-length* 0)
         (if (logtest? s4-0 (collide-spec hit-by-others-list))
@@ -2161,7 +2222,7 @@
   (let ((s5-0 (-> this probe-count)))
     (while (< s5-0 19)
       (let ((f28-0 (rand-vu-float-range -2730.6667 2730.6667))
-            (f30-0 (rand-vu-float-range -8192.0 8192.0))
+            (f30-0 (rand-vu-float-range (* -8192.0 (-> this enhanced-width)) (* 8192.0 (-> this enhanced-width))))
             (s4-0 (-> this probe-dir s5-0))
             )
         (set-vector! s4-0 0.0 0.0 1.0 1.0)
@@ -2308,8 +2369,10 @@
   (vector-copy! (-> self start-pos) arg0)
   (vector-copy! (-> self start-dir) arg1)
   (rot-zxy-from-vector! (-> self start-rot) arg1)
-  ;; Enhanced: a charged shot reaches up to 2.2x as far
-  (set! (-> self enhanced-scale) (+ 1.0 (* 1.2 *enhanced-red-charged-shot*)))
+  ;; Enhanced: a charged shot reaches a little further (up to 1.4x) and spreads very wide (up to
+  ;; 2.5x the arc)
+  (set! (-> self enhanced-scale) (+ 1.0 (* 0.4 *enhanced-red-charged-shot*)))
+  (set! (-> self enhanced-width) (+ 1.0 (* 1.5 *enhanced-red-charged-shot*)))
   (let* ((v1-2 *game-info*)
          (a0-7 (+ (-> v1-2 attack-id) 1))
          )

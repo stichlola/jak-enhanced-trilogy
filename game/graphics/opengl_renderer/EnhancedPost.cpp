@@ -1042,7 +1042,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
                                   [&](const Blast& b) {
                                     // gun blasts are short: free their slots for the next ones
-                                    const double life = b.kind == 2 ? 0.3 : b.kind == 1 ? 0.7 : 1.6;
+                                    const double life = b.kind == 2 ? 0.3 : b.kind != 0 ? 0.7 : 1.6;
                                     return m_time - b.start > life;
                                   }),
                    m_blasts.end());
@@ -1064,8 +1064,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.pos[3] = std::clamp(b.radius * 4.f, 8.f * kMeter, 30.f * kMeter);
       float k = 4.f * std::exp(-age * 5.f) * m_settings.blast * m_settings.light_strength;
       // the red gun: a short red-orange flash carried ahead of the muzzle with its wave
-      const float tint[3] = {1.f, b.kind == 1 ? 0.32f : 0.62f, b.kind == 1 ? 0.1f : 0.3f};
-      if (b.kind == 1) {
+      // (the charged shot: red-fuchsia)
+      const float tint[3] = {1.f, b.kind == 1 ? 0.32f : b.kind == 3 ? 0.2f : 0.62f,
+                             b.kind == 1 ? 0.1f : b.kind == 3 ? 0.5f : 0.3f};
+      if (b.kind == 1 || b.kind == 3) {
         if (age > 0.35f) {
           continue;
         }

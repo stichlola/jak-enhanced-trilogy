@@ -142,7 +142,8 @@ extern EnhancedMenu g_enhanced_menu;
 struct EnhancedExplosions {
   static constexpr int kMax = 16;
   // world position + radius, then (gun blasts) the direction it's fired + the kind (0: an
-  // explosion, 1: the red gun's blast, 2: the red gun charging: sparks crackling on it)
+  // explosion, 1: the red gun's blast, 2: the red gun charging: sparks crackling on it, 3: its
+  // charged shot)
   float pending[kMax][8];
   int count = 0;
   std::mutex mutex;

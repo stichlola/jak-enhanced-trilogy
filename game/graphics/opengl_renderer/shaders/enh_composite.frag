@@ -119,7 +119,8 @@ uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), apertu
 uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float blast_seed[4];
 uniform vec4 blast_dir[4];      // gun blasts: where it's fired (view space), w: kind (0 explosion,
-                                // 1 red gun, 2 red gun charging: only sparks on the gun)
+                                // 1 red gun, 2 red gun charging: only sparks on the gun, 3 a
+                                // charged shot: wide, red going fuchsia at its edges)
 
 in vec2 tex_coord;
 out vec4 color;
@@ -1152,9 +1153,11 @@ void main() {
       vec2 sd = (auv - cuv) / size;
       float slen = length(sd);
       float front = dot(normalize(rel / size + 1e-6), sd / max(slen, 1e-6));
-      band *= mix(1.0, smoothstep(0.2, 0.7, front), clamp(slen * 3.0, 0.0, 1.0));
+      // (a charged shot: a much wider arc)
+      float arc = blast_dir[i].w > 2.5 ? -0.5 : 0.2;
+      band *= mix(1.0, smoothstep(arc, arc + 0.5, front), clamp(slen * 3.0, 0.0, 1.0));
     }
-    if (blast_dir[i].w > 1.5) {
+    if (abs(blast_dir[i].w - 2.0) < 0.5) {
       continue;  // charging: no wave, no hot air
     }
     if (band > 0.001) {
@@ -1949,7 +1952,8 @@ void main() {
       continue;
     }
     bool gun = blast_dir[i].w > 0.5;
-    bool charging = blast_dir[i].w > 1.5;
+    bool charging = abs(blast_dir[i].w - 2.0) < 0.5;
+    bool charged = blast_dir[i].w > 2.5;
     for (int j = 0; j < (charging ? 10 : 40); j++) {
       float s = blast_seed[i] * 13.7 + float(j) * 3.17;
       float h1 = fract(sin(s * 12.9898) * 43758.5453);
@@ -1982,7 +1986,8 @@ void main() {
         speed = (2.0 + 4.0 * h3) * 4096.0;
       } else if (gun) {
         vec3 side = normalize(cross(blast_dir[i].xyz, up_view) + 1e-6);
-        dir = normalize(blast_dir[i].xyz + side * (h1 - 0.5) * 1.8 + up_view * (h2 - 0.3) * 0.5);
+        dir = normalize(blast_dir[i].xyz + side * (h1 - 0.5) * (charged ? 4.5 : 1.8) +
+                        up_view * (h2 - 0.3) * 0.5);
         speed = (14.0 + 18.0 * h3) * 4096.0;
       }
       float drag = (1.0 - exp(-age * 2.0)) / 2.0;  // distance flown with drag, per unit speed
@@ -2005,6 +2010,10 @@ void main() {
       float cool = age / life;
       vec3 hot = gun ? mix(vec3(1.0, 0.85, 0.55), vec3(1.0, 0.18, 0.04), cool)
                      : mix(vec3(1.0, 0.92, 0.65), vec3(1.0, 0.35, 0.05), cool);
+      if (charged && !crackle) {
+        // red in the middle of the spread, fuchsia toward its edges
+        hot = mix(hot, mix(vec3(1.0, 0.5, 0.85), vec3(1.0, 0.1, 0.6), cool), smoothstep(0.1, 0.45, abs(h1 - 0.5)));
+      }
       c += hot * glow * (1.0 - cool) * 2.2 * blast_sparks;
     }
   }

@@ -9,6 +9,30 @@
 
 ;; DECOMP BEGINS
 
+;; Enhanced: a line on the screen, the first time the scattergun is given, on charging it: frames
+;; left to show it (counted outside cutscenes)
+(define *enhanced-charge-hint* 0)
+
+(defun enhanced-charge-hint-draw ()
+  (when (and (> *enhanced-charge-hint* 0) (not (movie?)))
+    (+! *enhanced-charge-hint* -1)
+    (let ((font (new 'stack 'font-context *font-default-matrix* 56 70 0.0 (font-color default) (font-flags shadow kerning))))
+      (set-width! font 400)
+      (set-height! font 60)
+      (set! (-> font scale) 0.6)
+      (set! (-> font flags) (font-flags shadow kerning middle large))
+      (print-game-text
+        "Scatter Gun: hold fire to charge it, let go for a huge blast (it kicks you back)"
+        font
+        #f
+        44
+        (bucket-id hud-draw-hud-alpha)
+        )
+      )
+    )
+  (none)
+  )
+
 (deftype resetter-control (basic)
   ((process           handle)
    (handle-init-hack  symbol  :overlay-at process)
@@ -1243,6 +1267,10 @@
        (logclear! (-> *game-info* features) (game-feature board))
        )
       (((game-task-node-command add-gun-red-1))
+       ;; Enhanced: the first time, a word on charging it (enhanced-charge-hint-draw)
+       (if (not (logtest? (-> *game-info* features) (game-feature gun-red-1)))
+           (set! *enhanced-charge-hint* 720)
+           )
        (logior! (-> *game-info* features) (game-feature gun gun-red-1))
        )
       (((game-task-node-command add-gun-red-2))
