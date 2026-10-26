@@ -1512,15 +1512,15 @@ void main() {
   if (fog.z > 0.0 && z > 0.0) {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
-    c = mix(c, mix(fog_color, vec3(luma(fog_color)), 0.8 * weather.x), amount * fog.z);
+    c = mix(c, mix(fog_color, vec3(luma(fog_color)), 0.55 * weather.x), amount * fog.z);
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
     vec3 grey = vec3(luma(fog_color)) * vec3(0.92, 0.97, 1.06);  // the fog's brightness, not its tint
     // the wet air washes the distance's colors out
     float wash = (1.0 - exp(-z / 4096.0 * 0.01)) * weather.x;
-    c = mix(c, vec3(luma(c)), wash * 0.6);
-    c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.008 + 0.01 * weather2.x))) * (0.28 + 0.2 * weather2.x) * weather.x);
+    c = mix(c, vec3(luma(c)), wash * 0.25);
+    c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.007 + 0.006 * weather2.x))) * (0.22 + 0.12 * weather2.x) * weather.x);
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
   float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w);
@@ -1565,7 +1565,7 @@ void main() {
     }
     vec4 v = sum / wsum;
     // under rain the mist is grey, whatever the area's fog tint
-    v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.95, 0.98, 1.05), weather.x * 0.85);
+    v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.95, 0.98, 1.05), weather.x * 0.6);
     c = c * v.a + v.rgb;
   }
 
@@ -1682,7 +1682,7 @@ void main() {
         continue;
       }
       float cosang = dot(ray, lp / ld);
-      float spread = clamp(light_pos[i].w * 0.6 / ld, 0.01, 0.25);
+      float spread = clamp(light_pos[i].w * 0.4 / ld, 0.01, 0.1);
       // (not the lights right by the camera: their glow would fill the screen)
       float g = exp(-(1.0 - cosang) / (spread * spread * 0.5)) *
                 smoothstep(4.0 * 4096.0, 10.0 * 4096.0, ld);
@@ -1690,10 +1690,10 @@ void main() {
         continue;
       }
       // dimmer where the scene is in front of the light, fading in over its radius (no hard edge)
-      float hidden = mix(0.3, 1.0, smoothstep(ld - light_pos[i].w * 1.5, ld, scene_dist));
+      float hidden = mix(0.05, 1.0, smoothstep(ld - light_pos[i].w * 1.5, ld, scene_dist));
       halo += light_color[i].rgb * g * hidden;
     }
-    c += halo * min(air, 1.5) * 0.3;
+    c += halo * min(air, 1.5) * 0.25 * (0.25 + 0.75 * clouds.w);
   }
 
   // rain streaks in front of everything, lit by the sky and by the lights around (the bloom)
@@ -1714,7 +1714,7 @@ void main() {
 
   // grading: the area's tint (shadows lifted toward one color, highlights toward another), then
   // saturation, gentle S-curve, warm highlights / cool shadows
-  c = mix(c, vec3(luma(c)) * vec3(0.95, 1.0, 1.07), 0.32 * weather.x);
+  c = mix(c, vec3(luma(c)) * vec3(0.95, 1.0, 1.07), 0.1 * weather.x);
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
