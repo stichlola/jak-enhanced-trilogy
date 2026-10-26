@@ -347,6 +347,7 @@ class EnhancedPost {
   struct WakePoint {
     float pos[3];
     double time;
+    bool ride = false;  // behind a vehicle or the board: foam churned along it
   };
   std::vector<WakePoint> m_wake;
   // Jak's footprints (a print every stride, left and right in turn) and the ruts of what he drives
@@ -369,6 +370,23 @@ class EnhancedPost {
   };
   std::vector<Step> m_steps;
   int m_last_player_state = 0;
+  // dust kicked up behind a vehicle or the board in the desert, spray where they cross water
+  struct Puff {
+    float pos[3];
+    float size;  // meters
+    int kind;    // 0 dust, 1 spray
+    float seed;
+    float life;  // seconds
+    double time;
+  };
+  std::vector<Puff> m_puffs;
+  float m_ride_last[3] = {};
+  double m_ride_last_time = -1.0;
+  float m_ride_speed = 0.f;  // m/s, smoothed
+  float m_ride_dir[2] = {0.f, 1.f};
+  double m_puff_time = 0.0;
+  bool m_puff_left = false;
+  int m_last_ride_state = 0;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
 

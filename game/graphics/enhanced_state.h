@@ -22,7 +22,9 @@ extern EnhancedSun g_enhanced_sun;
 // from it.
 struct EnhancedPlayer {
   float pos[3] = {0.f, 0.f, 0.f};
-  int state = 0;  // 0 elsewhere, 1 on foot on soft ground (sand, dirt, snow), 2 driving
+  // 0 elsewhere, 1 on foot on soft ground (sand, dirt, snow), 2 driving, 3 on foot on other
+  // ground, 4 on the board, 5 driving or boarding over water
+  int state = 0;
   bool valid = false;
 };
 extern EnhancedPlayer g_enhanced_player;

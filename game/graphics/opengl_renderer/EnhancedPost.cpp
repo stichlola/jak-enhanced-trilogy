@@ -1192,8 +1192,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     {
       // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
       // the shader starts a ring on the water from each one that lies at the water's height
-      constexpr int kWake = 16;
+      // (riding over the water: a point every 0.05 s, foam churned along them)
+      constexpr int kWake = 32;
       const auto& pl = g_enhanced_player;
+      const bool riding_water = pl.valid && pl.state == 5;
       if (pl.valid && m_settings.wake > 0.f) {
         double since = m_wake.empty() ? 1e9 : m_time - m_wake.back().time;
         float moved = 1e9f;
@@ -1202,8 +1204,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           float dx = pl.pos[0] - q[0], dz = pl.pos[2] - q[2];
           moved = std::sqrt(dx * dx + dz * dz);
         }
-        if ((since >= 0.1 && moved > 0.1f * kMeter) || since >= 0.5) {
-          m_wake.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time});
+        if ((since >= (riding_water ? 0.05 : 0.1) && moved > 0.1f * kMeter) || since >= 0.5) {
+          m_wake.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time, riding_water});
         }
       }
       while (!m_wake.empty() && (m_time - m_wake.front().time > 2.0 || m_wake.size() > kWake)) {
@@ -1216,7 +1218,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           break;
         }
         std::memcpy(wake + wake_count * 4, w.pos, sizeof(float) * 3);
-        wake[wake_count * 4 + 3] = (float)(m_time - w.time);
+        // age, + 10 behind a vehicle or the board
+        wake[wake_count * 4 + 3] = (float)(m_time - w.time) + (w.ride ? 10.f : 0.f);
         wake_count++;
       }
       glUniform1i(glGetUniformLocation(id, "wake_count"), wake_count);
@@ -1259,7 +1262,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         m_steps.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, 2.f, m_time});
       }
       m_last_player_state = pl.valid ? pl.state : 0;
-      if (pl.valid && pl.state > 0) {
+      if (pl.valid && pl.state > 0 && pl.state <= 3) {
         bool rut = pl.state == 2;
         const bool soft = pl.state == 1 || pl.state == 2;
         // (ruts: a piece every meter, each one reaching back to the one before: a solid track)
@@ -1348,6 +1351,91 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       glUniform1i(glGetUniformLocation(id, "splash_count"), m_wet > 0.05f ? splash_count : 0);
       glUniform4fv(glGetUniformLocation(id, "splash"), kSplashes, splash);
+
+      // dust behind a vehicle or the board crossing the desert (two plumes, off the back wheels),
+      // spray where they cross water, and a burst where they hit it
+      constexpr int kPuffs = 32;
+      const bool riding = pl.valid && (pl.state == 2 || pl.state == 4 || pl.state == 5);
+      if (riding && m_ride_last_time >= 0.0 && m_time > m_ride_last_time) {
+        float dx = pl.pos[0] - m_ride_last[0], dz = pl.pos[2] - m_ride_last[2];
+        float dist = std::sqrt(dx * dx + dz * dz) / kMeter;
+        float v = dist / (float)(m_time - m_ride_last_time);
+        if (v < 80.f) {  // not a teleport
+          m_ride_speed += (v - m_ride_speed) * 0.2f;
+          if (dist > 0.02f) {
+            m_ride_dir[0] = dx / (dist * kMeter);
+            m_ride_dir[1] = dz / (dist * kMeter);
+          }
+        }
+      } else if (!riding) {
+        m_ride_speed = 0.f;
+      }
+      std::memcpy(m_ride_last, pl.pos, sizeof(m_ride_last));
+      m_ride_last_time = m_time;
+      auto add_puff = [&](float back, float side, float down, float size, int kind, float life) {
+        Puff f;
+        const float fx = m_ride_dir[0], fz = m_ride_dir[1];
+        f.pos[0] = pl.pos[0] - fx * back * kMeter + fz * side * kMeter;
+        f.pos[1] = pl.pos[1] - down * kMeter;
+        f.pos[2] = pl.pos[2] - fz * back * kMeter - fx * side * kMeter;
+        f.size = size;
+        f.kind = kind;
+        f.seed = (float)(std::rand() % 1000) / 1000.f;
+        f.life = life;
+        f.time = m_time;
+        m_puffs.push_back(f);
+      };
+      // test switch: puffs behind Jak at any speed, anywhere (dust on the ground, spray on water)
+      static bool test_puffs = std::getenv("JAK_ENHANCED_PUFF_TEST") != nullptr;
+      if (pl.state == 2 || pl.state == 4) {
+        m_last_ride_state = pl.state;
+      }
+      const bool board = pl.state == 4 || (pl.state == 5 && m_last_ride_state == 4);
+      const bool on_water = pl.state == 5 || (test_puffs && pl.state != 1);
+      if ((riding || test_puffs) && pl.valid && m_time - m_puff_time > 0.06) {
+        const float sp = test_puffs ? 20.f : m_ride_speed;
+        const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
+        // (the test: as if moving, along a 12 m trail)
+        const float back = (board ? 0.6f : 1.6f) + (test_puffs ? (float)std::fmod(m_time * 6.0, 12.0) : 0.f);
+        if (on_water && sp > 3.f && m_settings.wake > 0.f) {
+          add_puff(back, side, board ? 0.2f : 0.6f, std::min(0.5f + sp * 0.04f, 2.f), 1, 1.1f);
+        } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
+          add_puff(back, side, board ? 0.1f : 0.6f, std::min(0.6f + sp * 0.05f, 2.4f), 0, 2.2f);
+        }
+        m_puff_left = !m_puff_left;
+        m_puff_time = m_time;
+      }
+      // hitting the water at speed: a burst all around
+      static int last_state = 0;
+      if (pl.valid && pl.state == 5 && (last_state == 2 || last_state == 4) && m_ride_speed > 5.f &&
+          m_settings.wake > 0.f) {
+        for (int k = 0; k < 4; k++) {
+          add_puff((k - 1.5f) * 0.8f, (k % 2 ? 1.f : -1.f) * 1.2f, 0.4f, 2.6f, 1, 1.4f);
+        }
+      }
+      last_state = pl.valid ? pl.state : 0;
+      while (!m_puffs.empty() && (m_time - m_puffs.front().time > m_puffs.front().life ||
+                                  m_puffs.size() > (size_t)kPuffs)) {
+        m_puffs.erase(m_puffs.begin());
+      }
+      float puff[kPuffs * 4] = {};
+      float puff_info[kPuffs * 4] = {};
+      int puff_count = 0;
+      for (const auto& f : m_puffs) {
+        if (m_time - f.time > f.life) {
+          continue;
+        }
+        std::memcpy(puff + puff_count * 4, f.pos, sizeof(float) * 3);
+        puff[puff_count * 4 + 3] = (float)(m_time - f.time);
+        puff_info[puff_count * 4] = f.size;
+        puff_info[puff_count * 4 + 1] = (float)f.kind;
+        puff_info[puff_count * 4 + 2] = f.seed;
+        puff_info[puff_count * 4 + 3] = f.life;
+        puff_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "puff_count"), cam.valid ? puff_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "puff"), kPuffs, puff);
+      glUniform4fv(glGetUniformLocation(id, "puff_info"), kPuffs, puff_info);
     }
     // the nearest explosions in view for the shockwave: view space + radius, age
     {

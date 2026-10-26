@@ -30,6 +30,9 @@ uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
 uniform int splash_count;       // Jak's last steps and landings: world xyz (game units),
 uniform vec4 splash[8];         // w: age (s) + 10 * strength (1 step, 2 landing)
 uniform float prints_strength;
+uniform int puff_count;         // dust behind a vehicle or the board, spray off the water:
+uniform vec4 puff[32];          // world xyz (game units), age (s)
+uniform vec4 puff_info[32];     // size (m), kind (0 dust, 1 spray), seed, life (s)
 uniform float relief;           // relief from the textures' shading under the sun (0 = off; 2 = left half)
 uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
@@ -514,6 +517,78 @@ float vnoise3(vec3 x) {
              mix(mix(ihash3(i + vec3(0, 0, 1)), ihash3(i + vec3(1, 0, 1)), f.x),
                  mix(ihash3(i + vec3(0, 1, 1)), ihash3(i + vec3(1, 1, 1)), f.x), f.y),
              f.z);
+}
+
+// the dust and spray puffs along the view ray, up to the scene (m): soft balls that grow, rise (the
+// spray falls back) and fade, broken up by noise; dust drifts with the wind. Premultiplied color,
+// coverage.
+vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun_w) {
+  vec3 o = cam_pos / 4096.0;
+  vec3 d = view_to_world * ray_view;
+  vec3 col = vec3(0.0);
+  float trans = 1.0;
+  for (int i = 0; i < puff_count; i++) {
+    float age = puff[i].w;
+    float u = age / puff_info[i].w;
+    if (u >= 1.0) {
+      continue;
+    }
+    bool dust = puff_info[i].y < 0.5;
+    float seed = puff_info[i].z;
+    vec3 c = puff[i].xyz / 4096.0;
+    float r;
+    if (dust) {
+      r = puff_info[i].x * (0.45 + 1.6 * sqrt(u));
+      c.y += r * 0.45 + 0.4 * age;
+      c.xz += dust_wind.xy * age * 1.5;
+    } else {
+      r = puff_info[i].x * (0.5 + 1.1 * sqrt(u));
+      c.y += r * 0.3 + 3.0 * age - 4.0 * age * age;
+    }
+    vec3 oc = c - o;
+    float tc = dot(oc, d);
+    float d2 = dot(oc, oc) - tc * tc;
+    if (d2 >= r * r || tc + r < 0.0) {
+      continue;
+    }
+    float half_chord = sqrt(r * r - d2);
+    float t0 = max(tc - half_chord, 0.0);
+    float t1 = min(tc + half_chord, scene_dist);
+    if (t1 <= t0) {
+      continue;
+    }
+    // four samples through it: billows of 3D noise, thinning toward the edge
+    float dens = 0.0;
+    vec3 lit_dir = vec3(0.0);
+    float dt = (t1 - t0) / 4.0;
+    for (int k = 0; k < 4; k++) {
+      vec3 q = (o + d * (t0 + dt * (float(k) + 0.5)) - c) / r;
+      float fall = max(1.0 - dot(q, q), 0.0);
+      vec3 nq = q * 1.9 + vec3(seed * 17.0, -age * 0.9, seed * 5.0);
+      float n = vnoise3(nq) * 0.6 + vnoise3(nq * 2.3 + 4.0) * 0.4;
+      float sd = fall * smoothstep(0.42, 0.72, n + fall * 0.2);
+      if (!dust) {
+        // drops: a fine grain on top of the mist
+        sd = sd * 0.6 + fall * smoothstep(0.6, 0.8, vnoise3(q * 9.0 + vec3(seed * 9.0, age * 6.0, 0.0))) * 0.8;
+      }
+      dens += sd * dt / r;
+      lit_dir += q * sd;
+    }
+    float lit = 0.75 + 0.25 * dot(normalize(lit_dir + vec3(0.0, 1e-3, 0.0)), sun_w);
+    float a;
+    vec3 pc;
+    if (dust) {
+      a = dens * (1.0 - smoothstep(0.3, 1.0, u)) * smoothstep(0.0, 0.06, age) * 1.3;
+      pc = sand * lit;
+    } else {
+      a = dens * (1.0 - smoothstep(0.2, 1.0, u)) * 1.2;
+      pc = spray * lit;
+    }
+    a = clamp(a, 0.0, 0.8);
+    col += trans * a * pc;
+    trans *= 1.0 - a;
+  }
+  return vec4(col, 1.0 - trans);
 }
 
 // the sandstorm's air at a world point (m): rolling clouds of sand stretched along the wind and
@@ -1295,15 +1370,23 @@ void main() {
     // wakes: rings spreading from where Jak touched the water lately (each point of his path near
     // this water's height)
     float water_y = dot(up_view, p) + cam_pos.y;
+    float wake_foam = 0.0;
     for (int i = 0; i < wake_count; i++) {
-      // (Jak's root is his feet: up to 2.5 m under the surface swimming, over it riding)
+      // (Jak's root is his feet: up to 2.5 m under the surface swimming, over it riding; a
+      // vehicle's seat higher)
+      bool ride = wake[i].w >= 10.0;
       float above = wake[i].y - water_y;
-      if (above < -2.5 * 4096.0 || above > 1.0 * 4096.0) {
+      if (above < -2.5 * 4096.0 || above > (ride ? 3.0 : 1.0) * 4096.0) {
         continue;
       }
       vec2 rel = world - wake[i].xz / 4096.0;  // meters
       float dist = length(rel);
-      float age = wake[i].w;
+      float age = wake[i].w - (ride ? 10.0 : 0.0);
+      if (ride) {
+        // churned water behind it: foam spreading and thinning out
+        float fr = 0.9 + 1.2 * age;
+        wake_foam += exp(-dist * dist / (fr * fr)) * (1.0 - age / 2.0) * 0.7;
+      }
       float x = dist - (0.3 + 1.4 * age);
       float band = exp(-x * x / 0.15) * (1.0 - age / 2.0);
       if (band > 0.001) {
@@ -1443,6 +1526,12 @@ void main() {
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
       wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
+    }
+    if (wake_foam > 0.0) {
+      float lace = smoothstep(0.35, 0.75, gnoise(world * 2.2 + vec2(t * 0.3, 0.0)) * 0.5 + 0.5 +
+                              (min(wake_foam, 1.0) - 0.5) * 0.8);
+      wc = mix(wc, vec3(0.9, 0.93, 0.92) * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0)),
+               lace * min(wake_foam, 1.0) * 0.8);
     }
     // the game's effects drawn over the water (foam, splashes, wakes) show through where they're
     // clearly brighter than our water; on a disc lying on the water, anything brighter does
@@ -1862,6 +1951,16 @@ void main() {
     float dist = z > 0.0 ? length(p) / 4096.0 : 3000.0;
     float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832);
     c = mix(c, sand, cover * 0.94);
+  }
+  if (puff_count > 0) {
+    float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.12;
+    vec3 sand = mix(vec3(0.66, 0.54, 0.4) * (0.2 + 0.65 * daylight), fog_color * 0.9, 0.3);
+    vec3 spray = mix(vec3(0.82, 0.87, 0.9) * (0.2 + 0.75 * daylight), fog_color, 0.15);
+    float toward = pow(max(dot(ray, sky_sun.xyz), 0.0), 4.0) * 0.35 * daylight;
+    float dist = z > 0.0 ? length(p) / 4096.0 : 1e5;
+    vec4 rp = ride_puffs(ray, dist, sand * (1.0 + toward), spray * (1.0 + toward),
+                         view_to_world * sky_sun.xyz);
+    c = c * (1.0 - rp.a) + rp.rgb;
   }
 
   // volumetric mist: the half-resolution march, upsampled with weights from the depth so the mist
