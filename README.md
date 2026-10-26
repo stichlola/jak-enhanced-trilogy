@@ -1,3 +1,151 @@
+# Jak 3 Enhanced
+
+A personal, for-fun remaster of **Jak 3** on top of [OpenGOAL](https://opengoal.dev), inspired by
+*Ratchet & Clank Enhanced*. It adds modern lighting and post-processing, denser vegetation and
+cities, a few gameplay tweaks and an in-game menu that turns every change on and off. Everything here
+is code: the game itself comes from **your own copy** of the PS2 disc. No game data is in this
+repository.
+
+Technical notes for each feature (how it works, its test switches) are in [ENHANCED.md](ENHANCED.md).
+
+## What's new
+
+### Graphics
+- **Lighting**: sun shadow map (level, characters and wind-blown trees cast shadows), contact
+  shadows, ambient occlusion (SSAO), one bounce of indirect light (SSGI), and computed normals for the
+  levels, which originally had only baked vertex colors.
+- **Lights**: the levels' own lamps and every glow (torches, shots, explosions) light their
+  surroundings and cast short shadows. Night lamps switch on at night.
+- **Fires** flicker, the air above them shimmers, and embers rise from them.
+- **Explosions**: a flash of light and a shockwave that bends the picture. Smoke and dust are lit by
+  the lights near them.
+- **Atmosphere**: volumetric ground mist with light shafts, god rays, distance and height fog,
+  heat haze, depth of field, bloom, camera motion blur and color grading.
+- **Anti-aliasing**: TAA (temporal), with FXAA as the fallback.
+- **Water**: screen-space reflections on the sea, open-sea swell, refraction and caustics in
+  shallow water, and rings spreading where Jak swims or rides.
+- **Materials**: metal and glass pick up reflections and highlights (found from the texture names),
+  and the surfaces show relief from their textures.
+- **Vegetation**: more grass and plants around the original ones, and climbing plants on the walls
+  near the level's own vines. Grass sways in the wind and bends away from Jak, enemies and vehicles.
+- **Desert**: footprints and tire ruts in the sand, and a new sand texture on the dunes.
+- **HD textures**: a 4x AI upscale of Spargus, the desert, the vehicles, Jak, Daxter and the guns
+  (an optional step, see below).
+- **Draw distance**: no more buildings popping in around corners and over rooftops.
+
+### City
+- **Population** setting from Low to Extreme. At High (the default) there are twice as many
+  passers-by and as much traffic, and six times as many Metal Heads and KG robots in the street war.
+- The vehicles' engine sounds no longer go silent when both factions are out in the streets.
+- The **Jak 2 plaza** is rebuilt inside Haven, with passages cut into the port and the Metal Head
+  city. It needs a Jak 2 disc too.
+
+### Gameplay
+- Faster jetboard, always at hand.
+- Guns fire 1.5x faster and carry twice the ammo.
+- Driving modes for the desert vehicles (classic, sport, turbo).
+
+### In-game menu (press `\`)
+- **Graphics**: three presets (Classic: the game as it was; Medium: the costly effects off; Maximum:
+  everything) and a switch for every effect. Also vegetation density, lamp strength and the water
+  effects.
+- **City**: population (Low / Normal / High / Extreme) and the minimap, which is hidden by default.
+- **Time of day**: six buttons (dawn to night), a slider, and a "freeze time" switch.
+- **Showcase**: five stops that show the mod off, in order (see below).
+- **Teleport**: quick travel to nine places in Haven, Spargus and the desert.
+
+The choices are saved and come back at the next start.
+
+### Showcase tour
+Open the menu with `\`, then press the stops in order:
+
+| # | Stop | Time | What to look at |
+|---|------|------|-----------------|
+| 1 | Forest | 9:00 | vegetation, climbing plants, wind, god rays through the trees, mist |
+| 2 | Spargus | 12:00 | HD textures, the sea's reflections and swell, metal and glass |
+| 3 | Desert | 18:00 | dunes, dust, footprints and ruts (drive a vehicle), heat haze at sunset |
+| 4 | Haven war zone | 15:00 | crowds, the Krimson Guard against the Metal Heads, explosions and smoke |
+| 5 | Haven port at night | 22:00 | lamps lighting the streets, light shadows, the water at night |
+
+Some stops need the area unlocked in your save, as on any continue point. Stop 4 sets the population to
+High.
+
+## Known issues
+- **Water and PBR reflections/refraction** still show artifacts (less than before): shimmering or
+  smeared edges where the screen-space reflections run out of picture, and the refraction bends the
+  wrong things at the shoreline.
+- **Extreme population crashes the game in Haven's war zone** (near the port, where the guards fight
+  the Metal Heads): the streets' navigation meshes run out of room for that many characters. Use High
+  there.
+- The Jak 2 plaza has no passers-by or enemies yet (it has no navigation mesh for them).
+- HD textures cover only Spargus, the desert, the vehicles and the characters.
+- No hardware ray tracing (the renderer is OpenGL).
+
+## Install and play (Windows)
+
+You need **your own Jak 3 disc image** (an ISO of the PS2 game: PAL, NTSC or NTSC-J), about 30 GB free
+and a recent GPU.
+
+1. Get the code: install [Git](https://git-scm.com/download/win), then in a terminal
+   (PowerShell):
+   ```
+   git clone -b jak3-enhanced <this repository's URL> jak-project
+   cd jak-project
+   ```
+   Name the folder `jak-project`: the OpenGOAL tools look for that name.
+2. Run the setup with your ISO:
+   ```
+   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Iso "C:\path\to\Jak 3.iso"
+   ```
+   It installs what's missing with winget (Visual Studio 2022 Build Tools with Clang, CMake, Ninja,
+   NASM), builds the game, extracts and compiles your disc's data, and writes
+   `Play-Jak3-Enhanced.bat`. The first run takes about an hour.
+3. Play: double-click `Play-Jak3-Enhanced.bat`. Press `\` in the game for the Enhanced menu.
+
+Optional HD textures: with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) installed, run
+`python scripts\enhanced\hd_textures.py`, then extract the levels again (the decompiler command in
+ENHANCED.md).
+
+## Change it yourself
+
+### The fastest way: with an AI coding assistant
+This mod was made by talking to [Claude Code](https://claude.com/claude-code), Anthropic's coding
+agent: you describe what you want in plain words, and it reads the code, makes the change, builds,
+runs the game to check, and commits.
+
+1. Install Claude Code (desktop app or `npm install -g @anthropic-ai/claude-code`) and open the
+   `jak-project` folder in it.
+2. Ask for the setup first: *"Set this project up and build it following README.md; my ISO is at
+   C:\...\Jak 3.iso"*.
+3. Then ask for changes the way you'd say them to a friend: *"make the night darker"*, *"more Metal
+   Heads in the port"*, *"add a menu switch for the fog"*. It's good practice to ask it to explain
+   the change and to try it in the game before committing.
+
+[ENHANCED.md](ENHANCED.md) and `AGENTS.md` give the assistant the project's map and rules.
+
+### By hand
+- **Graphics** (C++ and shaders): `game/graphics/opengl_renderer/EnhancedPost.cpp` (the post-processing
+  passes and the menu) and `game/graphics/opengl/shaders/enh_*`. Rebuild with
+  `setup.ps1 -SkipTools -SkipExtract`.
+- **Game code** (GOAL, a Lisp): `goal_src/jak3/`. The changes are marked `Enhanced`, for example
+  `engine/ai/traffic-h.gc` (population) and `engine/target/logic-target.gc` (the menu's requests).
+  Recompile with `out\build\Release\bin\goalc.exe --user-auto --game jak3 --cmd "(mi)"` (a few
+  seconds to minutes), then restart the game.
+- **Live changes**: start the game with `-debug` (`gk.exe --game jak3 -- -boot -fakeiso -debug`), open
+  the compiler (`goalc.exe --user-auto --game jak3`), type `(lt)` then `(mi)`, and change values while
+  you play, e.g. `(set! *enhanced-board-speed* 1.6)`.
+- **Effect settings**: many sliders are in the debug menu (`-debug`, then "Renderer Debug" → "Enhanced
+  Post"). The environment variables in ENHANCED.md (`JAK_ENHANCED_*`) switch effects for a test run.
+
+## Legal
+Use your own legally owned copy of the game. Jak 3 is © Sony Interactive Entertainment / Naughty Dog.
+This project is unofficial and contains no game assets. OpenGOAL's license applies to the code
+([LICENSE](LICENSE)).
+
+---
+
+# Original OpenGOAL README
+
 <p align="center">
   <img width="500" height="100%" src="./docs/img/logo-text-colored-new.png">
 </p>

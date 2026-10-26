@@ -104,6 +104,9 @@ EnhancedPost::EnhancedPost() {
   } else if (m_population != 2) {
     g_enhanced_menu.ask(6, std::to_string(m_population));
   }
+  if (const char* map = std::getenv("JAK_ENHANCED_MINIMAP")) {
+    g_enhanced_menu.minimap = std::strcmp(map, "0") != 0;
+  }
   const char* env = std::getenv("JAK_ENHANCED");
   if (env && std::strcmp(env, "0") == 0) {
     m_settings.enabled = false;
@@ -1966,14 +1969,14 @@ void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
   // no close button: \ closes it (and gives the mouse back to the camera)
-  if (!ImGui::Begin("Jak 3 Enhanced  ( \\ chiude )", nullptr,
+  if (!ImGui::Begin("Jak 3 Enhanced  ( \\ closes )", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;
   }
   auto& s = m_settings;
-  if (ImGui::CollapsingHeader("Grafica", ImGuiTreeNodeFlags_DefaultOpen)) {
-    static const char* presets[] = {"Classico", "Medio", "Massimo"};
+  if (ImGui::CollapsingHeader("Graphics", ImGuiTreeNodeFlags_DefaultOpen)) {
+    static const char* presets[] = {"Classic", "Medium", "Maximum"};
     ImGui::TextUnformatted("Preset:");
     for (int i = 0; i < 3; i++) {
       ImGui::SameLine();
@@ -1981,7 +1984,7 @@ void EnhancedPost::draw_menu() {
         apply_preset(i);
       }
     }
-    ImGui::Checkbox("Grafica Enhanced (tutto)", &s.enabled);
+    ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
     ImGui::BeginDisabled(!s.enabled);
     // two columns of switches
     int n = 0;
@@ -1992,83 +1995,87 @@ void EnhancedPost::draw_menu() {
       return ImGui::Checkbox(label, value);
     };
     check("Antialiasing (TAA)", &s.taa);
-    check("Nebbia volumetrica", &s.volume);
-    check("Ombre del sole", &s.shadow_map);
-    check("Ombre di personaggi e alberi", &s.shadow_casters);
-    check("Ombre di contatto", &s.sun_shadows);
+    check("Volumetric mist", &s.volume);
+    check("Sun shadows", &s.shadow_map);
+    check("Character and tree shadows", &s.shadow_casters);
+    check("Contact shadows", &s.sun_shadows);
     check("Occlusione (SSAO)", &s.ssao);
     check("Luce indiretta (SSGI)", &s.gi);
-    check("Luce sui personaggi", &g_enhanced_merc.enabled);
+    check("Character lighting", &g_enhanced_merc.enabled);
     check("Bloom", &s.bloom);
-    check("Raggi di luce", &s.shafts);
-    check("Profondita' di campo", &s.dof);
+    check("God rays", &s.shafts);
+    check("Depth of field", &s.dof);
     bool blur = s.motion_blur > 0.f;
     if (check("Motion blur", &blur)) {
       s.motion_blur = blur ? 0.5f : 0.f;
     }
-    check("Luci dinamiche", &s.lights);
+    check("Dynamic lights", &s.lights);
     check("Fuochi (calore, braci)", &s.fire);
     bool light_shadows = s.light_shadow > 0.f;
-    if (check("Ombre delle luci", &light_shadows)) {
+    if (check("Light shadows", &light_shadows)) {
       s.light_shadow = light_shadows ? 0.85f : 0.f;
     }
-    check("Normali della geometria", &s.geometry_normals);
+    check("Geometry normals", &s.geometry_normals);
     bool prints = s.prints > 0.f;
-    if (check("Impronte nella sabbia", &prints)) {
+    if (check("Footprints in the sand", &prints)) {
       s.prints = prints ? 1.f : 0.f;
     }
     bool smoke = s.lit_smoke > 0.f;
-    if (check("Fumo illuminato", &smoke)) {
+    if (check("Lit smoke", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
     }
-    check("Distanza visiva estesa", &s.far_view);
+    check("Extended draw distance", &s.far_view);
     bool relief = s.relief > 0.f;
-    if (check("Rilievo delle superfici", &relief)) {
+    if (check("Surface relief", &relief)) {
       s.relief = relief ? 1.f : 0.f;
     }
     bool mats = s.materials > 0.f;
-    if (check("Metallo e vetro riflettenti", &mats)) {
+    if (check("Reflective metal and glass", &mats)) {
       s.materials = mats ? 1.f : 0.f;
     }
-    check("Vento sull'erba", &g_enhanced_wind.enabled);
-    check("Erba che si piega", &g_enhanced_wind.push);
+    check("Wind on the grass", &g_enhanced_wind.enabled);
+    check("Grass bends away", &g_enhanced_wind.push);
     ImGui::SetNextItemWidth(200);
-    ImGui::Combo("Vegetazione", &g_enhanced_vegetation, "Classica\0Media\0Rigogliosa\0");
+    ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Forza lampade", &s.lamp_strength, 0.f, 3.f, "%.2f");
+    ImGui::SliderFloat("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
     ImGui::EndDisabled();
-    ImGui::SeparatorText("Acqua");
+    ImGui::SeparatorText("Water");
     n = 0;
     bool swell = s.water_swell > 0.f, refr = s.water_refraction > 0.f, caus = s.water_caustics > 0.f;
-    check("Riflessi", &s.water_reflections);
-    if (check("Onde lunghe", &swell)) {
+    check("Reflections", &s.water_reflections);
+    if (check("Swell", &swell)) {
       s.water_swell = swell ? 1.f : 0.f;
     }
-    if (check("Rifrazione", &refr)) {
+    if (check("Refraction", &refr)) {
       s.water_refraction = refr ? 0.012f : 0.f;
     }
-    if (check("Caustiche", &caus)) {
+    if (check("Caustics", &caus)) {
       s.water_caustics = caus ? 0.8f : 0.f;
     }
     ImGui::EndDisabled();
   }
-  if (ImGui::CollapsingHeader("Citta'", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (ImGui::CollapsingHeader("City", ImGuiTreeNodeFlags_DefaultOpen)) {
     // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
     // enhanced-population-count); the game reads the same variable at boot
     ImGui::SetNextItemWidth(200);
-    if (ImGui::Combo("Popolazione", &m_population, "Bassa\0Media\0Alta\0Estrema\0")) {
+    if (ImGui::Combo("Population", &m_population, "Low\0Normal\0High\0Extreme\0")) {
       g_enhanced_menu.ask(6, std::to_string(m_population));
+    }
+    bool map = g_enhanced_menu.minimap;
+    if (ImGui::Checkbox("Minimap", &map)) {
+      g_enhanced_menu.minimap = map;
     }
   }
   save_menu_settings();
-  if (ImGui::CollapsingHeader("Ora del giorno", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (ImGui::CollapsingHeader("Time of day", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Hour {
       const char* name;
       int hour;
     };
-    static const Hour hours[] = {{"Alba", 6},     {"Mattina", 9}, {"Mezzogiorno", 12},
-                                 {"Tramonto", 18}, {"Sera", 20},  {"Notte", 23}};
+    static const Hour hours[] = {{"Dawn", 6},    {"Morning", 9},  {"Noon", 12},
+                                 {"Sunset", 18}, {"Evening", 20}, {"Night", 23}};
     for (int i = 0; i < 6; i++) {
       if (i % 3) {
         ImGui::SameLine();
@@ -2079,31 +2086,59 @@ void EnhancedPost::draw_menu() {
     }
     static int hour = 12;
     ImGui::SetNextItemWidth(260);
-    ImGui::SliderInt("##ora", &hour, 0, 23, "ore %d");
+    ImGui::SliderInt("##hour", &hour, 0, 23, "%d:00");
     ImGui::SameLine();
-    if (ImGui::Button("Imposta")) {
+    if (ImGui::Button("Set")) {
       g_enhanced_menu.ask(1, std::to_string(hour));
     }
     static bool frozen = false;
-    if (ImGui::Checkbox("Ferma il tempo", &frozen)) {
+    if (ImGui::Checkbox("Freeze time", &frozen)) {
       g_enhanced_menu.ask(4, frozen ? "0" : "1");
     }
   }
-  if (ImGui::CollapsingHeader("Teletrasporto", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (ImGui::CollapsingHeader("Showcase", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // five stops, in order, each showing off a part of the mod: the place, its hour and (for the
+    // war zone) the population in one request (kind 9: "<hour> <population or -1> <continue point>")
+    struct Stop {
+      const char* name;
+      const char* what;
+      int hour, population;
+      const char* continue_point;
+    };
+    static const Stop stops[] = {
+        {"1  Forest", "vegetation, vines, wind, god rays, mist", 9, -1, "foresta-start"},
+        {"2  Spargus", "HD textures, water, reflective metal", 12, -1, "wascitya-start"},
+        {"3  Desert", "dunes, dust, footprints, heat haze, sunset", 18, -1, "desert-facing-wasdoors"},
+        {"4  Haven war zone", "crowds, the street war, explosions", 15, 2, "ctyport-warzone"},
+        {"5  Haven port at night", "lamps, light shadows, water at night", 22, -1, "ctyport-start"},
+    };
+    for (const auto& stop : stops) {
+      if (ImGui::Button(stop.name, ImVec2(200, 0))) {
+        if (stop.population >= 0) {
+          m_population = stop.population;
+        }
+        g_enhanced_menu.ask(9, fmt::format("{} {} {}", stop.hour, stop.population,
+                                           stop.continue_point));
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", stop.what);
+    }
+  }
+  if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Place {
       const char* name;
       const char* continue_point;
     };
     static const Place places[] = {
-        {"Piazza (Jak 2)", "piazza-start"},
-        {"Porto", "ctyport-start"},
+        {"Plaza (Jak 2)", "piazza-start"},
+        {"Port", "ctyport-start"},
         {"Hip Hog", "ctyport-hiphog"},
-        {"Vicolo degli slum", "ctysluma-alley"},
-        {"Zona industriale", "ctyinda-start"},
-        {"Settore centrale", "ctygenb-start"},
-        {"Teste di Metallo", "mhcitya-near-ctyport"},
+        {"Slums alley", "ctysluma-alley"},
+        {"Industrial zone", "ctyinda-start"},
+        {"Central sector", "ctygenb-start"},
+        {"Metal Head city", "mhcitya-near-ctyport"},
         {"Spargus", "wascitya-start"},
-        {"Deserto", "desert-facing-wasdoors"},
+        {"Desert", "desert-facing-wasdoors"},
     };
     for (int i = 0; i < (int)(sizeof(places) / sizeof(places[0])); i++) {
       const auto& p = places[i];
@@ -2157,6 +2192,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["water_refraction"] = s.water_refraction;
   j["water_caustics"] = s.water_caustics;
   j["population"] = m_population;
+  j["minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
 }
 
@@ -2203,6 +2239,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("water_caustics", s.water_caustics);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
+  bool map = false;
+  get("minimap", map);
+  g_enhanced_menu.minimap = map;
 }
 
 // Classico: the game as it was (the enhanced pass off), Medio: the costly passes off (mist, indirect

@@ -413,7 +413,8 @@
        (let ((a0-46 (-> s5-1 nav-mesh)))
          (when a0-46
            (change-to a0-46 this)
-           (if (not (-> this nav))
+           ;; Enhanced: also when the mesh had no room left (change-to keeps the old nav then)
+           (if (or (not (-> this nav)) (zero? (-> this nav)) (!= (-> this nav state mesh) a0-46))
                (go-inactive this)
                )
            (let ((v1-77 (-> this nav state)))

@@ -56,19 +56,22 @@ Laptop (the game stays at its 60 fps cap).
 | HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
 
 **In-game menu: `\`** opens and closes it (EnhancedPost::draw_menu): every effect on/off, lamp
-strength, the time of day (six hours, a slider, a frozen clock) and quick travel to nine continue
+strength, population and the minimap (hidden unless switched on: `pc-enhanced-minimap?` in
+hud-map's update-values!, `JAK_ENHANCED_MINIMAP=1`), the time of day (six hours, a slider, a frozen
+clock), a five-stop Showcase (request 9 `<hour> <population or -1> <continue point>`: forest,
+Spargus, desert at sunset, the port's war zone, the port at night) and quick travel to nine continue
 points (the piazza, port, Hip Hog, slums, industrial zone, central sector, Metal Head city, Spargus,
 desert). The renderer queues one request, the game polls it each frame
 (`pc-enhanced-poll-request`, `enhanced-menu-update` in logic-target.gc). The cursor is freed from
 the mouse camera while it's open.
-Three presets at the top (Classico: the game as it was; Medio: the costly passes off, i.e. mist,
+Three presets at the top (Classic: the game as it was; Medium: the costly passes off, i.e. mist,
 SSGI, depth of field, god rays, motion blur, the lights' shadows, refraction and caustics;
-Massimo: everything). The menu's choices (switches, vegetation, population) are saved to
+Maximum: everything). The menu is in English. The menu's choices (switches, vegetation, population, minimap) are saved to
 `enhanced-settings.json` in the game's settings folder whenever they change and loaded at the next
 start; the environment switches below still win over them, and are only written to the file if the
 player then changes something in the menu.
 
-Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_SHADOW_CASTERS=0` (only the static level geometry in the shadow map), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_VEGETATION=0|1|2` (classic, moderate, lush: default), `JAK_ENHANCED_VINES=0` (no extra wall vines), `JAK_ENHANCED_POPULATION=0|1|2|3` (Haven's passers-by, traffic, guards and Metal Heads: half, the game's, double: default, 3.5x; the enemies, Metal Heads and KG robots, 4x and 6x instead; at most 20 of a kind; also in the menu, live), `JAK_ENHANCED_CENSUS=1` (any game, also the full one: log every 5 s how many guards, Metal Heads and citizens are alive and where Jak is; `2` also every process type), `JAK_ENHANCED_GRASS_PUSH=<m>` (the radius grass bends away from Jak in, 0 = off), `JAK_ENHANCED_NORMALS=0` (normals from depth only; `2` shows them: left the ones used, level normals in color, right the depth-rebuilt ones), `JAK_ENHANCED_MENU=1` or `<kind>:<value>` (menu open from the start, plus one queued request: `1:23` hour, `2:<continue point>`, `3:x,y,z,yaw`, `4:0` frozen clock, `5:1` on the jetboard, `6:<0-3>` population, `7:<frames>` a harmless test explosion in front of Jak every so many frames, `8:<type>` into a vehicle), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
+Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_SHADOW_CASTERS=0` (only the static level geometry in the shadow map), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_VEGETATION=0|1|2` (classic, moderate, lush: default), `JAK_ENHANCED_VINES=0` (no extra wall vines), `JAK_ENHANCED_POPULATION=0|1|2|3` (Haven's passers-by, traffic, guards and Metal Heads: half, the game's, double: default, 3.5x; the enemies, Metal Heads and KG robots, 6x and 10x instead; at most 40 of a kind, guards 16; also in the menu, live. The traffic engine keeps 40 inactive slots a kind (was 20) and 254 active per tracker (was 126), its spatial hash 509 objects; nav meshes take twice their `nav-max-users`, and a citizen whose mesh is full goes back inactive), `JAK_ENHANCED_CENSUS=1` (any game, also the full one: log every 5 s how many guards, Metal Heads and citizens are alive and where Jak is; `2` also every process type), `JAK_ENHANCED_GRASS_PUSH=<m>` (the radius grass bends away from Jak in, 0 = off), `JAK_ENHANCED_NORMALS=0` (normals from depth only; `2` shows them: left the ones used, level normals in color, right the depth-rebuilt ones), `JAK_ENHANCED_MENU=1` or `<kind>:<value>` (menu open from the start, plus one queued request: `1:23` hour, `2:<continue point>`, `3:x,y,z,yaw`, `4:0` frozen clock, `5:1` on the jetboard, `6:<0-3>` population, `7:<frames>` a harmless test explosion in front of Jak every so many frames, `8:<type>` into a vehicle), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 
@@ -95,6 +98,14 @@ and bikes were silent: `update-sound-info` (cty-borrow-manager.gc) now puts it f
 plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not missing sounds.
 `JAK_ENHANCED_MENU=8:<vehicle type>` puts Jak in a new vehicle (0-2 bikes, needs ctycarb; 3-5 cars,
 ctycara; 7 Hellcat) once its level is in, for testing.
+
+## Known issues
+
+- Water and PBR (metal/glass) reflections and refraction: fewer artifacts than before, but still
+  shimmer and smears where the screen-space rays leave the picture, and refraction at the shoreline.
+- Extreme population crashes in Haven's war zone near the port: `nav-mesh::new-nav-control: too many
+  users` even with twice the users (some caller other than the citizens' `traffic-activate` doesn't
+  check for a full mesh). High is fine; the Showcase's war-zone stop uses High.
 
 ## Not done (yet)
 

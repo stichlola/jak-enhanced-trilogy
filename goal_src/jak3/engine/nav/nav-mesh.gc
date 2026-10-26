@@ -801,8 +801,9 @@
       (set! (-> this poly-hash work) *grid-hash-work*)
       )
   (let ((s5-0 (new 'stack-no-clear 'nav-stack-type2)))
+    ;; Enhanced: twice the users (at most 255, the count is a byte), for the bigger population
     (set! (-> s5-0 word00)
-          (res-lump-value arg0 'nav-max-users int :default (the-as uint128 64) :time -1000000000.0)
+          (min 255 (* 2 (the-as int (res-lump-value arg0 'nav-max-users int :default (the-as uint128 64) :time -1000000000.0))))
           )
     (set! (-> this user-list) (new 'loading-level 'engine 'nav-engine (-> s5-0 word00) connection))
     (set! (-> this nav-control-array)

@@ -244,8 +244,9 @@
    (id                       uint8)
    (active-object-count      uint8)
    (inactive-object-count    int8)
-   (active-object-list       handle        126)
-   (active-object-type-list  traffic-type  126)
+   ;; Enhanced: 254 active (was 126), for the bigger street war
+   (active-object-list       handle        254)
+   (active-object-type-list  traffic-type  254)
    )
   (:methods
     (traffic-tracker-method-9 (_type_) none)
@@ -285,12 +286,13 @@
    (object-type-info-array  traffic-object-type-info  29 :inline)
    (tracker-array           traffic-tracker           2 :inline)
    (tracker0                traffic-tracker           :inline :overlay-at (-> tracker-array 0))
-   (tracker1                traffic-tracker           :inline :offset 6304)
-   (inactive-object-array   handle                    580     :offset 7456)
+   (tracker1                traffic-tracker           :inline :overlay-at (-> tracker-array 1))
+   ;; Enhanced: 40 inactive slots a kind (was 20, 580 in all); the offsets after it follow
+   (inactive-object-array   handle                    1160)
    (suppressor              traffic-suppressor        :inline)
-   (danger-sphere-count     int8                              :offset 12656)
+   (danger-sphere-count     int8)
    (danger-sphere-array     traffic-danger-info       4 :inline)
-   (allow-spawning?         symbol                            :offset 12928)
+   (allow-spawning?         symbol)
    )
   (:methods
     (new (symbol type) _type_)

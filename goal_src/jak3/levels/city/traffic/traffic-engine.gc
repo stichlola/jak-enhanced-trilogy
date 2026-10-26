@@ -75,7 +75,7 @@
 
 (defmethod add-active-process ((this traffic-tracker) (arg0 traffic-type) (arg1 handle))
   (let ((v1-0 (-> this active-object-count)))
-    (when (< v1-0 (the-as uint 126))
+    (when (< v1-0 (the-as uint 254))
       (set! (-> this active-object-list v1-0) arg1)
       (set! (-> this active-object-type-list v1-0) arg0)
       (+! (-> this active-object-count) 1)
@@ -110,7 +110,7 @@
   (let* ((v1-2 (-> this traffic object-type-info-array arg0))
          (a1-2 (-> v1-2 inactive-count))
          )
-    (when (< a1-2 20)
+    (when (< a1-2 40)
       (set! (-> v1-2 array a1-2) arg1)
       (+! (-> v1-2 inactive-count) 1)
       (+! (-> v1-2 reserve-count) 1)
@@ -407,7 +407,7 @@
         (set! (-> a1-3 array) v1-5)
         (set! (-> a1-3 level) #f)
         )
-      (set! v1-5 (&-> v1-5 20))
+      (set! v1-5 (&-> v1-5 40))
       )
     )
   (set! (-> this object-type-info-array 6 guard-type) (the-as uint 0))
@@ -1773,7 +1773,7 @@
 
 (defmethod new traffic-engine ((allocation symbol) (type-to-make type))
   (let ((s5-0 (object-new allocation type-to-make (the-as int (-> type-to-make size)))))
-    (set! (-> s5-0 object-hash) ((method-of-type spatial-hash new) allocation spatial-hash #xc1c0 253))
+    (set! (-> s5-0 object-hash) ((method-of-type spatial-hash new) allocation spatial-hash #x18380 509))
     s5-0
     )
   )

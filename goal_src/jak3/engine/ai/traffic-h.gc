@@ -236,18 +236,20 @@
 
 (defun enhanced-population-count ((count int) (kind int))
   "The game's wanted count of a kind of citizen scaled by the population setting: never down to
-   zero (or up from it), at most 20 (each kind keeps 20 inactive slots). The enemies (Metal Heads
-   and the KG robots) grow much more than the rest, for the street war."
+   zero (or up from it). The enemies (Metal Heads and the KG robots) grow much more than the rest,
+   for the street war. At most 40 a kind (the traffic engine keeps 40 inactive slots a kind), the
+   guards 16 (ff-squad-control sorts its guards in arrays of 16)."
   (if (<= count 0)
       count
       (let ((enemy (or (and (>= kind (traffic-type metalhead-grunt)) (<= kind (traffic-type metalhead-predator)))
                        (and (>= kind (traffic-type roboguard)) (<= kind (traffic-type flying-turret)))
                        )
                    )
+            (most (if (or (= kind (traffic-type guard-a)) (= kind (traffic-type guard-b))) 16 40))
             )
-        (max 1 (min 20 (the int (+ 0.5 (* (the float count)
+        (max 1 (min most (the int (+ 0.5 (* (the float count)
                                             (if enemy
-                                                (case *enhanced-population* ((0) 0.5) ((1) 1.0) ((2) 4.0) (else 6.0))
+                                                (case *enhanced-population* ((0) 0.5) ((1) 1.0) ((2) 6.0) (else 10.0))
                                                 (case *enhanced-population* ((0) 0.5) ((1) 1.0) ((2) 2.0) (else 3.5))
                                                 )
                                             )

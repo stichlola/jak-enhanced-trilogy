@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -88,6 +89,7 @@ extern EnhancedGameLights g_enhanced_game_lights;
 // frozen ("0"), 5 on the jetboard, 6 population ("0".."3").
 struct EnhancedMenu {
   bool open = false;
+  std::atomic<bool> minimap = false;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   std::mutex mutex;
   int request = 0;
   std::string arg;
