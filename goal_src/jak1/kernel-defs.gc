@@ -614,6 +614,17 @@
 
 (define-extern pc-rand (function int))
 
+;; Enhanced (shared with Jak 2 and 3, see kmachine.cpp)
+(define-extern pc-enhanced-set-sun (function pointer none))
+(define-extern pc-enhanced-set-player (function pointer none))
+(define-extern pc-enhanced-set-scene (function string float symbol none))
+(define-extern pc-enhanced-thunder (function int))
+(define-extern pc-enhanced-set-pushers (function pointer int none))
+(define-extern pc-enhanced-explosion (function pointer none))
+(define-extern pc-enhanced-getenv (function string string int symbol))
+(define-extern pc-enhanced-set-lights (function pointer int none))
+(define-extern pc-enhanced-poll-request (function string int int))
+
 (define-extern pc-encode-utf8-string (function string string none))
 
 ;; Constants generated within the C++ runtime

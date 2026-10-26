@@ -185,6 +185,30 @@
   (set! (-> arg0 title-light-group ambi levels x) 1.0)
   (none))
 
+(define-extern movie? (function symbol))
+(define-extern math-camera-pos (function vector))
+
+;; Enhanced: the thunder after one of the renderer's lightning bolts, the game's own thunder sound
+;; from the bolt's direction
+(defun enhanced-thunder ()
+  (let ((k (pc-enhanced-thunder)))
+    (when (and (> k 0) (not (movie?)))
+      (let ((az (* (the float (mod k 1000)) 182.04445))
+            (pos (new 'stack-no-clear 'vector)))
+        (set-vector! pos (* (meters 40) (sin az)) (meters 25) (* (meters 40) (cos az)) 1.0)
+        (vector+! pos pos (math-camera-pos))
+        (sound-play "thunder" :vol (if (= (/ k 1000) 1) 80.0 100.0) :pitch (if (= (/ k 1000) 2) -0.5 0.0)
+                    :position (the-as symbol pos)))))
+  (none))
+
+;; Enhanced: where Jak is, the hour and whether a cutscene plays, for the renderer's grading per
+;; area, weather and cutscene depth of field
+(defun enhanced-send-scene ((ctx time-of-day-context))
+  (let ((lev (level-get-target-inside *level*)))
+    (pc-enhanced-set-scene (if lev (symbol->string (-> lev name)) "none") (-> ctx time) (movie?)))
+  (enhanced-thunder)
+  (none))
+
 (defun update-time-of-day ((arg0 time-of-day-context))
   "Update the time of day context"
   ;; set defaults
@@ -399,6 +423,10 @@
   (set! (-> *math-camera* fog-end) (-> arg0 current-fog fog-dists y))
   (set! (-> *math-camera* fog-max) (-> arg0 current-fog fog-dists z))
   (set! (-> *math-camera* fog-min) (-> arg0 current-fog fog-dists w))
+  ;; Enhanced: the key light for the renderer's screen-space sun shadows, and the scene
+  (pc-enhanced-set-sun (the-as pointer (-> arg0 light-group 0 dir0 direction)))
+  (pc-enhanced-set-lights (the-as pointer 0) 0)
+  (enhanced-send-scene arg0)
   ;; interp target lights. (note: added check here.)
   (let* ((v1-195 (if *target* (-> *target* draw light-index) 0))
          (f30-1 (-> arg0 target-interp))

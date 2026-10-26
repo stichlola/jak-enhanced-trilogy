@@ -1201,3 +1201,29 @@ nav-enemy-default-event-handler
                  (f3-1 (- (-> a0-10 z) f1-2)))
             (if (>= (square (-> a0-10 w)) (+ (square f2-2) (square f3-1))) (return #t)))))))
   #f)
+
+;; Enhanced: the grass bends away from the enemies near Jak too
+(define *enhanced-pushers* (new 'static 'array float 32))
+
+(define *enhanced-pusher-count* 0)
+
+(defun enhanced-update-pushers ()
+  "Up to 8 enemies within 30 m of Jak (x y z radius) for the grass shader."
+  (set! *enhanced-pusher-count* 0)
+  (when *target*
+    (iterate-process-tree
+      *active-pool*
+      (lambda ((p process))
+        (when (and (< *enhanced-pusher-count* 8) (type-type? (-> p type) nav-enemy))
+          (let ((pos (-> (the-as process-drawable p) root trans))
+                (i (* 4 *enhanced-pusher-count*)))
+            (when (< (vector-vector-distance pos (-> *target* control trans)) (meters 30))
+              (set! (-> *enhanced-pushers* i) (-> pos x))
+              (set! (-> *enhanced-pushers* (+ i 1)) (-> pos y))
+              (set! (-> *enhanced-pushers* (+ i 2)) (-> pos z))
+              (set! (-> *enhanced-pushers* (+ i 3)) (meters 1.1))
+              (+! *enhanced-pusher-count* 1))))
+        #f)
+      *kernel-context*))
+  (pc-enhanced-set-pushers (the-as pointer *enhanced-pushers*) *enhanced-pusher-count*)
+  (none))

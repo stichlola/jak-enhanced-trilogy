@@ -138,6 +138,9 @@
   "Get the permanent storage for a game-task"
   (-> this task-perm-list data arg0))
 
+;; Enhanced: filled from JAK_ENHANCED_START
+(define *enhanced-start-name* (new 'global 'string 64 (the-as string #f)))
+
 (defmethod initialize! ((this game-info) (cause symbol) (save-to-load game-save) (continue-point-override string))
   "Initialize the game-info.
     The cause can be 'dead if you die, or 'game to reset everything.
@@ -177,6 +180,9 @@
                     (cond
                       (continue-point-override (empty) continue-point-override)
                       ((!= *kernel-boot-message* 'play) "demo-start")
+                      ;; Enhanced: JAK_ENHANCED_START picks the boot continue point (test runs)
+                      ((and *debug-segment* (pc-enhanced-getenv "JAK_ENHANCED_START" *enhanced-start-name* 64))
+                       *enhanced-start-name*)
                       (*debug-segment* "village1-hut")
                       (else "title-start")))
      (set! (-> this auto-save-count) 0)

@@ -1389,7 +1389,20 @@ void OpenGLRenderer::dispatch_buckets_jak1(DmaFollower dma,
     auto bucket_prof = prof.make_scoped_child(renderer->name_and_id());
     g_current_renderer = renderer->name_and_id();
     // lg::info("Render: {} start", g_current_renderer);
+    const bool ocean = bucket_id == (int)jak1::BucketId::OCEAN_NEAR && m_enhanced_post;
+    if (ocean) {
+      m_enhanced_post->begin_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                   m_render_state.render_fb_h, &m_render_state);
+    }
     renderer->render(dma, &m_render_state, bucket_prof);
+    if (ocean) {
+      m_enhanced_post->end_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                 m_render_state.render_fb_h, &m_render_state);
+    }
+    if (bucket_id == (int)jak1::BucketId::OCEAN_MID_AND_FAR && m_enhanced_post) {
+      m_enhanced_post->capture_far_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
+                                         m_render_state.render_fb_h);
+    }
     if (sync_after_buckets) {
       auto pp = scoped_prof("finish");
       glFinish();
@@ -1406,6 +1419,13 @@ void OpenGLRenderer::dispatch_buckets_jak1(DmaFollower dma,
     if (bucket_id == 31 - 1 && Gfx::g_global_settings.collision_enable) {
       auto p = prof.make_scoped_child("collision-draw");
       m_collide_renderer.render(&m_render_state, p);
+    }
+
+    // Enhanced: post effects on the finished 3D scene, before sprites and the HUD
+    if (bucket_id + 1 == (int)jak1::BucketId::PRE_SPRITE_TEX && m_enhanced_post) {
+      auto p = prof.make_scoped_child("enhanced-post");
+      m_enhanced_post->apply_to_scene(m_render_state.render_fb, m_render_state.render_fb_w,
+                                      m_render_state.render_fb_h, screen_vao, &m_render_state, p);
     }
   }
 

@@ -587,10 +587,72 @@
   0
   (none))
 
+;; Enhanced: JAK_ENHANCED_HOUR=<0..23> sets the time of day shortly after a test boot
+(define *enhanced-hour-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-hour-wanted* (pc-enhanced-getenv "JAK_ENHANCED_HOUR" *enhanced-hour-buf* 64))
+(define *enhanced-boot-frames* 0)
+
+;; Enhanced: the in-game menu (\ key, EnhancedPost::draw_menu) asks for a time of day, a frozen
+;; clock or a continue point; it's carried out here.
+(define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
+
+(defun enhanced-set-hour ((hour int))
+  (when *time-of-day-proc*
+    (set! (-> *time-of-day-proc* 0 hour) (max 0 (min 23 hour)))
+    (set! (-> *time-of-day-proc* 0 minute) 0)
+    (set! (-> *time-of-day-proc* 0 second) 0))
+  (none))
+
+(defun enhanced-menu-update ()
+  (when *enhanced-hour-wanted*
+    (+! *enhanced-boot-frames* 1)
+    (when (= *enhanced-boot-frames* 60)
+      (set! *enhanced-hour-wanted* #f)
+      (enhanced-set-hour (string->int *enhanced-hour-buf*))))
+  (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((1) (enhanced-set-hour (string->int *enhanced-menu-buf*)))
+    ((2)
+     (let ((cp (get-continue-by-name *game-info* *enhanced-menu-buf*)))
+       (if (and cp *target*) (start 'play cp))))
+    ((4)
+     (when *time-of-day-proc*
+       (set! (-> *time-of-day-proc* 0 time-ratio)
+             (cond
+               ((string= *enhanced-menu-buf* "0") 0.0)
+               (*time-of-day-fast* 18000.0)
+               (else 300.0))))))
+  (none))
+
+(define-extern enhanced-update-pushers (function none))
+(define-extern start (function symbol continue-point target))
+
+(define *enhanced-player-vec* (new 'static 'vector))
+
+(defbehavior enhanced-player-update target ()
+  (enhanced-menu-update)
+  ;; Enhanced: grass bends away from Jak
+  ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 on the zoomer (footprints and ruts)
+  (let ((v *enhanced-player-vec*))
+    (vector-copy! v (-> self control trans))
+    (set! (-> v w)
+          (cond
+            ((logtest? (-> self control root-prim prim-core action) (collide-action racer)) 2.0)
+            ((and (logtest? (-> self control status) (cshape-moving-flags onsurf))
+                  (let ((m (-> self control ground-pat material)))
+                    (or (= m (pat-material sand)) (= m (pat-material quicksand)) (= m (pat-material dirt))
+                        (= m (pat-material snow)) (= m (pat-material deepsnow)) (= m (pat-material swamp)))))
+             1.0)
+            (else 0.0)))
+    (pc-enhanced-set-player (the-as pointer v)))
+  ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)
+  (enhanced-update-pushers)
+  (none))
+
 (defbehavior flag-setup target ()
   (level-setup)
   (set! (-> self control last-transv quad) (-> self control transv quad))
   ((-> self control current-surface active-hook))
+  (enhanced-player-update)
   (cond
     ((logtest? (-> self control status) (cshape-moving-flags onsurf))
      (set-time! (-> self control last-time-on-surface))

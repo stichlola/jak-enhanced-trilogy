@@ -85,15 +85,20 @@ Si parte da Jak 2 perché il motore è quasi uguale a quello di Jak 3.
 Qui c'è più lavoro: bucket diversi (`dispatch_buckets_jak1`) e un sistema di luce diverso (mood
 a tabelle, cielo e sole propri).
 
-- [ ] Agganciare `EnhancedPost` al percorso di Jak 1: AO, GI, riflessi, raggi di luce, nuvole
-      volumetriche, profondità di campo.
-- [ ] Ponte GOAL per Jak 1: sole, ora del giorno, livello corrente.
-- [ ] Meteo pensato per Jak 1:
-      - Sandover e spiaggia: "Sunny" (è il suo look naturale);
-      - pioggia: Palude di Boggy Billy, Giungla Proibita;
-      - neve che cade (nuova): Snowy Mountain;
-      - aria tremolante dal calore: Fire Canyon, Volcanic Crater;
-      - nebbia: Misty Island.
+- [x] Agganciare `EnhancedPost` al percorso di Jak 1 (`dispatch_buckets_jak1`: prima degli sprite
+      e dell'HUD, i bucket dell'oceano). Luce rimbalzata ×0,6 come in Jak 2.
+- [x] Ponte GOAL per Jak 1: sole e scena (`time-of-day.gc`, tuoni col suono "thunder" del gioco),
+      Jak e i nemici per l'erba (`logic-target.gc`, `nav-enemy.gc`), menu (ora, orologio fermo,
+      continue point), `JAK_ENHANCED_START` / `JAK_ENHANCED_HOUR`. Jak 1 non ha lampioni.
+- [x] Zone di Jak 1 (nomi controllati solo in Jak 1: `sunken` c'è anche in Jak 2):
+      - isole (Sandover, spiaggia, colline, Geyser Rock): sempre bel tempo, un tocco di "Sunny"
+        (×0,3: il gioco è già saturo, quello pieno lo brucia);
+      - giungla: il ciclo pioggia/temporale/sole come la foresta;
+      - palude e Misty Island: nebbia fissa e pioviggine a tratti;
+      - Snowy Mountain: freddo, nebbiolina, cielo coperto;
+      - Fire Canyon, Volcanic Crater, Lava Tube, Klaww: vulcano; grotte e città sommersa:
+        sottoterra; Cittadella: tempio.
+- [ ] Ancora da fare per Jak 1: neve che cade, aria tremolante sulla lava, esplosioni.
 - [ ] **Passata di coerenza** sui tre giochi: stessa famiglia di colori, stessa intensità degli
       effetti, stessi preset.
 
