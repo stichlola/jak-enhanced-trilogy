@@ -1557,6 +1557,9 @@ void EnhancedPost::update_scene() {
   poll_world();
   m_zone = zone_of(level);
   m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
+  m_city = g_game_version != GameVersion::Jak1 &&
+           ((m_zone > 0 && m_zone < (int)g_world.zones.size() && g_world.zones[m_zone].name == "haven") ||
+            level.rfind("was", 0) == 0);
   // every visit to a zone picks its weather anew: the spells start from a random point of their
   // cycle (the first visit of a session too)
   if (m_zone != m_visit_zone && !level.empty() && level != "none") {
@@ -3111,6 +3114,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               m_settings.clouds && m_ssao_ready ? m_settings.cloud_amount : 0.f, m_grade.clouds,
               (float)std::fmod(m_time, 10000.0), m_night);
   const float on = m_ssao_ready ? 1.f : 0.f;
+  glUniform1f(glGetUniformLocation(id, "city_glow"), m_city ? m_night * on : 0.f);
   glUniform4f(glGetUniformLocation(id, "weather"), m_rain * on, m_dust * on,
               (float)std::fmod(m_time, 1000.0), m_wet * on);
   glUniform4f(glGetUniformLocation(id, "weather2"), m_storm * on, m_mist * on, m_clear * on,

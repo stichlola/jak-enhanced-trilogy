@@ -502,6 +502,7 @@ class EnhancedPost {
   int m_zone = 0;
   bool m_pond = false;  // the water here is a pond (Jak 3's desert oases)
   float m_night = 0.f;
+  bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)
   void read_focus(int w, int h);

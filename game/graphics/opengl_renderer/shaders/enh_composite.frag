@@ -110,6 +110,7 @@ uniform sampler2D tex_T13;      // the sun shadow map as plain depths (soft shad
 uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per meter, soft (1) or not
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
+uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
@@ -731,6 +732,80 @@ vec3 rainbow(vec3 ray_view) {
     }
   }
   return col;
+}
+
+// the night sky over the game's: stars in two layers (cells on a cube of directions; twinkling,
+// bluish to warm), a faint milky way, the moon's disk and halo; hidden where the game's sky is
+// bright (its clouds), by the weather and by a city's glow
+vec3 night_sky(vec3 dv, vec3 base, float px) {
+  vec3 wd = world_dir(dv);
+  float up = wd.y;
+  vec3 add = vec3(0.0);
+  float clear = (1.0 - smoothstep(0.1, 0.28, luma(base))) *
+                (1.0 - clamp((clouds.y - 0.45) * 1.8, 0.0, 1.0)) * (1.0 - min(weather.x, 1.0)) *
+                (1.0 - min(weather.y * 1.5, 1.0)) * (1.0 - min(weather2.y, 1.0)) * smoothstep(0.0, 0.15, up);
+  if (clear > 0.0) {
+    vec3 a = abs(wd);
+    vec2 f;
+    float face;
+    if (a.x > a.y && a.x > a.z) {
+      f = wd.yz / a.x;
+      face = wd.x > 0.0 ? 0.0 : 1.0;
+    } else if (a.y > a.z) {
+      f = wd.xz / a.y;
+      face = wd.y > 0.0 ? 2.0 : 3.0;
+    } else {
+      f = wd.xy / a.z;
+      face = wd.z > 0.0 ? 4.0 : 5.0;
+    }
+    // the milky way: a band across the sky, mottled
+    vec3 band_n = normalize(vec3(0.35, 0.45, 0.82));
+    float bd = dot(wd, band_n);
+    float band = exp(-bd * bd / 0.035) * (0.4 + 0.9 * vnoise3(wd * 7.0) * vnoise3(wd * 19.0 + 3.0));
+    float city_dim = 1.0 - 0.75 * city_glow;
+    add += vec3(0.55, 0.6, 0.78) * band * 0.045 * city_dim;
+    for (int layer = 0; layer < 2; layer++) {
+      float cells = layer == 0 ? 70.0 : 220.0;
+      vec2 g = (f * 0.5 + 0.5) * cells;
+      vec2 cid = floor(g);
+      vec3 key = vec3(cid, face + 7.0 * float(layer));
+      float h = ihash3(key);
+      // (more of the faint ones along the milky way)
+      float thr = layer == 0 ? 0.9 : 0.78 - 0.25 * band;
+      if (h > thr) {
+        vec2 sp = vec2(ihash3(key + 11.0), ihash3(key + 23.0)) * 0.7 + 0.15;
+        float ang = length(g - cid - sp) / cells * 1.5708;
+        float size = px * (layer == 0 ? 1.1 : 0.75);
+        float shape = exp(-ang * ang / (size * size));
+        float b = (h - thr) / (1.0 - thr);
+        b = layer == 0 ? 0.25 + 2.2 * b * b * b : 0.15 + 0.5 * b;
+        float tw = 0.7 + 0.3 * sin(clouds.z * (2.0 + 5.0 * ihash3(key + 5.0)) + h * 60.0);
+        vec3 tint = mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.86, 0.66), ihash3(key + 31.0));
+        add += tint * shape * b * tw * (layer == 0 ? 1.0 : city_dim);
+      }
+    }
+    add *= clear;
+  }
+  // the moon (the night's light comes from it): a pale disk, darker seas, a soft halo
+  float md = dot(dv, sky_sun.xyz);
+  if (md > 0.9 && sky_sun.w > 0.0) {
+    float mclear = (1.0 - clamp((clouds.y - 0.6) * 2.0, 0.0, 1.0)) * (1.0 - min(weather.x + weather.y, 1.0));
+    float rr = 0.0135;
+    float off = sqrt(max(2.0 * (1.0 - md), 0.0));
+    float disk = 1.0 - smoothstep(rr - px, rr + px, off);
+    vec3 side = normalize(cross(sky_sun.xyz, vec3(0.0, 1.0, 0.0)) + 1e-4);
+    vec3 upv = cross(side, sky_sun.xyz);
+    vec2 mq = vec2(dot(dv, side), dot(dv, upv)) / rr;
+    float seas = smoothstep(0.45, 0.7, vnoise3(vec3(mq * 2.2, 1.7)) * 0.7 + vnoise3(vec3(mq * 5.0, 4.1)) * 0.3);
+    float limb = sqrt(max(1.0 - dot(mq, mq), 0.0));
+    vec3 moon = vec3(0.98, 0.96, 0.88) * (1.0 - 0.3 * seas) * (0.75 + 0.25 * limb) * 1.25;
+    float halo = pow(md, 900.0) * 0.25 + pow(md, 60.0) * 0.06;
+    add = mix(add, moon, disk * mclear * smoothstep(0.0, 0.05, up));
+    add += vec3(0.6, 0.68, 0.85) * halo * (0.4 + 0.6 * mclear);
+  }
+  // a city's lights on the low sky
+  add += vec3(1.0, 0.55, 0.25) * city_glow * 0.06 * (1.0 - smoothstep(-0.05, 0.4, up));
+  return add * clouds.w;
 }
 
 // the sun's color by its height, the moon's at night
@@ -1912,6 +1987,10 @@ void main() {
       z = 0.0;  // the weather below treats it as sky
     }
   }
+  // the night sky: stars, the moon, a city's glow (over the game's sky)
+  if (clouds.w > 0.01 && z == 0.0 && wsurf == 0.0) {
+    c += night_sky(ray, c, pixel_rad);
+  }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
     float up = world_dir(ray).y;
@@ -1923,7 +2002,9 @@ void main() {
   if (fog.z > 0.0 && z > 0.0) {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
-    c = mix(c, mix(fog_color, vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15), 0.55 * weather.x), amount * fog.z);
+    vec3 fc = mix(fog_color, vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15), 0.55 * weather.x);
+    fc += vec3(1.0, 0.55, 0.25) * city_glow * 0.06 * clamp(exp(-height * fog.y), 0.0, 1.0);
+    c = mix(c, fc, amount * fog.z);
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -2119,10 +2200,34 @@ void main() {
 
   // halos: in rain, fog or dust the air around each light glows (scattering), less where the
   // light is behind something
-  float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3;
+  // (at night the air always holds some haze: the lamps glow in it, and light the air along the
+  // view between them and the scene)
+  float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + clouds.w * 0.35;
   if (air > 0.02 && light_count > 0) {
     vec3 halo = vec3(0.0);
+    vec3 shine = vec3(0.0);
     float scene_dist = z > 0.0 ? length(p) : 1e12;
+    for (int i = 0; i < min(light_count, 32); i++) {
+      // the light scattered toward the camera along the ray up to the scene: the integral of
+      // 1 / (h^2 + (t - tc)^2), h the light's distance off the ray
+      vec3 lp = light_pos[i].xyz;
+      float lr = light_pos[i].w;
+      float tc = dot(lp, ray);
+      float h = sqrt(max(dot(lp, lp) - tc * tc, 1.0));
+      if (h > lr * 1.5) {
+        continue;
+      }
+      float t1 = min(scene_dist, tc + lr * 3.0);
+      float t0 = 0.0;
+      if (t1 <= t0) {
+        continue;
+      }
+      float hs = max(h, lr * 0.08);
+      float inte = (atan((t1 - tc) / hs) - atan((t0 - tc) / hs)) * lr / hs;
+      shine += light_color[i].rgb * inte * (1.0 - smoothstep(lr * 0.5, lr * 1.5, h)) *
+               smoothstep(2.0 * 4096.0, 6.0 * 4096.0, length(lp));
+    }
+    c += shine * min(air, 1.5) * 0.02;
     for (int i = 0; i < min(light_count, 16); i++) {
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);
