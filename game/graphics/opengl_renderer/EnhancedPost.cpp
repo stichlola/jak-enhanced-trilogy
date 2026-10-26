@@ -108,6 +108,11 @@ struct WeatherPreset {
   const char* name;
   std::array<float, 9> mix;  // rain, storm, fog, mist, snow, dust, clouds, after, wet
 };
+// cutscene close-ups: nearer than this (game units) the screen-space shadows and occlusion and the
+// sun's shadow map fade out. At a face's scale a pixel step is a millimeter: Daxter's fur and Jak's
+// hair shadow themselves into specks and stripes, and the map's texels show as blocks
+constexpr float kCloseUp = 3.f * 4096.f;  // 3 m
+
 const WeatherPreset kWeatherPresets[] = {
     {"Clear", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
     {"Changing (by area)", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
@@ -911,9 +916,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glBindTexture(GL_TEXTURE_2D, near_water ? m_ocean_depth[1] : m_black_tex);
   glActiveTexture(GL_TEXTURE6);
   glBindTexture(GL_TEXTURE_2D, far_water ? m_ocean_depth[2] : m_black_tex);
+  glActiveTexture(GL_TEXTURE14);
+  glBindTexture(GL_TEXTURE_2D, near_water ? m_ocean_depth[0] : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T5"), 5);
   glUniform1i(glGetUniformLocation(id, "tex_T6"), 6);
+  glUniform1i(glGetUniformLocation(id, "tex_T14"), 14);
   m_far_ocean_ready = false;
   glUniform1f(glGetUniformLocation(id, "water_strength"),
               water ? m_settings.water_reflection_strength : 0.f);
@@ -1730,6 +1738,7 @@ void EnhancedPost::update_scene() {
     m_flash = std::min(1.f, f * m_bolt[3]) * std::min(1.f, m_storm * 1.5f);
   }
   ease(m_cine, movie && s.cine_dof ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
+  ease(m_movie, movie ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
 }
 
 // cutscene autofocus: nine depth samples around the middle of the screen go into a pixel buffer;
@@ -2524,6 +2533,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
                 on ? m_settings.sun_shadow_strength : 0.f);
     glUniform1f(glGetUniformLocation(id, "sun_length"), m_settings.sun_shadow_length * kMeter);
   }
+  glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
   // traced occlusion
   const bool rt_ao = m_settings.rt_ao && m_rt_ready;
   glUniform1i(glGetUniformLocation(id, "rt_levels"), rt_ao ? m_rt_count : 0);
@@ -2981,6 +2991,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
+  glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
   glUniform1f(glGetUniformLocation(id, "vignette"), m_settings.vignette);
   glUniform1f(glGetUniformLocation(id, "sharpen"), m_settings.sharpen);
   return shader;

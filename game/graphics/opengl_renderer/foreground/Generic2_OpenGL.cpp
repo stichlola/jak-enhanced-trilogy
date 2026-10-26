@@ -1,6 +1,7 @@
 #include "common/log/log.h"
 
 #include "Generic2.h"
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/gfx.h"
 
 void Generic2::opengl_setup(ShaderLibrary& shaders) {
@@ -194,7 +195,12 @@ void Generic2::setup_opengl_for_draw_mode(const DrawMode& draw_mode,
     ASSERT(false);
   }
 
-  if (draw_mode.get_depth_write_enable()) {
+  // Enhanced: see-through effects (a gun's blast fan, flashes, trails) don't write depth: the post
+  // pass would take them for a surface, shade it, and let it shadow what's behind it
+  const bool see_through = draw_mode.get_ab_enable() &&
+                           draw_mode.get_alpha_blend() != DrawMode::AlphaBlend::DISABLED &&
+                           g_enhanced_normals.enabled && g_enhanced_normals.fbo;
+  if (draw_mode.get_depth_write_enable() && !see_through) {
     glDepthMask(GL_TRUE);
   } else {
     glDepthMask(GL_FALSE);

@@ -477,6 +477,7 @@ class EnhancedPost {
   double m_drift[2] = {0, 0};    // how far the wind has carried the dust (m, wrapped)
   int m_weather_state = 0;       // what the changing weather is doing now (for the debug text)
   float m_cine = 0.f;  // cutscene depth of field, eased in and out
+  float m_movie = 0.f;  // a cutscene plays, eased: its close-ups get the game's own shading
   int m_zone = 0;
   float m_night = 0.f;
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame

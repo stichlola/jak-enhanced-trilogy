@@ -14,6 +14,7 @@ uniform float intensity;
 uniform float max_distance;  // game units
 uniform vec4 sun;            // xyz: key light direction in view space, w: shadow strength
 uniform float sun_length;    // game units marched toward the light
+uniform float close_up;      // cutscenes: nearer than this (game units) it all fades out (0 = off)
 
 // ray-traced occlusion: short rays through the levels' hierarchies (see rt_trace in
 // enh_composite.frag for the layout), world space in game units
@@ -236,5 +237,8 @@ void main() {
   }
   // fade out toward the max distance
   ao = mix(ao, 1.0, smoothstep(0.6 * max_distance, max_distance, dist));
+  if (close_up > 0.0) {
+    ao = mix(1.0, ao, smoothstep(0.5 * close_up, close_up, dist));
+  }
   ao_out = ao;
 }

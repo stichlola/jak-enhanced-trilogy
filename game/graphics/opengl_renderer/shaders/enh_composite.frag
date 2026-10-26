@@ -84,6 +84,7 @@ uniform vec2 motion_keep;  // sharp until, full blur from (game units)
 
 uniform sampler2D tex_T5;  // depth with the near ocean's surface (black when none)
 uniform sampler2D tex_T6;  // depth right after the mid/far ocean (black when none)
+uniform sampler2D tex_T14; // depth right before the near ocean (black when none)
 uniform float water_strength;
 uniform vec3 right_view;  // world axes in view space
 uniform vec3 fwd_view;
@@ -112,6 +113,7 @@ uniform float sheet;            // sheet lightning: the whole sky lit from insid
 uniform vec2 snow_heat;          // snowfall, hot air over lava (0..1)
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
+uniform float close_up;          // cutscenes: nearer than this (game units) no sun shadow map (0 = off)
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float blast_seed[4];
@@ -1099,7 +1101,10 @@ void main() {
     float wd = texture(tex_T5, uv).r;
     float fd = texture(tex_T6, uv).r;
     bool under_is_sea = fd > 1e-7 && abs(fd - d) < 1e-7 && dot(up_view, view_pos(uv, fd)) < -4096.0;
-    if (wd > d + 1e-7) {
+    // (where the scene's depth changed after the sea was drawn, something drawn later covers it,
+    // as the game shows it: Spargus palace's floor, under the sea's level)
+    bool covered = abs(texture(tex_T14, uv).r - d) > 1e-7;
+    if (wd > d + 1e-7 && !covered) {
       wsurf = wd;
       water_deep = under_is_sea || d <= 1e-7;
     } else if (under_is_sea) {
@@ -1581,6 +1586,9 @@ void main() {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
       float sh = sun_shadow(w) * smoothstep(0.0, 0.3, ndl);
+      if (close_up > 0.0) {
+        sh *= smoothstep(0.5 * close_up, close_up, z);
+      }
       c *= 1.0 - shadow_strength * sh;
     }
   }
