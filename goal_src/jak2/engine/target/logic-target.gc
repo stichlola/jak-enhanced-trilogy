@@ -1517,6 +1517,52 @@
   (none)
   )
 
+;; Enhanced: JAK_ENHANCED_HOUR=<0..23> sets the time of day shortly after a test boot
+(define *enhanced-hour-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-hour-wanted* (pc-enhanced-getenv "JAK_ENHANCED_HOUR" *enhanced-hour-buf* 64))
+(define *enhanced-boot-frames* 0)
+
+;; Enhanced: the in-game menu (\ key, EnhancedPost::draw_menu) asks for a time of day, a frozen
+;; clock or a continue point; it's carried out here.
+(define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
+
+(defun enhanced-menu-update ()
+  (when (and *enhanced-hour-wanted* *time-of-day*)
+    (+! *enhanced-boot-frames* 1)
+    (when (= *enhanced-boot-frames* 60)
+      (set! *enhanced-hour-wanted* #f)
+      (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-hour-buf*))
+      )
+    )
+  (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((1)
+     (when *time-of-day*
+       (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-menu-buf*))
+       )
+     )
+    ((2)
+     (let ((cp (get-continue-by-name *game-info* *enhanced-menu-buf*)))
+       (if (and cp *target*)
+           (send-event *target* 'continue cp)
+           )
+       )
+     )
+    ((4)
+     (when *time-of-day*
+       (if (string= *enhanced-menu-buf* "0")
+           (send-event (ppointer->process *time-of-day*) 'change 'ratio 0.0)
+           (send-event (ppointer->process *time-of-day*) 'change 'ratio 1.0)
+           )
+       )
+     )
+    )
+  (none)
+  )
+
+(define-extern enhanced-update-pushers (function none))
+
+(define *enhanced-player-vec* (new 'static 'vector))
+
 (defbehavior flag-setup target ()
   (cond
     ((= (-> *cpad-list* cpads (-> self control cpad number) stick0-speed) 0.0)
@@ -1586,6 +1632,29 @@
   (if (!= (not (logtest? (-> self game features) (game-feature sidekick))) (not (-> self sidekick)))
       (target-sidekick-setup (logtest? (-> self game features) (game-feature sidekick)))
       )
+  (enhanced-menu-update)
+  ;; Enhanced: grass bends away from Jak
+  ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts)
+  (let ((v *enhanced-player-vec*))
+    (vector-copy! v (-> self control trans))
+    (set! (-> v w) (cond
+                     ((focus-test? self pilot) 2.0)
+                     ((and (logtest? (-> self control status) (collide-status on-surface))
+                           (let ((m (-> self control ground-pat material)))
+                             (or (= m (pat-material sand)) (= m (pat-material quicksand)) (= m (pat-material dirt))
+                                 (= m (pat-material snow)) (= m (pat-material deepsnow)) (= m (pat-material swamp))
+                                 )
+                             )
+                           )
+                      1.0
+                      )
+                     (else 0.0)
+                     )
+          )
+    (pc-enhanced-set-player (the-as pointer v))
+    )
+  ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)
+  (enhanced-update-pushers)
   (if (and (!= (not (logtest? (-> self game features) (game-feature board))) (not (-> self board board)))
            (not (logtest? (focus-status board) (-> self focus-status)))
            )

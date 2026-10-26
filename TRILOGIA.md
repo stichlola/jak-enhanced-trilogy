@@ -63,10 +63,15 @@ tempo di gioco e opzioni. Per chi gioca, il risultato è un solo gioco continuo.
 
 Si parte da Jak 2 perché il motore è quasi uguale a quello di Jak 3.
 
-- [ ] Agganciare `EnhancedPost` in `dispatch_buckets_jak2`: prima dell'HUD, i bucket dell'oceano,
-      il target delle normali, `merc2` (bagnato, luci).
-- [ ] Portare i ponti GOAL da `goal_src/jak3` a `goal_src/jak2`: sole e scena (`enhanced-send-scene`
-      in `time-of-day.gc`), camera, polvere e tempesta, tuoni.
+- [x] Agganciare `EnhancedPost` in `dispatch_buckets_jak2` (prima di minimappa e HUD, i bucket
+      dell'oceano). Il resto del renderer (normali, `merc2`, materiali, erba) era già comune.
+- [x] Ponti GOAL in `goal_src/jak2`: sole, scena e tuoni (`time-of-day.gc`), lampioni, esplosioni
+      (`generic-obs.gc`), Jak e chi gli sta attorno per l'erba (`logic-target.gc`, `nav-enemy.gc`),
+      menu (ora, orologio fermo, continue point), `JAK_ENHANCED_START` / `JAK_ENHANCED_HOUR`.
+- [x] Zone di Jak 2 nella gradazione (palazzo, oracolo, nascondiglio, miniera, scavi, trivella,
+      castello, tomba, nido) e una correzione per gioco: in Jak 2 luce rimbalzata ×0,6 e lampioni
+      ×0,45 (livelli più luminosi, neon più forti).
+- [ ] Da fare: popolazione e traffico, munizioni, tutto sbloccato, minimappa nascosta.
 - [ ] Meteo per zona. Haven intatta (Jak 2) è perfetta per pioggia e temporale di notte.
       Poi Fogne, Foresta, Montagna, Atollo, Palazzo, Strip.
 - [ ] Popolazione e traffico: Jak 2 ha il suo gestore del traffico (`city`). Si adatta

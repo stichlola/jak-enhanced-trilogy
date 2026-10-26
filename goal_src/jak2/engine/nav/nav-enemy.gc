@@ -2774,3 +2774,47 @@
     )
   :post nav-enemy-debug-control-post
   )
+
+;; Enhanced: the grass bends away from the enemies, passers-by and vehicles near Jak too
+(define *enhanced-pushers* (new 'static 'array float 32))
+
+(define *enhanced-pusher-count* 0)
+
+(defun enhanced-update-pushers ()
+  "Up to 8 enemies, passers-by and vehicles within 30 m of Jak (x y z radius) for the grass shader."
+  (set! *enhanced-pusher-count* 0)
+  (when *target*
+    (iterate-process-tree
+      *active-pool*
+      (lambda ((p process))
+        (when (< *enhanced-pusher-count* 8)
+          (let ((radius (cond
+                          ((type? p enemy) (meters 1.1))
+                          ((type? p rigid-body-object) (meters 2.6))
+                          (else 0.0)
+                          )
+                        )
+                )
+            (when (> radius 0.0)
+              (let ((pos (-> (the-as process-drawable p) root trans))
+                    (i (* 4 *enhanced-pusher-count*))
+                    )
+                (when (< (vector-vector-distance pos (-> *target* control trans)) (meters 30))
+                  (set! (-> *enhanced-pushers* i) (-> pos x))
+                  (set! (-> *enhanced-pushers* (+ i 1)) (-> pos y))
+                  (set! (-> *enhanced-pushers* (+ i 2)) (-> pos z))
+                  (set! (-> *enhanced-pushers* (+ i 3)) radius)
+                  (+! *enhanced-pusher-count* 1)
+                  )
+                )
+              )
+            )
+          )
+        #f
+        )
+      *kernel-context*
+      )
+    )
+  (pc-enhanced-set-pushers (the-as pointer *enhanced-pushers*) *enhanced-pusher-count*)
+  (none)
+  )

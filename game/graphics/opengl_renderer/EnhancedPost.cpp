@@ -61,6 +61,15 @@ EnhancedNormalTarget::~EnhancedNormalTarget() {
 }
 
 namespace {
+// Jak 2's levels are lit brighter and its lamps (neon signs) are stronger than Jak 3's: the same
+// settings bounce and glow less there, so the two games look alike
+float game_gi_scale() {
+  return g_game_version == GameVersion::Jak2 ? 0.6f : 1.f;
+}
+float game_lamp_scale() {
+  return g_game_version == GameVersion::Jak2 ? 0.45f : 1.f;
+}
+
 GLuint make_1x1(u32 rgba) {
   GLuint tex;
   glGenTextures(1, &tex);
@@ -796,7 +805,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         float bright = lc[0] + lc[1] + lc[2];
         for (int k = 0; k < 3; k++) {
-          c.color[k] = lc[k] * m_settings.light_strength * m_settings.lamp_strength;
+          c.color[k] =
+              lc[k] * m_settings.light_strength * m_settings.lamp_strength * game_lamp_scale();
         }
         c.color[3] = 0.f;
         c.score = bright * radius / (dist + radius);
@@ -1080,23 +1090,25 @@ int zone_of(const std::string& level) {
       return kZoneForest;
     }
   }
-  for (const char* p : {"mhc", "nst", "lmh"}) {
+  // Jak 2's levels too: Haven's palace, the oracle, the hideout; the strip mine and the dig are dusty;
+  // the drill platform, the underport, the castle and the tomb are underground
+  for (const char* p : {"mhc", "nst", "lmh", "nes"}) {
     if (starts(p)) {
       return kZoneMetalHead;
     }
   }
   for (const char* p : {"cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom",
-                        "piazza", "stadium", "intp"}) {
+                        "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide"}) {
     if (starts(p)) {
       return kZoneHaven;
     }
   }
-  for (const char* p : {"was", "lwas", "des", "wca", "wcb", "hang", "arena"}) {
+  for (const char* p : {"was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"}) {
     if (starts(p)) {
       return kZoneDesert;
     }
   }
-  for (const char* p : {"sew", "fact", "mine", "tow", "rail", "prec", "comb"}) {
+  for (const char* p : {"sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"}) {
     if (starts(p)) {
       return kZoneUnder;
     }
@@ -1104,7 +1116,7 @@ int zone_of(const std::string& level) {
   if (starts("vol")) {
     return kZoneVolcano;
   }
-  if (starts("temp")) {
+  if (starts("temp") || starts("tomb")) {
     return kZoneTemple;
   }
   return kZoneOther;
@@ -2588,7 +2600,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
   glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
               m_vol_h ? 1.f / m_vol_h : 0.f);
-  glUniform1f(glGetUniformLocation(id, "gi_strength"), m_gi_ready ? m_settings.gi_strength : 0.f);
+  glUniform1f(glGetUniformLocation(id, "gi_strength"),
+              m_gi_ready ? m_settings.gi_strength * game_gi_scale() : 0.f);
   glUniform1f(glGetUniformLocation(id, "shafts_strength"),
               m_shafts_ready ? m_settings.shafts_strength * (1.f + 1.2f * m_clear) : 0.f);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],

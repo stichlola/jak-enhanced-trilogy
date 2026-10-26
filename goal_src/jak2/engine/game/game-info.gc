@@ -293,6 +293,9 @@
     )
   )
 
+;; Enhanced: filled from JAK_ENHANCED_START
+(define *enhanced-start-name* (new 'global 'string 64 (the-as string #f)))
+
 (defmethod initialize! ((this game-info) (arg0 symbol) (arg1 game-save) (arg2 string))
   (local-vars (v0-3 int))
   (case arg0
@@ -369,6 +372,10 @@
            )
          ((demo?)
           "demo-start"
+          )
+         ((and *debug-segment* (pc-enhanced-getenv "JAK_ENHANCED_START" *enhanced-start-name* 64))
+          ;; Enhanced: JAK_ENHANCED_START picks the boot continue point (test runs)
+          *enhanced-start-name*
           )
          (*debug-segment*
            "game-start"
