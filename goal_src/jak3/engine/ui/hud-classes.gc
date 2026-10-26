@@ -71,7 +71,7 @@
 
 (defmethod update-values! ((this hud-map))
   (cond
-    ;; Enhanced: hidden unless the menu's switch shows it
+    ;; Enhanced: the menu's switch can hide it (shown by default)
     ((and (update! *minimap*) (pc-enhanced-minimap?))
      (logior! (-> this flags) (hud-flags show))
      (let ((t9-1 (method-of-type hud update-values!)))

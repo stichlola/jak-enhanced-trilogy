@@ -125,7 +125,7 @@ extern EnhancedTimeOfDay g_enhanced_tod;
 
 struct EnhancedMenu {
   bool open = false;
-  std::atomic<bool> minimap = false;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
+  std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   std::mutex mutex;
   int request = 0;
   std::string arg;

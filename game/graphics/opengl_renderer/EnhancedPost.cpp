@@ -3271,7 +3271,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["weather_mix"] = s.weather_mix;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
-  j["minimap"] = g_enhanced_menu.minimap.load();
+  j["show_minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
 }
 
@@ -3329,8 +3329,8 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("vivid", s.vivid);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
-  bool map = false;
-  get("minimap", map);
+  bool map = true;  // ("show_minimap": the old "minimap" key saved it off by default)
+  get("show_minimap", map);
   g_enhanced_menu.minimap = map;
 }
 
