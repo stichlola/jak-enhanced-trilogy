@@ -628,8 +628,24 @@
 
 (define *enhanced-player-vec* (new 'static 'vector))
 
+;; Enhanced: JAK_ENHANCED_JAK1_BLAST=1 (test runs): a dark eco crate's explosion 6 m in front of Jak
+;; every 3 s, to see the renderer's flash and shockwave
+(define *enhanced-blast-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-blast-test* (pc-enhanced-getenv "JAK_ENHANCED_JAK1_BLAST" *enhanced-blast-buf* 16))
+(define *enhanced-blast-frames* 0)
+
 (defbehavior enhanced-player-update target ()
   (enhanced-menu-update)
+  (when *enhanced-blast-test*
+    (+! *enhanced-blast-frames* 1)
+    (when (zero? (mod *enhanced-blast-frames* 180))
+      (let ((pos (new 'stack-no-clear 'vector)))
+        (vector-z-quaternion! pos (-> self control quat))
+        (vector-float*! pos pos 24576.0)
+        (vector+! pos pos (-> self control trans))
+        (+! (-> pos y) 4096.0)
+        (process-spawn part-tracker :init part-tracker-init group-dark-eco-box-explosion -1 #f #f #f pos
+                       :to *entity-pool*))))
   ;; Enhanced: grass bends away from Jak
   ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 on the zoomer (footprints and ruts), 3 on foot
   (let ((v *enhanced-player-vec*))

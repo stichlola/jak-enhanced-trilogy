@@ -374,6 +374,22 @@
       (suspend)
       0))
 
+;; Enhanced: does a particle group's name say it's an explosion ("explode", "explosion")? Jak 1 has
+;; no explosion process: each blast is its own group. A crate just breaking isn't one
+(defun enhanced-explosion-name? ((name string))
+  (let ((found #f)
+        (crate #f)
+        )
+    (when name
+      (dotimes (i (- (length name) 4))
+        (if (and (= (-> name data i) #x65) (= (-> name data (+ i 1)) #x78) (= (-> name data (+ i 2)) #x70)
+                 (= (-> name data (+ i 3)) #x6c) (= (-> name data (+ i 4)) #x6f))
+            (set! found #t))
+        (if (and (= (-> name data i) #x63) (= (-> name data (+ i 1)) #x72) (= (-> name data (+ i 2)) #x61)
+                 (= (-> name data (+ i 3)) #x74) (= (-> name data (+ i 4)) #x65))
+            (set! crate #t))))
+    (and found (not crate))))
+
 (defbehavior part-tracker-init part-tracker ((arg0 sparticle-launch-group)
               (arg1 time-frame)
               (arg2 (function part-tracker none))
@@ -381,6 +397,13 @@
               (arg4 process)
               (arg5 collide-prim-core))
   (stack-size-set! (-> self main-thread) 128)
+  ;; Enhanced: the renderer gives explosions a flash of light and a shockwave (radius: the group's
+  ;; bounds, 4 m when it has none, at most 12 m)
+  (when (enhanced-explosion-name? (-> arg0 name))
+    (let ((v (new 'stack-no-clear 'vector)))
+      (set! (-> v quad) (-> arg5 world-sphere quad))
+      (set! (-> v w) (if (< (-> arg0 bounds w) 8192.0) 16384.0 (fmin 49152.0 (-> arg0 bounds w))))
+      (pc-enhanced-explosion (the-as pointer v))))
   (set! (-> self root) (new 'process 'trsqv))
   (set! (-> self root trans quad) (-> arg5 world-sphere quad))
   (set! (-> self offset quad) (-> arg5 world-sphere quad))
