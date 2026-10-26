@@ -68,7 +68,7 @@ Massimo: everything). The menu's choices (switches, vegetation, population) are 
 start; the environment switches below still win over them, and are only written to the file if the
 player then changes something in the menu.
 
-Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_SHADOW_CASTERS=0` (only the static level geometry in the shadow map), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_VEGETATION=0|1|2` (classic, moderate, lush: default), `JAK_ENHANCED_VINES=0` (no extra wall vines), `JAK_ENHANCED_POPULATION=0|1|2|3` (Haven's passers-by, traffic, guards and Metal Heads: half, the game's, double: default, 3.5x; at most 20 of a kind; also in the menu, live), `JAK_ENHANCED_GRASS_PUSH=<m>` (the radius grass bends away from Jak in, 0 = off), `JAK_ENHANCED_NORMALS=0` (normals from depth only; `2` shows them: left the ones used, level normals in color, right the depth-rebuilt ones), `JAK_ENHANCED_MENU=1` or `<kind>:<value>` (menu open from the start, plus one queued request: `1:23` hour, `2:<continue point>`, `3:x,y,z,yaw`, `4:0` frozen clock, `5:1` on the jetboard, `6:<0-3>` population, `7:<frames>` a harmless test explosion in front of Jak every so many frames), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
+Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXAA instead of TAA), `JAK_ENHANCED_SHADOWS=<strength>` (0 = screen-space shadows only), `JAK_ENHANCED_SHADOW_CASTERS=0` (only the static level geometry in the shadow map), `JAK_ENHANCED_MIST=<density /m>` (0 = off) and `JAK_ENHANCED_MIST_SUN=<x>`, `JAK_ENHANCED_LIGHTS=<strength>` (0 = no dynamic lights), `JAK_ENHANCED_HOUR=<0-23>` (set the time of day after boot, for testing), `JAK_ENHANCED_ENEMIES=0` (debug boots: keep the start-of-story city; by default they get the late-game factions, Krimson Guard and Metal Heads out in the streets), `JAK_ENHANCED_WATER_SIM=0` (no swell, refraction, caustics), `JAK_ENHANCED_TP=<x,y,z>[,yaw]` (test boots: move Jak there, meters/degrees), `JAK_ENHANCED_VEGETATION=0|1|2` (classic, moderate, lush: default), `JAK_ENHANCED_VINES=0` (no extra wall vines), `JAK_ENHANCED_POPULATION=0|1|2|3` (Haven's passers-by, traffic, guards and Metal Heads: half, the game's, double: default, 3.5x; at most 20 of a kind; also in the menu, live), `JAK_ENHANCED_GRASS_PUSH=<m>` (the radius grass bends away from Jak in, 0 = off), `JAK_ENHANCED_NORMALS=0` (normals from depth only; `2` shows them: left the ones used, level normals in color, right the depth-rebuilt ones), `JAK_ENHANCED_MENU=1` or `<kind>:<value>` (menu open from the start, plus one queued request: `1:23` hour, `2:<continue point>`, `3:x,y,z,yaw`, `4:0` frozen clock, `5:1` on the jetboard, `6:<0-3>` population, `7:<frames>` a harmless test explosion in front of Jak every so many frames, `8:<type>` into a vehicle), `JAK_ENHANCED_SUN_YAW=<deg>` (turn the sun around the up axis, for testing), `JAK_ENHANCED_AO_DEBUG=1` (occlusion and
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 
@@ -86,6 +86,15 @@ then e.g. `(set! *enhanced-board-speed* 1.6)`. `scripts/enhanced/og_repl.py "<fo
 the REPL's nREPL port (8181) from scripts; `scripts/enhanced/capture_window.ps1` screenshots the game
 window. Useful forms: `(send-event (ppointer->process *time-of-day*) 'change 'hour 7)`,
 `(start 'play (get-continue-by-name *game-info* "wascitya-top-of-stairs"))`.
+
+City sounds: Haven's sound banks share six half-slots (`city-sound-expand-want-list`); the Krimson
+Guard's and the Metal Heads' banks (`citykgf`, `citymhf`) take two each, the vehicles' (`citycarh`:
+engines, ignition, thrust, crashes), the Freedom League's, the passers-by's and the district's one
+each. With both factions out in the streets the vehicles' bank was the one left out, so stolen cars
+and bikes were silent: `update-sound-info` (cty-borrow-manager.gc) now puts it first. Names the game
+plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not missing sounds.
+`JAK_ENHANCED_MENU=8:<vehicle type>` puts Jak in a new vehicle (0-2 bikes, needs ctycarb; 3-5 cars,
+ctycara; 7 Hellcat) once its level is in, for testing.
 
 ## Not done (yet)
 

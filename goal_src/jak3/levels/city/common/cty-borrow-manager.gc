@@ -437,6 +437,22 @@
         )
       )
     )
+  ;; Enhanced: the vehicles' bank first (the list is in priority order). With the Krimson Guard and
+  ;; the Metal Heads both in the city (two slots each, of six) it was the one left out: no engines,
+  ;; ignition or crashes.
+  (let ((first (car *faction-sound-list*)))
+    (when (and first (!= first 'citycarh))
+      (let ((s (cdr *faction-sound-list*)))
+        (while (not (null? s))
+          (when (= (car s) 'citycarh)
+            (set! (car s) first)
+            (set! (car *faction-sound-list*) 'citycarh)
+            )
+          (set! s (cdr s))
+          )
+        )
+      )
+    )
   (persist-with-delay
     *setting-control*
     'cty-borrow-manager-city-sound
