@@ -61,29 +61,32 @@
   //     "thunder" (of those) a thunderstorm; the rest are fair with clouds passing
   //   morning_mist: fog on early mornings (5 to 9)
   //   game_dust: the game's own sandstorms blow the dust up too
+  //   fog: the distance fog and the volumetric mist. A number (fixed: 1 = full, 0 = none) or
+  //     spells {"period": s, "clear": chance of none, "light": chance of a little, "light_amount"}
+  //     (the rest are full); rain and morning mist bring some back. Default: 1
   "zones": {
     "other": {
       "day": {"lift": [0, 0, 0], "gain": [1, 1, 1], "saturation": 1.0, "contrast": 0.0, "warmth": 0.0, "clouds": 0.4},
       "night": {"lift": [0, 0, 0.012], "gain": [1, 1, 1.02], "saturation": 1.0, "contrast": 0.02, "warmth": 0.0, "clouds": 0.4},
-      "weather": {}
+      "weather": {"fog": {"period": 420, "clear": 0.4, "light": 0.35}}
     },
     // Haven: teal shadows and warm light by day; blue night, neon kept vivid
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
-      "weather": {"showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 0.6}
+      "weather": {"fog": {"period": 420, "clear": 0.4, "light": 0.35}, "showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 0.6}
     },
     // desert: sun-baked by day, cold blue night
     "desert": {
       "day": {"lift": [0.01, 0.004, -0.006], "gain": [1.05, 1, 0.91], "saturation": 1.04, "contrast": 0.05, "warmth": 0.04, "clouds": 0.2},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25},
-      "weather": {"dust": 0.15, "harder": {"dust": 0.65}, "harder_from": 120, "harder_to": 210, "game_dust": true}
+      "weather": {"fog": {"period": 420, "clear": 0.45, "light": 0.35}, "dust": 0.15, "harder": {"dust": 0.65}, "harder_from": 120, "harder_to": 210, "game_dust": true}
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
       "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 1.0}
+      "weather": {"fog": {"period": 420, "clear": 0.3, "light": 0.4}, "showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 1.0}
     },
     // Metal Heads: sickly purple shadows
     "metalhead": {
@@ -114,7 +117,7 @@
     "wilds": {
       "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
-      "weather": {"showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.4, "morning_mist": 0.8}
+      "weather": {"fog": {"period": 420, "clear": 0.35, "light": 0.35}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.4, "morning_mist": 0.8}
     },
     // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night. Ten-minute
     // spells: mostly fair, some with a shower, a few with a thunderstorm. The game is saturated
@@ -122,13 +125,13 @@
     "islands": {
       "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
-      "weather": {"showers": {"period": 600, "chance": 0.55, "thunder": 0.45}, "sunny": 0.3, "morning_mist": 0.5}
+      "weather": {"fog": {"period": 480, "clear": 0.65, "light": 0.3}, "showers": {"period": 600, "chance": 0.55, "thunder": 0.45}, "sunny": 0.3, "morning_mist": 0.5}
     },
     // the jungle: deep greens, the rain comes often
     "jungle": {
       "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"showers": {"period": 300, "chance": 0.8, "thunder": 0.5}, "sunny": 0.3, "morning_mist": 1.0}
+      "weather": {"fog": {"period": 420, "clear": 0.35, "light": 0.4}, "showers": {"period": 300, "chance": 0.8, "thunder": 0.5}, "sunny": 0.3, "morning_mist": 1.0}
     },
     // Boggy Billy's swamp: it always rains, harder now and then, under a low fog
     "swamp": {

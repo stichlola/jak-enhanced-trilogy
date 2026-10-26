@@ -77,6 +77,10 @@ struct ZoneWeather {
   float shower_period = 0.f, shower_chance = 0.f, shower_thunder = 0.f;
   float morning_mist = 0.f;
   bool game_dust = false;
+  // the distance fog and the volumetric mist: a fixed amount, or spells (period > 0) that are
+  // clear, light or full
+  float fog = 1.f;
+  float fog_period = 0.f, fog_clear = 0.f, fog_light = 0.f, fog_light_amount = 0.35f;
 };
 struct WorldZone {
   std::string name;
@@ -181,6 +185,17 @@ void load_world() {
         }
         we.morning_mist = wj.value("morning_mist", 0.f);
         we.game_dust = wj.value("game_dust", false);
+        if (wj.contains("fog")) {
+          const auto& f = wj["fog"];
+          if (f.is_number()) {
+            we.fog = f.get<float>();
+          } else {
+            we.fog_period = f.value("period", 480.f);
+            we.fog_clear = f.value("clear", 0.f);
+            we.fog_light = f.value("light", 0.f);
+            we.fog_light_amount = f.value("light_amount", 0.35f);
+          }
+        }
       }
       if (name == "other") {
         w.zones[0] = zone;
@@ -806,7 +821,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // world up in view space, for the fog and the heat haze
   glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
   glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
-              m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount : 0.f, 0.f);
+              m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount * m_fog : 0.f, 0.f);
   glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
               render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
   m_time += 1.0 / 60.0;
@@ -1304,6 +1319,7 @@ void EnhancedPost::update_scene() {
   // whether the ground is wet
   float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
   float snow = 0.f;
+  float fog = 1.f;
   // lava levels: the air over it shimmers whatever the weather
   const float heat = zone.weather.heat;
   const bool outdoors = zone.weather.outdoors;
@@ -1401,6 +1417,17 @@ void EnhancedPost::update_scene() {
         }
       }
       sunny = std::max(sunny, w.sunny * fair * (1.f - m_night));
+      // the fog: fixed, or its own spells (clear, a little, full), each its own
+      fog = w.fog;
+      if (w.fog_period > 0.f) {
+        const double tt = m_time + phase0;
+        const double period = std::max(30.0, (double)w.fog_period);
+        const uint32_t spell = (uint32_t)(tt / period) * 2246822519u + 3266489917u;
+        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
+        fog = roll < w.fog_clear ? 0.f : roll < w.fog_clear + w.fog_light ? w.fog_light_amount : 1.f;
+      }
+      // rain and morning mist bring some of it back
+      fog = std::max(fog, std::max(rain * 0.7f, mist));
       mist = std::max(mist, w.morning_mist * std::clamp(hour - 4.5f, 0.f, 1.f) *
                                 std::clamp((9.5f - hour) / 1.5f, 0.f, 1.f));
       if (!outdoors) {
@@ -1409,6 +1436,9 @@ void EnhancedPost::update_scene() {
       }
       break;
     }
+    case 0:
+      fog = 0.f;
+      break;
     case 2:
       rain = 1.f;
       break;
@@ -1422,6 +1452,7 @@ void EnhancedPost::update_scene() {
     case 5:
       clear = 1.f;
       wet = 0.85f;
+      fog = 0.5f;
       break;
     case 6:
       mist = 1.f;
@@ -1429,6 +1460,7 @@ void EnhancedPost::update_scene() {
       break;
     case 7:
       sunny = 1.f;
+      fog = 0.f;
       break;
     case 8:
       snow = 1.f;
@@ -1476,6 +1508,8 @@ void EnhancedPost::update_scene() {
   ease(m_dust, dust * s.dust_strength, k_weather);
   ease(m_storm, storm, k_weather);
   ease(m_mist, mist, k_weather);
+  // fog comes and goes slowly (half a minute)
+  ease(m_fog, fog, 1.f - std::exp(-dt / 10.f));
   ease(m_clear, clear, k_weather);
   ease(m_sunny, sunny, k_weather);
   ease(m_snow, snow, k_weather);
@@ -2201,7 +2235,7 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   }
   glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
               render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
-  glUniform4f(glGetUniformLocation(id, "mist"), m_settings.mist_density, m_settings.mist_height,
+  glUniform4f(glGetUniformLocation(id, "mist"), m_settings.mist_density * m_fog, m_settings.mist_height,
               m_settings.mist_distance, (float)m_time);
   glUniform4f(glGetUniformLocation(id, "mist_shape"), m_settings.mist_ground,
               m_settings.mist_noise, m_settings.mist_sun, m_settings.mist_aniso);
@@ -2470,7 +2504,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
   update_rt(render_state);
   if (m_settings.ssao) {
     do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
-    if (m_settings.volume && m_ssao_ready) {
+    if (m_settings.volume && m_ssao_ready && m_fog > 0.01f) {
       do_volume(render_state, screen_vao, prof);
     }
     if (m_settings.gi && m_ssao_ready) {
