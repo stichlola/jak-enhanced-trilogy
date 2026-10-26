@@ -1,10 +1,10 @@
 """Jak Enhanced Trilogy: 4x AI-upscaled textures as OpenGOAL texture replacements.
 
-    python scripts/enhanced/hd_textures.py [--tpages REGEX] [--gpu 0]
+    python scripts/enhanced/hd_textures.py [--game jak1|jak2|jak3] [--tpages REGEX] [--gpu 0]
 
-Reads the decompiler's texture dump (decompiler_out/jak3_pal/textures/<tpage>/<name>.png, made
+Reads the decompiler's texture dump (decompiler_out/<folder>/textures/<tpage>/<name>.png, made
 with "save_texture_pngs": true), upscales each one 4x with Real-ESRGAN (wrap-padded so tiling
-textures stay seamless) and writes custom_assets/jak3/texture_replacements/<tpage>/<name>.png.
+textures stay seamless) and writes custom_assets/<game>/texture_replacements/<tpage>/<name>.png.
 Decals, cutouts and glass (any texel with alpha < 120/128, see translucent.ps1) get the upscaled
 colors but their original alpha, resized smoothly (alpha_restore.ps1): the upscaler would move
 and soften their transparency. --opaque-only leaves them at their original resolution. The
@@ -26,13 +26,17 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-DUMP = ROOT / "decompiler_out/jak3_pal/textures"
-OUT = ROOT / "custom_assets/jak3/texture_replacements"
 CACHE = ROOT / "out/enhanced-upscale-cache"
 PAD = 16
 
-# Spargus, the desert and its sub-areas, the vehicles, plus Jak/Daxter and the guns.
-DEFAULT_TPAGES = r"^(was|des|wca|wcb|wasstad|desert|wcar|wvehicle|jak|daxter|gun|common|lj|dk)"
+# per game: the decompiler's output folder and the pages upscaled by default. Jak 3: Spargus, the
+# desert and its sub-areas, the vehicles, plus Jak/Daxter and the guns (Haven still to do);
+# Jak 1 and 2: everything
+GAMES = {
+    "jak1": ("jak1_pal", r"."),
+    "jak2": ("jak2_pal", r"."),
+    "jak3": ("jak3_pal", r"^(was|des|wca|wcb|wasstad|desert|wcar|wvehicle|jak|daxter|gun|common|lj|dk)"),
+}
 # HUD, fonts and minimaps are drawn 1:1 on screen or decoded by the game: leave them alone.
 EXCLUDE = r"(minimap|hud|font|progress|-sprite$|warp|ocean)"
 
@@ -78,7 +82,8 @@ def translucent(todo):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tpages", default=DEFAULT_TPAGES, help="regex of texture pages to upscale")
+    parser.add_argument("--game", choices=sorted(GAMES), default="jak3")
+    parser.add_argument("--tpages", help="regex of texture pages to upscale (default: per game)")
     parser.add_argument("--model", default="realesrgan-x4plus")
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--min-size", type=int, default=16, help="skip textures smaller than this (px)")
@@ -87,10 +92,14 @@ def main():
     parser.add_argument("--tools", type=Path, default=ROOT.parent / "jak3-ue5/tools")
     parser.add_argument("--opaque-only", action="store_true", help="skip translucent textures")
     args = parser.parse_args()
+    global OUT
+    folder, default_tpages = GAMES[args.game]
+    dump = ROOT / "decompiler_out" / folder / "textures"
+    OUT = ROOT / "custom_assets" / args.game / "texture_replacements"
 
-    pick, skip = re.compile(args.tpages), re.compile(EXCLUDE)
+    pick, skip = re.compile(args.tpages or default_tpages), re.compile(EXCLUDE)
     todo = []
-    for tpage in sorted(p for p in DUMP.iterdir() if p.is_dir()):
+    for tpage in sorted(p for p in dump.iterdir() if p.is_dir()):
         if not pick.search(tpage.name) or skip.search(tpage.name):
             continue
         for png in sorted(tpage.glob("*.png")):

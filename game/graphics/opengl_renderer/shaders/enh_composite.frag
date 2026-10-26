@@ -1350,7 +1350,9 @@ void main() {
     float ssr_hit = 0.0;
     if (z < 80.0 * 4096.0) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
-      vec3 q = p;
+      // start each pixel's march a little further along (the TAA averages the steps away: no
+      // staircase where the reflection meets what it reflects)
+      vec3 q = p + r * step_len * hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0);
       for (int i = 0; i < 32; i++) {
         q += r * step_len;
         step_len *= 1.12;
@@ -1368,8 +1370,23 @@ void main() {
         }
         float scene_z = view_z(sd);
         if (q.z > scene_z && q.z - scene_z < step_len + 4096.0) {
+          // home in on where the ray meets the surface (halving the last step)
+          vec3 lo = q - r * step_len / 1.12;
+          vec3 hi = q;
+          for (int k = 0; k < 5; k++) {
+            vec3 mid = (lo + hi) * 0.5;
+            vec2 muv = 0.5 * vec2(proj.z * mid.x, proj.w * mid.y) / mid.z + 0.5;
+            if (mid.z > view_z(texture(tex_T3, muv).r)) {
+              hi = mid;
+            } else {
+              lo = mid;
+            }
+          }
+          quv = 0.5 * vec2(proj.z * hi.x, proj.w * hi.y) / hi.z + 0.5;
+          // fade toward the screen's edges, wider at the top (where the reflected ray leaves the
+          // picture it ends in a hard line otherwise)
           vec2 edge = min(quv, 1.0 - quv);
-          ssr_hit = smoothstep(0.0, 0.05, min(edge.x, edge.y)) *
+          ssr_hit = smoothstep(0.0, 0.08, edge.x) * smoothstep(0.0, 0.15, edge.y) *
                     (1.0 - smoothstep(50.0 * 4096.0, 80.0 * 4096.0, z));
           ssr = texture(tex_T0, quv).rgb;
           break;

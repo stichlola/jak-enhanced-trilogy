@@ -397,6 +397,28 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   (none)
   )
 
+;; Enhanced: JAK_ENHANCED_POSE (test boots, for pictures): "board" on the jetboard, "v<n>" in a new
+;; vehicle of type n, "g<n>" holding out the gun of pickup-type n, ready to fire
+(define *enhanced-pose-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-pose-wanted* (pc-enhanced-getenv "JAK_ENHANCED_POSE" *enhanced-pose-buf* 64))
+(define *enhanced-pose-frames* 0)
+
+(defun enhanced-pose-number ()
+  "The number after the pose's letter."
+  (let ((n 0)
+        (i 1)
+        )
+    (while (and (< i (length *enhanced-pose-buf*))
+                (>= (-> *enhanced-pose-buf* data i) #x30)
+                (<= (-> *enhanced-pose-buf* data i) #x39)
+                )
+      (set! n (+ (* n 10) (- (the int (-> *enhanced-pose-buf* data i)) #x30)))
+      (+! i 1)
+      )
+    n
+    )
+  )
+
 (define-extern enhanced-update-pushers (function none))
 
 (define *enhanced-player-vec* (new 'static 'vector))
@@ -479,6 +501,32 @@ capture exactly."
     (when (and *enhanced-tp-wanted* *target* (= *enhanced-camlog-frames* 90))
       (set! *enhanced-tp-wanted* #f)
       (enhanced-teleport)
+      )
+    (when (and *enhanced-pose-wanted* *target* (>= *enhanced-camlog-frames* 150))
+      (let ((kind (-> *enhanced-pose-buf* data 0))
+            (n (enhanced-pose-number))
+            )
+        (cond
+          ((= kind #x62)
+           (when (= *enhanced-camlog-frames* 150)
+             (logior! (-> *game-info* features) (game-feature board))
+             (send-event *target* 'change-mode 'board #f)
+             )
+           )
+          ((= kind #x76)
+           (when (= *enhanced-camlog-frames* 150)
+             (set! *enhanced-vehicle-wanted* n)
+             (set! *enhanced-vehicle-frames* 0)
+             )
+           )
+          ((= kind #x67)
+           ;; every frame: the gun stays out
+           (logior! (-> *game-info* features) (the-as game-feature (logior (ash 1 5) (ash 1 (- n 20)))))
+           (set! (-> *game-info* gun-type) (the-as pickup-type n))
+           (set! (-> *target* gun latch?) #t)
+           )
+          )
+        )
       )
     (when (zero? (mod *enhanced-camlog-frames* 120))
       (let ((cam (-> *math-camera* trans))

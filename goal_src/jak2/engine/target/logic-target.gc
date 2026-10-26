@@ -1526,7 +1526,48 @@
 ;; clock or a continue point; it's carried out here.
 (define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
 
+;; Enhanced: JAK_ENHANCED_POSE (test boots, for pictures): "board" on the jetboard, "v<n>" in a new
+;; vehicle of type n, "g<n>" holding out the gun of pickup-type n, ready to fire
+(define *enhanced-pose-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-pose-wanted* (pc-enhanced-getenv "JAK_ENHANCED_POSE" *enhanced-pose-buf* 64))
+(define *enhanced-pose-frames* 0)
+
+(defun enhanced-pose-number ()
+  "The number after the pose's letter."
+  (let ((n 0)
+        (i 1)
+        )
+    (while (and (< i (length *enhanced-pose-buf*))
+                (>= (-> *enhanced-pose-buf* data i) #x30)
+                (<= (-> *enhanced-pose-buf* data i) #x39)
+                )
+      (set! n (+ (* n 10) (- (the int (-> *enhanced-pose-buf* data i)) #x30)))
+      (+! i 1)
+      )
+    n
+    )
+  )
+
 (defun enhanced-menu-update ()
+  (when (and *enhanced-pose-wanted* *target*)
+    (+! *enhanced-pose-frames* 1)
+    (when (>= *enhanced-pose-frames* 150)
+      (cond
+        ((= (-> *enhanced-pose-buf* data 0) #x62)
+         (when (= *enhanced-pose-frames* 150)
+           (logior! (-> *game-info* features) (game-feature board))
+           (send-event *target* 'change-mode 'board #f)
+           )
+         )
+        ((= (-> *enhanced-pose-buf* data 0) #x67)
+         ;; every frame: the gun stays out
+         (logior! (-> *game-info* features) (game-feature gun gun-yellow gun-red gun-blue gun-dark))
+         (set! (-> *game-info* gun-type) (the-as pickup-type (enhanced-pose-number)))
+         (set! (-> *target* gun latch?) #t)
+         )
+        )
+      )
+    )
   (when (and *enhanced-hour-wanted* *time-of-day*)
     (+! *enhanced-boot-frames* 1)
     (when (= *enhanced-boot-frames* 60)
