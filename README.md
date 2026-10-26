@@ -35,7 +35,8 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
   behind something), water, metal and glass trace the ray through the level's real geometry, lit by
   the game's own light at that hour. Hits show the real textures.
 - **Ray-traced ambient occlusion**: short rays from every pixel through the same geometry darken
-  corners, recesses and alleys from what's really there, even off the screen.
+  corners, recesses and alleys from what's really there, even off the screen. Off by default for
+  now (too slow): turn it on in the menu.
 - **Vegetation**: more grass and plants around the original ones, and climbing plants on the walls
   near the level's own vines. Grass sways in the wind and bends away from Jak, enemies and vehicles.
 - **Desert**: footprints and tire ruts in the sand, and a new sand texture on the dunes.
