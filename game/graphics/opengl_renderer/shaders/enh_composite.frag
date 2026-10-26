@@ -914,13 +914,13 @@ vec2 step_ripples(vec2 xz) {
       }
       float ring = d - a * (0.8 + 0.3 * strength);
       float band = exp(-ring * ring / 0.0012) * (1.0 - smoothstep(0.3, 1.1, a));
-      slope += rel / max(d, 1e-3) * band * sin(ring * 90.0) * 0.25 * strength;
+      slope += rel / max(d, 1e-3) * band * sin(ring * 90.0) * 0.38 * strength;
     }
   }
   return slope;
 }
 
-// the drops a step throws up from a puddle: a dozen (two dozen landing) small drops on short arcs,
+// the drops a step throws up from a puddle: ten (twenty landing) small drops on short arcs,
 // hidden behind the scene. Returns how much drop covers the pixel
 float step_drops(vec2 uv, float scene_z) {
   float sum = 0.0;
@@ -946,7 +946,7 @@ float step_drops(vec2 uv, float scene_z) {
     if (abs(uv.y - cuv.y) > reach || abs(uv.x - cuv.x) > reach * abs(proj.z / proj.w)) {
       continue;
     }
-    int n = strength > 1.5 ? 14 : 7;
+    int n = strength > 1.5 ? 20 : 10;
     for (int j = 0; j < n; j++) {
       float h1 = hash1(vec2(float(j), splash[i].x + 0.37));
       float h2 = hash1(vec2(splash[i].z, float(j) * 1.7));
@@ -965,8 +965,8 @@ float step_drops(vec2 uv, float scene_z) {
       }
       vec2 duv = 0.5 + 0.5 * vec2(v.x * proj.z, v.y * proj.w) / v.z;
       vec2 dd = (uv - duv) / texel;
-      // a drop of ~1.5 cm, at least a pixel, a little stretched along its fall
-      float rad = max(1.1, 0.015 * 4096.0 * abs(proj.w) * 0.5 / v.z / texel.y);
+      // a drop of ~2 cm, at least a pixel and a bit, a little stretched along its fall
+      float rad = max(1.3, 0.018 * 4096.0 * abs(proj.w) * 0.5 / v.z / texel.y);
       float k = 1.0 - smoothstep(rad * 0.5, rad, length(vec2(dd.x, dd.y * 0.6)));
       sum += k * (1.0 - smoothstep(0.3, 0.55, age)) * min(1.0, wet_here * 2.0);
     }
@@ -1882,7 +1882,7 @@ void main() {
       vec3 glow = texture(tex_T1, tex_coord).rgb;
       vec3 lit = c * 1.15 + vec3(0.08, 0.09, 0.1) + mix(fog_color, vec3(luma(fog_color)), 0.5) * 0.25 +
                  glow * 1.2;
-      c = mix(c, lit, drops * 0.3);
+      c = mix(c, lit, drops * 0.45);
     }
   }
 
