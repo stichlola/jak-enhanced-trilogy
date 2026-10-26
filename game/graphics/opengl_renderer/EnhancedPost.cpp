@@ -1940,6 +1940,15 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
           glBufferData(GL_COPY_READ_BUFFER, gpu.size[i], data[i], GL_STATIC_DRAW);
         }
         glBindBuffer(GL_COPY_READ_BUFFER, 0);
+        if (rt->layer_count > 0) {
+          gpu.layers = rt->layer_count;
+          glGenTextures(1, &gpu.tex);
+          glBindTexture(GL_TEXTURE_2D_ARRAY, gpu.tex);
+          glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kRtLayerSize, kRtLayerSize, gpu.layers);
+          glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kRtLayerSize, kRtLayerSize, gpu.layers,
+                          GL_RGBA, GL_UNSIGNED_BYTE, rt->layers.data());
+          glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+        }
       }
       m_rt_levels[lev->load_id] = gpu;
     }
@@ -1956,6 +1965,9 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
     if (!used) {
       if (it->second.buf[0]) {
         glDeleteBuffers(3, it->second.buf);
+      }
+      if (it->second.tex) {
+        glDeleteTextures(1, &it->second.tex);
       }
       it = m_rt_levels.erase(it);
     } else {
@@ -1982,6 +1994,29 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
       glBindBuffer(GL_COPY_WRITE_BUFFER, m_rt_buf[i]);
       glBufferData(GL_COPY_WRITE_BUFFER, total[i], nullptr, GL_STATIC_DRAW);
     }
+    // and one texture array (with mipmaps, for the far hits)
+    GLint max_layers = 2048;
+    glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &max_layers);
+    int layers = 0;
+    for (auto id : in_use) {
+      layers += m_rt_levels[id].layers;
+    }
+    layers = std::clamp(layers, 1, (int)max_layers);
+    if (m_rt_tex) {
+      glDeleteTextures(1, &m_rt_tex);
+    }
+    glGenTextures(1, &m_rt_tex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_rt_tex);
+    int mips = 1;
+    while ((kRtLayerSize >> mips) > 0) {
+      mips++;
+    }
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, mips, GL_RGBA8, kRtLayerSize, kRtLayerSize, layers);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    int layer_at = 0;
     u32 offset[3] = {0, 0, 0};
     m_rt_count = 0;
     for (auto id : in_use) {
@@ -1990,7 +2025,14 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
       base[0] = offset[0] / sizeof(EnhancedRtLevel::Node);
       base[1] = offset[1] / sizeof(EnhancedRtLevel::Tri);
       base[2] = offset[2] / sizeof(u32) / 8;
-      base[3] = 0;
+      base[3] = layer_at;
+      if (gpu.tex && layer_at + gpu.layers <= layers) {
+        glCopyImageSubData(gpu.tex, GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, m_rt_tex, GL_TEXTURE_2D_ARRAY,
+                           0, 0, 0, layer_at, kRtLayerSize, kRtLayerSize, gpu.layers);
+        layer_at += gpu.layers;
+      } else {
+        base[3] = -1;  // no textures: mean colors
+      }
       for (int i = 0; i < 3; i++) {
         glBindBuffer(GL_COPY_READ_BUFFER, gpu.buf[i]);
         glBindBuffer(GL_COPY_WRITE_BUFFER, m_rt_buf[i]);
@@ -2001,8 +2043,10 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
     }
     glBindBuffer(GL_COPY_READ_BUFFER, 0);
     glBindBuffer(GL_COPY_WRITE_BUFFER, 0);
-    lg::info("[enhanced] ray tracing: {} levels, {:.0f} MB", m_rt_count,
-             (total[0] + total[1] + total[2]) / 1e6);
+    glGenerateMipmap(GL_TEXTURE_2D_ARRAY);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+    lg::info("[enhanced] ray tracing: {} levels, {:.0f} MB, {} textures", m_rt_count,
+             (total[0] + total[1] + total[2]) / 1e6, layer_at);
   }
   m_rt_ready = m_rt_count > 0;
 }
@@ -2044,6 +2088,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     for (int i = 0; i < 3; i++) {
       glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
     }
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, m_rt_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
     glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
     glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
     // the same decoding as interp_time_of_day: palette p, channel ch, 64 = 1

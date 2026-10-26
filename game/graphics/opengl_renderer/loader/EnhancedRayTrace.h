@@ -11,32 +11,42 @@
  * geometry (tfrag and tie, the most detailed level of detail, already in world space) goes into a
  * bounding volume hierarchy the post pass can trace rays through on the GPU: reflections on water,
  * metal and glass still find what's off the screen or hidden behind something. Each triangle keeps
- * its texture's mean color and its first vertex's time-of-day color index, so a hit is shaded with
- * the game's own baked light at the current hour.
+ * its texture (a layer of a small texture array: the level's textures at kRtLayerSize), its UVs and
+ * its first vertex's time-of-day color index, so a hit is shaded with the game's own baked light
+ * at the current hour.
  */
+constexpr int kRtLayerSize = 64;  // the textures' size in the ray tracer's texture array
+
 struct EnhancedRtLevel {
   // 32 bytes: bounds, then (inner) the right child (the left one follows the node), or (leaf) the
-  // first triangle with the count in the high byte of w... see enh_rt.glsl
+  // first triangle and the count (see rt_trace in enh_composite.frag)
   struct Node {
     float min[3];
     u32 a;  // inner: index of the right child; leaf: first triangle
     float max[3];
     u32 b;  // inner: 0; leaf: triangle count
   };
-  // 48 bytes: a vertex and two edges, the texture's mean color (RGBA8), the time-of-day color
+  // 80 bytes: a vertex and two edges, the texture's mean color (RGBA8), the time-of-day color,
+  // the texture's layer (UINT32_MAX: none, use the mean color), the three vertices' UVs
   struct Tri {
     float v0[3];
     u32 color;
     float e1[3];
     u32 tod;  // index into palettes
     float e2[3];
-    u32 pad;
+    u32 layer;
+    float uv0[2], uv1[2];
+    float uv2[2];
+    u32 pad[2];
   };
   std::string name;
   std::vector<Node> nodes;
   std::vector<Tri> tris;
   // 8 palettes per time-of-day color, RGBA8 each (the PackedTimeOfDay of each tree, unpacked)
   std::vector<u32> palettes;
+  // the textures, kRtLayerSize x kRtLayerSize RGBA8 each, one after the other
+  std::vector<u32> layers;
+  int layer_count = 0;
 };
 
 // build the level's hierarchy and keep it for the renderer (replaces one of the same name)

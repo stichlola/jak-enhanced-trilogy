@@ -46,15 +46,16 @@ uniform sampler2D tex_T11;  // the level geometry's world normals (a = 0: none, 
 
 // ray-traced reflections: the loaded levels' bounding volume hierarchies (EnhancedRayTrace.h),
 // world space in game units. Nodes: 2 vec4 (min, w: right child or first triangle; max, w: 0 or
-// the leaf's triangle count). Triangles: 3 vec4 (v0, w: texture mean color; edge 1, w: time-of-day
-// color; edge 2). Palettes: 8 RGBA8 per time-of-day color.
+// the leaf's triangle count). Triangles: 5 vec4 (v0, w: texture mean color; edge 1, w: time-of-day
+// color; edge 2, w: texture layer or ~0; uv0, uv1; uv2). Palettes: 8 RGBA8 per time-of-day color.
 layout(std430, binding = 0) readonly buffer RtNodes { vec4 rt_nodes[]; };
 layout(std430, binding = 1) readonly buffer RtTris { vec4 rt_tris[]; };
 layout(std430, binding = 2) readonly buffer RtPalettes { uint rt_pal[]; };
 uniform int rt_mode;          // 0 off, 1 where the screen-space reflection misses, 2 traced only,
                               // 3 debug: the traced color alone on the water (magenta: missed)
 uniform int rt_levels;
-uniform ivec4 rt_base[16];    // per level: node, triangle, palette base
+uniform ivec4 rt_base[16];    // per level: node, triangle, palette, texture layer base (-1: none)
+uniform sampler2DArray tex_T12;  // the levels' textures, small
 uniform vec4 rt_tod[8];       // the time-of-day palettes' weights (per channel)
 uniform int normal_debug;
 uniform vec4 proj;  // a, b, fx, fy (see enh_ssao.frag)
@@ -218,6 +219,7 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
   float best = tmax;
   int best_tri = -1;
   int best_level = 0;
+  vec2 best_uv = vec2(0.0);
   int stack[32];
   for (int l = 0; l < rt_levels; l++) {
     int nb = rt_base[l].x;
@@ -243,7 +245,7 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
       int count = int(floatBitsToUint(b.w));
       if (count > 0) {
         for (int k = 0; k < count; k++) {
-          int ti = (tb + first + k) * 3;
+          int ti = (tb + first + k) * 5;
           vec3 v0 = rt_tris[ti].xyz;
           vec3 e1 = rt_tris[ti + 1].xyz;
           vec3 e2 = rt_tris[ti + 2].xyz;
@@ -268,6 +270,7 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
             best = t;
             best_tri = ti;
             best_level = l;
+            best_uv = vec2(u, v);
           }
         }
       } else if (sp < 31) {
@@ -280,6 +283,15 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
     return false;
   }
   vec3 tex = unpackUnorm4x8(floatBitsToUint(rt_tris[best_tri].w)).rgb;
+  uint layer = floatBitsToUint(rt_tris[best_tri + 2].w);
+  if (layer != 0xffffffffu && rt_base[best_level].w >= 0) {
+    vec4 a = rt_tris[best_tri + 3];
+    vec2 uv2 = rt_tris[best_tri + 4].xy;
+    vec2 tuv = a.xy * (1.0 - best_uv.x - best_uv.y) + a.zw * best_uv.x + uv2 * best_uv.y;
+    // coarser further away (the ray's footprint grows with the distance)
+    float lod = clamp(log2(best / (6.0 * 4096.0)), 0.0, 6.0);
+    tex = textureLod(tex_T12, vec3(tuv, float(rt_base[best_level].w + int(layer))), lod).rgb;
+  }
   int pi = (rt_base[best_level].z + int(floatBitsToUint(rt_tris[best_tri + 1].w))) * 8;
   vec4 tod = vec4(0.0);
   for (int k = 0; k < 8; k++) {
@@ -295,7 +307,8 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
 
 // a reflection: the screen-space one where it found something (ssr_hit), else what the ray meets
 // in the levels (rt_mode), else env (the screen where the ray vanishes, or the fog color)
-vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float tmax) {
+vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float tmax,
+                        float amount) {
   if (rt_mode >= 2) {
     ssr_hit = 0.0;
   }
@@ -308,8 +321,8 @@ vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float
     vec3 rc;
     float rd;
     // start a little off the surface, so it doesn't find itself
-    if (rt_trace(o + d * (0.1 * 4096.0), d, tmax, rc, rd)) {
-      env = rc;
+    if (amount > 0.0 && rt_trace(o + d * (0.1 * 4096.0), d, tmax, rc, rd)) {
+      env = mix(env, rc, amount);
     }
   }
   return mix(env, ssr, ssr_hit);
@@ -349,7 +362,7 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
       break;
     }
   }
-  vec3 refl = reflection_with_rt(p, r, env, ssr, hit, 60.0 * 4096.0);
+  vec3 refl = reflection_with_rt(p, r, env, ssr, hit, 60.0 * 4096.0, 1.0);
   if (rt_mode > 0) {
     hit = 1.0;  // traced or not, it's the best there is
   }
@@ -647,8 +660,9 @@ void main() {
       }
     }
     // what the screen doesn't have: traced through the levels (near water only, it's costly)
-    refl = z < 200.0 * 4096.0 ? reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0)
-                              : mix(refl, ssr, ssr_hit);
+    // (faded out from 150 to 200 m, no seam)
+    refl = reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0,
+                              1.0 - smoothstep(150.0 * 4096.0, 200.0 * 4096.0, z));
     wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
 
     // sun glints: a tight highlight plus a broad sheen toward the sun

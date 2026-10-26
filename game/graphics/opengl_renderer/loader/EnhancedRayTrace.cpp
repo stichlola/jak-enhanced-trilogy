@@ -167,6 +167,33 @@ u32 mean_color(const tfrag3::Texture& tex) {
   return (u32)(sum[0] / n) | ((u32)(sum[1] / n) << 8) | ((u32)(sum[2] / n) << 16) | 0xff000000;
 }
 
+// a texture scaled to kRtLayerSize square (each texel the mean of what it covers), appended
+void add_layer(const tfrag3::Texture& tex, std::vector<u32>* out) {
+  const int n = kRtLayerSize;
+  for (int y = 0; y < n; y++) {
+    int y0 = y * tex.h / n, y1 = std::max(y0 + 1, (y + 1) * tex.h / n);
+    for (int x = 0; x < n; x++) {
+      int x0 = x * tex.w / n, x1 = std::max(x0 + 1, (x + 1) * tex.w / n);
+      u32 sum[4] = {0, 0, 0, 0};
+      u32 count = 0;
+      for (int yy = y0; yy < y1; yy++) {
+        for (int xx = x0; xx < x1; xx++) {
+          u32 px = tex.data[yy * tex.w + xx];
+          for (int ch = 0; ch < 4; ch++) {
+            sum[ch] += (px >> (8 * ch)) & 0xff;
+          }
+          count++;
+        }
+      }
+      u32 v = 0;
+      for (int ch = 0; ch < 4; ch++) {
+        v |= (sum[ch] / count) << (8 * ch);
+      }
+      out->push_back(v);
+    }
+  }
+}
+
 void add_palettes(const tfrag3::PackedTimeOfDay& colors, std::vector<u32>* out) {
   for (u32 c = 0; c < colors.color_count; c++) {
     for (int p = 0; p < 8; p++) {
@@ -189,6 +216,20 @@ void enhanced_build_rt(const tfrag3::Level& level, const std::string& name) {
   auto rt = std::make_unique<EnhancedRtLevel>();
   rt->name = name;
   std::unordered_map<s32, u32> tex_color;
+  std::unordered_map<s32, u32> tex_layer;
+  auto layer_of = [&](s32 tex) {
+    if (tex < 0 || (size_t)tex >= level.textures.size() || !level.textures[tex].w ||
+        !level.textures[tex].h || level.textures[tex].data.size() < (size_t)level.textures[tex].w *
+                                                                        level.textures[tex].h) {
+      return UINT32_MAX;
+    }
+    auto it = tex_layer.find(tex);
+    if (it == tex_layer.end()) {
+      it = tex_layer.emplace(tex, (u32)rt->layer_count++).first;
+      add_layer(level.textures[tex], &rt->layers);
+    }
+    return it->second;
+  };
   auto color_of = [&](s32 tex) {
     if (tex < 0 || (size_t)tex >= level.textures.size()) {
       return 0xff808080u;
@@ -209,6 +250,7 @@ void enhanced_build_rt(const tfrag3::Level& level, const std::string& name) {
       size_t end = d + 1 < draws.size() ? draws[d + 1].unpacked.idx_of_first_idx_in_full_buffer
                                         : idx.size();
       u32 color = color_of(draws[d].tree_tex_id);
+      u32 layer = layer_of(draws[d].tree_tex_id);
       auto tri = [&](u32 a, u32 b, u32 c) {
         if (a >= verts.size() || b >= verts.size() || c >= verts.size() || a == b || b == c ||
             a == c) {
@@ -233,7 +275,14 @@ void enhanced_build_rt(const tfrag3::Level& level, const std::string& name) {
         }
         t.color = color;
         t.tod = tod_base + va.color_index;
-        t.pad = 0;
+        t.layer = layer;
+        t.uv0[0] = va.s;
+        t.uv0[1] = va.t;
+        t.uv1[0] = vb.s;
+        t.uv1[1] = vb.t;
+        t.uv2[0] = vc.s;
+        t.uv2[1] = vc.t;
+        t.pad[0] = t.pad[1] = 0;
         rt->tris.push_back(t);
       };
       if (strips) {
@@ -301,10 +350,12 @@ void enhanced_build_rt(const tfrag3::Level& level, const std::string& name) {
   }
   rt->tris = std::move(ordered);
   rt->nodes = std::move(b.nodes);
-  lg::info("[enhanced] ray tracing {}: {} triangles, {} nodes, {} colors, {:.0f} MB in {:.2f} s",
-           name, rt->tris.size(), rt->nodes.size(), rt->palettes.size() / 8,
+  lg::info("[enhanced] ray tracing {}: {} triangles, {} nodes, {} colors, {} textures, {:.0f} MB "
+           "in {:.2f} s",
+           name, rt->tris.size(), rt->nodes.size(), rt->palettes.size() / 8, rt->layer_count,
            (rt->tris.size() * sizeof(EnhancedRtLevel::Tri) +
-            rt->nodes.size() * sizeof(EnhancedRtLevel::Node) + rt->palettes.size() * 4) /
+            rt->nodes.size() * sizeof(EnhancedRtLevel::Node) +
+            (rt->palettes.size() + rt->layers.size()) * 4) /
                1e6,
            timer.getSeconds());
   std::lock_guard<std::mutex> lock(g_rt_mutex);

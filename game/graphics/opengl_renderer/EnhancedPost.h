@@ -391,12 +391,15 @@ class EnhancedPost {
   struct RtLevelGpu {
     GLuint buf[3] = {0, 0, 0};  // nodes, triangles, palettes
     u32 size[3] = {0, 0, 0};    // bytes
+    GLuint tex = 0;             // its textures (2D array, one mip level)
+    int layers = 0;
   };
   std::unordered_map<u64, RtLevelGpu> m_rt_levels;  // by level load id
   std::vector<u64> m_rt_in_use;
   GLuint m_rt_buf[3] = {0, 0, 0};
+  GLuint m_rt_tex = 0;  // all their textures (2D array with mipmaps)
   int m_rt_count = 0;                    // levels in the combined buffers
-  std::array<s32, 16 * 4> m_rt_base{};   // per level: node, triangle, palette base; root node
+  std::array<s32, 16 * 4> m_rt_base{};   // per level: node, triangle, palette, texture layer base
   bool m_rt_ready = false;
 
   // volumetric mist, half resolution
