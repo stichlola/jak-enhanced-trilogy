@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: bloom downsample (13-tap, as in Call of Duty: AW), with a soft-knee
+// Jak Enhanced Trilogy: bloom downsample (13-tap, as in Call of Duty: AW), with a soft-knee
 // bright pass on the first level.
 
 uniform sampler2D tex_T0;

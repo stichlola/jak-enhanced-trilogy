@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <random>
 #include <vector>
 
 #include "common/log/log.h"
@@ -362,7 +363,7 @@ void sun_world(float out[3]) {
 }  // namespace
 
 EnhancedPost::EnhancedPost() {
-  lg::info("[enhanced] Jak 3 Enhanced by stichlola - https://github.com/stichlola/jak3-enhanced");
+  lg::info("[enhanced] Jak Enhanced Trilogy by stichlola - https://github.com/stichlola/jak-enhanced-trilogy");
   // the menu's choices from the last session first, the test switches below win over them
   try {
     auto path = file_util::get_user_settings_dir(g_game_version) / "enhanced-settings.json";
@@ -1201,8 +1202,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           m_prints.push_back(p);
         }
       }
-      if (pl.valid && m_settings.prints > 0.f && pl.state > 0) {
+      // a landing from a jump: a big splash where he comes down
+      const bool on_foot = pl.state == 1 || pl.state == 3;
+      if (pl.valid && on_foot && m_last_player_state == 0) {
+        m_steps.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, 2.f, m_time});
+      }
+      m_last_player_state = pl.valid ? pl.state : 0;
+      if (pl.valid && pl.state > 0) {
         bool rut = pl.state == 2;
+        const bool soft = pl.state == 1 || pl.state == 2;
         float stride = (rut ? 0.5f : 0.7f) * kMeter;
         float dx = 0.f, dz = 0.f, moved = 1e9f;
         if (m_last_print_valid) {
@@ -1221,7 +1229,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             p.heading = std::atan2(fx, fz);
             p.kind = rut ? 2 : (m_print_left ? 0 : 1);
             p.time = m_time;
-            m_prints.push_back(p);
+            if (soft && m_settings.prints > 0.f) {
+              m_prints.push_back(p);
+            }
+            if (!rut) {
+              m_steps.push_back({{p.pos[0], p.pos[1], p.pos[2]}, 1.f, m_time});
+            }
             m_print_left = !m_print_left;
           }
           std::memcpy(m_last_print, pl.pos, sizeof(m_last_print));
@@ -1249,6 +1262,38 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "prints"), kPrints, prints);
       glUniform2fv(glGetUniformLocation(id, "print_info"), kPrints, print_info);
       glUniform1f(glGetUniformLocation(id, "prints_strength"), m_settings.prints);
+
+      // splashes: the steps of the last second (the shader checks for a puddle under them)
+      constexpr int kSplashes = 8;
+      static bool test_splash = std::getenv("JAK_ENHANCED_SPLASH_TEST") != nullptr;
+      static double test_splash_t = 0;
+      if (test_splash && pl.valid && m_time - test_splash_t > 0.15) {
+        // test switch: steps landing one after another on a line ahead of Jak, away from the camera
+        test_splash_t = m_time;
+        static int n = 0;
+        float fx = pl.pos[0] - cam.trans[0], fz = pl.pos[2] - cam.trans[2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1.f);
+        const float along = (-1.5f + (n % 6) * 0.6f) * kMeter;
+        const float side = ((n % 3) - 1) * 1.2f * kMeter;
+        m_steps.push_back({{pl.pos[0] + fx / len * along + fz / len * side, pl.pos[1],
+                            pl.pos[2] + fz / len * along - fx / len * side},
+                           (n % 4) == 0 ? 2.f : 1.f, m_time});
+        n++;
+      }
+      while (!m_steps.empty() &&
+             (m_time - m_steps.front().time > 1.2 || m_steps.size() > (size_t)kSplashes)) {
+        m_steps.erase(m_steps.begin());
+      }
+      float splash[kSplashes * 4] = {};
+      int splash_count = 0;
+      for (const auto& st : m_steps) {
+        std::memcpy(splash + splash_count * 4, st.pos, sizeof(float) * 3);
+        // age, with the strength in the integer part above 10 s: 1 step, 2 landing
+        splash[splash_count * 4 + 3] = (float)(m_time - st.time) + 10.f * st.strength;
+        splash_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "splash_count"), m_wet > 0.05f ? splash_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "splash"), kSplashes, splash);
     }
     // the nearest explosions in view for the shockwave: view space + radius, age
     {
@@ -1356,6 +1401,14 @@ void EnhancedPost::update_scene() {
   movie = movie || cine_test;
   poll_world();
   m_zone = zone_of(level);
+  // every visit to a zone picks its weather anew: the spells start from a random point of their
+  // cycle (the first visit of a session too)
+  if (m_zone != m_visit_zone && !level.empty() && level != "none") {
+    m_visit_zone = m_zone;
+    // (std::rand is never seeded: it would pick the same each run)
+    static std::mt19937 rng{std::random_device{}()};
+    m_visit_offset = std::uniform_real_distribution<double>(0.0, 100000.0)(rng);
+  }
   const WorldZone& zone = g_world.zones[m_zone];
   // night from 19 to 21 in, from 5 to 7 out
   auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
@@ -1455,15 +1508,15 @@ void EnhancedPost::update_scene() {
       m_weather_state = rain > 0.3f ? 2 : snow > 0.f || mist > 0.5f ? 1 : dust > 0.f ? 5 : 0;
       float fair = 1.f;
       if (w.shower_period > 0.f) {
-        // each spell its own: a roll picks fair, a shower or a thunderstorm. A wet spell: clouds
+        // each spell its own (and a new one on every visit): a roll picks fair, a shower or a thunderstorm. A wet spell: clouds
         // build, rain (the storm in the middle of it), the sun back out on the wet ground, drying
-        const double tt = m_time + phase0;
+        const double tt = m_time + phase0 + m_visit_offset;
         const double period = std::max(30.0, (double)w.shower_period);
         const float p = (float)(std::fmod(tt, period) / period);
         const uint32_t index = (uint32_t)(tt / period);
         const uint32_t spell = index * 2654435761u + 977u;
         // the first spell is always fair: a game starts under a clear sky
-        const float roll = index == 0 ? 0.999f : (float)((spell >> 8) % 1000) / 1000.f;
+        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
         auto win = [&](float a, float b) {
           return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
         };
@@ -1491,11 +1544,11 @@ void EnhancedPost::update_scene() {
       // the fog: fixed, or its own spells (clear, a little, full), each its own
       fog = w.fog;
       if (w.fog_period > 0.f) {
-        const double tt = m_time + phase0;
+        const double tt = m_time + phase0 + m_visit_offset;
         const double period = std::max(30.0, (double)w.fog_period);
         const uint32_t index = (uint32_t)(tt / period);
         const uint32_t spell = index * 2246822519u + 3266489917u;
-        const float roll = index == 0 ? 0.f : (float)((spell >> 8) % 1000) / 1000.f;
+        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
         fog = roll < w.fog_clear ? 0.f : roll < w.fog_clear + w.fog_light ? w.fog_light_amount : 1.f;
       }
       // rain and morning mist bring some of it back
@@ -2922,7 +2975,7 @@ void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
   // no close button: \ closes it (and gives the mouse back to the camera)
-  if (!ImGui::Begin("Jak 3 Enhanced by stichlola  ( \\ closes )", nullptr,
+  if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\ closes )", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;

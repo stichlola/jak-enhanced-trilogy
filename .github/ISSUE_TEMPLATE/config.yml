@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/open-goal/jak-project/issues
     about: Check with JAK_ENHANCED=0 or the Classic preset first. If it happens in the original OpenGOAL build too, report it there, not here (and follow their AI policy).
   - name: Ideas and questions
-    url: https://github.com/stichlola/jak3-enhanced/discussions
+    url: https://github.com/stichlola/jak-enhanced-trilogy/discussions
     about: Talk about ideas, show your screenshots and videos, ask for help.

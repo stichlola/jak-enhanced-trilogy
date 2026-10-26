@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: one-bounce screen-space indirect light. Around each pixel, the scene colors
+// Jak Enhanced Trilogy: one-bounce screen-space indirect light. Around each pixel, the scene colors
 // within a few meters that face it are gathered (cosine weighted), so a sunlit floor tints the
 // walls next to it and torch flames light their surroundings. Half resolution, blurred after.
 

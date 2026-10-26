@@ -1,6 +1,6 @@
 #version 430 core
 
-// Jak 3 Enhanced: screen-space ambient occlusion (Alchemy AO) from the game's depth buffer.
+// Jak Enhanced Trilogy: screen-space ambient occlusion (Alchemy AO) from the game's depth buffer.
 // Positions are rebuilt with the projection saved by the background renderers:
 // ndc_z = a + b / z, ndc_x = fx * x / z, ndc_y = fy * y / z.
 

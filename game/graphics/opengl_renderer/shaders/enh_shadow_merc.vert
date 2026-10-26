@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: the characters in the sun shadow map. Skinned like merc2.vert (the bones put
+// Jak Enhanced Trilogy: the characters in the sun shadow map. Skinned like merc2.vert (the bones put
 // them in camera space), then back to the world with the camera and drawn from the sun.
 
 layout (location = 0) in vec3 position_in;

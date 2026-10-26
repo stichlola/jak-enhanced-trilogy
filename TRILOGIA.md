@@ -1,6 +1,6 @@
-# Jak Trilogy Enhanced — roadmap
+# Jak Enhanced Trilogy — roadmap
 
-Obiettivo: Jak 1, 2 e 3 come **un unico gioco**, con le stesse migliorie grafiche di Jak 3 Enhanced
+Obiettivo: Jak 1, 2 e 3 come **un unico gioco**, con le stesse migliorie grafiche fatte prima per Jak 3
 su tutti e tre, e due livelli di raccordo nuovi tra un gioco e l'altro.
 
 Ordine: prima il motore unico (un solo programma, un solo menu, un solo salvataggio), poi le

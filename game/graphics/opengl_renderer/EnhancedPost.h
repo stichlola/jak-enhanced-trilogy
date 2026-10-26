@@ -88,7 +88,7 @@ struct EnhancedCasters {
 extern EnhancedCasters g_enhanced_casters;
 
 /*!
- * Jak 3 Enhanced post-processing, run on the finished game frame before it goes to the window:
+ * Jak Enhanced Trilogy post-processing, run on the finished game frame before it goes to the window:
  * screen-space ambient occlusion from the depth buffer, a light depth of field on the far
  * distance, god rays toward the sun, a soft bloom (bright pass + dual-filter blur chain), color grading, vignette and a light
  * contrast-adaptive sharpen. Set JAK_ENHANCED=0 in the environment to start with it off (vanilla
@@ -358,6 +358,14 @@ class EnhancedPost {
   float m_last_print[3] = {};
   bool m_last_print_valid = false;
   bool m_print_left = true;
+  // Jak's steps and landings on any ground, for the splashes in the puddles (kept a second)
+  struct Step {
+    float pos[3];
+    float strength;  // 1 a step, 2 a landing
+    double time;
+  };
+  std::vector<Step> m_steps;
+  int m_last_player_state = 0;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
 
@@ -450,6 +458,8 @@ class EnhancedPost {
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
   float m_snow = 0.f;   // snowfall (0..1)
+  int m_visit_zone = -1;        // the zone Jak was last in, and where its weather cycle starts
+  double m_visit_offset = 0.0;
   float m_fog = 0.f;    // how much of the distance fog and the volumetric mist (0..1)
   float m_heat = 0.f;   // hot air shimmering up from lava (0..1)
   float m_sunny = 0.f;  // a bright summer day: saturated, warm sun, deep blue sky

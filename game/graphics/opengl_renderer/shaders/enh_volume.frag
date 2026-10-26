@@ -1,6 +1,6 @@
 ﻿#version 410 core
 
-// Jak 3 Enhanced: volumetric mist. Half resolution: along each view ray, up to the scene's depth,
+// Jak Enhanced Trilogy: volumetric mist. Half resolution: along each view ray, up to the scene's depth,
 // a ground mist (thicker low, drifting with the wind as 3D noise) scatters the fog color and the
 // sun. Each sample looks a few steps toward the sun through the depth buffer: where a wall or a
 // roof is in the way the mist stays dark, so light shafts stream through alleys and arches.

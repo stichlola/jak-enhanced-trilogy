@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: temporal anti-aliasing. The 3D world is drawn with a different sub-pixel jitter
+// Jak Enhanced Trilogy: temporal anti-aliasing. The 3D world is drawn with a different sub-pixel jitter
 // every frame (Shader.cpp); this pass blends the frame into the history of the frames before,
 // reprojected with the camera's move, so each pixel averages several sample positions. The
 // history is clipped to the colors around the pixel this frame (variance clipping in YCoCg), so

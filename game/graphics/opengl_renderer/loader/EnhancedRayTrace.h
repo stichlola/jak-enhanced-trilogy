@@ -7,7 +7,7 @@
 #include "common/custom_data/Tfrag3Data.h"
 
 /*!
- * Jak 3 Enhanced: ray-traced reflections. When a level loads (on the loader thread), its static
+ * Jak Enhanced Trilogy: ray-traced reflections. When a level loads (on the loader thread), its static
  * geometry (tfrag and tie, the most detailed level of detail, already in world space) goes into a
  * bounding volume hierarchy the post pass can trace rays through on the GPU: reflections on water,
  * metal and glass still find what's off the screen or hidden behind something. Each triangle keeps

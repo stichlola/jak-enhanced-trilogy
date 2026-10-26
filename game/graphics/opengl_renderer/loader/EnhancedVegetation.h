@@ -3,7 +3,7 @@
 #include "common/custom_data/Tfrag3Data.h"
 
 /*!
- * Jak 3 Enhanced: vegetation density. When a level loads, its grass and small plants (cutout
+ * Jak Enhanced Trilogy: vegetation density. When a level loads, its grass and small plants (cutout
  * shrubs made of crossed cards, standing on the level's floor) get copies scattered around them,
  * turned, scaled and set down on the floor below, and tufts of their own cards grow on the grassy
  * floor around them. The copies go in extra shrub draws with a tier

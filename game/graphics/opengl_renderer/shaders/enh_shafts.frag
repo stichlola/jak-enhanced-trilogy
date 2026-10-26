@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: god rays. The bright sky (pixels with no depth) is smeared along the line to
+// Jak Enhanced Trilogy: god rays. The bright sky (pixels with no depth) is smeared along the line to
 // the sun's position on screen, so it streams through gaps between buildings and rocks.
 
 uniform sampler2D tex_T0;  // frame

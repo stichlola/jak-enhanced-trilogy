@@ -1,4 +1,4 @@
-"""Jak 3 Enhanced: 4x AI-upscaled textures as OpenGOAL texture replacements.
+"""Jak Enhanced Trilogy: 4x AI-upscaled textures as OpenGOAL texture replacements.
 
     python scripts/enhanced/hd_textures.py [--tpages REGEX] [--gpu 0]
 

@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: bloom upsample, 3x3 tent filter, added onto the bigger level by blending.
+// Jak Enhanced Trilogy: bloom upsample, 3x3 tent filter, added onto the bigger level by blending.
 
 uniform sampler2D tex_T0;
 uniform vec2 texel;  // source texel size

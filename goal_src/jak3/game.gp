@@ -410,7 +410,7 @@
 (goal-src "levels/test-zone/test-zone-obs.gc" "process-focusable")
 (custom-level-cgo "TSZ.DGO" "test-zone/testzone.gd")
 
-;; Jak 3 Enhanced: Jak 2's palace plaza
+;; Jak Enhanced Trilogy: Jak 2's palace plaza
 (build-custom-level "piazza")
 (custom-level-cgo "PZZ.DGO" "piazza/piazza.gd")
 

@@ -7,7 +7,7 @@
 #include "common/common_types.h"
 
 /*!
- * Jak 3 Enhanced: values the game hands to the renderer through the kernel (kmachine.cpp).
+ * Jak Enhanced Trilogy: values the game hands to the renderer through the kernel (kmachine.cpp).
  */
 
 // The key light ("sun") direction of the current time of day, world space, as the game's

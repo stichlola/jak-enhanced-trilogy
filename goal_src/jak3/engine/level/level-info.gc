@@ -20661,7 +20661,7 @@
                              )
         )
 
-;; Jak 3 Enhanced: Jak 2's palace plaza, between the Metal Head city (mhcitya) and the port
+;; Jak Enhanced Trilogy: Jak 2's palace plaza, between the Metal Head city (mhcitya) and the port
 (define piazza
   (new 'static 'level-load-info
     :name 'piazza

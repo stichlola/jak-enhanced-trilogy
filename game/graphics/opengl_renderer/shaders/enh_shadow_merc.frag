@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: the characters in the sun shadow map, depth only; the see-through parts of
+// Jak Enhanced Trilogy: the characters in the sun shadow map, depth only; the see-through parts of
 // alpha-tested textures don't cast (alpha_ref < 0: solid).
 
 in vec2 st;

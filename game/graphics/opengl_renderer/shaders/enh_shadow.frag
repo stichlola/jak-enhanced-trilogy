@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: sun shadow map, depth only. What the background shaders cut away for the
+// Jak Enhanced Trilogy: sun shadow map, depth only. What the background shaders cut away for the
 // passages into the Jak 2 plaza (Shader.cpp, enh_in_cut) doesn't cast shadows either, nor do
 // the see-through parts of alpha-tested textures (alpha_ref < 0: solid).
 

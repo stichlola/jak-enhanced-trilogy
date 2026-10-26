@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: sun shadow map. The levels' static geometry (world positions, as uploaded by
+// Jak Enhanced Trilogy: sun shadow map. The levels' static geometry (world positions, as uploaded by
 // the loader) drawn from the sun with an orthographic projection; depth only. The wind-blown
 // trees also bring texture coordinates, for their leaves' cutouts.
 

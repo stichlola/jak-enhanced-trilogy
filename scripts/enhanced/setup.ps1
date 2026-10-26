@@ -1,23 +1,32 @@
-# Jak 3 Enhanced: one-command setup on Windows.
+# Jak Enhanced Trilogy: one-command setup on Windows.
 #
-#   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Iso "D:\Games\Jak 3.iso"
+#   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Jak1Iso "D:\Games\Jak 1.iso" `
+#     -Jak2Iso "D:\Games\Jak 2.iso" -Jak3Iso "D:\Games\Jak 3.iso"
 #
+# Any of the three discs is enough (-Iso is Jak 3, as before).
 # 1. installs what's missing (Visual Studio 2022 Build Tools with Clang, CMake, Ninja, NASM) with winget
 # 2. builds the game, the compiler and the extractor (Release, clang-cl)
-# 3. extracts your ISO, decompiles its data and compiles the game (OpenGOAL's extractor: 20-40 min)
-# 4. writes Play-Jak3-Enhanced.bat in the repository folder
+# 3. extracts your ISOs, decompiles their data and compiles the games (OpenGOAL's extractor: 20-40
+#    min a game)
+# 4. writes Play-Jak1/2/3-Enhanced.bat for each game, and Play-Jak-Enhanced-Trilogy.bat (starts from
+#    the first game you have; F9 in the game switches to the next one)
 #
 # -SkipTools / -SkipBuild / -SkipExtract skip a step (to rebuild after a code change: -SkipTools -SkipExtract).
 
 param(
   [string]$Iso = "",
+  [string]$Jak1Iso = "",
+  [string]$Jak2Iso = "",
+  [string]$Jak3Iso = "",
   [switch]$SkipTools,
   [switch]$SkipBuild,
   [switch]$SkipExtract
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
-Write-Host "Jak 3 Enhanced setup in $root"
+Write-Host "Jak Enhanced Trilogy setup in $root"
+if ($Iso -and -not $Jak3Iso) { $Jak3Iso = $Iso }
+$isos = [ordered]@{ jak1 = $Jak1Iso; jak2 = $Jak2Iso; jak3 = $Jak3Iso }
 
 # The OpenGOAL tools find the project by a folder named jak-project in their path
 if ((Split-Path $root -Leaf) -ne "jak-project") {
@@ -65,25 +74,50 @@ if (-not $SkipBuild) {
 }
 
 if (-not $SkipExtract) {
-  if (-not $Iso) { throw "Pass your Jak 3 ISO: -Iso `"<path to your own copy>`"" }
-  Write-Host "Extracting, decompiling and compiling the game from $Iso (20-40 min)..."
-  & "$root\out\build\Release\bin\extractor.exe" --game jak3 --proj-path "$root" -e -d -c "$Iso"
-  if ($LASTEXITCODE -ne 0) { throw "Extraction failed (exit $LASTEXITCODE)" }
-  # the REPL and `goalc --cmd` use the folder the extractor made (jak3, jak3_pal...)
-  $folder = Get-ChildItem "$root\iso_data" -Directory | Where-Object { $_.Name -like "jak3*" } | Select-Object -First 1
-  if ($folder) {
+  if (-not ($isos.Values | Where-Object { $_ })) {
+    throw "Pass at least one of your discs: -Jak1Iso / -Jak2Iso / -Jak3Iso `"<path to your own copy>`""
+  }
+  $repl = @{}
+  foreach ($game in $isos.Keys) {
+    $gameIso = $isos[$game]
+    if (-not $gameIso) { continue }
+    Write-Host "Extracting, decompiling and compiling $game from $gameIso (20-40 min)..."
+    & "$root\out\build\Release\bin\extractor.exe" --game $game --proj-path "$root" -e -d -c "$gameIso"
+    if ($LASTEXITCODE -ne 0) { throw "Extraction of $game failed (exit $LASTEXITCODE)" }
+    # the REPL and `goalc --cmd` use the folder the extractor made (jak3, jak3_pal...)
+    $folder = Get-ChildItem "$root\iso_data" -Directory | Where-Object { $_.Name -like "$game*" } | Select-Object -First 1
+    if ($folder) { $repl[$game] = $folder.Name }
+  }
+  if ($repl.Count -gt 0) {
     New-Item -ItemType Directory -Force "$root\goal_src\user\player" | Out-Null
     Set-Content -Encoding ascii "$root\goal_src\user\user.txt" "player"
-    Set-Content -Encoding ascii "$root\goal_src\user\player\repl-config.json" "{`"jak3`": {`"gameVersionFolder`": `"$($folder.Name)`"}}"
+    $entries = ($repl.Keys | Sort-Object | ForEach-Object { "`"$_`": {`"gameVersionFolder`": `"$($repl[$_])`"}" }) -join ", "
+    Set-Content -Encoding ascii "$root\goal_src\user\player\repl-config.json" "{$entries}"
   }
 }
 
-$play = Join-Path $root "Play-Jak3-Enhanced.bat"
-Set-Content -Encoding ascii $play @"
+# a launcher for each game that's been extracted, and one for the trilogy
+$have = @("jak1", "jak2", "jak3") | Where-Object { Test-Path "$root\out\$_\iso" }
+foreach ($game in $have) {
+  $n = $game.Substring(3)
+  Set-Content -Encoding ascii (Join-Path $root "Play-Jak$n-Enhanced.bat") @"
 @echo off
-rem Jak 3 Enhanced: the full game. Press \ in the game for the Enhanced menu.
+rem Jak Enhanced Trilogy: Jak $n. Press \ in the game for the Enhanced menu.
 cd /d "$root"
-start "" out\build\Release\bin\gk.exe --game jak3 -- -boot -fakeiso
+start "" out\build\Release\bin\gk.exe --game $game -- -boot -fakeiso
 "@
-Write-Host ""
-Write-Host "Done. Play with: $play"
+}
+if ($have) {
+  $play = Join-Path $root "Play-Jak-Enhanced-Trilogy.bat"
+  Set-Content -Encoding ascii $play @"
+@echo off
+rem Jak Enhanced Trilogy: from the first game you have. F9 in the game switches to the next one.
+cd /d "$root"
+start "" out\build\Release\bin\gk.exe --game $($have[0]) -- -boot -fakeiso
+"@
+  Write-Host ""
+  Write-Host "Done. Play with: $play (or Play-Jak1/2/3-Enhanced.bat)"
+} else {
+  Write-Host ""
+  Write-Host "Built. No game extracted yet: run again with -Jak1Iso / -Jak2Iso / -Jak3Iso."
+}

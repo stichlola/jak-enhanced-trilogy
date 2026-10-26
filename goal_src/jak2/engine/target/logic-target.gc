@@ -1643,7 +1643,7 @@
   (enhanced-unlock-all)
   (enhanced-menu-update)
   ;; Enhanced: grass bends away from Jak
-  ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts)
+  ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts), 3 on foot
   (let ((v *enhanced-player-vec*))
     (vector-copy! v (-> self control trans))
     (set! (-> v w) (cond
@@ -1657,6 +1657,8 @@
                            )
                       1.0
                       )
+                     ;; 3: on foot on other ground (splashes in the puddles)
+                     ((logtest? (-> self control status) (collide-status on-surface)) 3.0)
                      (else 0.0)
                      )
           )

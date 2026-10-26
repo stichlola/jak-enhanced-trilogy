@@ -1,6 +1,6 @@
 #version 410 core
 
-// Jak 3 Enhanced: depth-aware 1D blur of the occlusion (run horizontally, then vertically).
+// Jak Enhanced Trilogy: depth-aware 1D blur of the occlusion (run horizontally, then vertically).
 
 uniform sampler2D tex_T0;  // occlusion
 uniform sampler2D tex_T1;  // depth

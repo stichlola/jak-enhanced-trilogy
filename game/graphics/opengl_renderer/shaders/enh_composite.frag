@@ -1,6 +1,6 @@
 #version 430 core
 
-// Jak 3 Enhanced: composite of the 3D scene, drawn back over it before the HUD buckets.
+// Jak Enhanced Trilogy: composite of the 3D scene, drawn back over it before the HUD buckets.
 // In order: heat haze, camera motion blur or FXAA, light depth of field, contrast-adaptive
 // sharpen, ambient occlusion and sun shadows, distance/height fog, bloom and god rays, highlight
 // roll-off, grading and vignette.
@@ -27,6 +27,8 @@ uniform float wake_strength;
 uniform int print_count;        // footprints and ruts: world xyz (game units), heading (rad)
 uniform vec4 prints[48];
 uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
+uniform int splash_count;       // Jak's last steps and landings: world xyz (game units),
+uniform vec4 splash[8];         // w: age (s) + 10 * strength (1 step, 2 landing)
 uniform float prints_strength;
 uniform float relief;           // relief from the textures' shading under the sun (0 = off; 2 = left half)
 uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
@@ -890,6 +892,88 @@ float snow_flakes(vec3 ray_view, float scene_z, float px) {
 
 // raindrops in the puddles: each 0.5 m cell gets a ring now and then, spreading and fading
 // (returns the slope it gives the water, xz)
+// how much of a puddle is at a world point (m), as the wet ground draws them (flat ground)
+float puddle_at(vec2 xz) {
+  float pd = gnoise(xz * 0.22) + 0.45 * gnoise(xz * 0.7 + 7.1) + 0.12 * gnoise(xz * 3.1 + 2.3);
+  float spread = 0.22 * weather2.x;
+  return smoothstep(-0.12 - spread, 0.02 - spread, pd) * weather.w;
+}
+
+// rings on the puddles where Jak stepped: spreading 0.8 m/s for a second (slope, xz)
+vec2 step_ripples(vec2 xz) {
+  vec2 slope = vec2(0.0);
+  for (int i = 0; i < splash_count; i++) {
+    float strength = floor(splash[i].w / 10.0);
+    float age = splash[i].w - 10.0 * strength;
+    vec2 rel = xz - splash[i].xz / 4096.0;
+    float d = length(rel);
+    for (int k = 0; k < 2; k++) {
+      float a = age - float(k) * 0.12;
+      if (a <= 0.0) {
+        continue;
+      }
+      float ring = d - a * (0.8 + 0.3 * strength);
+      float band = exp(-ring * ring / 0.0012) * (1.0 - smoothstep(0.3, 1.1, a));
+      slope += rel / max(d, 1e-3) * band * sin(ring * 90.0) * 0.25 * strength;
+    }
+  }
+  return slope;
+}
+
+// the drops a step throws up from a puddle: a dozen (two dozen landing) small drops on short arcs,
+// hidden behind the scene. Returns how much drop covers the pixel
+float step_drops(vec2 uv, float scene_z) {
+  float sum = 0.0;
+  mat3 to_view = transpose(view_to_world);
+  for (int i = 0; i < splash_count; i++) {
+    float strength = floor(splash[i].w / 10.0);
+    float age = splash[i].w - 10.0 * strength;
+    if (age > 0.55) {
+      continue;
+    }
+    vec3 foot = splash[i].xyz / 4096.0;  // m
+    float wet_here = puddle_at(foot.xz);
+    if (wet_here < 0.2) {
+      continue;
+    }
+    // skip what's far from this pixel on screen
+    vec3 cv = to_view * (splash[i].xyz - cam_pos);
+    if (cv.z < 0.5 * 4096.0) {
+      continue;
+    }
+    vec2 cuv = 0.5 + 0.5 * vec2(cv.x * proj.z, cv.y * proj.w) / cv.z;
+    float reach = 1.2 * 4096.0 * abs(proj.w) / cv.z;  // ~1.2 m in uv (height)
+    if (abs(uv.y - cuv.y) > reach || abs(uv.x - cuv.x) > reach * abs(proj.z / proj.w)) {
+      continue;
+    }
+    int n = strength > 1.5 ? 14 : 7;
+    for (int j = 0; j < n; j++) {
+      float h1 = hash1(vec2(float(j), splash[i].x + 0.37));
+      float h2 = hash1(vec2(splash[i].z, float(j) * 1.7));
+      float h3 = hash1(vec2(float(j) * 3.1, splash[i].y));
+      float ang = (float(j) + h1) * 6.2832 / float(n);
+      float speed = (0.5 + 0.9 * h2) * (0.7 + 0.3 * strength);
+      float up = (1.4 + 1.2 * h3) * (0.8 + 0.2 * strength);
+      float t = age;
+      vec3 wp = foot + vec3(cos(ang) * speed * t, up * t - 4.9 * t * t, sin(ang) * speed * t);
+      if (wp.y < foot.y - 0.02) {
+        continue;  // back in the water
+      }
+      vec3 v = to_view * (wp * 4096.0 - cam_pos);
+      if (v.z < 0.3 * 4096.0 || (scene_z > 0.0 && v.z > scene_z + 0.05 * 4096.0)) {
+        continue;
+      }
+      vec2 duv = 0.5 + 0.5 * vec2(v.x * proj.z, v.y * proj.w) / v.z;
+      vec2 dd = (uv - duv) / texel;
+      // a drop of ~1.5 cm, at least a pixel, a little stretched along its fall
+      float rad = max(1.1, 0.015 * 4096.0 * abs(proj.w) * 0.5 / v.z / texel.y);
+      float k = 1.0 - smoothstep(rad * 0.5, rad, length(vec2(dd.x, dd.y * 0.6)));
+      sum += k * (1.0 - smoothstep(0.3, 0.55, age)) * min(1.0, wet_here * 2.0);
+    }
+  }
+  return min(sum, 1.0);
+}
+
 vec2 rain_ripples(vec2 xz, float t) {
   vec2 slope = vec2(0.0);
   vec2 cell = floor(xz / 0.5);
@@ -1503,6 +1587,9 @@ void main() {
                      gnoise(ww.xz * 2.2 + vec2(5.0 - tw * 0.25, tw * 0.3))) * 0.07 +
                 vec2(gnoise(ww.xz * 7.0 + tw * 0.6), gnoise(ww.xz * 7.0 + 3.3 - tw * 0.5)) * 0.025;
     vec2 bend = rip * (0.15 + 0.6 * puddle) + rough * 0.35 + wave * puddle;
+    if (splash_count > 0 && z < 25.0 * 4096.0) {
+      bend += step_ripples(ww.xz) * puddle;
+    }
     vec3 n2 = normalize(wet_n + right_view * bend.x + fwd_view * bend.y);
     vec3 vdir = normalize(p);
     vec3 r = reflect(vdir, n2);
@@ -1786,6 +1873,17 @@ void main() {
       halo += light_color[i].rgb * g * hidden;
     }
     c += halo * min(air, 1.5) * 0.25 * (0.25 + 0.75 * clouds.w);
+  }
+
+  // the drops Jak's steps throw up from the puddles, lit like the rain
+  if (splash_count > 0) {
+    float drops = step_drops(tex_coord, z);
+    if (drops > 0.0) {
+      vec3 glow = texture(tex_T1, tex_coord).rgb;
+      vec3 lit = c * 1.15 + vec3(0.08, 0.09, 0.1) + mix(fog_color, vec3(luma(fog_color)), 0.5) * 0.25 +
+                 glow * 1.2;
+      c = mix(c, lit, drops * 0.3);
+    }
   }
 
   // rain streaks in front of everything, lit by the sky and by the lights around (the bloom)

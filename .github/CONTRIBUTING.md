@@ -1,6 +1,6 @@
-# Contributing to Jak 3 Enhanced
+# Contributing to Jak Enhanced Trilogy
 
-Jak 3 Enhanced is a community remaster: fork it, improve it, send the good parts back. This page is
+Jak Enhanced Trilogy is a community remaster: fork it, improve it, send the good parts back. This page is
 the short version of how the project works. The long version of every feature is in
 [ENHANCED.md](../ENHANCED.md).
 

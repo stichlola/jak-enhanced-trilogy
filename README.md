@@ -1,89 +1,122 @@
-# Jak 3 Enhanced
+# Jak Enhanced Trilogy
 
-A personal, for-fun remaster of **Jak 3** on top of [OpenGOAL](https://opengoal.dev), inspired by
-*Ratchet & Clank Enhanced*. It adds modern lighting and post-processing, denser vegetation and
-cities, a few gameplay tweaks and an in-game menu that turns every change on and off. Everything here
-is code: the game itself comes from **your own copy** of the PS2 disc. No game data is in this
-repository.
+A personal, for-fun remaster of the **Jak and Daxter trilogy** (Jak 1, Jak 2 and Jak 3) on top of
+[OpenGOAL](https://opengoal.dev), inspired by *Ratchet & Clank Enhanced*. It started as *Jak 3
+Enhanced*: modern lighting and post-processing, living weather, denser vegetation and cities, a few
+gameplay tweaks and an in-game menu that turns every change on and off. Now the same improvements
+come to all three games, and the three are becoming **one game**: one program that goes from Jak 1
+to Jak 2 to Jak 3, with new bridge levels between them.
 
-Technical notes for each feature (how it works, its test switches) are in [ENHANCED.md](ENHANCED.md).
+Everything here is code: the games themselves come from **your own copies** of the PS2 discs. No
+game data is in this repository.
+
+Technical notes for each feature (how it works, its test switches) are in [ENHANCED.md](ENHANCED.md);
+the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 
 > An unofficial fork, not affiliated with the OpenGOAL team: please don't report Enhanced bugs to them.
 > Made by [stichlola](https://github.com/stichlola) with AI assistance (Claude Code). Forks and
 > improvements are welcome: see [CONTRIBUTING](.github/CONTRIBUTING.md), and please credit the
 > project in videos and mods (see [Credits](#credits)).
 
+## The trilogy
+
+| | Graphics | Weather | Gameplay | Status |
+|---|---|---|---|---|
+| **Jak 3** | everything below | Haven, Spargus, the desert, the forest | population, guns, jetboard, vehicles | the most complete |
+| **Jak 2** | everything below except the HD textures | Haven, the wilds, the forest | population, all guns and Dark Jak powers unlocked, twice the ammo | playable |
+| **Jak 1** | everything below except the HD textures | Sandover and the islands, the jungle, the swamp, Misty Island, Snowy Mountain, the volcano | | playable |
+
+- **One program, three games**: press **F9** in a game to switch to the next one (Jak 1 → 2 → 3 → 1)
+  without leaving the program. The next steps: the window kept across the switch, one trilogy menu
+  and save, the end of each game leading into the next.
+- **Bridge levels** (planned): the end of Jak 1 into Jak 2's opening, and a new level for what Jak
+  3 only tells: Jak arrested in a Haven at war and sent into the desert.
+- **The same look everywhere**: the world's zones, their color grades and their weather for the
+  three games are in one file, [game/assets/enhanced/world.json](game/assets/enhanced/world.json),
+  reloaded while the game runs. `python scripts/enhanced/check_games.py` checks what each game has.
+
 ## What's new
 
 ### Graphics
 - **Lighting**: sun shadow map (level, characters and wind-blown trees cast shadows) with soft
-  shadows (sharp where they touch, softer further from what casts them), contact shadows, ambient occlusion (SSAO), one bounce of indirect light (SSGI), and computed normals for the
-  levels, which originally had only baked vertex colors.
+  shadows (sharp where they touch, softer further from what casts them), contact shadows, ambient
+  occlusion (SSAO), one bounce of indirect light (SSGI), and computed normals for the levels, which
+  originally had only baked vertex colors.
 - **Lights**: the levels' own lamps and every glow (torches, shots, explosions) light their
   surroundings and cast short shadows. Night lamps switch on at night.
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
 - **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
   arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
-- **Weather that changes**: in Haven and the forest the clouds build, it rains, then the sun comes back out on the wet streets (light shafts,
-  steam, a rainbow) and they slowly dry. Rain falls in the world with splashes on the ground, wet
-  streets reflect the windows and signs, lamps get halos in the wet air, characters get wet and
-  glossy. Fog on early mornings. In the desert the game's own sandstorm now blows real clouds of
-  sand through the world, carried by its wind. "Sunny" pumps the colors up like Jak 1's Sandover:
-  deep blue sky, saturated greens, warm sun. Menu: Clear / Changing / Rain / Sandstorm /
-  Thunderstorm / After the rain / Morning fog / Sunny.
 - **Sky**: volumetric clouds lit by the sun (bright edges toward it, shaded undersides), a deep
   blue sky by day, orange at sunset, grey and low under the rain.
-- **Color grade per area**: Haven (teal and warm by day, blue with vivid neon at night), the
-  desert (sun-baked), the forest (autumn gold), the Metal Head city, underground, the volcano and
-  the temples, easing from one to the next.
+- **Color grade per area**: Haven, the desert, the forest, the Metal Head city, underground, the
+  volcano, the temples, Sandover's islands, the jungle, the swamp, the snow... easing from one to
+  the next, by day and by night.
+- **Vivid colors** (a separate setting, off by default): saturated greens and blues, warm sun, deep
+  sky.
 - **Characters**: soft, warm light past the edge of the lit side, a cool rim on the shadow side,
   darker and glossy in the rain.
 - **Cutscenes**: depth of field with autofocus on who's in the middle of the shot.
-- **Atmosphere**: volumetric ground mist with light shafts, god rays, distance and height fog,
-  heat haze, depth of field, bloom, camera motion blur and color grading.
+- **Atmosphere**: volumetric ground mist with light shafts, god rays, heat haze, depth of field,
+  bloom, camera motion blur and color grading.
 - **Anti-aliasing**: TAA (temporal), with FXAA as the fallback.
 - **Water**: screen-space reflections on the sea, open-sea swell, refraction and caustics in
   shallow water, and rings spreading where Jak swims or rides.
 - **Materials**: metal and glass pick up reflections and highlights (found from the texture names),
   and the surfaces show relief from their textures.
-- **Ray-traced reflections**: where the screen has nothing to reflect (off the edge, or hidden
-  behind something), water, metal and glass trace the ray through the level's real geometry, lit by
-  the game's own light at that hour. Hits show the real textures. Off by default for now (it
-  still has artifacts): turn it on in the menu.
-- **Ray-traced ambient occlusion**: short rays from every pixel through the same geometry darken
-  corners, recesses and alleys from what's really there, even off the screen. Off by default for
-  now (too slow): turn it on in the menu.
+- **Ray-traced reflections and ambient occlusion** in software, through the levels' real geometry
+  (off by default for now: still artifacts, and slow).
 - **Vegetation**: more grass and plants around the original ones, and climbing plants on the walls
   near the level's own vines. Grass sways in the wind and bends away from Jak, enemies and vehicles.
-- **Desert**: footprints and tire ruts in the sand, and a new sand texture on the dunes.
-- **HD textures**: a 4x AI upscale of Spargus, the desert, the vehicles, Jak, Daxter and the guns
-  (an optional step, see below).
+- **Footprints and tire ruts** in sand, dirt and snow.
+- **HD textures** (Jak 3): a 4x AI upscale of Spargus, the desert, the vehicles, Jak, Daxter and the
+  guns (an optional step, see below).
 - **Draw distance**: no more buildings popping in around corners and over rooftops.
 
-### City
-- **Population** setting from Low to Extreme. At High (the default) there are twice as many
+### Weather
+- **Living weather, different on every visit**: in the open places with no weather of their own in
+  the story (Sandover, Haven, Spargus, the forests...) the weather comes in spells: mostly fair,
+  sometimes clouds, a drizzle, a downpour or a thunderstorm, sometimes light or thick fog. Each
+  visit starts somewhere new. No fog is added by default.
+- **Fixed where the game wants it**: it always rains in Boggy Billy's swamp, the fog never lifts on
+  Misty Island, it always snows on Snowy Mountain, the air shimmers over the lava.
+- **Rain** falls in the world with splashes on the ground; wet streets reflect the windows and
+  signs, puddles fill and dry, Jak's steps splash in them, lamps get halos in the wet air,
+  characters get wet and glossy. After the rain the sun comes back out (light shafts, steam, a
+  rainbow).
+- **Thunderstorms**: lightning bolts with the game's own thunder, sheet lightning inside the clouds.
+- **Snow**: flakes drifting down with the wind.
+- **Sandstorms**: the game's own sandstorm in the desert blows real clouds of sand through the
+  world.
+- **Menu**: "Changing" (the above), or 20 presets from Clear and Overcast to Downpour, Storm in the
+  fog, Dense fog, Blizzard and Dusty haze, each a mix of rain, thunder, fog, ground mist, snow,
+  dust, clouds and wet ground that you can change by hand.
+
+### City (Jak 2 and 3)
+- **Population** setting from Low to Extreme. At High (the default in Jak 3) there are twice as many
   passers-by and as much traffic, and six times as many Metal Heads and KG robots in the street war.
-- The vehicles' engine sounds no longer go silent when both factions are out in the streets.
-- The **Jak 2 plaza** is rebuilt inside Haven, with passages cut into the port and the Metal Head
-  city. It needs a Jak 2 disc too.
+- The vehicles' engine sounds no longer go silent when both factions are out in the streets (Jak 3).
+- The **Jak 2 plaza** is rebuilt inside Jak 3's Haven, with passages cut into the port and the Metal
+  Head city. It needs a Jak 2 disc too.
 
 ### Gameplay
-- Faster jetboard, always at hand.
-- Guns fire 1.5x faster and carry twice the ammo.
-- Driving modes for the desert vehicles (classic, sport, turbo).
+- Jak 3: faster jetboard, always at hand; guns fire 1.5x faster and carry twice the ammo; driving
+  modes for the desert vehicles (classic, sport, turbo).
+- Jak 2: twice the ammo; every gun, upgrade, the jetboard and Dark Jak's powers from the start (the
+  security passes stay with the story).
 
 ### In-game menu (press `\`)
 - **Graphics**: three presets (Classic: the game as it was; Medium: the costly effects off; Maximum:
-  everything) and a switch for every effect. Also vegetation density, lamp strength and the water
-  effects.
+  everything) and a switch for every effect. Also vegetation density, lamp strength, vivid colors,
+  the weather and the water effects.
 - **City**: population (Low / Normal / High / Extreme) and the minimap, which is hidden by default.
 - **Time of day**: six buttons (dawn to night), a slider, and a "freeze time" switch.
-- **Showcase**: five stops that show the mod off, in order (see below).
-- **Teleport**: quick travel to nine places in Haven, Spargus and the desert.
+- **Showcase** (Jak 3): five stops that show the mod off, in order (see below).
+- **Teleport** (Jak 3): quick travel to nine places in Haven, Spargus and the desert.
 
 The choices are saved and come back at the next start.
 
-### Showcase tour
+### Showcase tour (Jak 3)
 Open the menu with `\`, then press the stops in order:
 
 | # | Stop | Time | What to look at |
@@ -101,35 +134,38 @@ High.
 - **Water and PBR reflections/refraction** still show artifacts (less than before): shimmering or
   smeared edges where the screen-space reflections run out of picture, and the refraction bends the
   wrong things at the shoreline.
-- The Jak 2 plaza has no passers-by or enemies yet (it has no navigation mesh for them).
-- HD textures cover only Spargus, the desert, the vehicles and the characters.
+- Switching games (F9) closes and reopens the window for now.
+- The Jak 2 plaza in Jak 3 has no passers-by or enemies yet (it has no navigation mesh for them).
+- HD textures cover only Jak 3's Spargus, the desert, the vehicles and the characters.
 - No hardware ray tracing (the renderer is OpenGL): the ray-traced reflections run in software on
   the GPU, and they don't show characters or vehicles yet.
 
 ## Install and play (Windows)
 
-You need **your own Jak 3 disc image** (an ISO of the PS2 game: PAL, NTSC or NTSC-J), about 30 GB free
-and a recent GPU.
+You need **your own disc images** (ISOs of the PS2 games: PAL, NTSC or NTSC-J) of the games you
+want to play, one, two or all three; about 30 GB free a game and a recent GPU.
 
 1. Get the code: install [Git](https://git-scm.com/download/win), then in a terminal
    (PowerShell):
    ```
-   git clone https://github.com/stichlola/jak3-enhanced.git jak-project
+   git clone https://github.com/stichlola/jak-enhanced-trilogy.git jak-project
    cd jak-project
    ```
    Name the folder `jak-project`: the OpenGOAL tools look for that name.
-2. Run the setup with your ISO:
+2. Run the setup with your ISOs (any of the three):
    ```
-   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Iso "C:\path\to\Jak 3.iso"
+   powershell -ExecutionPolicy Bypass -File scripts\enhanced\setup.ps1 -Jak1Iso "C:\path\to\Jak 1.iso" -Jak2Iso "C:\path\to\Jak 2.iso" -Jak3Iso "C:\path\to\Jak 3.iso"
    ```
    It installs what's missing with winget (Visual Studio 2022 Build Tools with Clang, CMake, Ninja,
-   NASM), builds the game, extracts and compiles your disc's data, and writes
-   `Play-Jak3-Enhanced.bat`. The first run takes about an hour.
-3. Play: double-click `Play-Jak3-Enhanced.bat`. Press `\` in the game for the Enhanced menu.
+   NASM), builds the program, extracts and compiles your discs' data, and writes
+   `Play-Jak1-Enhanced.bat`, `Play-Jak2-Enhanced.bat`, `Play-Jak3-Enhanced.bat` and
+   `Play-Jak-Enhanced-Trilogy.bat`. The first run takes about an hour, plus 20-40 minutes a game.
+3. Play: double-click one of them. Press `\` in the game for the Enhanced menu, F9 for the next
+   game.
 
-Optional HD textures: with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) installed, run
-`python scripts\enhanced\hd_textures.py`, then extract the levels again (the decompiler command in
-ENHANCED.md).
+Optional HD textures (Jak 3): with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) installed,
+run `python scripts\enhanced\hd_textures.py`, then extract the levels again (the decompiler command
+in ENHANCED.md).
 
 ## Change it yourself
 
@@ -140,8 +176,8 @@ runs the game to check, and commits.
 
 1. Install Claude Code (desktop app or `npm install -g @anthropic-ai/claude-code`) and open the
    `jak-project` folder in it.
-2. Ask for the setup first: *"Set this project up and build it following README.md; my ISO is at
-   C:\...\Jak 3.iso"*.
+2. Ask for the setup first: *"Set this project up and build it following README.md; my ISOs are at
+   C:\...\Jak 1.iso, ...\Jak 2.iso and ...\Jak 3.iso"*.
 3. Then ask for changes the way you'd say them to a friend: *"make the night darker"*, *"more Metal
    Heads in the port"*, *"add a menu switch for the fog"*. It's good practice to ask it to explain
    the change and to try it in the game before committing.
@@ -152,10 +188,13 @@ runs the game to check, and commits.
 - **Graphics** (C++ and shaders): `game/graphics/opengl_renderer/EnhancedPost.cpp` (the post-processing
   passes and the menu) and `game/graphics/opengl/shaders/enh_*`. Rebuild with
   `setup.ps1 -SkipTools -SkipExtract`.
-- **Game code** (GOAL, a Lisp): `goal_src/jak3/`. The changes are marked `Enhanced`, for example
-  `engine/ai/traffic-h.gc` (population) and `engine/target/logic-target.gc` (the menu's requests).
-  Recompile with `out\build\Release\bin\goalc.exe --user-auto --game jak3 --cmd "(mi)"` (a few
+- **Game code** (GOAL, a Lisp): `goal_src/jak1/`, `goal_src/jak2/`, `goal_src/jak3/`. The changes
+  are marked `Enhanced`, for example `engine/ai/traffic-h.gc` (population) and
+  `engine/target/logic-target.gc` (the menu's requests). Recompile with
+  `out\build\Release\bin\goalc.exe --user-auto --game jak3 --cmd "(mi)"` (or `jak1`, `jak2`; a few
   seconds to minutes), then restart the game.
+- **The world's look and weather**: `game/assets/enhanced/world.json` (zones, grades, weather, per
+  game): save it while the game runs and the change shows within a second.
 - **Live changes**: start the game with `-debug` (`gk.exe --game jak3 -- -boot -fakeiso -debug`), open
   the compiler (`goalc.exe --user-auto --game jak3`), type `(lt)` then `(mi)`, and change values while
   you play, e.g. `(set! *enhanced-board-speed* 1.6)`.
@@ -165,7 +204,8 @@ runs the game to check, and commits.
 ## Help wanted
 Good places to start, roughly from easiest:
 - the known issues above (the water and PBR artifacts);
-- HD textures for Haven and the other areas;
+- HD textures for Haven, the other areas and Jak 1 and 2;
+- the trilogy's next steps (TRILOGIA.md): the window kept across the switch, one menu and save;
 - passers-by and enemies in the Jak 2 plaza (the plan is in ENHANCED.md, "Not done");
 - translations of the menu.
 
@@ -173,13 +213,13 @@ Read [CONTRIBUTING](.github/CONTRIBUTING.md) first: three short rules (no game d
 be switched off, write down how it works) and where the code is.
 
 ## Credits
-- **Jak 3 Enhanced** by [stichlola](https://github.com/stichlola), made with
+- **Jak Enhanced Trilogy** (formerly Jak 3 Enhanced) by [stichlola](https://github.com/stichlola), made with
   [Claude Code](https://claude.com/claude-code) (Anthropic). **If you make a video, a mod or a fork
-  from it, please credit "Jak 3 Enhanced by stichlola" with a link to
-  https://github.com/stichlola/jak3-enhanced.** That's all I ask.
+  from it, please credit "Jak Enhanced Trilogy by stichlola" with a link to
+  https://github.com/stichlola/jak-enhanced-trilogy.** That's all I ask.
 - **[OpenGOAL](https://opengoal.dev)** and its team: the decompiled game, the compiler and the PC port
   that everything here is built on, years of their work. Support them.
-- **Naughty Dog**, for Jak 3.
+- **Naughty Dog**, for the Jak and Daxter trilogy.
 - **Ratchet & Clank Enhanced** (the PS2 remaster mod), the inspiration.
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Xintao Wang et al.) for the HD textures,
   [Dear ImGui](https://github.com/ocornut/imgui) for the menu, and the effects' techniques from their
@@ -187,7 +227,8 @@ be switched off, write down how it works) and where the code is.
 - The desert sand texture was generated with [Tripo](https://www.tripo3d.ai) (AI).
 
 ## Legal
-Use your own legally owned copy of the game. Jak 3 is © Sony Interactive Entertainment / Naughty Dog.
+Use your own legally owned copies of the games. Jak and Daxter: The Precursor Legacy, Jak II and Jak 3
+are © Sony Interactive Entertainment / Naughty Dog.
 This project is unofficial and contains no game assets. OpenGOAL's license applies to the code
 ([LICENSE](LICENSE)).
 

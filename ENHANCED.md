@@ -1,7 +1,7 @@
-# Jak 3 Enhanced
+# Jak Enhanced Trilogy
 
-OpenGOAL's Jak 3 with a modern post-processing chain and a few gameplay changes, inspired by
-Ratchet & Clank Enhanced. Everything is code: the game data comes from your own copy (PAL here).
+OpenGOAL's Jak and Daxter trilogy (Jak 1, 2 and 3) with a modern post-processing chain and a few gameplay changes, inspired by
+Ratchet & Clank Enhanced. Everything is code: the game data comes from your own copies (PAL here).
 
 ## Build and run (Windows)
 

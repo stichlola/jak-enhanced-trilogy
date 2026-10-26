@@ -1,4 +1,4 @@
-"""Jak 3 Enhanced: the desert dunes' sand from a seamless picture instead of the Wang tile atlas.
+"""Jak Enhanced Trilogy: the desert dunes' sand from a seamless picture instead of the Wang tile atlas.
 
     python scripts/enhanced/desert_sand.py [TILE.png] [--tint R,G,B]
 
