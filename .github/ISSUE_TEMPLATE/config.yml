@@ -1,11 +1,8 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: AI Usage Policy
-    url: https://github.com/open-goal/jak-project/blob/master/AI_POLICY.md
-    about: Please follow the template and do not copy-paste AI generated output as your issue description.
-  - name: Feature Requests and Ideas
-    url: https://github.com/open-goal/jak-project/discussions/new/choose
-    about: Please use the discussion board to bring up feature requests and ideas. If there is interest in them, they can then be converted to an issue(s).
-  - name: Discord Help Channel
-    url: https://discord.gg/dPRCfsju3N
-    about: The best place for general help and asking questions.
+  - name: A bug that also happens in plain OpenGOAL (without the Enhanced changes)
+    url: https://github.com/open-goal/jak-project/issues
+    about: Check with JAK_ENHANCED=0 or the Classic preset first. If it happens in the original OpenGOAL build too, report it there, not here (and follow their AI policy).
+  - name: Ideas and questions
+    url: https://github.com/stichlola/jak3-enhanced/discussions
+    about: Talk about ideas, show your screenshots and videos, ask for help.

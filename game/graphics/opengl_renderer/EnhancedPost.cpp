@@ -87,6 +87,7 @@ void sun_world(float out[3]) {
 }  // namespace
 
 EnhancedPost::EnhancedPost() {
+  lg::info("[enhanced] Jak 3 Enhanced by stichlola - https://github.com/stichlola/jak3-enhanced");
   // the menu's choices from the last session first, the test switches below win over them
   try {
     auto path = file_util::get_user_settings_dir(g_game_version) / "enhanced-settings.json";
@@ -1969,7 +1970,7 @@ void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
   // no close button: \ closes it (and gives the mouse back to the camera)
-  if (!ImGui::Begin("Jak 3 Enhanced  ( \\ closes )", nullptr,
+  if (!ImGui::Begin("Jak 3 Enhanced by stichlola  ( \\ closes )", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;

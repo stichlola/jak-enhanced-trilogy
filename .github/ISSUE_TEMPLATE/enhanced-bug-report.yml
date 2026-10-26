@@ -1,0 +1,34 @@
+name: "Jak 3 Enhanced bug"
+description: Something the Enhanced changes broke or do badly (graphics glitch, crash, wrong behavior).
+labels: ["bug"]
+body:
+  - type: checkboxes
+    attributes:
+      label: Before reporting
+      options:
+        - label: I play with my own copy of the game, and I'm not attaching any game files
+          required: true
+        - label: I checked the known issues in the README
+          required: true
+  - type: textarea
+    attributes:
+      label: What happens
+      description: What you saw, and what you expected. Screenshots or a short video help a lot.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Where and how
+      description: The place (a menu Showcase/Teleport stop is easiest to reproduce), the time of day, the population, and the steps.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Does it happen with the effect off?
+      description: Which menu switch makes it go away (or the Classic preset / JAK_ENHANCED=0).
+  - type: input
+    attributes:
+      label: Version
+      description: The commit (git log -1 --oneline) and your GPU.
+    validations:
+      required: true

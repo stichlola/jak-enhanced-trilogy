@@ -8,6 +8,11 @@ repository.
 
 Technical notes for each feature (how it works, its test switches) are in [ENHANCED.md](ENHANCED.md).
 
+> An unofficial fork, not affiliated with the OpenGOAL team: please don't report Enhanced bugs to them.
+> Made by [stichlola](https://github.com/stichlola) with AI assistance (Claude Code). Forks and
+> improvements are welcome: see [CONTRIBUTING](.github/CONTRIBUTING.md), and please credit the
+> project in videos and mods (see [Credits](#credits)).
+
 ## What's new
 
 ### Graphics
@@ -136,6 +141,30 @@ runs the game to check, and commits.
   you play, e.g. `(set! *enhanced-board-speed* 1.6)`.
 - **Effect settings**: many sliders are in the debug menu (`-debug`, then "Renderer Debug" → "Enhanced
   Post"). The environment variables in ENHANCED.md (`JAK_ENHANCED_*`) switch effects for a test run.
+
+## Help wanted
+Good places to start, roughly from easiest:
+- the known issues above (the water and PBR artifacts, the crash at Extreme population);
+- HD textures for Haven and the other areas;
+- passers-by and enemies in the Jak 2 plaza (the plan is in ENHANCED.md, "Not done");
+- translations of the menu.
+
+Read [CONTRIBUTING](.github/CONTRIBUTING.md) first: three short rules (no game data, everything can
+be switched off, write down how it works) and where the code is.
+
+## Credits
+- **Jak 3 Enhanced** by [stichlola](https://github.com/stichlola), made with
+  [Claude Code](https://claude.com/claude-code) (Anthropic). **If you make a video, a mod or a fork
+  from it, please credit "Jak 3 Enhanced by stichlola" with a link to
+  https://github.com/stichlola/jak3-enhanced.** That's all I ask.
+- **[OpenGOAL](https://opengoal.dev)** and its team: the decompiled game, the compiler and the PC port
+  that everything here is built on, years of their work. Support them.
+- **Naughty Dog**, for Jak 3.
+- **Ratchet & Clank Enhanced** (the PS2 remaster mod), the inspiration.
+- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (Xintao Wang et al.) for the HD textures,
+  [Dear ImGui](https://github.com/ocornut/imgui) for the menu, and the effects' techniques from their
+  authors (Alchemy AO, Lottes' FXAA, Henyey-Greenstein scattering, dual-filter bloom...).
+- The desert sand texture was generated with [Tripo](https://www.tripo3d.ai) (AI).
 
 ## Legal
 Use your own legally owned copy of the game. Jak 3 is © Sony Interactive Entertainment / Naughty Dog.

@@ -1,0 +1,14 @@
+name: "Idea for an improvement"
+description: A new effect, a tweak, a gameplay change.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    attributes:
+      label: The idea
+      description: What should change, where in the game, and why it would look or play better. A reference picture or video helps.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: How it could work (optional)
+      description: Which part of the code, a technique you know of, or a similar mod.
