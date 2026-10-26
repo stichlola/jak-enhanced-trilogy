@@ -98,9 +98,38 @@ a tabelle, cielo e sole propri).
       - Snowy Mountain: freddo, nebbiolina, cielo coperto;
       - Fire Canyon, Volcanic Crater, Lava Tube, Klaww: vulcano; grotte e città sommersa:
         sottoterra; Cittadella: tempio.
-- [ ] Ancora da fare per Jak 1: neve che cade, aria tremolante sulla lava, esplosioni.
+- [x] Neve che cade (Snowy Mountain, sempre, a tratti più forte; anche modo meteo "Snow") e aria
+      che tremola e sale dalla lava (zone vulcano, più forte sopra il bagliore della lava).
+- [x] Meteo dinamico come il giorno e la notte: a Sandover ondate di 10 minuti, ognuna diversa
+      (sereno con nuvole di passaggio, acquazzone, temporale e poi sole sul bagnato). Fissi i posti
+      fissi: nella palude piove sempre, a Misty c'è sempre nebbia, sui vulcani l'aria trema sempre.
+- [ ] Ancora da fare per Jak 1: esplosioni.
 - [ ] **Passata di coerenza** sui tre giochi: stessa famiglia di colori, stessa intensità degli
       effetti, stessi preset.
+
+## Pipeline: migliorie su ogni gioco
+
+Le migliorie stanno su tre livelli; quello che è "di sistema" sta in un posto solo, comune ai tre
+giochi.
+
+1. **Renderer (C++, comune)**: `game/graphics/opengl_renderer/EnhancedPost.*` e gli shader
+   `enh_*.frag`. Per gioco serve solo l'aggancio in `dispatch_buckets_jakN` (`OpenGLRenderer.cpp`):
+   effetti sulla scena prima di sprite e HUD, oceano vicino e lontano.
+2. **Ponti GOAL (per gioco)**: `goal_src/jakN` dice al renderer sole, livello, ora, filmato, Jak,
+   chi spinge l'erba, menu, avvio e ora di prova (le funzioni `pc-enhanced-*` del kernel sono
+   comuni, in `kmachine.cpp`).
+3. **Dati (comuni, a caldo)**: `game/assets/enhanced/world.json`. Ci sono la correzione per gioco
+   (luce rimbalzata, lampioni), i livelli di ogni gioco divisi in zone, e per zona la gradazione di
+   giorno e di notte e il meteo (fisso, rinforzi periodici, ondate di bel e brutto tempo, nebbia del
+   mattino, polvere, neve, calore). Il gioco lo rilegge appena lo salvi: si cambia mentre si gioca.
+
+Controllo: `python scripts/enhanced/check_games.py [jak1|jak2|jak3]` dice per ogni gioco quali
+agganci e ponti ci sono, se i dati tornano, e quali livelli non hanno ancora una zona.
+
+Per portare una miglioria nuova su tutti e tre: la si scrive nel renderer comune; se ha bisogno di
+un dato dal gioco, si aggiunge una funzione `pc-enhanced-*` nel kernel comune e la chiamata in ogni
+`goal_src/jakN` (e la riga in `BRIDGES` dello script); se ha valori da regolare per zona o per
+gioco, vanno in `world.json`.
 
 ## Fase 4 — Livelli di raccordo
 

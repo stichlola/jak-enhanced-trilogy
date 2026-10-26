@@ -61,13 +61,192 @@ EnhancedNormalTarget::~EnhancedNormalTarget() {
 }
 
 namespace {
-// Jak 2's levels are lit brighter and its lamps (neon signs) are stronger than Jak 3's: the same
-// settings bounce and glow less there, so the two games look alike
+// The world's look and weather for the three games: game/assets/enhanced/world.json, reloaded while
+// the game runs whenever it's saved (see the file for what each value does)
+struct ZoneLook {
+  float lift[3], gain[3], saturation, contrast, warmth, clouds;
+};
+struct ZoneWeather {
+  bool outdoors = true;
+  float rain = 0.f, mist = 0.f, snow = 0.f, heat = 0.f, dust = 0.f, sunny = 0.f, clouds = 0.f;
+  float wet = -1.f;  // < 0: as wet as it rains
+  // added for a while in every four-minute cycle
+  float harder_rain = 0.f, harder_mist = 0.f, harder_snow = 0.f, harder_dust = 0.f, harder_wet = 0.f;
+  float harder_from = 0.f, harder_to = 0.f;
+  // spells of weather (period 0: none)
+  float shower_period = 0.f, shower_chance = 0.f, shower_thunder = 0.f;
+  float morning_mist = 0.f;
+  bool game_dust = false;
+};
+struct WorldZone {
+  std::string name;
+  ZoneLook look[2];  // day, night
+  ZoneWeather weather;
+};
+struct World {
+  float gi[3] = {0.6f, 0.6f, 1.f};  // Jak 1, 2, 3
+  float lamps[3] = {1.f, 0.45f, 1.f};
+  std::vector<WorldZone> zones;  // [0]: "other", for the levels in no zone
+  std::vector<std::pair<std::string, int>> prefixes[3];
+};
+World g_world;
+
+int game_index() {
+  return g_game_version == GameVersion::Jak1 ? 0 : g_game_version == GameVersion::Jak2 ? 1 : 2;
+}
+
 float game_gi_scale() {
-  return g_game_version == GameVersion::Jak3 ? 1.f : 0.6f;
+  return g_world.gi[game_index()];
 }
 float game_lamp_scale() {
-  return g_game_version == GameVersion::Jak2 ? 0.45f : 1.f;
+  return g_world.lamps[game_index()];
+}
+
+fs::path world_path() {
+  return file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "world.json";
+}
+
+WorldZone neutral_zone() {
+  WorldZone z;
+  z.name = "other";
+  for (auto& l : z.look) {
+    l = {{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f};
+  }
+  return z;
+}
+
+// reads world.json; on an error the world stays as it was (the log says why)
+void load_world() {
+  try {
+    auto j = parse_commented_json(file_util::read_text_file(world_path()), "world.json");
+    World w;
+    w.zones.push_back(neutral_zone());
+    const char* games[3] = {"jak1", "jak2", "jak3"};
+    for (int g = 0; g < 3; g++) {
+      if (j.contains("tuning") && j["tuning"].contains(games[g])) {
+        const auto& t = j["tuning"][games[g]];
+        w.gi[g] = t.value("gi", w.gi[g]);
+        w.lamps[g] = t.value("lamps", w.lamps[g]);
+      }
+    }
+    auto read_look = [](const nlohmann::json& l, ZoneLook& out) {
+      for (int i = 0; i < 3; i++) {
+        out.lift[i] = l.contains("lift") ? l["lift"][i].get<float>() : 0.f;
+        out.gain[i] = l.contains("gain") ? l["gain"][i].get<float>() : 1.f;
+      }
+      out.saturation = l.value("saturation", 1.f);
+      out.contrast = l.value("contrast", 0.f);
+      out.warmth = l.value("warmth", 0.f);
+      out.clouds = l.value("clouds", 0.4f);
+    };
+    for (const auto& item : j.at("zones").items()) {
+      const std::string name = item.key();
+      const auto& z = item.value();
+      WorldZone zone = neutral_zone();
+      zone.name = name;
+      if (z.contains("day")) {
+        read_look(z["day"], zone.look[0]);
+      }
+      zone.look[1] = zone.look[0];
+      if (z.contains("night")) {
+        read_look(z["night"], zone.look[1]);
+      }
+      if (z.contains("weather")) {
+        const auto& wj = z["weather"];
+        auto& we = zone.weather;
+        we.outdoors = wj.value("outdoors", true);
+        we.rain = wj.value("rain", 0.f);
+        we.mist = wj.value("mist", 0.f);
+        we.snow = wj.value("snow", 0.f);
+        we.heat = wj.value("heat", 0.f);
+        we.dust = wj.value("dust", 0.f);
+        we.sunny = wj.value("sunny", 0.f);
+        we.clouds = wj.value("clouds", 0.f);
+        we.wet = wj.value("wet", -1.f);
+        if (wj.contains("harder")) {
+          const auto& h = wj["harder"];
+          we.harder_rain = h.value("rain", 0.f);
+          we.harder_mist = h.value("mist", 0.f);
+          we.harder_snow = h.value("snow", 0.f);
+          we.harder_dust = h.value("dust", 0.f);
+          we.harder_wet = h.value("wet", 0.f);
+        }
+        we.harder_from = wj.value("harder_from", 0.f);
+        we.harder_to = wj.value("harder_to", 0.f);
+        if (wj.contains("showers")) {
+          const auto& sh = wj["showers"];
+          we.shower_period = sh.value("period", 240.f);
+          we.shower_chance = sh.value("chance", 1.f);
+          we.shower_thunder = sh.value("thunder", 0.f);
+        }
+        we.morning_mist = wj.value("morning_mist", 0.f);
+        we.game_dust = wj.value("game_dust", false);
+      }
+      if (name == "other") {
+        w.zones[0] = zone;
+      } else {
+        w.zones.push_back(zone);
+      }
+    }
+    for (int g = 0; g < 3; g++) {
+      if (!j.contains("levels") || !j["levels"].contains(games[g])) {
+        continue;
+      }
+      for (const auto& entry : j["levels"][games[g]]) {
+        const std::string zone = entry.at("zone").get<std::string>();
+        int idx = -1;
+        for (size_t i = 0; i < w.zones.size(); i++) {
+          if (w.zones[i].name == zone) {
+            idx = (int)i;
+          }
+        }
+        if (idx < 0) {
+          lg::warn("[enhanced] world.json: {} levels in the unknown zone '{}'", games[g], zone);
+          continue;
+        }
+        for (const auto& prefix : entry.at("prefixes")) {
+          w.prefixes[g].emplace_back(prefix.get<std::string>(), idx);
+        }
+      }
+    }
+    g_world = std::move(w);
+    lg::info("[enhanced] world.json: {} zones", g_world.zones.size());
+  } catch (const std::exception& e) {
+    lg::error("[enhanced] world.json not loaded: {}", e.what());
+  }
+  if (g_world.zones.empty()) {
+    g_world.zones.push_back(neutral_zone());
+  }
+}
+
+// once a second: load world.json again if it was saved since
+void poll_world() {
+  static int frames = 0;
+  static fs::file_time_type last{};
+  static bool loaded = false;
+  if (loaded && ++frames < 60) {
+    return;
+  }
+  frames = 0;
+  std::error_code ec;
+  const auto t = fs::last_write_time(world_path(), ec);
+  if (!loaded || (!ec && t != last)) {
+    loaded = true;
+    if (!ec) {
+      last = t;
+    }
+    load_world();
+  }
+}
+
+// the zone of the level Jak is in, from the start of its name (the current game's list)
+int zone_of(const std::string& level) {
+  for (const auto& [prefix, zone] : g_world.prefixes[game_index()]) {
+    if (level.rfind(prefix, 0) == 0) {
+      return zone;
+    }
+  }
+  return 0;
 }
 
 GLuint make_1x1(u32 rgba) {
@@ -251,7 +430,7 @@ EnhancedPost::EnhancedPost() {
   }
   if (const char* weather = std::getenv("JAK_ENHANCED_WEATHER")) {
     // 0 clear, 1 by area, 2 rain, 3 sandstorm
-    m_settings.weather = std::clamp(std::atoi(weather), 0, 7);
+    m_settings.weather = std::clamp(std::atoi(weather), 0, 8);
   }
   if (const char* clouds = std::getenv("JAK_ENHANCED_CLOUDS")) {
     // the cloud layer's strength, 0 = off
@@ -1078,130 +1257,6 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
 }
 
-namespace {
-// the areas with a look of their own, from the name of the level Jak is in
-enum Zone { kZoneOther, kZoneHaven, kZoneDesert, kZoneForest, kZoneMetalHead, kZoneUnder,
-            kZoneVolcano, kZoneTemple, kZoneTropics, kZoneJungle, kZoneBog, kZoneSnow, kZoneCount };
-
-// Jak 1's levels (its names overlap Jak 2's, e.g. "sunken", so they're looked up only in Jak 1)
-int zone_of_jak1(const std::string& level) {
-  auto starts = [&](const char* prefix) { return level.rfind(prefix, 0) == 0; };
-  for (const char* p : {"village1", "village2", "beach", "training", "intro", "rolling", "title",
-                        "demo"}) {
-    if (starts(p)) {
-      return kZoneTropics;
-    }
-  }
-  if (starts("jungle")) {
-    return kZoneJungle;
-  }
-  if (starts("swamp") || starts("misty")) {
-    return kZoneBog;
-  }
-  if (starts("snow")) {
-    return kZoneSnow;
-  }
-  for (const char* p : {"firecanyon", "village3", "lavatube", "ogre"}) {
-    if (starts(p)) {
-      return kZoneVolcano;
-    }
-  }
-  for (const char* p : {"sunken", "maincave", "darkcave", "robocave"}) {
-    if (starts(p)) {
-      return kZoneUnder;
-    }
-  }
-  if (starts("citadel") || starts("finalboss")) {
-    return kZoneTemple;
-  }
-  return kZoneOther;
-}
-
-int zone_of(const std::string& level) {
-  if (g_game_version == GameVersion::Jak1) {
-    return zone_of_jak1(level);
-  }
-  auto starts = [&](const char* prefix) { return level.rfind(prefix, 0) == 0; };
-  for (const char* p : {"for", "lfor"}) {
-    if (starts(p)) {
-      return kZoneForest;
-    }
-  }
-  // Jak 2's levels too: Haven's palace, the oracle, the hideout; the strip mine and the dig are dusty;
-  // the drill platform, the underport, the castle and the tomb are underground
-  for (const char* p : {"mhc", "nst", "lmh", "nes"}) {
-    if (starts(p)) {
-      return kZoneMetalHead;
-    }
-  }
-  for (const char* p : {"cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom",
-                        "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide"}) {
-    if (starts(p)) {
-      return kZoneHaven;
-    }
-  }
-  for (const char* p : {"was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"}) {
-    if (starts(p)) {
-      return kZoneDesert;
-    }
-  }
-  for (const char* p : {"sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"}) {
-    if (starts(p)) {
-      return kZoneUnder;
-    }
-  }
-  if (starts("vol")) {
-    return kZoneVolcano;
-  }
-  if (starts("temp") || starts("tomb")) {
-    return kZoneTemple;
-  }
-  return kZoneOther;
-}
-
-struct ZoneLook {
-  float lift[3], gain[3], saturation, contrast, warmth, clouds;
-};
-// per area, by day and by night: shadows lifted toward a tint, highlights tinted, saturation
-// (times the setting), contrast and warmth (plus the setting), sky cover
-const ZoneLook kZoneLooks[kZoneCount][2] = {
-    // other: as it was
-    {{{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f}, {{0, 0, 0.012f}, {1, 1, 1.02f}, 1.f, 0.02f, 0.f, 0.4f}},
-    // Haven: teal shadows and warm light by day; blue night, neon kept vivid
-    {{{-0.005f, 0.f, 0.012f}, {1.03f, 1.f, 0.96f}, 1.f, 0.04f, 0.02f, 0.5f},
-     {{0.f, 0.006f, 0.03f}, {1.06f, 0.98f, 1.02f}, 1.12f, 0.08f, -0.02f, 0.65f}},
-    // desert: sun-baked by day, cold blue night
-    {{{0.01f, 0.004f, -0.006f}, {1.05f, 1.f, 0.91f}, 1.04f, 0.05f, 0.04f, 0.2f},
-     {{0.f, 0.004f, 0.02f}, {0.98f, 0.98f, 1.05f}, 0.95f, 0.04f, -0.03f, 0.25f}},
-    // forest: autumn gold, a little green in the shade
-    {{{0.f, 0.008f, 0.004f}, {1.07f, 1.f, 0.86f}, 1.12f, 0.06f, 0.03f, 0.45f},
-     {{0.f, 0.006f, 0.022f}, {0.98f, 1.f, 1.04f}, 1.f, 0.05f, -0.02f, 0.5f}},
-    // Metal Heads: sickly purple shadows
-    {{{0.012f, 0.f, 0.02f}, {1.f, 0.96f, 1.04f}, 1.08f, 0.08f, 0.f, 0.6f},
-     {{0.012f, 0.f, 0.026f}, {1.f, 0.96f, 1.06f}, 1.1f, 0.09f, -0.01f, 0.6f}},
-    // underground (sewers, factory, mines, tower, rail, Precursor core): cool and contrasty
-    {{{-0.004f, 0.002f, 0.012f}, {1.f, 1.f, 1.02f}, 0.94f, 0.1f, -0.01f, 0.4f},
-     {{-0.004f, 0.002f, 0.012f}, {1.f, 1.f, 1.02f}, 0.94f, 0.1f, -0.01f, 0.4f}},
-    // volcano: hot
-    {{{0.015f, 0.f, -0.005f}, {1.08f, 0.96f, 0.85f}, 1.1f, 0.08f, 0.04f, 0.5f},
-     {{0.015f, 0.f, 0.f}, {1.06f, 0.95f, 0.9f}, 1.08f, 0.08f, 0.02f, 0.5f}},
-    // temples: golden
-    {{{0.006f, 0.004f, 0.f}, {1.04f, 1.02f, 0.92f}, 1.04f, 0.06f, 0.02f, 0.4f},
-     {{0.f, 0.004f, 0.018f}, {1.f, 1.f, 1.03f}, 1.f, 0.05f, -0.01f, 0.4f}},
-    // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night
-    {{{0.004f, 0.008f, 0.016f}, {1.02f, 1.01f, 0.98f}, 1.f, 0.04f, 0.02f, 0.2f},
-     {{0.f, 0.006f, 0.03f}, {0.98f, 1.f, 1.05f}, 1.f, 0.05f, -0.02f, 0.35f}},
-    // the jungle: deep greens
-    {{{0.f, 0.01f, 0.004f}, {1.02f, 1.04f, 0.94f}, 1.1f, 0.06f, 0.02f, 0.5f},
-     {{0.f, 0.006f, 0.022f}, {0.98f, 1.f, 1.04f}, 1.f, 0.05f, -0.02f, 0.5f}},
-    // the swamp and Misty Island: grey-green, washed out, overcast
-    {{{0.004f, 0.008f, 0.004f}, {0.98f, 1.f, 0.94f}, 0.88f, 0.04f, 0.f, 0.75f},
-     {{0.f, 0.006f, 0.02f}, {0.96f, 0.98f, 1.02f}, 0.9f, 0.05f, -0.02f, 0.75f}},
-    // snow: cold, blue shadows
-    {{{0.f, 0.006f, 0.02f}, {1.f, 1.02f, 1.06f}, 0.95f, 0.05f, -0.04f, 0.6f},
-     {{0.f, 0.006f, 0.035f}, {0.97f, 0.99f, 1.06f}, 0.92f, 0.06f, -0.05f, 0.6f}},
-};
-}  // namespace
 
 // once a frame: the area Jak is in and the hour pick the grade and the weather, eased in over a
 // few seconds so a level change or nightfall doesn't snap
@@ -1217,14 +1272,16 @@ void EnhancedPost::update_scene() {
   }
   static const bool cine_test = std::getenv("JAK_ENHANCED_CINE_TEST") != nullptr;
   movie = movie || cine_test;
+  poll_world();
   m_zone = zone_of(level);
+  const WorldZone& zone = g_world.zones[m_zone];
   // night from 19 to 21 in, from 5 to 7 out
   auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
   m_night = std::max(ramp(19.f, 21.f, hour), 1.f - ramp(5.f, 7.f, hour));
 
   const auto& s = m_settings;
-  const ZoneLook& day = kZoneLooks[s.area_grading ? m_zone : kZoneOther][0];
-  const ZoneLook& night = kZoneLooks[s.area_grading ? m_zone : kZoneOther][1];
+  const ZoneLook& day = (s.area_grading ? zone : g_world.zones[0]).look[0];
+  const ZoneLook& night = (s.area_grading ? zone : g_world.zones[0]).look[1];
   auto mix = [&](float a, float b) { return a + (b - a) * m_night; };
   Grade want;
   for (int i = 0; i < 3; i++) {
@@ -1246,9 +1303,10 @@ void EnhancedPost::update_scene() {
   // what the weather wants: rain, dust, thunderstorm, ground fog, the sun out after the rain, and
   // whether the ground is wet
   float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
-  const bool outdoors = m_zone == kZoneHaven || m_zone == kZoneForest || m_zone == kZoneOther ||
-                        m_zone == kZoneDesert || m_zone == kZoneTropics || m_zone == kZoneJungle ||
-                        m_zone == kZoneBog || m_zone == kZoneSnow;
+  float snow = 0.f;
+  // lava levels: the air over it shimmers whatever the weather
+  const float heat = zone.weather.heat;
+  const bool outdoors = zone.weather.outdoors;
   // a scripted sequence for videos: JAK_ENHANCED_WEATHER_SCRIPT=<s>:<mode>,<s>:<mode>,... (seconds
   // since Jak is first in a level), e.g. "0:0,10:4,40:5": clear, a thunderstorm at 10 s, after the
   // rain at 40 s
@@ -1263,7 +1321,7 @@ void EnhancedPost::update_scene() {
         size_t colon = item.find(':');
         if (colon != std::string::npos) {
           steps.emplace_back(std::atof(item.c_str()),
-                             std::clamp(std::atoi(item.c_str() + colon + 1), 0, 7));
+                             std::clamp(std::atoi(item.c_str() + colon + 1), 0, 8));
         }
         if (end == std::string::npos) {
           break;
@@ -1296,42 +1354,57 @@ void EnhancedPost::update_scene() {
       auto in = [&](float a, float b) {
         return std::clamp((ph - a) / 12.f, 0.f, 1.f) * std::clamp((b - ph) / 12.f, 0.f, 1.f);
       };
-      m_weather_state = 0;
-      if (m_zone == kZoneHaven || m_zone == kZoneForest || m_zone == kZoneJungle) {
-        // sunny 0-60 s, clouds build, rain 80-160 with a thunderstorm 110-150, the sun back out on
-        // the wet ground 160-220, drying
-        sunny = in(-20.f, 60.f) + in(220.f, 260.f);
-        rain = in(80.f, 160.f);
-        storm = in(110.f, 150.f);
-        clear = in(160.f, 222.f);
-        wet = ph > 80.f && ph < 222.f ? 1.f : 0.f;
-        want.clouds = std::max(want.clouds, 0.95f * in(60.f, 168.f));
-        m_weather_state = ph < 60.f ? 6 : ph < 80.f ? 1 : ph < 110.f ? 2 : ph < 150.f ? 3
-                        : ph < 160.f ? 2 : ph < 220.f ? 4 : 6;
-        const float h = hour;
-        mist = std::clamp(h - 4.5f, 0.f, 1.f) * std::clamp((9.5f - h) / 1.5f, 0.f, 1.f) *
-               (m_zone == kZoneHaven ? 0.6f : 1.f);
-      } else if (m_zone == kZoneTropics) {
-        // Jak 1's islands: always fine weather, a touch of the sunny look by day (the game is
-        // saturated already: the full look burns it)
-        sunny = 0.3f * (1.f - m_night);
-        m_weather_state = 6;
-      } else if (m_zone == kZoneBog) {
-        // fog that never lifts, a drizzle now and then
-        mist = 0.8f;
-        rain = 0.5f * in(60.f, 180.f);
-        wet = 0.4f + 0.6f * in(60.f, 200.f);
-        m_weather_state = ph > 60.f && ph < 180.f ? 2 : 1;
-      } else if (m_zone == kZoneSnow) {
-        mist = 0.35f;
-        want.clouds = std::max(want.clouds, 0.8f);
-        m_weather_state = 1;
-      } else if (m_zone == kZoneDesert) {
-        dust = std::max(0.15f + 0.65f * in(120.f, 210.f), game_dust * 1.3f);
-        m_weather_state = 5;
+      // the zone's weather (world.json): what's always there, what comes harder for a while
+      // in every cycle, spells of fair and wet weather, mist on early mornings
+      const auto& w = zone.weather;
+      const float harder = w.harder_to > w.harder_from ? in(w.harder_from, w.harder_to) : 0.f;
+      rain = w.rain + w.harder_rain * harder;
+      mist = w.mist + w.harder_mist * harder;
+      snow = w.snow + w.harder_snow * harder;
+      dust = w.dust + w.harder_dust * harder;
+      if (w.wet >= 0.f) {
+        wet = w.wet + w.harder_wet * harder;
       }
+      want.clouds = std::max(want.clouds, w.clouds);
+      if (w.game_dust) {
+        dust = std::max(dust, game_dust * 1.3f);
+      }
+      m_weather_state = rain > 0.3f ? 2 : snow > 0.f || mist > 0.5f ? 1 : dust > 0.f ? 5 : 0;
+      float fair = 1.f;
+      if (w.shower_period > 0.f) {
+        // each spell its own: a roll picks fair, a shower or a thunderstorm. A wet spell: clouds
+        // build, rain (the storm in the middle of it), the sun back out on the wet ground, drying
+        const double tt = m_time + phase0;
+        const double period = std::max(30.0, (double)w.shower_period);
+        const float p = (float)(std::fmod(tt, period) / period);
+        const uint32_t spell = (uint32_t)(tt / period) * 2654435761u + 977u;
+        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
+        auto win = [&](float a, float b) {
+          return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
+        };
+        if (roll < w.shower_chance) {
+          const bool thunder = roll < w.shower_chance * w.shower_thunder;
+          rain = std::max(rain, win(0.333f, 0.667f) * (thunder ? 1.f : 0.6f));
+          storm = thunder ? win(0.458f, 0.625f) : 0.f;
+          clear = win(0.667f, 0.925f);
+          if (p > 0.333f && p < 0.925f) {
+            wet = 1.f;
+          }
+          want.clouds = std::max(want.clouds, 0.95f * win(0.25f, 0.7f));
+          fair = 1.f - win(0.25f, 0.7f);
+          m_weather_state = p < 0.25f ? 6 : p < 0.333f ? 1 : p < 0.667f ? (storm > 0.f ? 3 : 2)
+                          : p < 0.925f ? 4 : 6;
+        } else {
+          // fair weather clouds drift over now and then
+          want.clouds = std::max(want.clouds, 0.2f + 0.4f * roll * win(0.25f, 0.67f));
+          m_weather_state = 6;
+        }
+      }
+      sunny = std::max(sunny, w.sunny * fair * (1.f - m_night));
+      mist = std::max(mist, w.morning_mist * std::clamp(hour - 4.5f, 0.f, 1.f) *
+                                std::clamp((9.5f - hour) / 1.5f, 0.f, 1.f));
       if (!outdoors) {
-        rain = storm = clear = mist = dust = sunny = 0.f;
+        rain = storm = clear = mist = dust = sunny = snow = 0.f;
         wet = 0.f;
       }
       break;
@@ -1356,6 +1429,11 @@ void EnhancedPost::update_scene() {
       break;
     case 7:
       sunny = 1.f;
+      break;
+    case 8:
+      snow = 1.f;
+      mist = 0.4f;
+      want.clouds = std::max(want.clouds, 0.8f);
       break;
     default:
       break;
@@ -1400,6 +1478,8 @@ void EnhancedPost::update_scene() {
   ease(m_mist, mist, k_weather);
   ease(m_clear, clear, k_weather);
   ease(m_sunny, sunny, k_weather);
+  ease(m_snow, snow, k_weather);
+  ease(m_heat, heat, k_grade);
   // the ground soaks in a few seconds and takes a minute and a half to dry
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
@@ -2737,6 +2817,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   }
   glUniform1f(glGetUniformLocation(id, "sunny"), m_sunny * on);
   glUniform1f(glGetUniformLocation(id, "sheet"), m_sheet * on);
+  glUniform2f(glGetUniformLocation(id, "snow_heat"), m_snow * on, m_heat * on);
   glUniform4f(glGetUniformLocation(id, "bolt"), m_bolt[0], m_bolt[1], m_bolt[2],
               m_bolt[3] * m_storm * on);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
@@ -2832,7 +2913,7 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Weather", &s.weather,
-                 "Clear\0Changing (by area)\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0");
+                 "Clear\0Changing (by area)\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0Snow\0");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::BeginDisabled(!s.lights);
@@ -3051,7 +3132,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);
   get("weather", s.weather);
-  s.weather = std::clamp(s.weather, 0, 7);
+  s.weather = std::clamp(s.weather, 0, 8);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
   bool map = false;
@@ -3237,7 +3318,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Sharpen", &m_settings.sharpen, 0.f, 1.f);
     ImGui::Checkbox("Grade per area", &m_settings.area_grading);
-    ImGui::Text("area %d, night %.2f, rain %.2f, dust %.2f, focus %.1f m", m_zone, m_night, m_rain,
+    ImGui::Text("area %s, night %.2f, rain %.2f, dust %.2f, focus %.1f m", g_world.zones[m_zone].name.c_str(), m_night, m_rain,
                 m_dust, m_focus / kMeter);
     ImGui::Text("wet %.2f, storm %.2f, mist %.2f, sun after rain %.2f, state %d, wind %.1f m/s",
                 m_wet, m_storm, m_mist, m_clear, m_weather_state, m_wind_speed);
@@ -3246,7 +3327,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("Clouds", &m_settings.clouds);
     ImGui::SliderFloat("Cloud amount", &m_settings.cloud_amount, 0.f, 2.f);
     ImGui::Combo("Weather##debug", &m_settings.weather,
-                 "Clear\0Changing\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0");
+                 "Clear\0Changing\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0Snow\0");
     ImGui::SliderFloat("Rain strength", &m_settings.rain_strength, 0.f, 2.f);
     ImGui::SliderFloat("Dust strength", &m_settings.dust_strength, 0.f, 2.f);
     ImGui::Checkbox("Cutscene depth of field", &m_settings.cine_dof);

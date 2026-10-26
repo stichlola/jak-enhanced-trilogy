@@ -446,6 +446,8 @@ class EnhancedPost {
   float m_storm = 0.f;  // thunderstorm: lightning, wind
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
+  float m_snow = 0.f;   // snowfall (0..1)
+  float m_heat = 0.f;   // hot air shimmering up from lava (0..1)
   float m_sunny = 0.f;  // a bright summer day: saturated, warm sun, deep blue sky
   float m_flash = 0.f;  // lightning flash, 0..1
   float m_bolt[4] = {};  // the bolt: azimuth (rad), seed, age (s), strength

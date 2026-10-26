@@ -107,6 +107,7 @@ uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
 uniform float sheet;            // sheet lightning: the whole sky lit from inside the clouds (0..1)
+uniform vec2 snow_heat;          // snowfall, hot air over lava (0..1)
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
@@ -821,6 +822,72 @@ float rain_drops(vec3 ray_view, float scene_z, float px) {
          rain_grid(o, d, 12.0, min(far, 30.0), 1.6, px, 41.0) * 0.7;
 }
 
+// snowflakes: like the rain (columns in world cells, walked along the view ray), but round flakes
+// drifting down at about a meter a second, swaying, carried by the wind
+float snow_grid(vec3 o, vec3 d, float near, float far, float cell, float px, float seed) {
+  float t_snow = weather.z;
+  vec2 slant = dust_wind.xy * 0.35;
+  o.xz -= slant * o.y;
+  d.xz -= slant * d.y;
+  vec2 dh = d.xz;
+  float hl = length(dh);
+  if (hl < 1e-4) {
+    return 0.0;
+  }
+  vec2 start = o.xz + dh * near;
+  vec2 c = floor(start / cell);
+  vec2 stp = sign(dh);
+  vec2 inv = 1.0 / max(abs(dh), vec2(1e-5));
+  vec2 next = ((c + max(stp, 0.0)) * cell - o.xz) * stp * inv;
+  float sum = 0.0;
+  float t = near;
+  for (int i = 0; i < 24; i++) {
+    if (t > far) {
+      break;
+    }
+    float h = hash1(c + seed);
+    if (h < 0.85) {
+      // the column sways as a whole (its flakes are far apart)
+      vec2 sway = 0.18 * cell * vec2(sin(t_snow * 0.9 + h * 40.0), cos(t_snow * 0.7 + h * 23.0));
+      vec2 col = (c + 0.2 + 0.6 * vec2(fract(h * 13.7), fract(h * 71.3))) * cell + sway;
+      float tc = dot(col - o.xz, dh) / (hl * hl);
+      if (tc > near && tc < far) {
+        float miss = length(o.xz + dh * tc - col);
+        float foot = tc * px;
+        float r = max(0.012, foot * 0.9);
+        if (miss < r) {
+          // a flake every 0.9 m down the column, falling 1.1 m/s
+          float y = o.y + d.y * tc;
+          float dy = (fract((y + t_snow * 1.1) / 0.9 + fract(h * 37.1)) - 0.5) * 0.9;
+          float dist = length(vec2(miss, dy));
+          float flake = 1.0 - smoothstep(r * 0.4, r, dist);
+          // far flakes smaller than a pixel are faint; none right at the lens
+          sum += flake * min(1.0, (0.012 / r) * (0.012 / r) * 4.0) * smoothstep(1.0, 2.0, tc);
+        }
+      }
+    }
+    if (next.x < next.y) {
+      t = next.x;
+      next.x += cell * inv.x;
+      c.x += stp.x;
+    } else {
+      t = next.y;
+      next.y += cell * inv.y;
+      c.y += stp.y;
+    }
+  }
+  return sum;
+}
+
+float snow_flakes(vec3 ray_view, float scene_z, float px) {
+  vec3 d = world_dir(ray_view);
+  vec3 o = cam_pos / 4096.0;
+  float far = scene_z > 0.0 ? scene_z / 4096.0 / max(ray_view.z, 1e-3) : 1e4;
+  return snow_grid(o, d, 1.0, min(far, 6.0), 0.45, px, 5.0) +
+         snow_grid(o, d, 6.0, min(far, 18.0), 1.1, px, 29.0) * 0.8 +
+         snow_grid(o, d, 18.0, min(far, 45.0), 2.4, px, 53.0) * 0.6;
+}
+
 // raindrops in the puddles: each 0.5 m cell gets a ring now and then, spreading and fading
 // (returns the slope it gives the water, xz)
 vec2 rain_ripples(vec2 xz, float t) {
@@ -992,6 +1059,20 @@ void main() {
       vec2 wob = vec2(sin(uv.y * 180.0 + t * 3.1) + 0.5 * sin(uv.y * 410.0 - t * 4.3),
                       cos(uv.x * 140.0 + t * 2.3));
       uv += wob * haze.x * amount;
+    }
+  }
+
+  // hot air over lava: the picture ripples, rising, stronger above the glow of the lava (the pixels
+  // a little below this one)
+  if (snow_heat.y > 0.0 && z > 0.0) {
+    vec3 below = texture(tex_T0, uv - vec2(0.0, 0.035)).rgb;
+    float lava = smoothstep(0.12, 0.35, below.r - below.b) * smoothstep(0.45, 0.85, below.r);
+    float amount = snow_heat.y * smoothstep(2.0 * 4096.0, 15.0 * 4096.0, z) * (0.3 + 0.7 * lava);
+    if (amount > 0.0) {
+      float t = haze.w;
+      vec2 wob = vec2(sin(uv.y * 230.0 - t * 6.0 + 2.0 * sin(uv.x * 70.0)),
+                      sin(uv.x * 160.0 + uv.y * 90.0 - t * 5.0));
+      uv += wob * 0.0018 * amount;
     }
   }
 
@@ -1716,6 +1797,16 @@ void main() {
                  glow * 1.6;
       float show = 1.0 - 0.65 * smoothstep(0.45, 0.9, luma(c));
       c = mix(c, lit, clamp(streaks * 0.32 * weather.x * show, 0.0, 0.45));
+    }
+  }
+
+  // snowflakes in front of everything, white, a little dimmer in dim light
+  if (snow_heat.x > 0.0) {
+    float flakes = snow_flakes(ray, z, pixel_rad);
+    if (flakes > 0.0) {
+      vec3 white = vec3(0.92, 0.95, 1.0) * (0.55 + 0.45 * smoothstep(0.05, 0.5, luma(fog_color))) +
+                   texture(tex_T1, tex_coord).rgb;
+      c = mix(c, white, clamp(flakes * snow_heat.x, 0.0, 0.9));
     }
   }
 
