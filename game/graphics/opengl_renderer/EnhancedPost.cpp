@@ -1187,7 +1187,41 @@ void EnhancedPost::update_scene() {
   float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
   const bool outdoors = m_zone == kZoneHaven || m_zone == kZoneForest || m_zone == kZoneOther ||
                         m_zone == kZoneDesert;
-  switch (s.weather) {
+  // a scripted sequence for videos: JAK_ENHANCED_WEATHER_SCRIPT=<s>:<mode>,<s>:<mode>,... (seconds
+  // since Jak is first in a level), e.g. "0:0,10:4,40:5": clear, a thunderstorm at 10 s, after the
+  // rain at 40 s
+  static const std::vector<std::pair<double, int>> script = [] {
+    std::vector<std::pair<double, int>> steps;
+    if (const char* e = std::getenv("JAK_ENHANCED_WEATHER_SCRIPT")) {
+      std::string str(e);
+      size_t pos = 0;
+      while (pos < str.size()) {
+        size_t end = str.find(',', pos);
+        std::string item = str.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        size_t colon = item.find(':');
+        if (colon != std::string::npos) {
+          steps.emplace_back(std::atof(item.c_str()),
+                             std::clamp(std::atoi(item.c_str() + colon + 1), 0, 7));
+        }
+        if (end == std::string::npos) {
+          break;
+        }
+        pos = end + 1;
+      }
+    }
+    return steps;
+  }();
+  static double script_t0 = -1;
+  if (script_t0 < 0 && !level.empty() && level != "none") {
+    script_t0 = m_time;
+  }
+  int weather_mode = s.weather;
+  for (const auto& step : script) {
+    if (script_t0 >= 0 && m_time - script_t0 >= step.first) {
+      weather_mode = step.second;
+    }
+  }
+  switch (weather_mode) {
     case 1: {
       // changing: a four-minute cycle per area. Rain comes in Haven and the forest (clouds build,
       // rain, a thunderstorm, the rain stops and the sun comes out on the wet streets, they dry),
