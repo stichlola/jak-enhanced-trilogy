@@ -133,7 +133,7 @@ class EnhancedPost {
     float mist_noise = 0.7f;       // drifting patches
     float mist_sun = 1.5f;         // sunlight in the mist
     float mist_aniso = 0.5f;       // forward scattering (brighter looking toward the sun)
-    float motion_blur = 0.5f;      // camera motion blur, as a fraction of the frame's motion
+    float motion_blur = 0.3f;      // camera motion blur, as a fraction of the frame's motion
     bool water_reflections = true;
     float water_reflection_strength = 0.6f;
     float water_deep[3] = {0.035f, 0.17f, 0.2f};

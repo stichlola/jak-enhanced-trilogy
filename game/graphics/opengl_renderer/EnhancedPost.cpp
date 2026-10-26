@@ -2711,7 +2711,7 @@ void EnhancedPost::draw_menu() {
     check("Depth of field", &s.dof);
     bool blur = s.motion_blur > 0.f;
     if (check("Motion blur", &blur)) {
-      s.motion_blur = blur ? 0.5f : 0.f;
+      s.motion_blur = blur ? 0.3f : 0.f;
     }
     check("Dynamic lights", &s.lights);
     check("Fuochi (calore, braci)", &s.fire);
