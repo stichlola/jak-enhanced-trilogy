@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "common/log/log.h"
 
@@ -139,6 +140,106 @@ class Ground {
   std::unordered_map<u64, std::vector<u32>> m_cells;
 };
 
+/*!
+ * The level's walls: its upright triangles (tfrag and tie), for more of the level's wall vines.
+ */
+struct Walls {
+  struct Tri {
+    Vec3 a, b, c;
+    Vec3 n;      // horizontal, unit (either side)
+    float area;  // m2
+    float lo, hi;
+  };
+  std::vector<Tri> tris;
+
+  void add(const Vec3& a, const Vec3& b, const Vec3& c) {
+    Vec3 n = (b - a).cross(c - a);
+    float len = n.length();
+    if (!(len > 1.f) || std::abs(n.y()) / len > 0.25f) {
+      return;  // degenerate, or not upright
+    }
+    float area = 0.5f * len / (kMeter * kMeter);
+    if (area < 0.5f || area > 400.f) {
+      return;
+    }
+    Vec3 h(n.x(), 0.f, n.z());
+    u32 id = tris.size();
+    tris.push_back({a, b, c, h / h.length(), area, std::min({a.y(), b.y(), c.y()}),
+                    std::max({a.y(), b.y(), c.y()})});
+    int x0 = cell(std::min({a.x(), b.x(), c.x()})), x1 = cell(std::max({a.x(), b.x(), c.x()}));
+    int z0 = cell(std::min({a.z(), b.z(), c.z()})), z1 = cell(std::max({a.z(), b.z(), c.z()}));
+    for (int x = x0; x <= x1; x++) {
+      for (int z = z0; z <= z1; z++) {
+        cells[key(x, z)].push_back(id);
+      }
+    }
+  }
+
+  // how far the wall through `at` (facing n) goes down and up from [lo, hi]: the triangles in
+  // its plane over that spot, chained
+  void extent(const Vec3& at, const Vec3& n, float* lo, float* hi) const {
+    auto it = cells.find(key(cell(at.x()), cell(at.z())));
+    if (it == cells.end()) {
+      return;
+    }
+    for (bool changed = true; changed;) {
+      changed = false;
+      for (u32 id : it->second) {
+        const auto& t = tris[id];
+        if (std::abs(t.n.dot(n)) < 0.9f || t.lo >= *hi + 0.2f * kMeter || t.hi <= *lo - 0.2f * kMeter ||
+            (t.lo >= *lo && t.hi <= *hi)) {
+          continue;  // another plane, not touching, or nothing new
+        }
+        // in the plane and across this spot
+        Vec3 along(-n.z(), 0.f, n.x());
+        float s = (at - t.a).dot(along);
+        float s1 = (t.b - t.a).dot(along), s2 = (t.c - t.a).dot(along);
+        if (std::abs((at - t.a).dot(n)) > 0.3f * kMeter ||
+            s < std::min({0.f, s1, s2}) - 0.2f * kMeter || s > std::max({0.f, s1, s2}) + 0.2f * kMeter) {
+          continue;
+        }
+        *lo = std::min(*lo, t.lo);
+        *hi = std::max(*hi, t.hi);
+        changed = true;
+      }
+    }
+  }
+
+  template <typename Verts>
+  void add_mesh(const Verts& verts,
+                const std::vector<u32>& indices,
+                size_t first,
+                size_t end,
+                bool strips) {
+    auto pos = [&](u32 i) { return Vec3(verts[i].x, verts[i].y, verts[i].z); };
+    auto tri = [&](u32 a, u32 b, u32 c) {
+      if (a < verts.size() && b < verts.size() && c < verts.size() && a != b && b != c && a != c) {
+        add(pos(a), pos(b), pos(c));
+      }
+    };
+    if (strips) {
+      size_t start = first;
+      for (size_t i = first; i < end; i++) {
+        if (indices[i] == UINT32_MAX) {
+          start = i + 1;
+        } else if (i >= start + 2) {
+          tri(indices[i - 2], indices[i - 1], indices[i]);
+        }
+      }
+    } else {
+      for (size_t i = first; i + 2 < end; i += 3) {
+        tri(indices[i], indices[i + 1], indices[i + 2]);
+      }
+    }
+  }
+
+ private:
+  static constexpr float kCell = 4.f * kMeter;
+  static int cell(float v) { return (int)std::floor(v / kCell); }
+  static u64 key(int x, int z) { return ((u64)(u32)x << 32) | (u32)z; }
+  std::unordered_map<u64, std::vector<u32>> cells;
+};
+
 // deterministic random in [0, 1)
 float rnd(u32 a, u32 b, u32 c) {
   u32 h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u) * 0x85EBCA77u ^ (c + 0x165667B1u) * 0xC2B2AE3Du;
@@ -228,11 +329,14 @@ u32 place(std::vector<tfrag3::ShrubGpuVertex>& verts,
 }
 
 struct Stats {
-  int plants = 0, copies = 0, tufts = 0, habitats = 0;
+  int plants = 0, copies = 0, tufts = 0, habitats = 0, vine_sources = 0, vines = 0;
 };
 
 void add_to_tree(tfrag3::ShrubTree& tree,
+                 const std::vector<tfrag3::Texture>& textures,
                  const Ground& ground,
+                 const Walls& walls,
+                 float max_vines,
                  u32 tree_idx,
                  float max_tufts,
                  Stats* stats) {
@@ -366,7 +470,160 @@ void add_to_tree(tfrag3::ShrubTree& tree,
     }
   }
 
-  // 2: tufts on the floors the game already grows grass on. A habitat is a floor texture under
+  // 2: climbing plants: the level's own wall vines (shrubs with a "vine" texture, flat against a
+  // wall) copied onto the other walls around them, turned to face out of the wall, as high above
+  // the floor as the original (tier 2, a third of them tier 1)
+  struct Vine {
+    u32 plant;
+    Vec3 n;  // out of its wall
+    float cx, cz, min_y, height, width, rise;  // rise: its bottom above the floor
+  };
+  std::vector<Vine> vines;
+  std::unordered_map<u32, std::vector<std::pair<u32, Strip>>> vine_strips;
+  for (u32 d = 0; d < draw_strips.size(); d++) {
+    u32 tex = tree.static_draws[d].tree_tex_id;
+    if (tex >= textures.size() || textures[tex].debug_name.find("vine") == std::string::npos ||
+        textures[tex].debug_name.find("wriggler") != std::string::npos) {
+      continue;
+    }
+    for (const auto& s : draw_strips[d]) {
+      u32 v = tree.indices[s.start];
+      if (v < plant_of.size() && plant_of[v] != UINT32_MAX) {
+        vine_strips[plant_of[v]].emplace_back(d, s);
+      }
+    }
+  }
+  for (const auto& [g, strips] : vine_strips) {
+    const auto& p = plants[g];
+    if (p.end_vert - p.first_vert < 3) {
+      continue;
+    }
+    Vine vine{g, Vec3(0.f, 0.f, 0.f), 0, 0, 1e30f, 0, 0, 0};
+    float max_y = -1e30f;
+    for (u32 v = p.first_vert; v < p.end_vert; v++) {
+      vine.n = vine.n + unpack_normal(verts[v].pad0);
+      vine.cx += verts[v].x / (p.end_vert - p.first_vert);
+      vine.cz += verts[v].z / (p.end_vert - p.first_vert);
+      vine.min_y = std::min(vine.min_y, verts[v].y);
+      max_y = std::max(max_y, verts[v].y);
+    }
+    Vec3 h(vine.n.x(), 0.f, vine.n.z());
+    if (h.length() < 0.5f * vine.n.length() || h.length() < 1e-3f) {
+      continue;  // not flat against a wall
+    }
+    vine.n = h / h.length();
+    for (u32 v = p.first_vert; v < p.end_vert; v++) {
+      vine.width = std::max(vine.width, 2.f * std::hypot(verts[v].x - vine.cx, verts[v].z - vine.cz));
+    }
+    vine.height = max_y - vine.min_y;
+    if (vine.height < 0.3f * kMeter || vine.width > 8.f * kMeter || vine.height > 10.f * kMeter) {
+      continue;
+    }
+    // the wall's open side: the one with a floor below the vine
+    bool found = false;
+    for (int side = 0; side < 2 && !found; side++) {
+      Vec3 n = side == 0 ? vine.n : vine.n * -1.f;
+      float floor_y;
+      if (ground.height(vine.cx + n.x() * 0.6f * kMeter, vine.cz + n.z() * 0.6f * kMeter,
+                        vine.min_y, 6.f * kMeter, 0.5f * kMeter, &floor_y)) {
+        vine.n = n;
+        vine.rise = std::max(0.f, vine.min_y - floor_y);
+        found = true;
+      }
+    }
+    if (found) {
+      vines.push_back(vine);
+    }
+  }
+  stats->vine_sources += vines.size();
+  if (const char* env = std::getenv("JAK_ENHANCED_VINES"); env && std::atoi(env) == 0) {
+    vines.clear();  // A/B tests
+  }
+  constexpr float kVineNear = 30.f * kMeter;
+  float vine_thin = 1.f;
+  std::unordered_set<u64> vine_taken;  // one vine per 2 x 2 x 3 m cell
+  for (int pass = 0; pass < 2 && !vines.empty(); pass++) {
+    int candidates = 0;
+    for (u32 id = 0; id < walls.tris.size(); id++) {
+      const auto& w = walls.tris[id];
+      float want = w.area * 0.3f;
+      int count = (int)want + (rnd(tree_idx, id, 4441) < want - (int)want ? 1 : 0);
+      for (int k = 0; k < count; k++) {
+        float u = rnd(tree_idx, id, k * 9 + 11), v = rnd(tree_idx, id, k * 9 + 12);
+        if (u + v > 1.f) {
+          u = 1.f - u;
+          v = 1.f - v;
+        }
+        Vec3 at = w.a + (w.b - w.a) * u + (w.c - w.a) * v;
+        // the nearest vine (not right next to one already there)
+        const Vine* src = nullptr;
+        float best = kVineNear;
+        for (const auto& vine : vines) {
+          float d = std::hypot(vine.cx - at.x(), vine.cz - at.z());
+          if (d < vine.width) {
+            src = nullptr;
+            break;
+          }
+          if (d < best) {
+            best = d;
+            src = &vine;
+          }
+        }
+        if (!src) {
+          continue;
+        }
+        // the floor in front of the wall (either side), and the wall tall enough for the vine
+        float lo = w.lo, hi = w.hi;
+        walls.extent(at, w.n, &lo, &hi);
+        Vec3 n = w.n;
+        float floor_y = 0;
+        bool found = false;
+        for (int side = 0; side < 2 && !found; side++) {
+          n = side == 0 ? w.n : w.n * -1.f;
+          found = ground.height(at.x() + n.x() * 0.6f * kMeter, at.z() + n.z() * 0.6f * kMeter,
+                                at.y(), 6.f * kMeter, 0.5f * kMeter, &floor_y) &&
+                  floor_y + src->rise > lo - 0.1f * kMeter &&
+                  floor_y + src->rise + src->height < hi + 0.3f * kMeter;
+        }
+        // thinner further from the vines already there
+        if (!found || rnd(tree_idx, id, k * 9 + 13) > 1.f - best / kVineNear) {
+          continue;
+        }
+        if (pass == 0) {
+          candidates++;
+          continue;
+        }
+        if (rnd(tree_idx, id, k * 9 + 14) > vine_thin) {
+          continue;
+        }
+        u64 cell = ((u64)(u32)(int)std::floor(at.x() / (2.f * kMeter)) << 40) ^
+                   ((u64)(u32)(int)std::floor(at.z() / (2.f * kMeter)) << 16) ^
+                   (u64)(u32)(int)std::floor(floor_y / (3.f * kMeter));
+        if (!vine_taken.insert(cell).second) {
+          continue;
+        }
+        int tier = rnd(tree_idx, id, k * 9 + 15) < 0.33f ? 1 : 2;
+        // turn the vine's normal onto this wall's
+        float c = src->n.x() * n.x() + src->n.z() * n.z();
+        float s = src->n.z() * n.x() - src->n.x() * n.z();
+        float scale = 0.85f + 0.3f * rnd(tree_idx, id, k * 9 + 16);
+        const auto& p = plants[src->plant];
+        // a few cm off the wall, so it doesn't flicker into it
+        u32 offset = place(verts, p.first_vert, p.end_vert, src->cx, src->cz, src->min_y,
+                           at.x() + n.x() * 0.05f * kMeter, floor_y + src->rise + 0.03f * kMeter,
+                           at.z() + n.z() * 0.05f * kMeter, std::atan2(s, c), scale);
+        for (const auto& [d, strip] : vine_strips[src->plant]) {
+          emit(d, tier, strip, p.first_vert, offset);
+        }
+        stats->vines++;
+      }
+    }
+    if (pass == 0) {
+      vine_thin = candidates > max_vines ? max_vines / candidates : 1.f;
+    }
+  }
+
+  // 3: tufts on the floors the game already grows grass on. A habitat is a floor texture under
   // at least 3 small plants; the brushes are their upright quads (single cards).
   std::unordered_map<u32, int> habitat_count;
   for (const auto& p : plants) {
@@ -563,6 +820,7 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
     return;
   }
   Ground ground;
+  Walls walls;
   for (const auto& tree : level.tfrag_trees[0]) {
     if (tree.kind != tfrag3::TFragmentTreeKind::NORMAL &&
         tree.kind != tfrag3::TFragmentTreeKind::DIRT) {
@@ -576,17 +834,22 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
                        : idx.size();
       ground.add_mesh(tree.unpacked.vertices, idx, first, end, tree.use_strips,
                       tree.draws[d].tree_tex_id);
+      walls.add_mesh(tree.unpacked.vertices, idx, first, end, tree.use_strips);
     }
   }
   for (const auto& tree : level.tie_trees[0]) {
     ground.add_mesh(tree.unpacked.vertices, tree.unpacked.indices, 0, tree.unpacked.indices.size(),
                     true, kNoTex);
+    walls.add_mesh(tree.unpacked.vertices, tree.unpacked.indices, 0, tree.unpacked.indices.size(),
+                   true);
   }
   Stats stats;
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
-    add_to_tree(level.shrub_trees[t], ground, t, 150000.f / level.shrub_trees.size(), &stats);
+    add_to_tree(level.shrub_trees[t], level.textures, ground, walls,
+                4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats);
   }
   lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} tufts on {} "
-           "grassy floors",
-           name, ground.size(), stats.plants, stats.copies, stats.tufts, stats.habitats);
+           "grassy floors, {} wall vines with {} copies",
+           name, ground.size(), stats.plants, stats.copies, stats.tufts, stats.habitats,
+           stats.vine_sources, stats.vines);
 }
