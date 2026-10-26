@@ -472,10 +472,32 @@
 
 ;; Enhanced: where Jak is, the hour and whether a cutscene plays, for the renderer's grading per
 ;; area, weather and cutscene depth of field
+;; the thunder after one of the renderer's lightning bolts: the game's own thunder sounds, from the
+;; bolt's direction
+(defun enhanced-thunder ()
+  (let ((k (pc-enhanced-thunder)))
+    (when (and (> k 0) (not (movie?)) (not (load-in-progress? *level*)))
+      (let ((az (* (the float (mod k 1000)) 182.04445))
+            (pos (new 'stack-no-clear 'vector))
+            )
+        (set-vector! pos (* (meters 40) (sin az)) (meters 25) (* (meters 40) (cos az)) 1.0)
+        (vector+! pos pos (math-camera-pos))
+        (case (/ k 1000)
+          ((1) (sound-play-by-spec (static-sound-spec "thunder-a" :group 0) (new-sound-id) pos))
+          ((2) (sound-play-by-spec (static-sound-spec "thunder-c" :group 0) (new-sound-id) pos))
+          (else (sound-play-by-spec (static-sound-spec "thunder-b" :group 0) (new-sound-id) pos))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun enhanced-send-scene ((ctx time-of-day-context))
   (let ((lev (level-get-target-inside *level*)))
     (pc-enhanced-set-scene (if lev (symbol->string-debug (-> lev name)) "none") (-> ctx time) (movie?))
     )
+  (enhanced-thunder)
   (none)
   )
 

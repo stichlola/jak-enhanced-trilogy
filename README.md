@@ -24,13 +24,13 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
 - **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
   arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
-- **Weather that changes**: in Haven and the forest the clouds build, it rains, a thunderstorm
-  rolls in (lightning bolts, flashes), then the sun comes back out on the wet streets (light shafts,
+- **Weather that changes**: in Haven and the forest the clouds build, it rains, then the sun comes back out on the wet streets (light shafts,
   steam, a rainbow) and they slowly dry. Rain falls in the world with splashes on the ground, wet
   streets reflect the windows and signs, lamps get halos in the wet air, characters get wet and
   glossy. Fog on early mornings. In the desert the game's own sandstorm now blows real clouds of
-  sand through the world, carried by its wind. Menu: Clear / Changing / Rain / Sandstorm /
-  Thunderstorm / After the rain / Morning fog.
+  sand through the world, carried by its wind. "Sunny" pumps the colors up like Jak 1's Sandover:
+  deep blue sky, saturated greens, warm sun. Menu: Clear / Changing / Rain / Sandstorm /
+  Thunderstorm (work in progress) / After the rain / Morning fog / Sunny.
 - **Sky**: a drifting cloud layer lit by the sun, orange at sunset, grey under the rain.
 - **Color grade per area**: Haven (teal and warm by day, blue with vivid neon at night), the
   desert (sun-baked), the forest (autumn gold), the Metal Head city, underground, the volcano and

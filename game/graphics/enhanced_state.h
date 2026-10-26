@@ -49,6 +49,10 @@ struct EnhancedDust {
 };
 extern EnhancedDust g_enhanced_dust;
 
+// Thunder after a lightning bolt, for the game to play (pc-enhanced-thunder): 0 none, else
+// kind * 1000 + the bolt's azimuth in degrees (0..359, world: atan2(x, z))
+extern std::atomic<int> g_enhanced_thunder;
+
 // The enemies, passers-by and vehicles near Jak (world, game units; w = the radius the grass bends
 // in), set every frame by pc-enhanced-set-pushers
 struct EnhancedPushers {

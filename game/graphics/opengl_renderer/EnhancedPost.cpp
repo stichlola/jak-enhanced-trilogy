@@ -25,6 +25,7 @@ EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
+std::atomic<int> g_enhanced_thunder{0};
 EnhancedPushers g_enhanced_pushers;
 EnhancedSmokeLights g_enhanced_smoke_lights;
 EnhancedMerc g_enhanced_merc;
@@ -241,7 +242,7 @@ EnhancedPost::EnhancedPost() {
   }
   if (const char* weather = std::getenv("JAK_ENHANCED_WEATHER")) {
     // 0 clear, 1 by area, 2 rain, 3 sandstorm
-    m_settings.weather = std::clamp(std::atoi(weather), 0, 6);
+    m_settings.weather = std::clamp(std::atoi(weather), 0, 7);
   }
   if (const char* clouds = std::getenv("JAK_ENHANCED_CLOUDS")) {
     // the cloud layer's strength, 0 = off
@@ -1174,7 +1175,7 @@ void EnhancedPost::update_scene() {
 
   // what the weather wants: rain, dust, thunderstorm, ground fog, the sun out after the rain, and
   // whether the ground is wet
-  float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f;
+  float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
   const bool outdoors = m_zone == kZoneHaven || m_zone == kZoneForest || m_zone == kZoneOther ||
                         m_zone == kZoneDesert;
   switch (s.weather) {
@@ -1193,7 +1194,7 @@ void EnhancedPost::update_scene() {
       m_weather_state = 0;
       if (m_zone == kZoneHaven || m_zone == kZoneForest) {
         rain = in(240.f, 420.f);
-        storm = in(330.f, 400.f);
+        storm = 0.f;  // (thunderstorms out of the cycle until they look right)
         clear = in(420.f, 560.f);
         wet = ph > 240.f && ph < 560.f ? 1.f : 0.f;
         want.clouds = std::max(want.clouds, 0.95f * in(180.f, 430.f));
@@ -1230,6 +1231,9 @@ void EnhancedPost::update_scene() {
       mist = 1.f;
       wet = 0.25f;
       break;
+    case 7:
+      sunny = 1.f;
+      break;
     default:
       break;
   }
@@ -1238,6 +1242,20 @@ void EnhancedPost::update_scene() {
   want.clouds += (0.55f - want.clouds) * clear;
   if (wet < 0.f) {
     wet = rain;
+  }
+  // sunny: Jak 1's Sandover. Saturated greens and blues, warm highlights, shadows lifted toward
+  // blue (the sky fills them), a few white clouds
+  if (sunny > 0.f) {
+    const float gain[3] = {1.08f, 1.04f, 0.95f};
+    const float lift[3] = {0.008f, 0.014f, 0.03f};
+    for (int i = 0; i < 3; i++) {
+      want.gain[i] = gain[i];
+      want.lift[i] = lift[i];
+    }
+    want.saturation = 1.38f;
+    want.contrast = 0.06f;
+    want.warmth = 0.07f;
+    want.clouds = 0.3f;
   }
 
   const float dt = 1.f / 60.f;
@@ -1257,6 +1275,7 @@ void EnhancedPost::update_scene() {
   ease(m_storm, storm, k_weather);
   ease(m_mist, mist, k_weather);
   ease(m_clear, clear, k_weather);
+  ease(m_sunny, sunny, k_weather);
   // the ground soaks in a few seconds and takes a minute and a half to dry
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 6.f : 90.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
@@ -1294,15 +1313,35 @@ void EnhancedPost::update_scene() {
     m_bolt[1] = rnd() * 100.f;
     m_bolt[2] = 0.f;
     m_bolt[3] = 0.6f + 0.4f * rnd();
-    m_next_bolt = m_time + 4.0 + 10.0 * rnd() / std::max(0.3f, m_storm);
+    // a big storm: one every couple of seconds
+    m_next_bolt = m_time + 1.5 + 3.5 * rnd() / std::max(0.3f, m_storm);
+    // the thunder follows, later the farther the bolt (the brighter, the nearer)
+    m_thunder_at = m_time + 0.4 + 3.0 * (1.f - m_bolt[3]) / 0.4f * rnd();
+    m_thunder_kind = 1 + std::rand() % 3;
+  }
+  if (m_thunder_at >= 0 && m_time >= m_thunder_at) {
+    m_thunder_at = -1;
+    int deg = (int)(m_bolt[0] * 57.2958f) % 360;
+    g_enhanced_thunder = m_thunder_kind * 1000 + deg;
   }
   m_bolt[2] += dt;
+  // test: a bolt held at its brightest (screenshots)
+  static const bool bolt_test = std::getenv("JAK_ENHANCED_BOLT_TEST") != nullptr;
+  if (bolt_test && m_storm > 0.3f) {
+    // straight ahead, at the age JAK_ENHANCED_BOLT_TEST says (s)
+    m_bolt[0] = std::atan2(m_prev_camera.rot[0][2], m_prev_camera.rot[2][2]) + 0.25f;
+    m_bolt[1] = 7.f;
+    m_bolt[2] = (float)std::atof(std::getenv("JAK_ENHANCED_BOLT_TEST"));
+    m_bolt[3] = 1.f;
+  }
   {
+    // as the bolt in the shader: a faint leader, the return stroke, two restrikes
     const float a = m_bolt[2];
-    const float f = a < 0.7f ? std::exp(-a * 9.f) +
-                                   0.7f * std::exp(-(a - 0.2f) * (a - 0.2f) * 600.f) +
-                                   0.4f * std::exp(-(a - 0.38f) * (a - 0.38f) * 900.f)
-                             : 0.f;
+    const float t = a - 0.09f;
+    const float f = a < 0.09f ? 0.1f
+                    : a < 0.8f ? std::exp(-t * 12.f) + 0.7f * std::exp(-(t - 0.12f) * (t - 0.12f) * 2000.f) +
+                                     0.5f * std::exp(-(t - 0.27f) * (t - 0.27f) * 1600.f)
+                               : 0.f;
     m_flash = std::min(1.f, f * m_bolt[3]) * std::min(1.f, m_storm * 1.5f);
   }
   ease(m_cine, movie && s.cine_dof ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
@@ -2522,8 +2561,17 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
                             m_sun_view[1] * m_prev_camera.rot[1][1] +
                             m_sun_view[2] * m_prev_camera.rot[1][2]) / len
                          : 0.5f;
-    glUniform4f(glGetUniformLocation(id, "sky_sun"), len > 0.f ? m_sun_view[0] / len : 0.f,
-                len > 0.f ? m_sun_view[1] / len : 0.f, len > 0.f ? m_sun_view[2] / len : 1.f, up);
+    float sv[3] = {len > 0.f ? m_sun_view[0] / len : 0.f, len > 0.f ? m_sun_view[1] / len : 0.f,
+                   len > 0.f ? m_sun_view[2] / len : 1.f};
+    // test: the sun low behind the camera (the rainbow ahead)
+    static const bool rainbow_test = std::getenv("JAK_ENHANCED_RAINBOW_TEST") != nullptr;
+    if (rainbow_test) {
+      for (int i = 0; i < 3; i++) {
+        sv[i] = m_prev_camera.rot[1][i] * 0.34f - (i == 2 ? 0.94f : 0.f);
+      }
+      up = 0.34f;
+    }
+    glUniform4f(glGetUniformLocation(id, "sky_sun"), sv[0], sv[1], sv[2], up);
   }
   // (no sky, clouds or weather without a 3D scene: loading screens, menus)
   glUniform4f(glGetUniformLocation(id, "clouds"),
@@ -2539,6 +2587,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform4f(glGetUniformLocation(id, "dust_wind"), m_wind[0] / wl, m_wind[1] / wl,
                 (float)m_drift[0], (float)m_drift[1]);
   }
+  glUniform1f(glGetUniformLocation(id, "sunny"), m_sunny * on);
   glUniform4f(glGetUniformLocation(id, "bolt"), m_bolt[0], m_bolt[1], m_bolt[2],
               m_bolt[3] * m_storm * on);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
@@ -2634,7 +2683,7 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Weather", &s.weather,
-                 "Clear\0Changing (by area)\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0");
+                 "Clear\0Changing (by area)\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::BeginDisabled(!s.lights);
@@ -2853,7 +2902,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);
   get("weather", s.weather);
-  s.weather = std::clamp(s.weather, 0, 6);
+  s.weather = std::clamp(s.weather, 0, 7);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
   bool map = false;
@@ -3048,7 +3097,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("Clouds", &m_settings.clouds);
     ImGui::SliderFloat("Cloud amount", &m_settings.cloud_amount, 0.f, 2.f);
     ImGui::Combo("Weather##debug", &m_settings.weather,
-                 "Clear\0Changing\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0");
+                 "Clear\0Changing\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0");
     ImGui::SliderFloat("Rain strength", &m_settings.rain_strength, 0.f, 2.f);
     ImGui::SliderFloat("Dust strength", &m_settings.dust_strength, 0.f, 2.f);
     ImGui::Checkbox("Cutscene depth of field", &m_settings.cine_dof);

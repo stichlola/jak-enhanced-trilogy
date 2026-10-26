@@ -106,6 +106,7 @@ uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night 
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
+uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
@@ -563,28 +564,67 @@ float ground_fog(vec3 ray_view, float dist, float amount) {
   return 1.0 - exp(-0.035 * amount * base * max(path, 0.0));
 }
 
-// a lightning bolt across the sky: a jagged line from the clouds down to the horizon at the bolt's
-// azimuth, with a glow around it
-float lightning_bolt(vec3 ray_view) {
-  vec3 wd = world_dir(ray_view);
-  float el = wd.y;
-  if (bolt.w <= 0.0 || bolt.z > 0.45 || el < -0.02 || el > 0.5) {
+// lightning, far out in the sky: a jagged channel from the clouds down to the horizon at the
+// bolt's azimuth. The leader steps down from the top in under a tenth of a second (its tip
+// brightest), then the return stroke lights the whole channel and its branches, it strikes again
+// twice and fades. Returns the light (unitless, ~1 at the core).
+float bolt_jag(float u, float seed) {
+  // the channel's sideways offset (rad) at u (0 at the clouds, 1 at the horizon)
+  return (gnoise(vec2(u * 5.0, seed)) * 0.07 + gnoise(vec2(u * 22.0, seed + 5.0)) * 0.022 +
+          gnoise(vec2(u * 70.0, seed + 11.0)) * 0.006) * (0.4 + u);
+}
+
+float lightning_bolt(vec3 ray_view, float px) {
+  const float top = 0.6;  // the cloud base (sine of the elevation)
+  float a = bolt.z;
+  if (bolt.w <= 0.0 || a > 0.75) {
     return 0.0;
   }
-  float az = atan(wd.x, wd.z);
-  float da = mod(az - bolt.x + 3.14159, 6.28318) - 3.14159;
-  // the jag: big kinks and small ones down its length
-  float off = gnoise(vec2(el * 9.0, bolt.y)) * 0.08 + gnoise(vec2(el * 38.0, bolt.y + 5.0)) * 0.018;
-  // a branch off to one side halfway down
-  float br_el = clamp(el, 0.12, 0.26);
-  float br = abs(da - off - (0.26 - br_el) * 0.5 - gnoise(vec2(el * 30.0, bolt.y + 9.0)) * 0.015);
-  float x = abs(da - off);
-  float core = exp(-x * x / 0.000004) + 0.5 * exp(-br * br / 0.000003) * step(0.12, el) * step(el, 0.26);
-  float glow = exp(-x * x / 0.0016) * 0.25;
-  // it fades in at the top (out of the clouds) and flickers as it goes
-  float top = 1.0 - smoothstep(0.38, 0.5, el);
-  float flick = bolt.z < 0.06 ? 1.0 : (0.35 + 0.65 * step(0.5, fract(bolt.z * 23.0))) * (1.0 - bolt.z / 0.45);
-  return (core + glow) * top * flick * bolt.w;
+  vec3 wd = world_dir(ray_view);
+  float el = wd.y;
+  if (el < -0.01 || el > top) {
+    return 0.0;
+  }
+  float da = mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159;
+  if (abs(da) > 0.5) {
+    return 0.0;
+  }
+  float u = (top - el) / top;
+  // the leader's tip
+  float lead = clamp(a / 0.09, 0.0, 1.0);
+  if (u > lead) {
+    return 0.0;
+  }
+  float w = max(px * 1.3, 0.0012);
+  float x = da - bolt_jag(u, bolt.y);
+  float core = exp(-x * x / (w * w));
+  float glow = exp(-x * x / 0.0012) * 0.3 + exp(-x * x / 0.015) * 0.08;
+  // branches off the channel, reaching sideways and down
+  for (int k = 0; k < 3; k++) {
+    float b0 = 0.18 + 0.22 * float(k) + 0.08 * fract(bolt.y * (1.3 + float(k)));
+    float len = 0.2 + 0.1 * fract(bolt.y * 3.7 + float(k));
+    float bu = (u - b0) / len;
+    if (bu > 0.0 && bu < 1.0) {
+      float side = fract(bolt.y * 7.1 + float(k) * 0.37) > 0.5 ? 1.0 : -1.0;
+      float bx = da - bolt_jag(b0, bolt.y) - side * bu * len * 0.45 -
+                 gnoise(vec2(u * 40.0, bolt.y + 20.0 + float(k))) * 0.012;
+      float fade = 1.0 - bu;
+      core += exp(-bx * bx / (w * w * 0.6)) * 0.6 * fade;
+      glow += exp(-bx * bx / 0.0006) * 0.12 * fade;
+    }
+  }
+  // over time: the dim leader with a bright tip, the return stroke, two restrikes, fading
+  float bright;
+  if (a < 0.09) {
+    bright = 0.3 + 2.0 * exp(-pow((u - lead) / 0.03, 2.0));
+  } else {
+    float t = a - 0.09;
+    bright = 1.6 * exp(-t * 12.0) + 1.1 * exp(-pow((t - 0.12) * 45.0, 2.0)) +
+             0.8 * exp(-pow((t - 0.27) * 40.0, 2.0)) + 0.25 * exp(-t * 4.0);
+  }
+  // out of the clouds at the top
+  float in_cloud = smoothstep(0.0, 0.06, u);
+  return (core + glow) * bright * in_cloud * bolt.w;
 }
 
 // the rainbow opposite the sun after the rain: the primary bow at 42 degrees, red outside, and a
@@ -639,7 +679,8 @@ vec4 cloud_layer(vec3 dv) {
   col += sun_col * toward_sun * (1.0 - dens) * 0.8;
   // rain clouds: low and grey, darker in a thunderstorm, lit from inside by the lightning
   col *= 1.0 - 0.45 * weather.x - 0.2 * weather2.x;
-  col += vec3(0.75, 0.8, 1.0) * weather2.w * (0.5 + 0.8 * dens);
+  float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.25);
+  col += vec3(0.8, 0.85, 1.0) * weather2.w * (0.35 + 1.6 * near_bolt) * (0.4 + dens);
   // into the haze at the horizon
   col = mix(col, fog_color, (1.0 - smoothstep(0.02, 0.3, wd.y)) * 0.55);
   float alpha = dens * smoothstep(0.005, 0.12, wd.y) * 0.92;
@@ -1383,11 +1424,18 @@ void main() {
       c = mix(c, cl.rgb, clamp(cl.a * clouds.x, 0.0, 1.0));
     }
     c = mix(c, vec3(luma(c)) * 0.8, weather.x * 0.4);
-    c += vec3(0.6, 0.65, 0.8) * weather2.w * 0.3;
+    if (sunny > 0.0) {
+      float up = clamp(world_dir(ray).y, 0.0, 1.0);
+      vec3 blue = mix(vec3(0.55, 0.78, 0.98), vec3(0.16, 0.42, 0.9), smoothstep(0.0, 0.6, up));
+      // the clouds stay white: blue only where the sky is clear (the game's sky + our clouds)
+      float cloud = smoothstep(0.55, 0.85, luma(c)) * (1.0 - smoothstep(0.0, 0.15, abs(c.b - c.r)));
+      c = mix(c, blue * (0.9 + 0.2 * luma(c)), sunny * 0.7 * (1.0 - cloud));
+    }
   }
   // the bolt, over the sky and the far distance
-  if (bolt.w > 0.0 && (z == 0.0 || z > 300.0 * 4096.0) && wsurf == 0.0) {
-    c += vec3(0.85, 0.9, 1.0) * lightning_bolt(ray) * 2.5;
+  float bolt_light = 0.0;
+  if (bolt.w > 0.0 && z == 0.0 && wsurf == 0.0) {
+    bolt_light = lightning_bolt(ray, pixel_rad);
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
@@ -1404,8 +1452,8 @@ void main() {
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
-    vec3 grey = mix(fog_color, vec3(luma(fog_color)), 0.5);
-    c = mix(c, grey, (1.0 - exp(-z / 4096.0 * 0.008)) * 0.28 * weather.x);
+    vec3 grey = vec3(luma(fog_color)) * vec3(0.92, 0.97, 1.06);  // the fog's brightness, not its tint
+    c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.008 + 0.01 * weather2.x))) * (0.28 + 0.2 * weather2.x) * weather.x);
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
   float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w);
@@ -1552,11 +1600,6 @@ void main() {
     }
   }
 
-  // lightning: everything lit cold and bright for an instant
-  if (weather2.w > 0.0) {
-    c += vec3(0.75, 0.8, 1.0) * weather2.w * (0.05 + c * 0.6);
-  }
-
   // halos: in rain, fog or dust the air around each light glows (scattering), less where the
   // light is behind something
   float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3;
@@ -1583,7 +1626,7 @@ void main() {
 
   // rain streaks in front of everything, lit by the sky and by the lights around (the bloom)
   if (weather.x > 0.0) {
-    float streaks = rain_drops(ray, z, pixel_rad) * (1.0 + 0.5 * weather2.x);
+    float streaks = rain_drops(ray, z, pixel_rad) * (1.0 + 0.9 * weather2.x);
     if (streaks > 0.0) {
       vec3 lit = fog_color * 0.6 + vec3(0.18) + texture(tex_T1, tex_coord).rgb * 1.2;
       c = mix(c, lit, clamp(streaks * 0.45 * weather.x, 0.0, 0.7));
@@ -1605,6 +1648,14 @@ void main() {
   vec3 curve = c * c * (3.0 - 2.0 * c);
   c = mix(c, curve, contrast);
   c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35);
+
+  // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
+  // for an instant, the sky most, and the bolt over the sky
+  if (weather2.w > 0.0 || bolt_light > 0.0) {
+    vec3 cold = vec3(0.85, 0.9, 1.0);
+    c += cold * weather2.w * ((z == 0.0 ? 0.35 : 0.06) + c * 0.7);
+    c += cold * bolt_light * 2.2;
+  }
 
   // vignette
   vec2 v = tex_coord - 0.5;

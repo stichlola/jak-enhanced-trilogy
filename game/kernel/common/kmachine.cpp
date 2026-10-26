@@ -1132,6 +1132,11 @@ void pc_enhanced_set_dust(u32 intensity, u32 wind_x, u32 wind_z, u32 vel) {
   d.frame = d.now.load();
 }
 
+// Enhanced: thunder to play (see g_enhanced_thunder), taken once
+u64 pc_enhanced_thunder() {
+  return g_enhanced_thunder.exchange(0);
+}
+
 // Enhanced: the enemies and vehicles near Jak (count x y z radius), for the grass too
 void pc_enhanced_set_pushers(u32 data_ptr, u32 count) {
   auto* v = Ptr<float>(data_ptr).c();
@@ -1339,6 +1344,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
   make_func_symbol_func("pc-enhanced-set-scene", (void*)pc_enhanced_set_scene);
   make_func_symbol_func("pc-enhanced-set-dust", (void*)pc_enhanced_set_dust);
+  make_func_symbol_func("pc-enhanced-thunder", (void*)pc_enhanced_thunder);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
