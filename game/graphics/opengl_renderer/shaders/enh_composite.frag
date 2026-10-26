@@ -749,6 +749,10 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
 // o: the camera (m), d: the ray (world, unit), far: where the scene is along it (m), px: the angle
 // of a pixel (radians). Returns how much rain covers the pixel.
 float rain_grid(vec3 o, vec3 d, float near, float far, float cell, float px, float seed) {
+  // the wind slants the rain: shear space so the drops' paths stand vertical in it
+  vec2 slant = dust_wind.xy * (0.06 + 0.12 * weather2.x);
+  o.xz -= slant * o.y;
+  d.xz -= slant * d.y;
   vec2 dh = d.xz;
   float hl = length(dh);
   if (hl < 1e-4) {
@@ -767,7 +771,10 @@ float rain_grid(vec3 o, vec3 d, float near, float far, float cell, float px, flo
       break;
     }
     float h = hash1(c + seed);
-    if (h < 0.9) {
+    // gusts: denser and sparser sheets of rain drifting with the wind
+    vec2 cw = c * cell;
+    float gust = 0.55 + 0.45 * smoothstep(-0.3, 0.4, gnoise(cw * 0.06 - dust_wind.xy * t_rain * 0.25));
+    if (h < 0.92 * gust) {
       // the column, somewhere in the cell
       vec2 col = (c + 0.15 + 0.7 * vec2(fract(h * 13.7), fract(h * 71.3))) * cell;
       float tc = dot(col - o.xz, dh) / (hl * hl);  // closest along the ray
@@ -780,11 +787,11 @@ float rain_grid(vec3 o, vec3 d, float near, float far, float cell, float px, flo
           // drops every 1.5 m down the column, falling 9 m/s, each 0.4 m long (motion blur)
           float y = o.y + d.y * tc;
           float v = fract((y + t_rain * 9.0) / 1.5 + fract(h * 37.1));
-          float len = 0.4 / 1.5;
+          float len = 0.35 / 1.5;
           float streak = smoothstep(0.0, len * 0.3, v) * (1.0 - smoothstep(len * 0.6, len, v));
           // thin far drops are faint, not thick
           // (not right at the lens: a drop there would cross the whole screen)
-          sum += line * streak * min(1.0, 0.005 / width) * 3.5 * smoothstep(0.8, 1.8, tc);
+          sum += line * streak * min(1.0, 0.005 / width) * 3.0 * smoothstep(2.0, 3.5, tc);
         }
       }
     }
@@ -808,7 +815,7 @@ float rain_drops(vec3 ray_view, float scene_z, float px) {
   // along the ray to the scene (m); the sky is far
   float far = scene_z > 0.0 ? scene_z / 4096.0 / max(ray_view.z, 1e-3) : 1e4;
   // near drops on a fine grid, farther ones on a coarser one
-  return rain_grid(o, d, 0.8, min(far, 4.0), 0.25, px, 0.0) +
+  return rain_grid(o, d, 2.0, min(far, 4.0), 0.25, px, 0.0) +
          rain_grid(o, d, 4.0, min(far, 12.0), 0.7, px, 17.0) * 0.9 +
          rain_grid(o, d, 12.0, min(far, 30.0), 1.6, px, 41.0) * 0.7;
 }
@@ -1251,7 +1258,7 @@ void main() {
     wet_n = surface_normal(tex_coord, p);
     wet = weather.w * smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
           (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
-    c *= 1.0 - 0.08 * weather.x - 0.3 * wet;
+    c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
   }
 
   // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
@@ -1399,16 +1406,21 @@ void main() {
   // surroundings reflected (strongest in the puddles and at grazing angles: the neon on a wet street)
   if (wet > 0.01) {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
-    float pd = gnoise(ww.xz * 0.45) + 0.5 * gnoise(ww.xz * 1.3 + 7.1);
-    float puddle = smoothstep(-0.05, 0.25, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
+    // wide puddles: low-frequency dips with a ragged rim
+    float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
+    float puddle = smoothstep(-0.12, 0.02, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
                    (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z));
-    c *= 1.0 - 0.2 * puddle * wet;
+    c *= 1.0 - 0.25 * puddle * wet;
     vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
     // outside the puddles the wet ground is rough: a fine noise breaks its reflection up
     vec2 rough = vec2(gnoise(ww.xz * 9.0), gnoise(ww.xz * 9.0 + 5.3)) * (1.0 - puddle) *
                  (1.0 - smoothstep(10.0 * 4096.0, 30.0 * 4096.0, z));
-    vec3 n2 = normalize(wet_n + (right_view * (rip.x * (0.15 + 0.6 * puddle) + rough.x * 0.35) +
-                                 fwd_view * (rip.y * (0.15 + 0.6 * puddle) + rough.y * 0.35)));
+    float tw = weather.z;
+    vec2 wave = vec2(gnoise(ww.xz * 2.2 + vec2(tw * 0.35, tw * 0.2)),
+                     gnoise(ww.xz * 2.2 + vec2(5.0 - tw * 0.25, tw * 0.3))) * 0.07 +
+                vec2(gnoise(ww.xz * 7.0 + tw * 0.6), gnoise(ww.xz * 7.0 + 3.3 - tw * 0.5)) * 0.025;
+    vec2 bend = rip * (0.15 + 0.6 * puddle) + rough * 0.35 + wave * puddle;
+    vec3 n2 = normalize(wet_n + right_view * bend.x + fwd_view * bend.y);
     vec3 vdir = normalize(p);
     vec3 r = reflect(vdir, n2);
     float facing = clamp(dot(-vdir, n2), 0.0, 1.0);
@@ -1417,7 +1429,7 @@ void main() {
     vec3 refl = trace_reflection(p, r, z, hit);
     // a sheen, not a mirror: the ground's own color stays, dimmer reflections outside the puddles
     refl = mix(refl, c, 0.25 * (1.0 - puddle));
-    float amount = wet * (0.2 + 0.55 * puddle) * clamp(f * 1.5 + 0.18 * puddle + 0.03, 0.0, 1.0) *
+    float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0) *
                    (1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z));
     c = mix(c, refl, amount);
     // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
@@ -1697,8 +1709,11 @@ void main() {
   if (weather.x > 0.0) {
     float streaks = rain_drops(ray, z, pixel_rad) * (1.0 + 0.9 * weather2.x);
     if (streaks > 0.0) {
-      vec3 lit = fog_color * 0.6 + vec3(0.18) + texture(tex_T1, tex_coord).rgb * 1.2;
-      c = mix(c, lit, clamp(streaks * 0.45 * weather.x, 0.0, 0.7));
+      vec3 glow = texture(tex_T1, tex_coord).rgb;
+      vec3 lit = c * 1.25 + vec3(0.07, 0.08, 0.1) + mix(fog_color, vec3(luma(fog_color)), 0.5) * 0.25 +
+                 glow * 1.6;
+      float show = 1.0 - 0.65 * smoothstep(0.45, 0.9, luma(c));
+      c = mix(c, lit, clamp(streaks * 0.32 * weather.x * show, 0.0, 0.45));
     }
   }
 
