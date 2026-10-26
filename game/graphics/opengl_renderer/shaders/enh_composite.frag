@@ -998,6 +998,60 @@ vec2 rain_ripples(vec2 xz, float t) {
   return slope;
 }
 
+// the little crowns the drops of rain_ripples throw up as they land, at the start of each ring
+// (same cells and timing): how much splash is at a point. radius in m (bigger far away, so it
+// still covers a pixel)
+float rain_splashes(vec2 xz, float t, float radius) {
+  float sum = 0.0;
+  vec2 cell = floor(xz / 0.5);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 cc = cell + vec2(i, j);
+      float h = hash1(cc);
+      vec2 center = (cc + 0.2 + 0.6 * vec2(h, fract(h * 23.1))) * 0.5;
+      float cycle = t * 1.3 + h * 7.0;
+      float phase = fract(cycle);
+      if (phase > 0.14 || hash1(cc + floor(cycle) * 1.37) > 0.45) {
+        continue;
+      }
+      vec2 rel = xz - center;
+      sum += exp(-dot(rel, rel) / (radius * radius)) * (1.0 - phase / 0.14);
+    }
+  }
+  return sum;
+}
+
+// distant rain hitting a surface: one short sparkle per cell for each drop, the cells growing
+// with distance (powers of two, blended) so the drops stay about a pixel big and as many on screen
+float rain_spark_level(vec2 xz, float t, float cs, float r) {
+  float sum = 0.0;
+  vec2 cell = floor(xz / cs);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      vec2 cc = cell + vec2(i, j);
+      float h = hash1(cc + cs * 17.0);
+      vec2 center = (cc + 0.2 + 0.6 * vec2(h, fract(h * 23.1))) * cs;
+      float cycle = t * 1.6 + h * 7.0;
+      float phase = fract(cycle);
+      if (phase > 0.12 || hash1(cc + floor(cycle) * 1.37 + cs) > 0.55) {
+        continue;
+      }
+      vec2 rel = xz - center;
+      sum += exp(-dot(rel, rel) / (r * r)) * (1.0 - phase / 0.12);
+    }
+  }
+  return sum;
+}
+
+// across: the pixel's width there (m)
+float rain_sparkles(vec2 xz, float t, float across) {
+  float r = max(across, 0.02);
+  float lvl = max(log2(r * 4.5 / 0.25), 0.0);
+  float l0 = floor(lvl);
+  float cs = 0.25 * exp2(l0);
+  return mix(rain_spark_level(xz, t, cs, r), rain_spark_level(xz, t, cs * 2.0, r), lvl - l0);
+}
+
 // FXAA (Lottes' compact version): blend along the edge direction where the luma jumps
 vec3 fxaa_at(vec2 uv) {
   vec3 m = texture(tex_T0, uv).rgb;
@@ -1230,6 +1284,31 @@ void main() {
         slope += rel / max(dist, 0.05) * (band * 0.45 * wake_strength * sin(x * 10.0));
       }
     }
+    // rain on the water: rings where the drops land (two staggered layers) and their small
+    // splashes up close; further out, where the rings would shimmer, the surface just roughened
+    float rain_hits = 0.0;
+    if (weather.x > 0.01) {
+      float rain_amt = min(weather.x, 1.5);
+      float rings = 1.0 - smoothstep(0.03, 0.08, water_foot);
+      vec2 w2 = world * 1.6 + vec2(3.7, 1.3);
+      if (rings > 0.0) {
+        slope += (rain_ripples(world, t) + rain_ripples(w2, t + 0.37)) * rain_amt * rings;
+      }
+      // the drops' splashes: crowns up close, sparkles further out (sized by the pixel's width, not
+      // its length along the view, which grows at grazing angles), out to the horizon
+      float across = z / 4096.0 * pixel_rad;
+      float close = 1.0 - smoothstep(0.012, 0.03, across);
+      if (close > 0.0) {
+        rain_hits = (rain_splashes(world, t, 0.018) + rain_splashes(w2, t + 0.37, 0.03)) * close;
+      }
+      if (close < 1.0) {
+        rain_hits += rain_sparkles(world, t, across) * 1.6 * (1.0 - close) *
+                     (1.0 - smoothstep(200.0 * 4096.0, 400.0 * 4096.0, z));
+      }
+      rain_hits *= rain_amt;
+      vec2 rw = world / clamp(water_foot * 4.0, 0.08, 2.0) + vec2(t * 2.0, -t * 1.7);
+      slope += vec2(gnoise(rw), gnoise(rw + 5.3)) * 0.08 * rain_amt * (1.0 - rings) * far;
+    }
     vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
 
     // what's under shallow water, bent by the waves (refraction), where the bent ray still lands
@@ -1308,6 +1387,11 @@ void main() {
       float sr = max(dot(r, sun_dir.xyz), 0.0);
       float glint = pow(sr, 900.0) * 7.0 + pow(sr, 80.0) * 0.25;
       wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w;
+    }
+
+    // the drops' splashes, lit like the rain
+    if (rain_hits > 0.0) {
+      wc = mix(wc, wc * 1.3 + vec3(0.16, 0.17, 0.19) + fog_color * 0.4, min(rain_hits, 1.0) * 0.8);
     }
 
     // foam where the water meets the shore, moving with the waves
@@ -1621,6 +1705,14 @@ void main() {
       }
       float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
       c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * 0.55;
+    }
+    // further out: the drops as sparkles about a pixel big, on what faces up, out to 200 m
+    if (weather.x > 0.0 && z > 6.0 * 4096.0 && z < 200.0 * 4096.0) {
+      float spk = rain_sparkles(ww.xz, weather.z, z / 4096.0 * pixel_rad);
+      float fade = smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z) *
+                   (1.0 - smoothstep(120.0 * 4096.0, 200.0 * 4096.0, z)) *
+                   smoothstep(0.7, 0.9, dot(wet_n, up_view));
+      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * 0.45;
     }
   }
 
