@@ -188,9 +188,12 @@ class EnhancedPost {
     float shadow_softness = 0.02f;  // penumbra per meter between caster and receiver
     bool clouds = true;            // a drifting cloud layer in the sky, lit by the sun
     float cloud_amount = 1.0f;
-    int weather = 1;               // 0 clear, 1 changing (by area, comes and goes), 2 rain,
-                                   // 3 sandstorm, 4 thunderstorm, 5 after the rain, 6 morning fog,
-                                   // 7 sunny (vivid colors, like Jak 1's Sandover)
+    int weather = 1;               // a preset (kWeatherPresets in EnhancedPost.cpp): 1 changing (by
+                                   // area, comes and goes), the last one custom (weather_mix)
+    // the custom weather, mixed by hand: rain, thunderstorm, fog, ground mist, snow, dust, clouds,
+    // the sun out after the rain, wet ground (< 0: as wet as it rains)
+    std::array<float, 9> weather_mix = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.3f, 0.f, -1.f};
+    float vivid = 0.f;             // vivid colors: saturated greens and blues, warm sun, deep sky
     float rain_strength = 1.0f;
     float dust_strength = 1.0f;
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
@@ -447,7 +450,7 @@ class EnhancedPost {
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
   float m_snow = 0.f;   // snowfall (0..1)
-  float m_fog = 1.f;    // how much of the distance fog and the volumetric mist (0..1)
+  float m_fog = 0.f;    // how much of the distance fog and the volumetric mist (0..1)
   float m_heat = 0.f;   // hot air shimmering up from lava (0..1)
   float m_sunny = 0.f;  // a bright summer day: saturated, warm sun, deep blue sky
   float m_flash = 0.f;  // lightning flash, 0..1

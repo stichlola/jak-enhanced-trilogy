@@ -51,7 +51,8 @@
   //   setting), contrast and warmth (plus the setting), clouds: the sky cover (0..1)
   // "weather" is what the "Changing" weather does there (all optional):
   //   outdoors: false = no weather at all (caves, interiors)
-  //   rain, mist, snow, heat (hot air over lava), dust, sunny (the bright summer look),
+  //   rain, mist, snow, heat (hot air over lava), dust, sunny (the zone's own touch of vivid
+  //   colors, by day and out of the rain; the menu's "Vivid colors" adds to it),
   //   clouds (at least): always there
   //   harder: added on top for a while in every four-minute cycle (between harder_from and
   //     harder_to seconds of it)
@@ -68,56 +69,56 @@
     "other": {
       "day": {"lift": [0, 0, 0], "gain": [1, 1, 1], "saturation": 1.0, "contrast": 0.0, "warmth": 0.0, "clouds": 0.4},
       "night": {"lift": [0, 0, 0.012], "gain": [1, 1, 1.02], "saturation": 1.0, "contrast": 0.02, "warmth": 0.0, "clouds": 0.4},
-      "weather": {"fog": {"period": 420, "clear": 0.4, "light": 0.35}}
+      "weather": {"fog": 0}
     },
     // Haven: teal shadows and warm light by day; blue night, neon kept vivid
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
-      "weather": {"fog": {"period": 420, "clear": 0.4, "light": 0.35}, "showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 0.6}
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}}
     },
     // desert: sun-baked by day, cold blue night
     "desert": {
       "day": {"lift": [0.01, 0.004, -0.006], "gain": [1.05, 1, 0.91], "saturation": 1.04, "contrast": 0.05, "warmth": 0.04, "clouds": 0.2},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25},
-      "weather": {"fog": {"period": 420, "clear": 0.45, "light": 0.35}, "dust": 0.15, "harder": {"dust": 0.65}, "harder_from": 120, "harder_to": 210, "game_dust": true}
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "harder": {"dust": 0.5}, "harder_from": 120, "harder_to": 210, "game_dust": true}
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
       "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 420, "clear": 0.3, "light": 0.4}, "showers": {"period": 240, "chance": 1.0, "thunder": 1.0}, "sunny": 1.0, "morning_mist": 1.0}
+      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "showers": {"period": 420, "chance": 0.5, "thunder": 0.4}, "morning_mist": 0.5}
     },
     // Metal Heads: sickly purple shadows
     "metalhead": {
       "day": {"lift": [0.012, 0, 0.02], "gain": [1, 0.96, 1.04], "saturation": 1.08, "contrast": 0.08, "warmth": 0.0, "clouds": 0.6},
       "night": {"lift": [0.012, 0, 0.026], "gain": [1, 0.96, 1.06], "saturation": 1.1, "contrast": 0.09, "warmth": -0.01, "clouds": 0.6},
-      "weather": {"outdoors": false}
+      "weather": {"outdoors": false, "fog": 0}
     },
     // underground (sewers, factory, mines, tower, caves, the sunken city): cool and contrasty
     "under": {
       "day": {"lift": [-0.004, 0.002, 0.012], "gain": [1, 1, 1.02], "saturation": 0.94, "contrast": 0.1, "warmth": -0.01, "clouds": 0.4},
       "night": {"lift": [-0.004, 0.002, 0.012], "gain": [1, 1, 1.02], "saturation": 0.94, "contrast": 0.1, "warmth": -0.01, "clouds": 0.4},
-      "weather": {"outdoors": false}
+      "weather": {"outdoors": false, "fog": 0}
     },
     // volcano: hot, the air shimmering over the lava
     "volcano": {
       "day": {"lift": [0.015, 0, -0.005], "gain": [1.08, 0.96, 0.85], "saturation": 1.1, "contrast": 0.08, "warmth": 0.04, "clouds": 0.5},
       "night": {"lift": [0.015, 0, 0], "gain": [1.06, 0.95, 0.9], "saturation": 1.08, "contrast": 0.08, "warmth": 0.02, "clouds": 0.5},
-      "weather": {"outdoors": false, "heat": 1.0}
+      "weather": {"outdoors": false, "heat": 1.0, "fog": 0}
     },
     // temples: golden
     "temple": {
       "day": {"lift": [0.006, 0.004, 0], "gain": [1.04, 1.02, 0.92], "saturation": 1.04, "contrast": 0.06, "warmth": 0.02, "clouds": 0.4},
       "night": {"lift": [0, 0.004, 0.018], "gain": [1, 1, 1.03], "saturation": 1.0, "contrast": 0.05, "warmth": -0.01, "clouds": 0.4},
-      "weather": {"outdoors": false}
+      "weather": {"outdoors": false, "fog": 0}
     },
     // Jak 2's wilds outside Haven (Dead Town, the mountain, the atoll, the construction site):
     // grey-green, showers come over now and then
     "wilds": {
       "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
-      "weather": {"fog": {"period": 420, "clear": 0.35, "light": 0.35}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.4, "morning_mist": 0.8}
+      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25}, "showers": {"period": 480, "chance": 0.45, "thunder": 0.4}}
     },
     // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night. Ten-minute
     // spells: mostly fair, some with a shower, a few with a thunderstorm. The game is saturated
@@ -125,13 +126,13 @@
     "islands": {
       "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
-      "weather": {"fog": {"period": 480, "clear": 0.65, "light": 0.3}, "showers": {"period": 600, "chance": 0.55, "thunder": 0.45}, "sunny": 0.3, "morning_mist": 0.5}
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "showers": {"period": 600, "chance": 0.4, "thunder": 0.4}, "sunny": 0.3}
     },
     // the jungle: deep greens, the rain comes often
     "jungle": {
       "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 420, "clear": 0.35, "light": 0.4}, "showers": {"period": 300, "chance": 0.8, "thunder": 0.5}, "sunny": 0.3, "morning_mist": 1.0}
+      "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.3, "morning_mist": 0.5}
     },
     // Boggy Billy's swamp: it always rains, harder now and then, under a low fog
     "swamp": {

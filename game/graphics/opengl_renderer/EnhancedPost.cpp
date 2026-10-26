@@ -95,6 +95,73 @@ struct World {
 };
 World g_world;
 
+// the weather presets of the menu (the order is kept: saved settings and test scripts use the
+// index). Values as in Settings::weather_mix; "Changing" has none (the zones decide)
+struct WeatherPreset {
+  const char* name;
+  std::array<float, 9> mix;  // rain, storm, fog, mist, snow, dust, clouds, after, wet
+};
+const WeatherPreset kWeatherPresets[] = {
+    {"Clear", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
+    {"Changing (by area)", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
+    {"Rain", {1, 0, 0.6f, 0, 0, 0, 0.95f, 0, -1}},
+    {"Sandstorm", {0, 0, 0.3f, 0, 0, 1, 0.3f, 0, -1}},
+    {"Thunderstorm", {1, 1, 0.7f, 0, 0, 0, 1, 0, -1}},
+    {"After the rain", {0, 0, 0.3f, 0, 0, 0, 0.55f, 1, 0.85f}},
+    {"Morning fog", {0, 0, 0.6f, 1, 0, 0, 0.4f, 0, 0.25f}},
+    {"Clear, a few clouds", {0, 0, 0, 0, 0, 0, 0.25f, 0, -1}},
+    {"Snow", {0, 0, 0.6f, 0.4f, 1, 0, 0.8f, 0, -1}},
+    {"Overcast", {0, 0, 0.2f, 0, 0, 0, 0.95f, 0, -1}},
+    {"Drizzle", {0.3f, 0, 0.3f, 0, 0, 0, 0.9f, 0, -1}},
+    {"Downpour", {1.3f, 0.3f, 0.8f, 0, 0, 0, 1, 0, -1}},
+    {"Storm in the fog", {1, 1, 1, 0.6f, 0, 0, 1, 0, -1}},
+    {"Light fog", {0, 0, 0.4f, 0, 0, 0, 0.5f, 0, -1}},
+    {"Fog", {0, 0, 1, 0.3f, 0, 0, 0.7f, 0, -1}},
+    {"Dense fog", {0, 0, 1, 1, 0, 0, 0.9f, 0, 0.3f}},
+    {"Rain and fog", {0.6f, 0, 1, 0.5f, 0, 0, 0.95f, 0, -1}},
+    {"Light snow", {0, 0, 0.3f, 0, 0.4f, 0, 0.7f, 0, -1}},
+    {"Blizzard", {0, 0, 1, 0.8f, 1.4f, 0, 1, 0, -1}},
+    {"Dusty haze", {0, 0, 0.4f, 0, 0, 0.35f, 0.3f, 0, -1}},
+    {"Sun after the storm", {0, 0, 0, 0.2f, 0, 0, 0.4f, 0.8f, 0.7f}},
+    {"Custom", {0, 0, 0, 0, 0, 0, 0.3f, 0, -1}},
+};
+constexpr int kWeatherCount = sizeof(kWeatherPresets) / sizeof(kWeatherPresets[0]);
+constexpr int kWeatherCustom = kWeatherCount - 1;
+
+// the weather in a menu: the presets, and under them the mix (moving a slider makes it "Custom")
+void weather_menu(EnhancedPost::Settings& s, const char* id) {
+  ImGui::SetNextItemWidth(200);
+  if (ImGui::BeginCombo(id, kWeatherPresets[std::clamp(s.weather, 0, kWeatherCount - 1)].name)) {
+    for (int i = 0; i < kWeatherCount; i++) {
+      if (ImGui::Selectable(kWeatherPresets[i].name, s.weather == i)) {
+        s.weather = i;
+        if (i != 1 && i != kWeatherCustom) {
+          s.weather_mix = kWeatherPresets[i].mix;
+        }
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (s.weather == 1) {
+    return;
+  }
+  const char* names[9] = {"Rain", "Thunderstorm", "Fog", "Ground mist", "Snow",
+                          "Dust", "Clouds", "Sun after rain", "Wet ground"};
+  const float top[9] = {1.5f, 1.f, 1.f, 1.f, 1.5f, 1.f, 1.f, 1.f, 1.f};
+  ImGui::Indent();
+  for (int i = 0; i < 9; i++) {
+    ImGui::SetNextItemWidth(160);
+    float v = s.weather_mix[i];
+    const float lo = i == 8 ? -0.01f : 0.f;  // wet ground below 0: as wet as it rains
+    if (ImGui::SliderFloat(fmt::format("{}##{}", names[i], id).c_str(), &v, lo, top[i],
+                           i == 8 && v < 0.f ? "with the rain" : "%.2f")) {
+      s.weather_mix[i] = v;
+      s.weather = kWeatherCustom;
+    }
+  }
+  ImGui::Unindent();
+}
+
 int game_index() {
   return g_game_version == GameVersion::Jak1 ? 0 : g_game_version == GameVersion::Jak2 ? 1 : 2;
 }
@@ -445,7 +512,7 @@ EnhancedPost::EnhancedPost() {
   }
   if (const char* weather = std::getenv("JAK_ENHANCED_WEATHER")) {
     // 0 clear, 1 by area, 2 rain, 3 sandstorm
-    m_settings.weather = std::clamp(std::atoi(weather), 0, 8);
+    m_settings.weather = std::clamp(std::atoi(weather), 0, kWeatherCount - 1);
   }
   if (const char* clouds = std::getenv("JAK_ENHANCED_CLOUDS")) {
     // the cloud layer's strength, 0 = off
@@ -1337,7 +1404,7 @@ void EnhancedPost::update_scene() {
         size_t colon = item.find(':');
         if (colon != std::string::npos) {
           steps.emplace_back(std::atof(item.c_str()),
-                             std::clamp(std::atoi(item.c_str() + colon + 1), 0, 8));
+                             std::clamp(std::atoi(item.c_str() + colon + 1), 0, kWeatherCount - 1));
         }
         if (end == std::string::npos) {
           break;
@@ -1393,14 +1460,18 @@ void EnhancedPost::update_scene() {
         const double tt = m_time + phase0;
         const double period = std::max(30.0, (double)w.shower_period);
         const float p = (float)(std::fmod(tt, period) / period);
-        const uint32_t spell = (uint32_t)(tt / period) * 2654435761u + 977u;
-        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
+        const uint32_t index = (uint32_t)(tt / period);
+        const uint32_t spell = index * 2654435761u + 977u;
+        // the first spell is always fair: a game starts under a clear sky
+        const float roll = index == 0 ? 0.999f : (float)((spell >> 8) % 1000) / 1000.f;
         auto win = [&](float a, float b) {
           return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
         };
         if (roll < w.shower_chance) {
           const bool thunder = roll < w.shower_chance * w.shower_thunder;
-          rain = std::max(rain, win(0.333f, 0.667f) * (thunder ? 1.f : 0.6f));
+          // a drizzle to a downpour (the roll's place among the wet spells), all of it in a storm
+          const float strength = thunder ? 1.f : 0.3f + 0.6f * roll / std::max(w.shower_chance, 1e-3f);
+          rain = std::max(rain, win(0.333f, 0.667f) * strength);
           storm = thunder ? win(0.458f, 0.625f) : 0.f;
           clear = win(0.667f, 0.925f);
           if (p > 0.333f && p < 0.925f) {
@@ -1422,8 +1493,9 @@ void EnhancedPost::update_scene() {
       if (w.fog_period > 0.f) {
         const double tt = m_time + phase0;
         const double period = std::max(30.0, (double)w.fog_period);
-        const uint32_t spell = (uint32_t)(tt / period) * 2246822519u + 3266489917u;
-        const float roll = (float)((spell >> 8) % 1000) / 1000.f;
+        const uint32_t index = (uint32_t)(tt / period);
+        const uint32_t spell = index * 2246822519u + 3266489917u;
+        const float roll = index == 0 ? 0.f : (float)((spell >> 8) % 1000) / 1000.f;
         fog = roll < w.fog_clear ? 0.f : roll < w.fog_clear + w.fog_light ? w.fog_light_amount : 1.f;
       }
       // rain and morning mist bring some of it back
@@ -1436,40 +1508,24 @@ void EnhancedPost::update_scene() {
       }
       break;
     }
-    case 0:
-      fog = 0.f;
+    default: {
+      // a preset or the custom mix, the same everywhere
+      const auto& m = weather_mode == kWeatherCustom
+                          ? s.weather_mix
+                          : kWeatherPresets[std::clamp(weather_mode, 0, kWeatherCount - 1)].mix;
+      rain = m[0];
+      storm = m[1];
+      fog = m[2];
+      mist = m[3];
+      snow = m[4];
+      dust = m[5];
+      want.clouds = std::max(want.clouds * 0.5f, m[6]);
+      clear = m[7];
+      wet = m[8];
       break;
-    case 2:
-      rain = 1.f;
-      break;
-    case 3:
-      dust = 1.f;
-      break;
-    case 4:
-      rain = 1.f;
-      storm = 1.f;
-      break;
-    case 5:
-      clear = 1.f;
-      wet = 0.85f;
-      fog = 0.5f;
-      break;
-    case 6:
-      mist = 1.f;
-      wet = 0.25f;
-      break;
-    case 7:
-      sunny = 1.f;
-      fog = 0.f;
-      break;
-    case 8:
-      snow = 1.f;
-      mist = 0.4f;
-      want.clouds = std::max(want.clouds, 0.8f);
-      break;
-    default:
-      break;
+    }
   }
+  sunny = std::max(sunny, s.vivid * (1.f - m_night) * (1.f - std::min(1.f, rain)));
   // rain brings its clouds; after it, broken clouds with the sun through
   want.clouds = std::max(want.clouds, rain * 0.95f);
   want.clouds += (0.55f - want.clouds) * clear;
@@ -2946,8 +3002,8 @@ void EnhancedPost::draw_menu() {
       s.blast_sparks = sparks ? 1.f : 0.f;
     }
     ImGui::SetNextItemWidth(200);
-    ImGui::Combo("Weather", &s.weather,
-                 "Clear\0Changing (by area)\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0Snow\0");
+    ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
+    weather_menu(s, "Weather");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::BeginDisabled(!s.lights);
@@ -3112,6 +3168,8 @@ std::string EnhancedPost::menu_settings_json() const {
   j["cine_dof"] = s.cine_dof;
   j["blast_sparks"] = s.blast_sparks;
   j["weather"] = s.weather;
+  j["weather_mix"] = s.weather_mix;
+  j["vivid"] = s.vivid;
   j["population"] = m_population;
   j["minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
@@ -3166,7 +3224,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);
   get("weather", s.weather);
-  s.weather = std::clamp(s.weather, 0, 8);
+  s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
+  get("weather_mix", s.weather_mix);
+  get("vivid", s.vivid);
   get("population", m_population);
   m_population = std::clamp(m_population, 0, 3);
   bool map = false;
@@ -3218,6 +3278,8 @@ void EnhancedPost::apply_preset(int preset) {
   s.clouds = d.clouds;
   s.blast_sparks = d.blast_sparks;
   s.weather = d.weather;
+  s.weather_mix = d.weather_mix;
+  s.vivid = d.vivid;
   s.soft_shadows = all && d.soft_shadows;
   s.cine_dof = all && d.cine_dof;
   g_enhanced_merc.enabled = preset > 0;
@@ -3360,8 +3422,8 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Shadow softness (/m)", &m_settings.shadow_softness, 0.f, 0.08f, "%.3f");
     ImGui::Checkbox("Clouds", &m_settings.clouds);
     ImGui::SliderFloat("Cloud amount", &m_settings.cloud_amount, 0.f, 2.f);
-    ImGui::Combo("Weather##debug", &m_settings.weather,
-                 "Clear\0Changing\0Rain\0Sandstorm\0Thunderstorm\0After the rain\0Morning fog\0Sunny (Jak 1)\0Snow\0");
+    ImGui::SliderFloat("Vivid colors##debug", &m_settings.vivid, 0.f, 1.f);
+    weather_menu(m_settings, "Weather##debug");
     ImGui::SliderFloat("Rain strength", &m_settings.rain_strength, 0.f, 2.f);
     ImGui::SliderFloat("Dust strength", &m_settings.dust_strength, 0.f, 2.f);
     ImGui::Checkbox("Cutscene depth of field", &m_settings.cine_dof);
