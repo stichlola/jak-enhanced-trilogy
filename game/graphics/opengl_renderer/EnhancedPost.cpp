@@ -1405,6 +1405,11 @@ void EnhancedPost::update_scene() {
   }
   static const bool cine_test = std::getenv("JAK_ENHANCED_CINE_TEST") != nullptr;
   movie = movie || cine_test;
+  static std::string last_level;
+  if (level != last_level) {
+    lg::info("[enhanced] scene {}", level);
+    last_level = level;
+  }
   poll_world();
   m_zone = zone_of(level);
   // every visit to a zone picks its weather anew: the spells start from a random point of their
@@ -1482,6 +1487,10 @@ void EnhancedPost::update_scene() {
     if (script_t0 >= 0 && m_time - script_t0 >= step.first) {
       weather_mode = step.second;
     }
+  }
+  // the title screen's intro (Jak 2, Jak 3: game levels behind the logo) as in the original
+  if (level == "title") {
+    weather_mode = 0;
   }
   switch (weather_mode) {
     case 1: {
@@ -3122,34 +3131,6 @@ void EnhancedPost::draw_menu() {
     static bool frozen = false;
     if (ImGui::Checkbox("Freeze time", &frozen)) {
       g_enhanced_menu.ask(4, frozen ? "0" : "1");
-    }
-  }
-  if (ImGui::CollapsingHeader("Showcase", ImGuiTreeNodeFlags_DefaultOpen)) {
-    // five stops, in order, each showing off a part of the mod: the place, its hour and (for the
-    // war zone) the population in one request (kind 9: "<hour> <population or -1> <continue point>")
-    struct Stop {
-      const char* name;
-      const char* what;
-      int hour, population;
-      const char* continue_point;
-    };
-    static const Stop stops[] = {
-        {"1  Forest", "vegetation, vines, wind, god rays, mist", 9, -1, "foresta-start"},
-        {"2  Spargus", "HD textures, water, reflective metal", 12, -1, "wascitya-start"},
-        {"3  Desert", "dunes, dust, footprints, heat haze, sunset", 18, -1, "desert-facing-wasdoors"},
-        {"4  Haven war zone", "crowds, the street war, explosions", 15, 2, "ctyport-warzone"},
-        {"5  Haven port at night", "lamps, light shadows, water at night", 22, -1, "ctyport-start"},
-    };
-    for (const auto& stop : stops) {
-      if (ImGui::Button(stop.name, ImVec2(200, 0))) {
-        if (stop.population >= 0) {
-          m_population = stop.population;
-        }
-        g_enhanced_menu.ask(9, fmt::format("{} {} {}", stop.hour, stop.population,
-                                           stop.continue_point));
-      }
-      ImGui::SameLine();
-      ImGui::TextDisabled("%s", stop.what);
     }
   }
   if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {

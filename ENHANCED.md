@@ -65,8 +65,7 @@ Laptop (the game stays at its 60 fps cap).
 **In-game menu: `\`** opens and closes it (EnhancedPost::draw_menu): every effect on/off, lamp
 strength, population and the minimap (hidden unless switched on: `pc-enhanced-minimap?` in
 hud-map's update-values!, `JAK_ENHANCED_MINIMAP=1`), the time of day (six hours, a slider, a frozen
-clock), a five-stop Showcase (request 9 `<hour> <population or -1> <continue point>`: forest,
-Spargus, desert at sunset, the port's war zone, the port at night) and quick travel to nine continue
+clock) and quick travel to nine continue
 points (the piazza, port, Hip Hog, slums, industrial zone, central sector, Metal Head city, Spargus,
 desert). The renderer queues one request, the game polls it each frame
 (`pc-enhanced-poll-request`, `enhanced-menu-update` in logic-target.gc). The cursor is freed from

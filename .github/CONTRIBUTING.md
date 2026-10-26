@@ -37,7 +37,7 @@ the short version of how the project works. The long version of every feature is
    `scripts\enhanced\setup.ps1 -Iso "<your ISO>"` (see the README).
 2. A branch per change. Build with `setup.ps1 -SkipTools -SkipExtract` (C++), recompile the game code
    with `goalc --user-auto --game jak3 --cmd "(mi)"`.
-3. Test in the game. The Showcase stops in the menu are handy fixed places; `JAK_ENHANCED_HOUR`,
+3. Test in the game. The Teleport stops in the menu are handy fixed places; `JAK_ENHANCED_HOUR`,
    `JAK_ENHANCED_POPULATION`, `JAK_ENHANCED_CENSUS` and the others in ENHANCED.md help repeat a test.
 4. Open a pull request with before/after screenshots (the template has a short checklist).
 

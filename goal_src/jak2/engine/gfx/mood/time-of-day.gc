@@ -406,9 +406,25 @@
 
 ;; Enhanced: where Jak is, the hour and whether a cutscene plays, for the renderer's grading per
 ;; area, weather and cutscene depth of field
+(defun enhanced-title? ()
+  "The title screen, its intro included (it plays in other levels): no game started yet."
+  (or (level-get *level* 'title)
+      (let ((c (-> *game-info* current-continue)))
+        (and c (string= (-> c name) "title-start"))
+        )
+      )
+  )
+
 (defun enhanced-send-scene ((ctx time-of-day-context))
+  ;; (the title screen and its intro, played in game levels: "title", so the renderer keeps the
+  ;; original weather there)
   (let ((lev (level-get-target-inside *level*)))
-    (pc-enhanced-set-scene (if lev (symbol->string (-> lev name)) "none") (-> ctx time) (movie?))
+    (pc-enhanced-set-scene (cond
+                             ((enhanced-title?) "title")
+                             (lev (symbol->string (-> lev name)))
+                             (else "none"))
+                           (-> ctx time)
+                           (movie?))
     )
   (enhanced-thunder)
   (none)

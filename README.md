@@ -160,24 +160,9 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   the weather and the water effects.
 - **City**: population (Low / Normal / High / Extreme) and the minimap, which is hidden by default.
 - **Time of day**: six buttons (dawn to night), a slider, and a "freeze time" switch.
-- **Showcase** (Jak 3): five stops that show the mod off, in order (see below).
 - **Teleport** (Jak 3): quick travel to nine places in Haven, Spargus and the desert.
 
 The choices are saved and come back at the next start.
-
-### Showcase tour (Jak 3)
-Open the menu with `\`, then press the stops in order:
-
-| # | Stop | Time | What to look at |
-|---|------|------|-----------------|
-| 1 | Forest | 9:00 | vegetation, climbing plants, wind, god rays through the trees, mist |
-| 2 | Spargus | 12:00 | HD textures, the sea's reflections and swell, metal and glass |
-| 3 | Desert | 18:00 | dunes, dust, footprints and ruts (drive a vehicle), heat haze at sunset |
-| 4 | Haven war zone | 15:00 | crowds, the Krimson Guard against the Metal Heads, explosions and smoke |
-| 5 | Haven port at night | 22:00 | lamps lighting the streets, light shadows, the water at night |
-
-Some stops need the area unlocked in your save, as on any continue point. Stop 4 sets the population to
-High.
 
 ## Known issues
 - **Water and PBR reflections/refraction** still show artifacts (less than before): shimmering or

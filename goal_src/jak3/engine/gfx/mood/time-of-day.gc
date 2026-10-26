@@ -493,9 +493,28 @@
   (none)
   )
 
+(defun enhanced-title? ()
+  "The title screen, its intro included (it plays in other levels): no game started yet."
+  (or (level-get *level* 'title)
+      ;; the intro in the desert (wasintro): the title's own scenes, or the opening cutscene
+      (level-get *level* 'inttitle)
+      (and (movie?) (level-get *level* 'introcst))
+      (let ((c (-> *game-info* current-continue)))
+        (and c (string= (-> c name) "title-start"))
+        )
+      )
+  )
+
 (defun enhanced-send-scene ((ctx time-of-day-context))
+  ;; (the title screen and its intro, played in game levels: "title", so the renderer keeps the
+  ;; original weather there)
   (let ((lev (level-get-target-inside *level*)))
-    (pc-enhanced-set-scene (if lev (symbol->string-debug (-> lev name)) "none") (-> ctx time) (movie?))
+    (pc-enhanced-set-scene (cond
+                             ((enhanced-title?) "title")
+                             (lev (symbol->string-debug (-> lev name)))
+                             (else "none"))
+                           (-> ctx time)
+                           (movie?))
     )
   (enhanced-thunder)
   (none)
