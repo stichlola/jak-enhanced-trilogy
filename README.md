@@ -86,9 +86,6 @@ High.
 - **Water and PBR reflections/refraction** still show artifacts (less than before): shimmering or
   smeared edges where the screen-space reflections run out of picture, and the refraction bends the
   wrong things at the shoreline.
-- **Extreme population crashes the game in Haven's war zone** (near the port, where the guards fight
-  the Metal Heads): the streets' navigation meshes run out of room for that many characters. Use High
-  there.
 - The Jak 2 plaza has no passers-by or enemies yet (it has no navigation mesh for them).
 - HD textures cover only Spargus, the desert, the vehicles and the characters.
 - No hardware ray tracing (the renderer is OpenGL): the ray-traced reflections run in software on
@@ -152,7 +149,7 @@ runs the game to check, and commits.
 
 ## Help wanted
 Good places to start, roughly from easiest:
-- the known issues above (the water and PBR artifacts, the crash at Extreme population);
+- the known issues above (the water and PBR artifacts);
 - HD textures for Haven and the other areas;
 - passers-by and enemies in the Jak 2 plaza (the plan is in ENHANCED.md, "Not done");
 - translations of the menu.

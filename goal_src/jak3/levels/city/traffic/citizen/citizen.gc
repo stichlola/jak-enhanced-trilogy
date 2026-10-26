@@ -388,6 +388,16 @@
      (if (not (focus-test? this inactive))
          (return #f)
          )
+     ;; Enhanced: no room left on the nav mesh it would join (raised population; the war zone and
+     ;; the missions activate citizens directly too): it stays inactive instead
+     (let ((mesh (-> (the-as traffic-object-spawn-params (-> arg3 param 0)) nav-mesh)))
+       (if (and mesh
+                (not (and (-> this nav) (nonzero? (-> this nav)) (= (-> this nav state mesh) mesh)))
+                (not (enhanced-nav-mesh-room? mesh 2))
+                )
+           (return #f)
+           )
+       )
      (set! (-> this controller traffic) (the-as traffic-engine (-> arg3 param 1)))
      (let ((s5-1 (the-as traffic-object-spawn-params (-> arg3 param 0))))
        (cond
@@ -413,10 +423,14 @@
        (let ((a0-46 (-> s5-1 nav-mesh)))
          (when a0-46
            (change-to a0-46 this)
-           ;; Enhanced: also when the mesh had no room left (change-to keeps the old nav then)
-           (if (or (not (-> this nav)) (zero? (-> this nav)) (!= (-> this nav state mesh) a0-46))
-               (go-inactive this)
-               )
+           ;; Enhanced: also when the mesh had no room left (change-to keeps the old nav then), and
+           ;; then nothing below may touch the nav (go doesn't leave an event handler: it went on
+           ;; writing through a #f nav and crashed with extreme population)
+           (cond
+             ((or (not (-> this nav)) (zero? (-> this nav)) (!= (-> this nav state mesh) a0-46))
+              (go-inactive this)
+              )
+             (else
            (let ((v1-77 (-> this nav state)))
              (set! (-> v1-77 current-poly) (the-as nav-poly #f))
              )
@@ -439,6 +453,7 @@
            (move-to-ground this (meters 10) (meters 10) #t (-> this gnd-collide-with))
            (set! (-> this gnd-height) (-> this root gspot-pos y))
            (go-from-behavior this s5-1)
+           ))
            )
          )
        )
@@ -1708,7 +1723,7 @@
       )
     )
   :enter (behavior ()
-    (when (-> self nav)
+    (when (and (-> self nav) (nonzero? (-> self nav)))  ;; Enhanced: 0 when it never got one
       (citizen-method-195 self)
       (let ((v1-4 self))
         (set! (-> v1-4 enemy-flags) (the-as enemy-flag (logclear (-> v1-4 enemy-flags) (enemy-flag ef37))))

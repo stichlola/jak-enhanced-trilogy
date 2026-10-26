@@ -269,7 +269,8 @@
                 )
               )
             (cond
-              ((send-event s3-0 'traffic-activate arg0 (-> this traffic))
+              ((and (or (not (-> arg0 nav-mesh)) (enhanced-nav-mesh-room? (-> arg0 nav-mesh) 8)) ;; Enhanced
+                    (send-event s3-0 'traffic-activate arg0 (-> this traffic)))
                (set! (-> arg0 proc) s3-0)
                (add-active-process this gp-0 sv-16)
                0
@@ -360,7 +361,8 @@
              )
         (when s3-0
           (cond
-            ((send-event s3-0 'traffic-activate arg0 (-> this traffic))
+            ((and (or (not (-> arg0 nav-mesh)) (enhanced-nav-mesh-room? (-> arg0 nav-mesh) 8)) ;; Enhanced
+                    (send-event s3-0 'traffic-activate arg0 (-> this traffic)))
              (set! (-> arg0 proc) s3-0)
              (add-active-process this gp-0 sv-16)
              0

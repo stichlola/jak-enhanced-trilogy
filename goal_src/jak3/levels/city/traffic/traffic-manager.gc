@@ -312,6 +312,12 @@
 
 ;; WARN: Return type mismatch process vs process-drawable.
 (defun citizen-spawn ((arg0 process) (arg1 traffic-type) (arg2 traffic-object-spawn-params))
+  ;; Enhanced: every citizen, even the inactive ones waiting in the pool, holds a user slot of the
+  ;; default nav mesh from its init on. With the raised population the pool outgrew it and the
+  ;; next one crashed (no nav): spawn no more than the mesh can take.
+  (if (not (enhanced-nav-mesh-room? *default-nav-mesh* 4))
+      (return (the-as process-drawable #f))
+      )
   (let ((gp-0 (the-as process #f)))
     (let* ((a1-1 (type-from-traffic-object-type arg1))
            (s3-0 (get-process *default-dead-pool* a1-1 #x4000 1))

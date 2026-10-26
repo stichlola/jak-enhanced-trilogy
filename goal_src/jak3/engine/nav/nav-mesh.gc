@@ -544,6 +544,23 @@
   (none)
   )
 
+;; Enhanced: does the mesh still have room for margin more users? The traffic leaves some free for
+;; the rest (story actors, guards' vehicles): with the raised population a full mesh crashed the
+;; war zone (a citizen or turret without a nav kept running).
+(defun enhanced-nav-mesh-room? ((mesh nav-mesh) (margin int))
+  (if (or (not mesh) (zero? mesh) (zero? (-> mesh nav-control-array)))
+      (return #t)  ;; not set up (yet): the game's own checks decide
+      )
+  (let ((free (- (the int (-> mesh max-nav-control-count)) (the int (-> mesh nav-control-count)))))
+    (dotimes (i (the int (-> mesh nav-control-count)))
+      (if (not (-> mesh nav-control-array i process))
+          (+! free 1)
+          )
+      )
+    (>= free margin)
+    )
+  )
+
 (defmethod new-nav-control ((this nav-mesh))
   (let ((gp-0 (the-as nav-control #f)))
     (let ((v1-0 0))

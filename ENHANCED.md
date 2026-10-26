@@ -105,9 +105,16 @@ ctycara; 7 Hellcat) once its level is in, for testing.
 
 - Water and PBR (metal/glass) reflections and refraction: fewer artifacts than before, but still
   shimmer and smears where the screen-space rays leave the picture, and refraction at the shoreline.
-- Extreme population crashes in Haven's war zone near the port: `nav-mesh::new-nav-control: too many
-  users` even with twice the users (some caller other than the citizens' `traffic-activate` doesn't
-  check for a full mesh). High is fine; the Showcase's war-zone stop uses High.
+- Extreme population in the war zone fills the navigation meshes: fewer characters appear than
+  asked for at the busiest moments (it used to crash, see below).
+
+Fixed: the Extreme population crash in Haven's war zone (`nav-mesh::new-nav-control: too many
+users`). Every citizen, even the inactive ones waiting in the traffic pool, holds a user slot of the
+static `*default-nav-mesh*` (128) from its init, and the raised population outgrew it: the next one
+got no nav and crashed. `citizen-spawn` now stops while that mesh has fewer than 4 free slots
+(`enhanced-nav-mesh-room?` in nav-mesh.gc), the traffic engine leaves 8 free on the street meshes, a
+citizen refuses `traffic-activate` (from the missions and the war zone too) on a full mesh, and
+nothing touches a missing nav after `go-inactive`.
 
 ## Not done (yet)
 
