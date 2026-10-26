@@ -918,6 +918,8 @@ void Merc2::handle_setup_dma(DmaFollower& dma, SharedRenderState* render_state) 
     glUniform2f(glGetUniformLocation(id, "enh_rim_spec"),
                 g_enhanced_merc.enabled ? g_enhanced_merc.rim : 0.f,
                 g_enhanced_merc.enabled ? g_enhanced_merc.spec : 0.f);
+    glUniform1f(glGetUniformLocation(id, "enh_wet"),
+                g_enhanced_merc.enabled ? g_enhanced_merc.wet : 0.f);
   }
   switch_to_emerc(render_state);
   set_uniform(m_emerc_uniforms.hvdf_offset, m_low_memory.hvdf_offset);

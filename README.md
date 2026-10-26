@@ -24,14 +24,19 @@ Technical notes for each feature (how it works, its test switches) are in [ENHAN
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
 - **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
   arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
-- **Weather**: rain in Haven at night, with wet streets that reflect the windows and signs, puddles
-  with raindrop rings and the lamps glinting on the ground; blowing dust in the desert, or a full
-  sandstorm. Menu: Clear / By area / Rain / Sandstorm.
+- **Weather that changes**: in Haven and the forest the clouds build, it rains, a thunderstorm
+  rolls in (lightning bolts, flashes), then the sun comes back out on the wet streets (light shafts,
+  steam, a rainbow) and they slowly dry. Rain falls in the world with splashes on the ground, wet
+  streets reflect the windows and signs, lamps get halos in the wet air, characters get wet and
+  glossy. Fog on early mornings. In the desert the game's own sandstorm now blows real clouds of
+  sand through the world, carried by its wind. Menu: Clear / Changing / Rain / Sandstorm /
+  Thunderstorm / After the rain / Morning fog.
 - **Sky**: a drifting cloud layer lit by the sun, orange at sunset, grey under the rain.
 - **Color grade per area**: Haven (teal and warm by day, blue with vivid neon at night), the
   desert (sun-baked), the forest (autumn gold), the Metal Head city, underground, the volcano and
   the temples, easing from one to the next.
-- **Characters**: soft, warm light past the edge of the lit side, and a cool rim on the shadow side.
+- **Characters**: soft, warm light past the edge of the lit side, a cool rim on the shadow side,
+  darker and glossy in the rain.
 - **Cutscenes**: depth of field with autofocus on who's in the middle of the shot.
 - **Atmosphere**: volumetric ground mist with light shafts, god rays, distance and height fog,
   heat haze, depth of field, bloom, camera motion blur and color grading.

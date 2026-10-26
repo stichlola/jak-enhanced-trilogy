@@ -47,6 +47,7 @@ struct EnhancedMerc {
   bool enabled = true;
   float rim = 0.45f;
   float spec = 0.35f;
+  float wet = 0.f;  // rain on the characters: darker, glossier (set by the post pass's weather)
 };
 extern EnhancedMerc g_enhanced_merc;
 
@@ -187,8 +188,8 @@ class EnhancedPost {
     float shadow_softness = 0.02f;  // penumbra per meter between caster and receiver
     bool clouds = true;            // a drifting cloud layer in the sky, lit by the sun
     float cloud_amount = 1.0f;
-    int weather = 1;               // 0 clear, 1 by area (rain in Haven at night, dust in the desert),
-                                   // 2 rain, 3 sandstorm
+    int weather = 1;               // 0 clear, 1 changing (by area, comes and goes), 2 rain,
+                                   // 3 sandstorm, 4 thunderstorm, 5 after the rain, 6 morning fog
     float rain_strength = 1.0f;
     float dust_strength = 1.0f;
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
@@ -440,6 +441,17 @@ class EnhancedPost {
   Grade m_grade;
   float m_rain = 0.f;  // 0..1
   float m_dust = 0.f;
+  float m_wet = 0.f;    // the ground: soaks fast in the rain, dries slowly after
+  float m_storm = 0.f;  // thunderstorm: lightning, wind
+  float m_mist = 0.f;   // low fog on the ground
+  float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
+  float m_flash = 0.f;  // lightning flash, 0..1
+  float m_bolt[4] = {};  // the bolt: azimuth (rad), seed, age (s), strength
+  double m_next_bolt = 0;
+  float m_wind[2] = {0.f, 1.f};  // the dust's wind direction (world xz)
+  float m_wind_speed = 8.f;      // m/s
+  double m_drift[2] = {0, 0};    // how far the wind has carried the dust (m, wrapped)
+  int m_weather_state = 0;       // what the changing weather is doing now (for the debug text)
   float m_cine = 0.f;  // cutscene depth of field, eased in and out
   int m_zone = 0;
   float m_night = 0.f;

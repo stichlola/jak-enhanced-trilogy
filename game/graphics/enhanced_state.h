@@ -38,6 +38,17 @@ struct EnhancedScene {
 };
 extern EnhancedScene g_enhanced_scene;
 
+// The game's own sandstorm (desert-dust-storm.gc), set every frame while it runs by
+// pc-enhanced-set-dust: intensity 0..1, the wind's direction (world xz) and speed (game units/s).
+// Stale after a moment without updates (the storm process is gone).
+struct EnhancedDust {
+  std::atomic<float> intensity{0.f};
+  std::atomic<float> wind_x{0.f}, wind_z{1.f}, wind_vel{0.f};
+  std::atomic<int> frame{-1000};  // the renderer's frame counter at the last update
+  std::atomic<int> now{0};        // the renderer's frame counter
+};
+extern EnhancedDust g_enhanced_dust;
+
 // The enemies, passers-by and vehicles near Jak (world, game units; w = the radius the grass bends
 // in), set every frame by pc-enhanced-set-pushers
 struct EnhancedPushers {

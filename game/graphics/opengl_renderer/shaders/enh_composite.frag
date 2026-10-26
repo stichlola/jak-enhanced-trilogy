@@ -103,7 +103,10 @@ uniform sampler2D tex_T13;      // the sun shadow map as plain depths (soft shad
 uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per meter, soft (1) or not
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
-uniform vec4 weather;           // rain, dust (0..1), time (s)
+uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
+uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
+uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
+uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float blast_seed[4];
@@ -349,8 +352,11 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   }
   vec3 ssr = env;
   float step_len = 0.15 * 4096.0 + z * 0.01;
-  vec3 q = p + r * (0.05 * 4096.0 + z * 0.002);
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
+                    haze.w * 7.13);
+  vec3 q = p + r * (0.05 * 4096.0 + z * 0.002 + step_len * jit);
   for (int i = 0; i < 20; i++) {
+    float used = step_len;
     q += r * step_len;
     step_len *= 1.15;
     if (q.z <= 0.0) {
@@ -366,6 +372,22 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
     }
     float scene_z = view_z(sd);
     if (q.z > scene_z && q.z - scene_z < step_len + 2048.0) {
+      // halve back and forth between the last step in front of the scene and this one
+      vec3 lo = q - r * used;
+      vec3 hi = q;
+      for (int k = 0; k < 5; k++) {
+        vec3 mid = 0.5 * (lo + hi);
+        vec2 muv = 0.5 * vec2(proj.z * mid.x, proj.w * mid.y) / max(mid.z, 1.0) + 0.5;
+        float md = texture(tex_T3, muv).r;
+        if (md > 1e-7 && mid.z > view_z(md)) {
+          hi = mid;
+        } else {
+          lo = mid;
+        }
+      }
+      if (hi.z > 0.0) {
+        quv = 0.5 * vec2(proj.z * hi.x, proj.w * hi.y) / hi.z + 0.5;
+      }
       vec2 edge = min(quv, 1.0 - quv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = texture(tex_T0, quv).rgb;
@@ -460,6 +482,130 @@ float fbm(vec2 q) {
   return sum;
 }
 
+// 3D value noise on an integer hash (no sin: stays clean kilometers from the origin)
+float ihash3(vec3 c) {
+  uvec3 v = uvec3(ivec3(c) + ivec3(1 << 20));
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z;
+  v.y += v.z * v.x;
+  v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z;
+  return float(v.x & 0xffffffu) / 16777215.0;
+}
+
+float vnoise3(vec3 x) {
+  vec3 i = floor(x);
+  vec3 f = fract(x);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(ihash3(i), ihash3(i + vec3(1, 0, 0)), f.x),
+                 mix(ihash3(i + vec3(0, 1, 0)), ihash3(i + vec3(1, 1, 0)), f.x), f.y),
+             mix(mix(ihash3(i + vec3(0, 0, 1)), ihash3(i + vec3(1, 0, 1)), f.x),
+                 mix(ihash3(i + vec3(0, 1, 1)), ihash3(i + vec3(1, 1, 1)), f.x), f.y),
+             f.z);
+}
+
+// the sandstorm's air at a world point (m): rolling clouds of sand stretched along the wind and
+// carried by it (the game storm's own wind), thicker near the ground, with fine streamers blowing
+// low over it close by. Roughly 1 on average.
+float dust_density(vec3 w, float near) {
+  vec2 dir = dust_wind.xy;
+  vec2 q = w.xz - dust_wind.zw;
+  // along the wind, up, across it; the clouds boil slowly as they go
+  vec3 s = vec3(dot(q, dir), w.y + clouds.z * 0.35, dot(q, vec2(-dir.y, dir.x)));
+  float big = vnoise3(s * vec3(1.0 / 26.0, 1.0 / 9.0, 1.0 / 11.0));
+  float mid = vnoise3(s * vec3(1.0 / 8.0, 1.0 / 3.5, 1.0 / 3.5) + vec3(17.0, 3.0, 5.0));
+  float n = big * 0.65 + mid * 0.35;
+  float dens = 0.2 + 1.6 * smoothstep(0.32, 0.8, n);
+  // low streamers: the sand that skims the ground, fast, near the camera only
+  if (near > 0.0) {
+    vec3 sf = vec3(dot(q, dir) * 2.0, w.y, dot(q, vec2(-dir.y, dir.x)));
+    float fine = vnoise3(sf * vec3(1.0 / 3.0, 1.0 / 0.5, 1.0 / 0.4) + vec3(3.0, 0.0, 9.0));
+    dens += near * 0.9 * smoothstep(0.55, 0.9, fine);
+  }
+  // thicker toward the ground (taken as a little under the camera)
+  float h = w.y - (cam_pos.y / 4096.0 - 3.0);
+  return dens * mix(1.0, 0.35, smoothstep(0.0, 40.0, h));
+}
+
+// how much of the dust hides the scene along a view ray (view space, unit) up to dist (m), marched
+// through the volume close up (where its shapes show) and in one step past that
+float dust_cover(vec3 ray_view, float dist, float amount, float jitter) {
+  vec3 wd = world_dir(ray_view);
+  vec3 o = cam_pos / 4096.0;
+  float k = 0.006 * amount + 0.03 * amount * amount * amount;  // extinction per meter
+  float march = min(dist, 160.0);
+  float tau = 0.0;
+  float prev = 0.0;
+  const int N = 12;
+  for (int i = 0; i < N; i++) {
+    // more steps near the camera
+    float u = (float(i) + jitter) / float(N);
+    float t = march * u * u;
+    float near = 1.0 - smoothstep(4.0, 14.0, t);
+    tau += dust_density(o + wd * t, near) * (t - prev) * k;
+    prev = t;
+  }
+  tau += dust_density(o + wd * march, 0.0) * (march - prev) * k;
+  // the rest of the way, at the average
+  tau += max(dist - march, 0.0) * k * 0.8;
+  return 1.0 - exp(-tau);
+}
+
+// low fog lying on the ground (thickest a couple of meters under the camera, thinning upward):
+// the height fog integral along the ray to dist (m)
+float ground_fog(vec3 ray_view, float dist, float amount) {
+  vec3 wd = world_dir(ray_view);
+  const float H = 7.0;
+  float base = exp(-2.0 / H);  // the density at the camera, which is ~2 m over the ground
+  float dy = wd.y;
+  float path = abs(dy) < 1e-3 ? dist : H / dy * (1.0 - exp(-dy * dist / H));
+  return 1.0 - exp(-0.035 * amount * base * max(path, 0.0));
+}
+
+// a lightning bolt across the sky: a jagged line from the clouds down to the horizon at the bolt's
+// azimuth, with a glow around it
+float lightning_bolt(vec3 ray_view) {
+  vec3 wd = world_dir(ray_view);
+  float el = wd.y;
+  if (bolt.w <= 0.0 || bolt.z > 0.45 || el < -0.02 || el > 0.5) {
+    return 0.0;
+  }
+  float az = atan(wd.x, wd.z);
+  float da = mod(az - bolt.x + 3.14159, 6.28318) - 3.14159;
+  // the jag: big kinks and small ones down its length
+  float off = gnoise(vec2(el * 9.0, bolt.y)) * 0.08 + gnoise(vec2(el * 38.0, bolt.y + 5.0)) * 0.018;
+  // a branch off to one side halfway down
+  float br_el = clamp(el, 0.12, 0.26);
+  float br = abs(da - off - (0.26 - br_el) * 0.5 - gnoise(vec2(el * 30.0, bolt.y + 9.0)) * 0.015);
+  float x = abs(da - off);
+  float core = exp(-x * x / 0.000004) + 0.5 * exp(-br * br / 0.000003) * step(0.12, el) * step(el, 0.26);
+  float glow = exp(-x * x / 0.0016) * 0.25;
+  // it fades in at the top (out of the clouds) and flickers as it goes
+  float top = 1.0 - smoothstep(0.38, 0.5, el);
+  float flick = bolt.z < 0.06 ? 1.0 : (0.35 + 0.65 * step(0.5, fract(bolt.z * 23.0))) * (1.0 - bolt.z / 0.45);
+  return (core + glow) * top * flick * bolt.w;
+}
+
+// the rainbow opposite the sun after the rain: the primary bow at 42 degrees, red outside, and a
+// faint secondary one at 51 with its colors the other way round
+vec3 rainbow(vec3 ray_view) {
+  float a = acos(clamp(dot(ray_view, -sky_sun.xyz), -1.0, 1.0)) * 57.2958;
+  vec3 col = vec3(0.0);
+  for (int i = 0; i < 2; i++) {
+    float center = i == 0 ? 41.5 : 51.0;
+    float width = i == 0 ? 3.2 : 5.0;
+    float t = (a - center) / width + 0.5;  // 0 violet .. 1 red (the other way for the secondary)
+    if (t > 0.0 && t < 1.0) {
+      float tt = i == 0 ? t : 1.0 - t;
+      float hue = (1.0 - tt) * 0.78;
+      vec3 rgb = clamp(abs(fract(hue + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
+      col += rgb * smoothstep(0.0, 0.25, t) * smoothstep(1.0, 0.75, t) * (i == 0 ? 1.0 : 0.35);
+    }
+  }
+  return col;
+}
+
 // the cloud layer along a view direction (view space): color, coverage. A sheet 900 m up, flattened
 // toward the horizon, drifting with the wind; lit by the sun through it (thinner toward the sun is
 // brighter), the dark sides in the sky's own color, silver edges looking toward the sun
@@ -491,8 +637,9 @@ vec4 cloud_layer(vec3 dv) {
   vec3 col = mix(base * 0.7, sun_col, clamp(lit * 0.75, 0.0, 1.0));
   float toward_sun = pow(max(dot(dv, sky_sun.xyz), 0.0), 10.0);
   col += sun_col * toward_sun * (1.0 - dens) * 0.8;
-  // rain clouds: low and grey
-  col *= 1.0 - 0.45 * weather.x;
+  // rain clouds: low and grey, darker in a thunderstorm, lit from inside by the lightning
+  col *= 1.0 - 0.45 * weather.x - 0.2 * weather2.x;
+  col += vec3(0.75, 0.8, 1.0) * weather2.w * (0.5 + 0.8 * dens);
   // into the haze at the horizon
   col = mix(col, fog_color, (1.0 - smoothstep(0.02, 0.3, wd.y)) * 0.55);
   float alpha = dens * smoothstep(0.005, 0.12, wd.y) * 0.92;
@@ -1002,9 +1149,9 @@ void main() {
   // reflections further down)
   float wet = 0.0;
   vec3 wet_n = vec3(0.0);
-  if (weather.x > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
+  if (weather.w > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
     wet_n = surface_normal(tex_coord, p);
-    wet = weather.x * smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
+    wet = weather.w * smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
           (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
     c *= 1.0 - 0.08 * weather.x - 0.3 * wet;
   }
@@ -1175,6 +1322,26 @@ void main() {
     float amount = wet * (0.2 + 0.55 * puddle) * clamp(f * 1.5 + 0.18 * puddle + 0.03, 0.0, 1.0) *
                    (1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z));
     c = mix(c, refl, amount);
+    // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
+    if (weather.x > 0.0 && z < 15.0 * 4096.0) {
+      float spl = 0.0;
+      for (int k = 0; k < 2; k++) {
+        float cs = k == 0 ? 0.3 : 0.45;
+        vec2 cell = floor(ww.xz / cs + float(k) * 0.5);
+        float h = hash1(cell + float(k) * 13.0);
+        float cyc = weather.z * (2.2 + h) + h * 9.0;
+        float ph = fract(cyc);
+        if (hash1(cell + floor(cyc) * 1.91) < 0.5) {
+          vec2 ctr = (cell + 0.2 + 0.6 * vec2(fract(h * 7.3), fract(h * 31.7)) - float(k) * 0.5) * cs;
+          float dd = length(ww.xz - ctr);
+          float rad = 0.015 + ph * 0.07;
+          float life = 1.0 - smoothstep(0.0, 0.12, ph * 0.45);
+          spl += exp(-pow((dd - rad) / 0.01, 2.0)) * life + exp(-dd * dd / 0.0002) * life * 0.6;
+        }
+      }
+      float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
+      c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * 0.55;
+    }
   }
 
   // relief: the texture's light and dark read as small bumps (bright = raised), lit by the sun:
@@ -1216,6 +1383,17 @@ void main() {
       c = mix(c, cl.rgb, clamp(cl.a * clouds.x, 0.0, 1.0));
     }
     c = mix(c, vec3(luma(c)) * 0.8, weather.x * 0.4);
+    c += vec3(0.6, 0.65, 0.8) * weather2.w * 0.3;
+  }
+  // the bolt, over the sky and the far distance
+  if (bolt.w > 0.0 && (z == 0.0 || z > 300.0 * 4096.0) && wsurf == 0.0) {
+    c += vec3(0.85, 0.9, 1.0) * lightning_bolt(ray) * 2.5;
+  }
+  // the rainbow, where the sky shows past the rain (or far behind)
+  if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
+    float up = world_dir(ray).y;
+    c += rainbow(ray) * weather2.z * 0.13 * smoothstep(-0.02, 0.06, up) *
+         clamp(1.0 - sky_sun.w * 1.6, 0.0, 1.0) * (1.0 - clouds.w);
   }
 
   // fog: thicker with distance and below the camera
@@ -1229,30 +1407,27 @@ void main() {
     vec3 grey = mix(fog_color, vec3(luma(fog_color)), 0.5);
     c = mix(c, grey, (1.0 - exp(-z / 4096.0 * 0.008)) * 0.28 * weather.x);
   }
-  // dust: the air goes sandy with distance, and sheets of sand blow across in front of everything
-  // (each sheet hidden behind what's nearer than it), lit by the sun
+  // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
+  float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w);
+  if (low_fog > 0.0) {
+    float dist = z > 0.0 ? length(p) / 4096.0 : 2500.0;
+    float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w);
+    vec3 fc = mix(fog_color, vec3(luma(fog_color)), 0.3) * 0.85 + vec3(0.06, 0.07, 0.08);
+    // brighter looking toward the sun
+    fc += vec3(1.0, 0.9, 0.75) * pow(max(dot(ray, sky_sun.xyz), 0.0), 6.0) * 0.35 * daylight;
+    c = mix(c, fc, ground_fog(ray, dist, low_fog) * 0.9);
+  }
+  // dust: the game's sandstorm (its intensity and its wind), as a volume in the world: rolling
+  // clouds of sand carried by the wind, streamers low over the ground close by; lit by the sun,
+  // brighter looking toward it
   if (weather.y > 0.0) {
     float dust = weather.y;
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.15;
     vec3 sand = mix(vec3(0.8, 0.63, 0.42) * (0.3 + 0.8 * daylight), fog_color, 0.25);
-    float zz = z > 0.0 ? z / 4096.0 : 3000.0;
-    float k = 0.004 * dust + 0.012 * dust * dust * dust;
-    float amount = (1.0 - exp(-zz * k)) * 0.85;
-    vec3 wd = world_dir(ray);
-    float az = atan(wd.x, wd.z) / 6.2832;
-    float el = wd.y / max(length(wd.xz), 1e-3);
-    float sheets = 0.0;
-    const float sd[3] = float[](4.0, 12.0, 30.0);
-    for (int i = 0; i < 3; i++) {
-      if (z > 0.0 && z < sd[i] * 4096.0) {
-        continue;
-      }
-      float sc = 1.0 + float(i) * 1.7;
-      vec2 g = vec2(az * 60.0 * sc - weather.z * (0.9 - float(i) * 0.2), el * 7.0 * sc + float(i) * 5.3);
-      float nn = gnoise(g * vec2(1.0, 4.0)) * 0.6 + gnoise(g * vec2(2.3, 9.0) + 3.1) * 0.4;
-      sheets += pow(clamp(nn + 0.45, 0.0, 1.0), 3.0) * (0.5 + 0.25 * float(i));
-    }
-    c = mix(c, sand, clamp(amount + sheets * 0.35 * dust, 0.0, 0.92));
+    sand *= 1.0 + pow(max(dot(ray, sky_sun.xyz), 0.0), 4.0) * 0.6 * daylight;
+    float dist = z > 0.0 ? length(p) / 4096.0 : 3000.0;
+    float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832);
+    c = mix(c, sand, cover * 0.94);
   }
 
   // volumetric mist: the half-resolution march, upsampled with weights from the depth so the mist
@@ -1377,9 +1552,38 @@ void main() {
     }
   }
 
+  // lightning: everything lit cold and bright for an instant
+  if (weather2.w > 0.0) {
+    c += vec3(0.75, 0.8, 1.0) * weather2.w * (0.05 + c * 0.6);
+  }
+
+  // halos: in rain, fog or dust the air around each light glows (scattering), less where the
+  // light is behind something
+  float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3;
+  if (air > 0.02 && light_count > 0) {
+    vec3 halo = vec3(0.0);
+    float scene_dist = z > 0.0 ? length(p) : 1e12;
+    for (int i = 0; i < min(light_count, 16); i++) {
+      vec3 lp = light_pos[i].xyz;
+      float ld = length(lp);
+      if (lp.z <= 0.0 || ld < 1.0) {
+        continue;
+      }
+      float cosang = dot(ray, lp / ld);
+      float spread = clamp(light_pos[i].w * 0.6 / ld, 0.01, 0.6);
+      float g = exp(-(1.0 - cosang) / (spread * spread * 0.5));
+      if (g < 0.003) {
+        continue;
+      }
+      float hidden = scene_dist < ld - light_pos[i].w * 0.5 ? 0.3 : 1.0;
+      halo += light_color[i].rgb * g * hidden;
+    }
+    c += halo * min(air, 1.5) * 0.3;
+  }
+
   // rain streaks in front of everything, lit by the sky and by the lights around (the bloom)
   if (weather.x > 0.0) {
-    float streaks = rain_drops(ray, z, pixel_rad);
+    float streaks = rain_drops(ray, z, pixel_rad) * (1.0 + 0.5 * weather2.x);
     if (streaks > 0.0) {
       vec3 lit = fog_color * 0.6 + vec3(0.18) + texture(tex_T1, tex_coord).rgb * 1.2;
       c = mix(c, lit, clamp(streaks * 0.45 * weather.x, 0.0, 0.7));
@@ -1397,7 +1601,7 @@ void main() {
   // saturation, gentle S-curve, warm highlights / cool shadows
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
-  c = max(mix(vec3(l), c, saturation), 0.0);
+  c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
   vec3 curve = c * c * (3.0 - 2.0 * c);
   c = mix(c, curve, contrast);
   c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35);

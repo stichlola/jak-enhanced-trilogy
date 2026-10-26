@@ -25,6 +25,7 @@ in vec3 enh_ambient;
 in vec3 enh_pos;
 uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
+uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
 
 void main() {
   if (gfx_hack_no_tex == 0) {
@@ -90,6 +91,20 @@ void main() {
     // and the shadow side catches the sky: a cool rim from the ambient light
     float back = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 2.5) * (1.0 - ndl);
     color.rgb += clamp(enh_ambient, 0.0, 1.0) * back * 0.35 * enh_rim_spec.x;
+  }
+
+  // Enhanced: wet in the rain: darker cloth and skin, a tight bright highlight from the key light
+  // and the grey sky caught on what faces up and at grazing angles
+  if (decal_enable == 0 && enh_wet > 0.0 && length(vtx_key) > 0.01) {
+    vec3 n = normalize(vtx_nrm);
+    vec3 v = normalize(vtx_view);
+    vec3 l = normalize(vtx_key);
+    float ndl = max(dot(n, l), 0.0);
+    float fres = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 4.0);
+    color.rgb *= 1.0 - 0.22 * enh_wet;
+    float spec = pow(max(dot(n, normalize(l + v)), 0.0), 120.0) * ndl;
+    color.rgb += clamp(vtx_key_color, 0.0, 1.5) * spec * 0.9 * enh_wet;
+    color.rgb += (clamp(enh_ambient, 0.0, 1.0) * 0.6 + 0.06) * fres * 0.5 * enh_wet;
   }
 
    color.xyz = mix(color.xyz, fog_color.rgb, clamp(fog_color.a * fog, 0, 1));

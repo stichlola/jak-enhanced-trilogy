@@ -15,6 +15,12 @@
 
 (define *duststorm-stationary?* #f)
 
+;; og:preserve-this Enhanced: the storm's intensity and wind for the renderer's dust
+(defun enhanced-send-dust ()
+  (pc-enhanced-set-dust *duststorm-intensity* (-> *duststorm-wind-vec* x) (-> *duststorm-wind-vec* z) *duststorm-wind-vel*)
+  (none)
+  )
+
 (define *fog-intensity-scalar* 0.0)
 
 (deftype desert-dust-storm (process)
@@ -149,6 +155,7 @@
     (vector-copy! (-> self origin) (math-camera-pos))
     (desert-dust-storm-method-18 self)
     (desert-dust-storm-method-17 self)
+    (enhanced-send-dust)
     )
   :code sleep-code
   )
@@ -205,6 +212,7 @@
     (seek! (-> self current-wind-angle) (-> self dest-wind-angle) (* 16384.0 (seconds-per-frame)))
     (set! *duststorm-stationary?* #t)
     (desert-dust-storm-method-19 self)
+    (enhanced-send-dust)
     (if (time-elapsed? (-> self last-hold-time) (seconds 0.1))
         (go-virtual track)
         )

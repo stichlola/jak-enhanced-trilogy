@@ -1117,6 +1117,21 @@ void pc_enhanced_set_scene(u32 name, u32 hour, u32 movie) {
   g_enhanced_scene.valid = true;
 }
 
+// Enhanced: the game's sandstorm this frame (intensity, wind direction xz, wind speed)
+void pc_enhanced_set_dust(u32 intensity, u32 wind_x, u32 wind_z, u32 vel) {
+  auto f = [](u32 v) {
+    float r;
+    memcpy(&r, &v, 4);
+    return r;
+  };
+  auto& d = g_enhanced_dust;
+  d.intensity = f(intensity);
+  d.wind_x = f(wind_x);
+  d.wind_z = f(wind_z);
+  d.wind_vel = f(vel);
+  d.frame = d.now.load();
+}
+
 // Enhanced: the enemies and vehicles near Jak (count x y z radius), for the grass too
 void pc_enhanced_set_pushers(u32 data_ptr, u32 count) {
   auto* v = Ptr<float>(data_ptr).c();
@@ -1323,6 +1338,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
   make_func_symbol_func("pc-enhanced-set-scene", (void*)pc_enhanced_set_scene);
+  make_func_symbol_func("pc-enhanced-set-dust", (void*)pc_enhanced_set_dust);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
