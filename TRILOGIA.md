@@ -71,11 +71,12 @@ Si parte da Jak 2 perché il motore è quasi uguale a quello di Jak 3.
 - [x] Zone di Jak 2 nella gradazione (palazzo, oracolo, nascondiglio, miniera, scavi, trivella,
       castello, tomba, nido) e una correzione per gioco: in Jak 2 luce rimbalzata ×0,6 e lampioni
       ×0,45 (livelli più luminosi, neon più forti).
-- [ ] Da fare: popolazione e traffico, munizioni, tutto sbloccato, minimappa nascosta.
+- [x] Gameplay come in Jak 3: popolazione regolabile (0-3, menu o `JAK_ENHANCED_POPULATION`;
+      tetto di 20 per tipo, i posti che il motore del traffico ha già), munizioni doppie, tutte le
+      armi, potenziamenti, jetboard e poteri di Dark Jak sbloccati, segreti comprati, minimappa
+      nascosta (si riaccende dal menu). I pass di sicurezza restano alla storia.
 - [ ] Meteo per zona. Haven intatta (Jak 2) è perfetta per pioggia e temporale di notte.
       Poi Fogne, Foresta, Montagna, Atollo, Palazzo, Strip.
-- [ ] Popolazione e traffico: Jak 2 ha il suo gestore del traffico (`city`). Si adatta
-      l'impostazione "popolazione" di Jak 3.
 - [ ] Upscale delle texture con la cache come per Jak 3.
 - [ ] Prova: stessi punti, prima e dopo, fps (log "average … fps").
 

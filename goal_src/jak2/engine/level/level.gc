@@ -58,6 +58,32 @@ into 7 sections, which might explain the weird sizes in the center.
     )
   )
 
+;; Enhanced: play as if the game were complete. *enhanced-unlock-all* (default #t) keeps every gun,
+;; gun upgrade, the jetboard and Dark Jak with all his powers unlocked, and every secret bought in
+;; the secrets menu (the toggles like big head left to the player); fills ammo, health and eco once
+;; per boot. The security passes are left to the story.
+(define *enhanced-unlock-all* #t)
+(define *enhanced-unlock-given* #f)
+
+(defun enhanced-unlock-all ()
+  (when *enhanced-unlock-all*
+    (logior! (-> *game-info* features)
+             (game-feature
+               gun gun-yellow gun-red gun-blue gun-dark
+               gun-upgrade-speed gun-upgrade-ammo gun-upgrade-damage
+               board
+               darkjak darkjak-bomb0 darkjak-bomb1 darkjak-invinc darkjak-giant
+               )
+             )
+    (logior! (-> *game-info* purchase-secrets) (the-as game-secrets #x7ffff))
+    (when (not *enhanced-unlock-given*)
+      (set! *enhanced-unlock-given* #t)
+      (give-all-stuff)
+      )
+    )
+  (none)
+  )
+
 (defmacro test-play ()
   "Temporary start macro"
   `(begin

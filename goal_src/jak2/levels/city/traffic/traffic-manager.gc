@@ -449,6 +449,22 @@
   (none)
   )
 
+;; Enhanced: the game's wanted counts, kept to rescale them when the population changes
+(define *enhanced-base-want-counts* (new 'global 'array 'int8 21))
+
+(defun enhanced-apply-population ()
+  (when *traffic-manager*
+    (let ((engine (-> *traffic-manager* traffic-engine)))
+      (dotimes (i 21)
+        (set! (-> engine object-type-info-array i want-count)
+              (enhanced-population-count (-> *enhanced-base-want-counts* i))
+              )
+        )
+      )
+    )
+  (none)
+  )
+
 (defmethod init-params ((this traffic-manager))
   (let ((traffic-want-counts (new 'stack-no-clear 'array 'int8 21)))
     (set! (-> traffic-want-counts 11) 8)
@@ -474,8 +490,12 @@
     (reset-and-init this)
     (let ((v1-20 (-> this traffic-engine)))
       (dotimes (a0-2 21)
-        (set! (-> v1-20 object-type-info-array a0-2 want-count) (-> traffic-want-counts a0-2))
+        (set! (-> *enhanced-base-want-counts* a0-2) (-> traffic-want-counts a0-2))
+        (set! (-> v1-20 object-type-info-array a0-2 want-count)
+              (enhanced-population-count (-> traffic-want-counts a0-2))
+              )
         )
+      (set! *enhanced-population-apply* enhanced-apply-population)
       )
     )
   (let ((params (-> this spawn-params)))

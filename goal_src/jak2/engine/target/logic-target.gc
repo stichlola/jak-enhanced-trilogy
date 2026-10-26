@@ -1547,6 +1547,14 @@
            )
        )
      )
+    ((6)
+     ;; population 0..3, applied to the running city
+     (set! *enhanced-population* (max 0 (min 3 (string->int *enhanced-menu-buf*))))
+     (if *enhanced-population-apply*
+         (*enhanced-population-apply*)
+         )
+     (format 0 "[enhanced] population ~D~%" *enhanced-population*)
+     )
     ((4)
      (when *time-of-day*
        (if (string= *enhanced-menu-buf* "0")
@@ -1632,6 +1640,7 @@
   (if (!= (not (logtest? (-> self game features) (game-feature sidekick))) (not (-> self sidekick)))
       (target-sidekick-setup (logtest? (-> self game features) (game-feature sidekick)))
       )
+  (enhanced-unlock-all)
   (enhanced-menu-update)
   ;; Enhanced: grass bends away from Jak
   ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts)

@@ -139,10 +139,11 @@
                       :buzzer-single-inc 1.0
                       :suck-bounce-dist (meters 18)
                       :suck-suck-dist (meters 7.5)
-                      :ammo-yellow-max 100.0
-                      :ammo-red-max 50.0
-                      :ammo-blue-max 100.0
-                      :ammo-dark-max 5.0
+                      ;; Enhanced: every gun carries twice its vanilla ammo
+                      :ammo-yellow-max 200.0
+                      :ammo-red-max 100.0
+                      :ammo-blue-max 200.0
+                      :ammo-dark-max 10.0
                       :ammo-yellow-start 100.0
                       :ammo-red-start 50.0
                       :ammo-blue-start 100.0
