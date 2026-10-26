@@ -945,6 +945,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform1f(glGetUniformLocation(id, "water_swell_strength"), m_settings.water_swell);
   glUniform1f(glGetUniformLocation(id, "water_refraction"), m_settings.water_refraction);
   glUniform1f(glGetUniformLocation(id, "water_caustics"), m_settings.water_caustics);
+  // in Jak 3's desert the ocean renderer draws the oases: ponds, murky, their rough bed hidden
+  // as in the game
+  glUniform1i(glGetUniformLocation(id, "pond"), m_pond ? 1 : 0);
   glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
   {
     // dynamic lights: the glows in view space, the brightest and nearest first, at most kLights
@@ -1257,7 +1260,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (pl.valid && pl.state > 0) {
         bool rut = pl.state == 2;
         const bool soft = pl.state == 1 || pl.state == 2;
-        float stride = (rut ? 0.5f : 0.7f) * kMeter;
+        // (ruts: a piece every meter, each one reaching back to the one before: a solid track)
+        float stride = (rut ? 1.f : 0.7f) * kMeter;
         float dx = 0.f, dz = 0.f, moved = 1e9f;
         if (m_last_print_valid) {
           dx = pl.pos[0] - m_last_print[0];
@@ -1275,6 +1279,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             p.heading = std::atan2(fx, fz);
             p.kind = rut ? 2 : (m_print_left ? 0 : 1);
             p.time = m_time;
+            p.seg = moved;
             if (soft && m_settings.prints > 0.f) {
               m_prints.push_back(p);
             }
@@ -1301,7 +1306,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         std::memcpy(prints + print_count * 4, p.pos, sizeof(float) * 3);
         prints[print_count * 4 + 3] = p.heading;
         print_info[print_count * 2] = (float)(m_time - p.time);
-        print_info[print_count * 2 + 1] = (float)p.kind;
+        // (ruts: 2 + the piece's length in meters)
+        print_info[print_count * 2 + 1] = (float)p.kind + (p.kind == 2 ? p.seg / kMeter : 0.f);
         print_count++;
       }
       glUniform1i(glGetUniformLocation(id, "print_count"), print_count);
@@ -1460,6 +1466,7 @@ void EnhancedPost::update_scene() {
   }
   poll_world();
   m_zone = zone_of(level);
+  m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
   // every visit to a zone picks its weather anew: the spells start from a random point of their
   // cycle (the first visit of a session too)
   if (m_zone != m_visit_zone && !level.empty() && level != "none") {

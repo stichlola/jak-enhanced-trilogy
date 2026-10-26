@@ -355,6 +355,7 @@ class EnhancedPost {
     float heading;  // radians, atan2(x, z) of the way he went
     int kind;       // 0 left foot, 1 right foot, 2 ruts
     double time;
+    float seg = 0.f;  // ruts: how far back the piece reaches (to the one before), game units
   };
   std::vector<Print> m_prints;
   float m_last_print[3] = {};
@@ -481,6 +482,7 @@ class EnhancedPost {
   float m_cine = 0.f;  // cutscene depth of field, eased in and out
   float m_movie = 0.f;  // a cutscene plays, eased: its close-ups get the game's own shading
   int m_zone = 0;
+  bool m_pond = false;  // the water here is a pond (Jak 3's desert oases)
   float m_night = 0.f;
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)

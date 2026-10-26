@@ -96,6 +96,7 @@ uniform float water_unify;
 uniform float water_swell_strength;  // open-sea swell (0 = ripples only)
 uniform float water_refraction;      // how far shallow water bends what's under it (uv per slope)
 uniform float water_caustics;        // caustics on the shallow sea bed
+uniform int pond;                    // the water here is a murky pond (Jak 3's desert oases)
 uniform float relight;      // sun relight strength (0 = off)  // how much of our water color replaces the game's
 
 uniform vec4 color_mult;
@@ -1276,10 +1277,12 @@ void main() {
     if (!water_deep && seabed_d > 1e-7) {
       depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
     }
-    float clear_water = exp(-depth_m / 2.0);
+    // a pond: murky, the bed gone a few cm down, no swell or caustics
+    bool pond_here = pond != 0;
+    float clear_water = exp(-depth_m / (pond_here ? 0.25 : 2.0));
 
     // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth
-    float swell_amt = water_swell_strength * smoothstep(1.0, 6.0, depth_m) *
+    float swell_amt = (pond_here ? 0.0 : water_swell_strength) * smoothstep(1.0, 6.0, depth_m) *
                       (1.0 - smoothstep(0.3, 1.5, water_foot));
     if (swell_amt > 0.0) {
       float s0 = water_swell(world, t);
@@ -1339,7 +1342,7 @@ void main() {
       if (rwd > texture(tex_T3, ruv).r + 1e-7) {
         c = texture(tex_T0, ruv).rgb;
       }
-      if (sun_dir.w > 0.0 && seabed_level && water_caustics > 0.0) {
+      if (sun_dir.w > 0.0 && seabed_level && water_caustics > 0.0 && !pond_here) {
         vec2 bed = vec2(dot(right_view, seabed_p) + cam_pos.x, dot(fwd_view, seabed_p) + cam_pos.z) / 4096.0;
         float k = caustics(bed, t) * water_caustics * sun_dir.w * smoothstep(0.05, 0.4, depth_m) *
                   exp(-depth_m / 3.0) * (1.0 - smoothstep(0.3, 1.0, water_foot));
@@ -1563,7 +1566,7 @@ void main() {
         vec3 d = (w - prints[i].xyz) / 4096.0;  // meters
         float kind = print_info[i].y;
         // feet: the ground is at the print; wheels: under the seat
-        if (d.y > 0.4 || d.y < (kind > 1.5 ? -2.5 : -0.4) || dot(d.xz, d.xz) > 9.0) {
+        if (d.y > 0.4 || d.y < (kind > 1.5 ? -2.5 : -0.4) || dot(d.xz, d.xz) > (kind > 1.5 ? 25.0 : 9.0)) {
           continue;
         }
         vec2 f = vec2(sin(prints[i].w), cos(prints[i].w));
@@ -1571,11 +1574,13 @@ void main() {
         float side = dot(d.xz, vec2(f.y, -f.x));
         float fade = 1.0 - smoothstep(12.0, 30.0, print_info[i].x);
         if (kind > 1.5) {
-          // two tracks 1.7 m apart, each piece reaching the next
+          // two tracks 1.7 m apart, each piece reaching back to the one before (2 + its length):
+          // one solid track, no dashes (a little overlap at both ends hides the joins)
+          float seg = max(kind - 2.0, 0.3);
           float t = abs(abs(side) - 0.85);
-          float len = 1.0 - smoothstep(0.25, 0.4, abs(along));
+          float len = smoothstep(-seg - 0.15, -seg + 0.05, along) * (1.0 - smoothstep(0.0, 0.15, along));
           dent = max(dent, (1.0 - smoothstep(0.07, 0.17, t)) * len * fade * 0.8);
-          rim = max(rim, smoothstep(0.12, 0.18, t) * (1.0 - smoothstep(0.18, 0.28, t)) * len * fade);
+          rim = max(rim, smoothstep(0.12, 0.18, t) * (1.0 - smoothstep(0.18, 0.28, t)) * len * fade * 0.5);
         } else {
           // a sole: heel behind, wider toes in front
           float width = mix(0.06, 0.085, smoothstep(-0.1, 0.1, along));
