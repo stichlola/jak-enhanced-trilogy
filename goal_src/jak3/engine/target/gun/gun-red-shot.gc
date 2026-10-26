@@ -19,7 +19,7 @@
 (define *enhanced-recoil-dir* (new 'global 'vector))
 
 (defbehavior enhanced-recoil-update target ()
-  "Enhanced: carry Jak back after a charged shot (up to 3 m), slowing down evenly."
+  "Enhanced: carry Jak back after a charged shot (up to 10 m), slowing down evenly."
   (when (< 0.0 *enhanced-recoil-speed*)
     (vector-float*! (-> self control additional-decaying-velocity) *enhanced-recoil-dir* *enhanced-recoil-speed*)
     (set! (-> self control additional-decaying-velocity-end-time) (+ (current-time) (seconds 0.1)))
@@ -1903,13 +1903,13 @@
       (set! (-> dir w) (if (< 0.0 *enhanced-red-charged-shot*) 3.0 1.0))
       (pc-enhanced-gun-blast (the-as pointer pos) (the-as pointer dir))
       )
-    ;; Enhanced: a charged shot kicks Jak back, up to 3 m (enhanced-recoil-update carries him)
+    ;; Enhanced: a charged shot kicks Jak back, up to 10 m (enhanced-recoil-update carries him)
     (when (< 0.0 *enhanced-red-charged-shot*)
       (vector-normalize-copy! *enhanced-recoil-dir* (-> gp-0 fire-dir-out) 1.0)
       (set! (-> *enhanced-recoil-dir* y) 0.0)
       (vector-normalize! *enhanced-recoil-dir* -1.0)
-      ;; v = sqrt(2 a d), a = 40 m/s^2, d = 3 m at full charge
-      (set! *enhanced-recoil-speed* (* 4096.0 (sqrtf (* 240.0 *enhanced-red-charged-shot*))))
+      ;; v = sqrt(2 a d), a = 40 m/s^2, d = 10 m at full charge
+      (set! *enhanced-recoil-speed* (* 4096.0 (sqrtf (* 800.0 *enhanced-red-charged-shot*))))
       (cpad-set-buzz! (-> *cpad-list* cpads 0) 0 (the int (* 255.0 *enhanced-red-charged-shot*)) (seconds 0.3))
       (activate! *camera-smush-control* (* 1638.4 *enhanced-red-charged-shot*) 15 75 1.0 0.9 (-> *display* camera-clock))
       )
