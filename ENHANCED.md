@@ -100,3 +100,13 @@ ctycara; 7 Hellcat) once its level is in, for testing.
 
 - Ray tracing (OpenGL has no hardware RT: it would need a compute-shader
   BVH or Vulkan interop).
+- Life in the Jak 2 plaza (`piazza`): passers-by, traffic, guards and Metal Heads come from the
+  traffic engine, which spawns them along the city nav graph's branches (`activate-one-citizen` /
+  `activate-one-vehicle` in traffic-engine.gc, over the segments of its vis cells) and gives each the
+  nav mesh of its node (`nav-mesh-id` -> `get-nav-mesh`); enemies need that mesh to walk at all. The
+  plaza has neither: the jak3 level builder doesn't write `nav-meshes` (commented out in
+  `goalc/build_level/jak3/LevelFile.cpp`). Needed, in order: (1) an `entity-nav-mesh` for the plaza,
+  written by the builder (polys of up to 4 vertices, max 255, adjacency, a 2-bit next-hop route table,
+  the `poly-hash` grid prebuilt) or built in GOAL at login like `init-from-entity` does; (2) plaza nodes
+  and branches in the city's `nav-graph` (assigned to that mesh), linked to the nodes at the two
+  passages; (3) the traffic engine's segments for them, so the spawner sees the plaza.
