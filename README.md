@@ -27,9 +27,10 @@ starts it.
 [this folder](https://drive.google.com/drive/folders/18hjJ85N1T702fA--h_zcC9uUGmpo0oaz?usp=sharing) (`Jak-Enhanced-HD-Textures-jak1.zip`, `-jak2`, `-jak3`: 0.5, 2.6 and 3.7 GB),
 unzip it into the Jak Enhanced Trilogy folder and double-click the launcher again: it puts them in
 the game by itself (20-40 minutes, only once). They're made from the games' own textures, so they're
-only for people who own the games. The upload is still in progress: if a pack isn't there yet, for Jak 3 you can
-use [Cioscos' HD pack on Nexus Mods](https://www.nexusmods.com/opengoal/mods/31) meanwhile (it goes
-in `data/custom_assets/jak3/texture_replacements`); the Drive packs are the ones made for this project.
+only for people who own the games. The upload is still in progress: if a pack isn't there yet, the community's packs work too
+(their `custom_assets` folder goes in `data`): Jak 3, [Cioscos' HD pack on Nexus Mods](https://www.nexusmods.com/opengoal/mods/31);
+Jak 2, [the ESRGAN pack on GitHub](https://github.com/Aloqas/OpenGOAL-Jak2-HD-Texture-Pack) (Code → Download ZIP).
+The Drive packs are the ones made for this project.
 
 **Jak 3 save in slot 4**: the whole game finished, everything unlocked (guns, powers, vehicles,
 secrets) to try every feature at once. A new game starts as the original; delete or overwrite the
