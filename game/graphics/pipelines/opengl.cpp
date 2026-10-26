@@ -346,6 +346,17 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
         }
       }));
 
+  // Trilogy prototype: F9 boots the next game (Jak 1 -> 2 -> 3 -> 1) in the same process
+  m_input_manager->register_command(
+      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_F9, [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
+            MasterExit == RuntimeExitStatus::RUNNING) {
+          const int v = (int)g_game_version;
+          g_switch_game_to = (GameVersion)(v >= (int)GameVersion::Jak3 ? 1 : v + 1);
+          MasterExit = RuntimeExitStatus::SWITCH_GAME;
+        }
+      }));
+
   const auto& bind = Gfx::g_debug_settings.toggle_fullscreen_key;
 
   m_input_manager->register_command(
@@ -743,6 +754,20 @@ void GLDisplay::render() {
   if (g_gfx_data->debug_gui.want_reboot_in_retail) {
     g_gfx_data->debug_gui.want_reboot_in_retail = false;
     MasterExit = RuntimeExitStatus::RESTART_IN_RETAIL;
+  }
+  // Trilogy test: JAK_TRILOGY_SWITCH_AT=<seconds> boots the next game that long after this one
+  // started (once per process)
+  {
+    static bool switched = false;
+    static Timer since_boot;
+    static const char* at = std::getenv("JAK_TRILOGY_SWITCH_AT");
+    if (at && !switched && MasterExit == RuntimeExitStatus::RUNNING &&
+        since_boot.getSeconds() > std::atof(at)) {
+      switched = true;
+      const int v = (int)g_game_version;
+      g_switch_game_to = (GameVersion)(v >= (int)GameVersion::Jak3 ? 1 : v + 1);
+      MasterExit = RuntimeExitStatus::SWITCH_GAME;
+    }
   }
 
   {

@@ -289,6 +289,14 @@ int main(int argc, char** argv) {
         case RuntimeExitStatus::RESTART_IN_RETAIL:
           force_retail_next_time = true;
           break;
+        case RuntimeExitStatus::SWITCH_GAME:
+          // Trilogy: the same process boots the next game, with the same arguments
+          lg::info("Switching to {}", version_to_game_name(g_switch_game_to));
+          game_options.game_version = g_switch_game_to;
+          if (port_number == -1) {
+            game_options.server_port = DECI2_PORT - 1 + (int)game_options.game_version;
+          }
+          break;
       }
     } catch (std::exception& ex) {
       lg::error("Unexpected exception occurred - {}", ex.what());

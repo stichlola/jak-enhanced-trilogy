@@ -1,6 +1,7 @@
 #pragma once
 #include "common/common_types.h"
 #include "common/util/Timer.h"
+#include "common/versions/versions.h"
 
 #define GAME_TERRITORY_SCEA 0  // sony america
 #define GAME_TERRITORY_SCEE 1  // sony europe
@@ -15,6 +16,7 @@ enum class RuntimeExitStatus {
   EXIT = 2,
   RESTART_IN_DEBUG = 3,
   RESTART_IN_RETAIL = 4,
+  SWITCH_GAME = 5,  // Trilogy: restart the runtime as another game (g_switch_game_to)
 };
 
 enum class VideoMode {
@@ -26,6 +28,9 @@ enum class VideoMode {
 
 // Set to nonzero to kill GOAL kernel
 extern RuntimeExitStatus MasterExit;
+
+// Trilogy: the game to boot next when MasterExit is SWITCH_GAME
+extern GameVersion g_switch_game_to;
 
 // Set to 1 to load game engine after boot automatically
 extern u32 DiskBoot;

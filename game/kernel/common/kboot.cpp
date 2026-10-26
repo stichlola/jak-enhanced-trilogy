@@ -5,6 +5,9 @@
 // Set to 1 to kill GOAL kernel
 RuntimeExitStatus MasterExit;
 
+// Trilogy: the game to boot next when MasterExit is SWITCH_GAME
+GameVersion g_switch_game_to = GameVersion::Jak1;
+
 // Set to 1 to load game engine after boot automatically
 u32 DiskBoot;
 
