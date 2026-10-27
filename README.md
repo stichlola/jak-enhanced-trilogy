@@ -205,6 +205,9 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   effects that cost the most, for weaker graphics cards; Medium: the costly effects off; Maximum:
   everything) and a switch for every effect. Also vegetation density, lamp strength, vivid colors,
   the weather and the water effects.
+- **Nap** (**N**, or "Nap..." in the menu; Jak II and Jak 3): pick how many hours (1-12); standing
+  still, Jak lies down on the ground, the sun or the moon crosses the sky over him in a few seconds,
+  and he gets up. A hit wakes him.
 - **City**: population (Low / Normal / High / Extreme) and the minimap (shown by default).
 - **Field of view**: 80-140% of the game's, in play (cutscenes as filmed).
 - **Time of day**: six buttons (dawn to night), a slider, and a "freeze time" switch.

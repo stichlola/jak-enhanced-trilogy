@@ -2109,6 +2109,18 @@ void EnhancedPost::update_scene() {
     last_level = level;
   }
   poll_world();
+  // test switch: JAK_ENHANCED_NAP=<hours> asks for a nap 8 s into the first level
+  {
+    static const char* nap = std::getenv("JAK_ENHANCED_NAP");
+    static double first_level_t = -1;
+    if (nap && first_level_t < 0 && !level.empty() && level != "none") {
+      first_level_t = m_time;
+    }
+    if (nap && first_level_t >= 0 && m_time - first_level_t > 8.0) {
+      g_enhanced_menu.ask(11, nap);
+      nap = nullptr;
+    }
+  }
   m_zone = zone_of(level);
   m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
   m_city = g_game_version != GameVersion::Jak1 &&
@@ -3699,6 +3711,39 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   return shader;
 }
 
+// the nap window (N): how many hours go by while Jak sleeps on the ground (Jak II and 3: Jak 1
+// has no lying-down animation). The game starts it once Jak stands still (request 11)
+void EnhancedPost::draw_nap() {
+  auto& menu = g_enhanced_menu;
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  ImGui::SetNextWindowPos(ImVec2(size.x * 0.5f, size.y * 0.4f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowBgAlpha(0.85f);
+  static int drawn_frame = -10;
+  if (ImGui::GetFrameCount() - drawn_frame > 1) {
+    ImGui::SetNextWindowFocus();
+  }
+  drawn_frame = ImGui::GetFrameCount();
+  if (ImGui::Begin("Nap  ( N closes )", nullptr,
+                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+    if (g_game_version == GameVersion::Jak1) {
+      ImGui::TextUnformatted("Not in this game (Jak II and Jak 3 only).");
+    } else {
+      ImGui::TextUnformatted("Jak lies down and sleeps while the hours go by.");
+      ImGui::TextUnformatted("(standing still on the ground; a hit wakes him)");
+      ImGui::SliderInt("Hours", &menu.nap_hours, 1, 12);
+      if (ImGui::Button("Sleep", ImVec2(120, 0))) {
+        menu.ask(11, std::to_string(menu.nap_hours));
+        menu.nap_open = false;
+      }
+      ImGui::SameLine();
+    }
+    if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+      menu.nap_open = false;
+    }
+  }
+  ImGui::End();
+}
+
 void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
@@ -3725,6 +3770,10 @@ void EnhancedPost::draw_menu() {
       if (ImGui::Button(presets[i], ImVec2(110, 0))) {
         apply_preset(preset_ids[i]);
       }
+    }
+    if (ImGui::Button("Nap...  (N)")) {
+      g_enhanced_menu.nap_open = true;
+      g_enhanced_menu.open = false;
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
     ImGui::BeginDisabled(!s.enabled);

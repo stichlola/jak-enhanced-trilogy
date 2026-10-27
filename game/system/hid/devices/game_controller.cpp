@@ -131,7 +131,7 @@ void GameController::process_event(const SDL_Event& sdl_event,
   // Enhanced: while the Enhanced menu is open the pad drives the menu, not the game: the sticks
   // and triggers read as let go, presses don't reach it (releases do: nothing stays held)
   SDL_Event event = sdl_event;
-  const bool menu_has_pad = g_enhanced_menu.open;
+  const bool menu_has_pad = g_enhanced_menu.any_open();
   if (menu_has_pad && event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
     event.gaxis.value = 0;
   }
@@ -238,7 +238,7 @@ void GameController::process_event(const SDL_Event& sdl_event,
 
     // Iterate the binds, and apply all of them
     for (const auto& bind : binds.buttons.at(event.gbutton.button)) {
-      if ((menu_has_pad || g_enhanced_menu.open) && event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+      if ((menu_has_pad || g_enhanced_menu.any_open()) && event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
         break;
       }
       // 1. pressed flag

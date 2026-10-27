@@ -302,8 +302,23 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   (none)
   )
 
+(define *enhanced-nap-wanted* 0)
+(define *enhanced-nap-wait* 0)
+
 (defun enhanced-menu-update ()
+  ;; a nap asked for and not started (Jak wasn't standing still) is forgotten after two seconds
+  (when (> *enhanced-nap-wanted* 0)
+    (+! *enhanced-nap-wait* 1)
+    (when (> *enhanced-nap-wait* 120)
+      (set! *enhanced-nap-wanted* 0)
+      )
+    )
   (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((11)
+     ;; a nap (the nap window, N): how many hours; target-stance starts it
+     (set! *enhanced-nap-wanted* (string->int *enhanced-menu-buf*))
+     (set! *enhanced-nap-wait* 0)
+     )
     ((1)
      (when *time-of-day*
        (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-menu-buf*))

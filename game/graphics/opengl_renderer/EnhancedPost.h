@@ -266,6 +266,7 @@ class EnhancedPost {
   bool far_view() const { return m_settings.enabled && m_settings.far_view; }
   // the in-game menu (\ key): the main switches, time of day, quick travel
   void draw_menu();
+  void draw_nap();
 
  private:
   static constexpr int kLevels = 6;

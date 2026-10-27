@@ -128,6 +128,9 @@ extern EnhancedTimeOfDay g_enhanced_tod;
 
 struct EnhancedMenu {
   bool open = false;
+  bool nap_open = false;  // the nap window (N): how many hours Jak sleeps
+  int nap_hours = 8;
+  bool any_open() const { return open || nap_open; }
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
   std::mutex mutex;

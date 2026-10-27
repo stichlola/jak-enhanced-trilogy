@@ -333,15 +333,20 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
   // Enhanced: \ or F1 opens and closes the in-game Enhanced menu (F1 for keyboards where \ is
-  // hard to find or doesn't come through as itself); on a pad Select and R3 together
+  // hard to find or doesn't come through as itself); on a pad Select and R3 together. N opens the
+  // nap window (render() frees the cursor while one is open)
   const auto flip_enhanced_menu = [&]() {
     g_enhanced_menu.open = !g_enhanced_menu.open;
-    // free the cursor to click the menu (the mouse camera locks it), lock it again after
-    if (m_input_manager->mouse_controls_camera()) {
-      SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
-    }
-    m_input_manager->hide_cursor(!g_enhanced_menu.open && m_input_manager->auto_hiding_cursor());
+    g_enhanced_menu.nap_open = false;
   };
+  m_input_manager->register_command(
+      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_N, [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
+            !ImGui::GetIO().WantTextInput) {
+          g_enhanced_menu.nap_open = !g_enhanced_menu.nap_open;
+          g_enhanced_menu.open = false;
+        }
+      }));
   const auto toggle_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
       flip_enhanced_menu();
@@ -639,11 +644,21 @@ void GLDisplay::render() {
   {
     auto p = scoped_prof("sdl-input-monitor-poll-for-kb-mouse");
     ImGuiIO& io = ImGui::GetIO();
-    // Enhanced: the pad moves through the Enhanced menu while it's open (the game doesn't get it)
-    if (g_enhanced_menu.open) {
+    // Enhanced: the pad moves through the Enhanced menu while it's open (the game doesn't get it);
+    // the cursor is free to click it (the mouse camera locks it), locked again after
+    const bool menu_up = g_enhanced_menu.any_open();
+    if (menu_up) {
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     } else {
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+    }
+    static bool menu_was_up = false;
+    if (menu_up != menu_was_up) {
+      menu_was_up = menu_up;
+      if (m_input_manager->mouse_controls_camera()) {
+        SDL_SetWindowRelativeMouseMode(m_window, !menu_up);
+      }
+      m_input_manager->hide_cursor(!menu_up && m_input_manager->auto_hiding_cursor());
     }
     if (io.WantCaptureKeyboard) {
       m_input_manager->clear_keyboard_actions();

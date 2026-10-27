@@ -68,6 +68,85 @@
   :post target-no-stick-post
   )
 
+(define-extern *enhanced-nap-wanted* int)
+
+;; Enhanced: a nap (the nap window, N): Jak lies down where he stands, the hours go by fast over
+;; him (the sun or the moon crossing the sky in a few seconds), and he gets up. A hit wakes him
+(define *enhanced-nap-left* 0.0)
+(define *enhanced-nap-ratio* 0.0)
+
+(defun enhanced-nap-clock ((ratio float))
+  (when *time-of-day*
+    (send-event (ppointer->process *time-of-day*) 'change 'ratio ratio)
+    )
+  (none)
+  )
+
+(defstate target-enhanced-nap (target)
+  :event target-standard-event-handler
+  :exit (behavior ()
+    ;; woken before the hours went by: the clock back as it was
+    (when (> *enhanced-nap-left* 0.0)
+      (set! *enhanced-nap-left* 0.0)
+      (enhanced-nap-clock *enhanced-nap-ratio*)
+      )
+    (target-exit)
+    )
+  :code (behavior ()
+    (set! (-> self control mod-surface) *trip-mods*)
+    (let ((hours (the float *enhanced-nap-wanted*)))
+      (set! *enhanced-nap-wanted* 0)
+      ;; down onto the ground, slowly: the trip of target-load-wait, which ends with Jak lying flat
+      (ja-channel-push! 1 (seconds 0.4))
+      (ja-no-eval :group! jakb-trip-ja :num! (seek! max 0.6) :frame-num 0.0)
+      (until (ja-done? 0)
+        (suspend)
+        (ja :num! (seek! max 0.6))
+        )
+      ;; asleep: the clock runs the hours by in five seconds (ratio 1 is a game hour a minute)
+      (when *time-of-day*
+        (let ((tod (the-as time-of-day-proc (ppointer->process *time-of-day*))))
+          (set! *enhanced-nap-ratio* (-> tod time-ratio))
+          (set! *enhanced-nap-left* hours)
+          (let ((last (-> tod time-of-day)))
+            (enhanced-nap-clock (* 12.0 hours))
+            (while (> *enhanced-nap-left* 0.0)
+              (suspend)
+              ;; settling down to sleep (as target-load-wait holds him)
+              (ja :num! (seek! (ja-aframe 19.0 0) 0.05))
+              (let* ((now (-> tod time-of-day))
+                     (d (- now last))
+                     )
+                (if (< d 0.0)
+                    (+! d 24.0)
+                    )
+                (set! *enhanced-nap-left* (- *enhanced-nap-left* d))
+                (set! last now)
+                )
+              )
+            )
+          (set! *enhanced-nap-left* 0.0)
+          (enhanced-nap-clock *enhanced-nap-ratio*)
+          )
+        )
+      )
+    ;; and up again
+    (ja-channel-push! 1 (seconds 0.3))
+    (ja-no-eval :group! jakb-painful-land-ja :num! (seek!) :frame-num (ja-aframe 40.0 0))
+    (until (ja-done? 0)
+      (suspend)
+      (ja :num! (seek!))
+      )
+    (ja-no-eval :group! jakb-painful-land-end-ja :num! (seek!) :frame-num 0.0)
+    (until (ja-done? 0)
+      (suspend)
+      (ja :num! (seek!))
+      )
+    (go target-stance)
+    )
+  :post target-no-stick-post
+  )
+
 (defstate target-stance-ambient (target)
   :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
     (case message

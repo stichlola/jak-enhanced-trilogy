@@ -44,6 +44,9 @@
   :post target-no-move-post
   )
 
+(define-extern *enhanced-nap-wanted* int)
+(define-extern target-enhanced-nap (state target))
+
 (defstate target-stance (target)
   :event target-standard-event-handler
   :enter (behavior ()
@@ -57,6 +60,13 @@
     )
   :trans (behavior ()
     ((-> self state-hook))
+    ;; Enhanced: a nap asked for (the nap window): Jak stands still on the ground
+    (when (and (> *enhanced-nap-wanted* 0)
+               (logtest? (-> self control status) (collide-status on-surface))
+               (not (using-gun? self))
+               )
+      (go target-enhanced-nap)
+      )
     (if (and (logtest? (water-flags wading) (-> self water flags)) (not (using-gun? self)))
         (go target-wade-stance)
         )
