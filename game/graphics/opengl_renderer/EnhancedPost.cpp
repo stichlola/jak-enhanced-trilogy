@@ -1595,6 +1595,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform2f(glGetUniformLocation(id, "night_dark"), dark, 1.f + 1.6f * dark);
     glUniform1f(glGetUniformLocation(id, "light_spill"), m_settings.light_spill);
     glUniform1f(glGetUniformLocation(id, "cloud_shadows"), m_settings.cloud_shadows ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(id, "lens_flare"),
+                g_enhanced_scene.movie ? 0.f : m_settings.lens_flare);
     {
       // Jak in view space: the dark spares a little around him (he stays readable)
       const auto& pl = g_enhanced_player;
@@ -3405,6 +3407,10 @@ void EnhancedPost::draw_menu() {
       s.light_spill = spill ? 1.f : 0.f;
     }
     check("Cloud shadows", &s.cloud_shadows);
+    bool flare = s.lens_flare > 0.f;
+    if (check("Lens flare", &flare)) {
+      s.lens_flare = flare ? 0.6f : 0.f;
+    }
     bool smoke = s.lit_smoke > 0.f;
     if (check("Lit smoke", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
@@ -3606,6 +3612,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["prints"] = s.prints;
   j["dark_nights"] = s.dark_nights;
   j["cloud_shadows"] = s.cloud_shadows;
+  j["lens_flare"] = s.lens_flare;
   j["light_spill"] = s.light_spill;
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
@@ -3663,6 +3670,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("prints", s.prints);
   get("dark_nights", s.dark_nights);
   get("cloud_shadows", s.cloud_shadows);
+  get("lens_flare", s.lens_flare);
   get("light_spill", s.light_spill);
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
@@ -3725,6 +3733,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.prints = d.prints;
   s.dark_nights = d.dark_nights;
   s.cloud_shadows = d.cloud_shadows;
+  s.lens_flare = d.lens_flare;
   s.light_spill = d.light_spill;
   s.lit_smoke = d.lit_smoke;
   s.far_view = d.far_view;

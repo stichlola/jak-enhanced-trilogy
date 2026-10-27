@@ -111,6 +111,7 @@ uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per me
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
+uniform float lens_flare;       // the sun in the lens (0 = off)
 uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
 uniform vec2 night_dark;        // dark nights: how dark (0..1), the lights' gain
 uniform vec4 player_view;       // Jak (view space, game units), w: valid
@@ -2454,6 +2455,48 @@ void main() {
   // bloom and god rays
   c += texture(tex_T1, tex_coord).rgb * bloom_strength;
   c += texture(tex_T4, tex_coord).rgb * shafts_strength;
+
+  // lens flare: looking toward the sun, the lens's glass throws ghosts of it along the line through
+  // the middle of the picture, a faint halo ring and a short streak. Only as much as the sun itself
+  // shows (the sky around its disk, not hidden behind a wall or the clouds).
+  if (lens_flare > 0.0 && sky_sun.z > 0.0 && sky_sun.w > 0.0 && clouds.w < 0.5) {
+    vec2 suv = 0.5 * vec2(proj.z * sky_sun.x, proj.w * sky_sun.y) / sky_sun.z + 0.5;
+    if (all(greaterThan(suv, vec2(-0.3))) && all(lessThan(suv, vec2(1.3)))) {
+      float vis = 0.0;
+      for (int i = 0; i < 12; i++) {
+        vec2 q = suv + vogel(i, 12, 0.0) * vec2(texel.x / texel.y, 1.0) * 0.012;
+        if (all(greaterThan(q, vec2(0.0))) && all(lessThan(q, vec2(1.0))) &&
+            texture(tex_T3, q).r <= 1e-7) {
+          vis += smoothstep(0.55, 0.95, luma(texture(tex_T0, q).rgb));
+        }
+      }
+      vis /= 12.0;
+      if (vis > 0.0) {
+        float aspect = texel.y / texel.x;
+        vec2 axis = vec2(0.5) - suv;
+        vec3 fl = vec3(0.0);
+        // ghosts: discs of a few sizes and tints, some behind the middle, one past it
+        const float at[5] = float[](0.45, 0.8, 1.25, 1.55, 2.1);
+        const float rad[5] = float[](0.025, 0.05, 0.018, 0.08, 0.035);
+        const vec3 tint[5] = vec3[](vec3(1.0, 0.75, 0.4), vec3(0.4, 0.8, 0.6), vec3(0.9, 0.5, 0.9),
+                                    vec3(0.35, 0.5, 1.0), vec3(1.0, 0.85, 0.5));
+        for (int k = 0; k < 5; k++) {
+          vec2 gp = suv + axis * at[k];
+          float d = length((tex_coord - gp) * vec2(aspect, 1.0));
+          fl += tint[k] * (1.0 - smoothstep(rad[k] * 0.5, rad[k], d)) * 0.07;
+        }
+        // the halo ring around the middle of the picture, toward the sun
+        vec2 dv = (tex_coord - vec2(0.5)) * vec2(aspect, 1.0);
+        float ring = exp(-pow((length(dv) - 0.42) / 0.025, 2.0)) *
+                     max(dot(normalize(dv + 1e-5), normalize(-axis * vec2(aspect, 1.0) + 1e-5)), 0.0);
+        fl += vec3(0.9, 0.75, 1.0) * ring * 0.025;
+        // a short horizontal streak through the sun
+        vec2 ds = (tex_coord - suv) * vec2(aspect, 1.0);
+        fl += vec3(1.0, 0.9, 0.75) * exp(-abs(ds.y) * 400.0) * exp(-abs(ds.x) * 6.0) * 0.18;
+        c += fl * vis * lens_flare * clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * 2.0) * (1.0 - 0.7 * weather.x);
+      }
+    }
+  }
 
   // highlights roll off instead of clipping (bloom can push past 1): first the brightness, from
   // 0.7 up (the hue kept: sunlit sand and walls keep their color instead of burning to yellow and
