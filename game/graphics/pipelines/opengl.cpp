@@ -334,17 +334,18 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
   // Enhanced: \ or F1 opens and closes the in-game Enhanced menu (F1 for keyboards where \ is
   // hard to find or doesn't come through as itself); on a pad Select and R3 together. N opens the
-  // nap window (render() frees the cursor while one is open)
+  // game's nap window (request 12; a pad's Select opens it in the game itself)
   const auto flip_enhanced_menu = [&]() {
     g_enhanced_menu.open = !g_enhanced_menu.open;
-    g_enhanced_menu.nap_open = false;
+    if (g_enhanced_menu.open) {
+      g_enhanced_menu.opens++;
+    }
   };
   m_input_manager->register_command(
       CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_N, [&](const SDL_Event& event) {
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
-            !ImGui::GetIO().WantTextInput) {
-          g_enhanced_menu.nap_open = !g_enhanced_menu.nap_open;
-          g_enhanced_menu.open = false;
+            !ImGui::GetIO().WantTextInput && !g_enhanced_menu.open) {
+          g_enhanced_menu.ask(12, "");
         }
       }));
   const auto toggle_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {

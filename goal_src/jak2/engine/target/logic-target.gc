@@ -1525,6 +1525,7 @@
 ;; Enhanced: the in-game menu (\ key, EnhancedPost::draw_menu) asks for a time of day, a frozen
 ;; clock or a continue point; it's carried out here.
 (define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
+(define-extern enhanced-nap-ui-open (function none))
 (define *enhanced-nap-wanted* 0)
 (define *enhanced-nap-wait* 0)
 
@@ -1585,6 +1586,10 @@
       )
     )
   (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((12)
+     ;; the nap window (N, the Enhanced menu's button)
+     (enhanced-nap-ui-open)
+     )
     ((11)
      ;; a nap (the nap window, N): how many hours; target-stance starts it
      (set! *enhanced-nap-wanted* (string->int *enhanced-menu-buf*))

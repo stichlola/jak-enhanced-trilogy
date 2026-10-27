@@ -305,6 +305,7 @@
 (define-extern pc-enhanced-fire (function pointer string none))
 (define-extern pc-enhanced-poll-request (function string int int))
 (define-extern pc-enhanced-minimap? (function symbol))
+(define-extern pc-enhanced-menu-state (function int))
 (define-extern pc-enhanced-fov (function int))
 
 (define-extern pc-encode-utf8-string (function string string none))

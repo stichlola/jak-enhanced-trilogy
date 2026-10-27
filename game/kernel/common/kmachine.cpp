@@ -1260,6 +1260,11 @@ u64 pc_enhanced_poll_request(u32 dest, u32 max_len) {
   return kind;
 }
 
+// Enhanced: the Enhanced menu's state for the game: 2 x the times it opened, + 1 while it's open
+u64 pc_enhanced_menu_state() {
+  return (u64)(g_enhanced_menu.opens.load() * 2 + (g_enhanced_menu.open ? 1 : 0));
+}
+
 // Enhanced: whether the HUD shows the minimap (the menu's switch)
 u64 pc_enhanced_minimap() {
   return bool_to_symbol(g_enhanced_menu.minimap);
@@ -1439,6 +1444,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-fire", (void*)pc_enhanced_fire);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
+  make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
 
   // text

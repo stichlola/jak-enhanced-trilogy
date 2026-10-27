@@ -7,6 +7,8 @@
 
 ;; DECOMP BEGINS
 
+(define-extern enhanced-nap-ui-draw (function none)) ;; task-control.gc
+
 (defun set-letterbox-frames ((arg0 time-frame))
   "Set the remaining time until letterboxing is removed.
    This uses the current clock ratio of the process and the game-clock.
@@ -762,6 +764,8 @@
         )
       )
 
+    ;; Enhanced: the nap window (task-control.gc)
+    (enhanced-nap-ui-draw)
     ;; draw console buffer
     (let ((buf (if *debug-segment*
                      (-> arg0 frames (-> arg0 on-screen) debug-buf)

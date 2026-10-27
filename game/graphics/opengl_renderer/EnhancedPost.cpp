@@ -1755,7 +1755,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // dust behind a vehicle or the board crossing the desert (two plumes, off the back wheels),
       // spray where they cross water, and a burst where they hit it
       constexpr int kPuffs = 32;
-      const bool riding = pl.valid && (pl.state == 2 || pl.state == 4 || pl.state == 5);
+      const bool riding = pl.valid && (pl.state == 2 || pl.state == 4 || pl.state == 5 || pl.state == 6);
       if (riding && m_ride_last_time >= 0.0 && m_time > m_ride_last_time) {
         float dx = pl.pos[0] - m_ride_last[0], dz = pl.pos[2] - m_ride_last[2];
         float dist = std::sqrt(dx * dx + dz * dz) / kMeter;
@@ -1789,12 +1789,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       static const char* puff_test = std::getenv("JAK_ENHANCED_PUFF_TEST");
       static bool test_puffs = puff_test != nullptr;
       static bool test_spray = puff_test && std::strcmp(puff_test, "water") == 0;
-      if (pl.state == 2 || pl.state == 4) {
-        m_last_ride_state = pl.state;
+      if (pl.state == 2 || pl.state == 4 || pl.state == 6) {
+        m_last_ride_state = pl.state == 6 ? 4 : pl.state;
       }
-      const bool board = pl.state == 4 || (pl.state == 5 && m_last_ride_state == 4);
+      const bool board = pl.state == 4 || pl.state == 6 || (pl.state == 5 && m_last_ride_state == 4);
       const bool on_water = pl.state == 5 || test_spray;
-      if ((riding || test_puffs) && pl.valid && m_time - m_puff_time > 0.06) {
+      // (none while the board is in the air: a jump leaves no dust)
+      if ((riding || test_puffs) && pl.valid && pl.state != 6 && m_time - m_puff_time > 0.06) {
         const float sp = test_puffs ? 20.f : m_ride_speed;
         const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
         // (the test: as if moving, along a 12 m trail)
@@ -2117,7 +2118,8 @@ void EnhancedPost::update_scene() {
       first_level_t = m_time;
     }
     if (nap && first_level_t >= 0 && m_time - first_level_t > 8.0) {
-      g_enhanced_menu.ask(11, nap);
+      // ("window": the nap window opens instead)
+      g_enhanced_menu.ask(std::strcmp(nap, "window") == 0 ? 12 : 11, nap);
       nap = nullptr;
     }
   }
@@ -3711,39 +3713,6 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   return shader;
 }
 
-// the nap window (N): how many hours go by while Jak sleeps on the ground (Jak II and 3: Jak 1
-// has no lying-down animation). The game starts it once Jak stands still (request 11)
-void EnhancedPost::draw_nap() {
-  auto& menu = g_enhanced_menu;
-  const ImVec2 size = ImGui::GetIO().DisplaySize;
-  ImGui::SetNextWindowPos(ImVec2(size.x * 0.5f, size.y * 0.4f), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowBgAlpha(0.85f);
-  static int drawn_frame = -10;
-  if (ImGui::GetFrameCount() - drawn_frame > 1) {
-    ImGui::SetNextWindowFocus();
-  }
-  drawn_frame = ImGui::GetFrameCount();
-  if (ImGui::Begin("Nap  ( N closes )", nullptr,
-                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
-    if (g_game_version == GameVersion::Jak1) {
-      ImGui::TextUnformatted("Not in this game (Jak II and Jak 3 only).");
-    } else {
-      ImGui::TextUnformatted("Jak lies down and sleeps while the hours go by.");
-      ImGui::TextUnformatted("(standing still on the ground; a hit wakes him)");
-      ImGui::SliderInt("Hours", &menu.nap_hours, 1, 12);
-      if (ImGui::Button("Sleep", ImVec2(120, 0))) {
-        menu.ask(11, std::to_string(menu.nap_hours));
-        menu.nap_open = false;
-      }
-      ImGui::SameLine();
-    }
-    if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-      menu.nap_open = false;
-    }
-  }
-  ImGui::End();
-}
-
 void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
@@ -3771,8 +3740,9 @@ void EnhancedPost::draw_menu() {
         apply_preset(preset_ids[i]);
       }
     }
-    if (ImGui::Button("Nap...  (N)")) {
-      g_enhanced_menu.nap_open = true;
+    // the game's nap window (Jak II and 3: Jak 1 has no lying-down animation)
+    if (g_game_version != GameVersion::Jak1 && ImGui::Button("Nap...  (N, Select)")) {
+      g_enhanced_menu.ask(12, "");
       g_enhanced_menu.open = false;
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);

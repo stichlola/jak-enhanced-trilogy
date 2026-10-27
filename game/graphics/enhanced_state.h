@@ -23,7 +23,7 @@ extern EnhancedSun g_enhanced_sun;
 struct EnhancedPlayer {
   float pos[3] = {0.f, 0.f, 0.f};
   // 0 elsewhere, 1 on foot on soft ground (sand, dirt, snow), 2 driving, 3 on foot on other
-  // ground, 4 on the board, 5 driving or boarding over water
+  // ground, 4 on the board, 5 driving or boarding over water, 6 on the board in the air
   int state = 0;
   int lamp_toggles = 0;  // how many times the player switched Jak's lantern (mod 64)
   bool valid = false;
@@ -128,9 +128,10 @@ extern EnhancedTimeOfDay g_enhanced_tod;
 
 struct EnhancedMenu {
   bool open = false;
-  bool nap_open = false;  // the nap window (N): how many hours Jak sleeps
-  int nap_hours = 8;
-  bool any_open() const { return open || nap_open; }
+  bool any_open() const { return open; }
+  // how many times the menu opened (pc-enhanced-menu-state: the game's Select opens the nap
+  // window on release, unless Select + R3 opened this menu meanwhile)
+  std::atomic<int> opens = 0;
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
   std::mutex mutex;

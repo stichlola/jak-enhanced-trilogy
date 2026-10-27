@@ -2370,3 +2370,228 @@
       )
     )
   )
+
+;; Enhanced: the nap window, drawn like the game's own menus (a pad's Select, N on a keyboard, or the
+;; Enhanced menu's button): how many hours Jak sleeps. The world holds still while it's open (as in
+;; Skyrim's wait menu); X starts the nap (target-stance lays Jak down once he stands on the ground),
+;; triangle, circle, Select or Start leave it
+(define-extern *enhanced-nap-wanted* int)
+(define-extern *enhanced-nap-wait* int)
+
+(define *enhanced-nap-ui* #f)
+(define *enhanced-nap-ui-hours* 8)
+(define *enhanced-nap-ui-time* 0.0) ;; seconds it's been open (it fades in)
+(define *enhanced-nap-ui-repeat* 0.0) ;; holding left or right: the hours run on
+(define *enhanced-nap-ui-held* #f)
+(define *enhanced-select-menu* -1) ;; pc-enhanced-menu-state as Select went down (-1: it's up)
+
+(defun enhanced-nap-ui-open ()
+  (when (and (not *enhanced-nap-ui*)
+             (= *master-mode* 'game)
+             (pause-allowed?)
+             (not (movie?))
+             *target*
+             (not (focus-test? *target* dead))
+             )
+    (set! *enhanced-nap-ui* #t)
+    (set! *enhanced-nap-ui-time* 0.0)
+    (set! *enhanced-nap-ui-held* #t) ;; (a stick already pushed doesn't move the hours at once)
+    (set-master-mode 'freeze)
+    )
+  (none)
+  )
+
+(defun enhanced-nap-ui-close ((hours int))
+  (set! *enhanced-nap-ui* #f)
+  (set! *enhanced-select-menu* -1)
+  (set-master-mode 'game)
+  (when (> hours 0)
+    (set! *enhanced-nap-wanted* hours)
+    (set! *enhanced-nap-wait* 0)
+    )
+  ;; the press that closed it doesn't reach Jak (a jump, a punch)
+  (cpad-clear! 0 x triangle circle select start)
+  (none)
+  )
+
+(defun enhanced-nap-ui-box ((x0 float) (y0 float) (x1 float) (y1 float) (bgr int) (a int) (how int))
+  "A box as the game's menus draw them (color #xBBGGRR, 128 full): how 1 darkens what's behind, 2 adds
+   a glow, 0 the outline"
+  (let ((box (new 'stack-no-clear 'hud-box)))
+    (set! (-> box min x) x0)
+    (set! (-> box min y) y0)
+    (set! (-> box max x) x1)
+    (set! (-> box max y) y1)
+    (set-vector! (-> box color) (logand bgr 255) (logand (shr bgr 8) 255) (logand (shr bgr 16) 255) a)
+    ;; (all in the text's bucket, in the order drawn: the menus' own buckets would put the glow under
+    ;; the darkening)
+    (with-dma-buffer-add-bucket ((buf (-> *display* frames (-> *display* on-screen) global-buf))
+                                 (bucket-id progress)
+                                 )
+      (case how
+        ;; (darkening: black over it, three quarters as strong as asked, the color unused; the games' own
+        ;; darkening box blends differently in Jak II and 3)
+        ((1)
+         (set-vector! (-> box color) 0 0 0 (/ (* a 3) 4))
+         (draw-box-alpha-3 box buf)
+         )
+        ((2) (draw-box-alpha-2 box buf))
+        (else (draw-box-prim-only box buf))
+        )
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-nap-ui-text ((str string) (y float) (scale float) (color font-color) (alpha float))
+  (let ((font (new 'stack 'font-context *font-default-matrix* 96 (the int y) 0.0 color (font-flags shadow kerning))))
+    (set-width! font 320)
+    (set-height! font 40)
+    (set! (-> font scale) scale)
+    (set! (-> font alpha) alpha)
+    (set! (-> font flags) (font-flags shadow kerning middle large))
+    (print-game-text str font #f 44 (bucket-id progress))
+    )
+  (none)
+  )
+
+(defun enhanced-nap-ui-part-of-day ((h float))
+  (cond
+    ((< h 5.0) "at night")
+    ((< h 8.0) "at dawn")
+    ((< h 12.0) "in the morning")
+    ((< h 17.0) "in the afternoon")
+    ((< h 20.0) "at sunset")
+    (else "at night")
+    )
+  )
+
+(defun enhanced-nap-ui-draw ()
+  "Drawn from display-loop-main while the frame's buffers are open (enhanced-nap-ui-update runs after
+   the frame went out: input only)"
+  (when *enhanced-nap-ui*
+  (let* ((fade (fmin 1.0 (* 5.0 *enhanced-nap-ui-time*)))
+         (a128 (the int (* 128.0 fade)))
+         (hours *enhanced-nap-ui-hours*)
+         (now (if *time-of-day*
+                  (-> (the-as time-of-day-proc (ppointer->process *time-of-day*)) time-of-day)
+                  12.0
+                  )
+              )
+         (wake (let ((w (+ now (the float hours))))
+                 (if (>= w 24.0)
+                     (- w 24.0)
+                     w
+                     )
+                 )
+               )
+         )
+    ;; the window: the world dimmed behind it, a glowing title strip, thin outlines
+    (enhanced-nap-ui-box 86.0 92.0 426.0 318.0 #x808080 a128 1)
+    (enhanced-nap-ui-box 86.0 92.0 426.0 318.0 #x808080 (the int (* 64.0 fade)) 1)
+    (enhanced-nap-ui-box 86.0 92.0 426.0 318.0 #x408080 a128 0)
+    (enhanced-nap-ui-box 86.0 92.0 426.0 130.0 #x408080 (the int (* 48.0 fade)) 2)
+    (enhanced-nap-ui-box 86.0 92.0 426.0 130.0 #x408080 a128 0)
+    (enhanced-nap-ui-text "NAP" 98.0 1.0 (font-color progress) fade)
+    ;; the hour now
+    (format (clear *temp-string*) "Now ~2,'0D:~2,'0D, ~S"
+            (the int now) (the int (* 60.0 (- now (the float (the int now))))) (enhanced-nap-ui-part-of-day now))
+    (enhanced-nap-ui-text *temp-string* 140.0 0.6 (font-color progress) fade)
+    ;; the bar: an hour a notch, the hours asked for glowing
+    (let* ((x0 136.0)
+           (x1 376.0)
+           (y0 178.0)
+           (y1 198.0)
+           (fill (+ x0 (* (- x1 x0) (/ (the float hours) 12.0))))
+           )
+      (enhanced-nap-ui-box x0 y0 x1 y1 #x808080 (the int (* 110.0 fade)) 1)
+      (enhanced-nap-ui-box x0 y0 fill y1 #x185080 a128 2)
+      (enhanced-nap-ui-box x0 y0 fill (+ y0 6.0) #x406080 (the int (* 64.0 fade)) 2)
+      (enhanced-nap-ui-box x0 y0 x1 y1 #x408080 a128 0)
+      (dotimes (i 11)
+        (let ((x (+ x0 (* (- x1 x0) (/ (the float (+ i 1)) 12.0)))))
+          (enhanced-nap-ui-box x (+ y0 4.0) (+ x 1.0) (- y1 4.0) #x408080 (the int (* 96.0 fade)) 0)
+          )
+        )
+      ;; the knob
+      (enhanced-nap-ui-box (- fill 6.0) (- y0 7.0) (+ fill 6.0) (+ y1 7.0) #x808080 a128 1)
+      (enhanced-nap-ui-box (- fill 6.0) (- y0 7.0) (+ fill 6.0) (+ y1 7.0) #x608080 a128 2)
+      (enhanced-nap-ui-box (- fill 6.0) (- y0 7.0) (+ fill 6.0) (+ y1 7.0) #x808080 a128 0)
+      )
+    (format (clear *temp-string*) (if (= hours 1) "~D hour" "~D hours") hours)
+    (enhanced-nap-ui-text *temp-string* 206.0 0.95 (font-color progress) fade)
+    (format (clear *temp-string*) "Jak wakes up at ~2,'0D:~2,'0D, ~S"
+            (the int wake) (the int (* 60.0 (- wake (the float (the int wake))))) (enhanced-nap-ui-part-of-day wake))
+    (enhanced-nap-ui-text *temp-string* 240.0 0.55 (font-color progress) fade)
+    ;; what the buttons do (the game's own button pictures: no format, its ~ codes would be eaten)
+    (enhanced-nap-ui-box 86.0 276.0 426.0 318.0 #x408080 (the int (* 24.0 fade)) 2)
+    (enhanced-nap-ui-text
+      "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Sleep    ~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Cancel"
+      286.0
+      0.6
+      (font-color progress)
+      fade
+      )
+    )
+    )
+  (none)
+  )
+
+(defun enhanced-nap-ui-update ()
+  ;; Select: the nap window opens as it's let go, unless Select + R3 opened the Enhanced menu meanwhile
+  (let ((ms (pc-enhanced-menu-state)))
+    (cond
+      ((cpad-pressed? 0 select)
+       (set! *enhanced-select-menu* ms)
+       )
+      ((and (>= *enhanced-select-menu* 0) (not (cpad-hold? 0 select)))
+       (if (and (= ms *enhanced-select-menu*) (zero? (logand ms 1)) (not *enhanced-nap-ui*))
+           (enhanced-nap-ui-open)
+           )
+       (set! *enhanced-select-menu* -1)
+       )
+      )
+    )
+  (when *enhanced-nap-ui*
+    (let ((dt (-> *display* real-clock seconds-per-frame))
+          (pad (-> *cpad-list* cpads 0))
+          )
+      (+! *enhanced-nap-ui-time* dt)
+      ;; left and right (the d-pad or the stick): an hour less or more, running on when held
+      (let ((dir (cond
+                   ((or (cpad-hold? 0 left) (< (-> pad leftx) 48)) -1)
+                   ((or (cpad-hold? 0 right) (< 208 (-> pad leftx))) 1)
+                   (else 0)
+                   )
+                 )
+            )
+        (cond
+          ((zero? dir)
+           (set! *enhanced-nap-ui-held* #f)
+           )
+          ((not *enhanced-nap-ui-held*)
+           (set! *enhanced-nap-ui-held* #t)
+           (set! *enhanced-nap-ui-repeat* 0.4)
+           (set! *enhanced-nap-ui-hours* (max 1 (min 12 (+ *enhanced-nap-ui-hours* dir))))
+           )
+          (else
+            (-! *enhanced-nap-ui-repeat* dt)
+            (when (>= 0.0 *enhanced-nap-ui-repeat*)
+              (set! *enhanced-nap-ui-repeat* 0.09)
+              (set! *enhanced-nap-ui-hours* (max 1 (min 12 (+ *enhanced-nap-ui-hours* dir))))
+              )
+            )
+          )
+        )
+      (cond
+        ((cpad-pressed? 0 x)
+         (enhanced-nap-ui-close *enhanced-nap-ui-hours*)
+         )
+        ((or (cpad-pressed? 0 triangle circle start) (and (cpad-pressed? 0 select) (< 0.2 *enhanced-nap-ui-time*)))
+         (enhanced-nap-ui-close 0)
+         )
+        )
+      )
+    )
+  (none)
+  )

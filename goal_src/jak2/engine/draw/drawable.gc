@@ -2180,11 +2180,16 @@
   )
 
 ;; definition for function determine-pause-mode
+(define-extern enhanced-nap-ui-update (function none))
+
 (defun determine-pause-mode ()
+  ;; Enhanced: Select opens the nap window (task-control.gc) instead of pausing
+  (enhanced-nap-ui-update)
   (when (and (or (not *progress-process*) (can-go-back? (-> *progress-process* 0)))
              (or (!= *master-mode* 'freeze) (and *debug-segment* (cpad-pressed? 0 select start) (cpad-hold? 0 l3)))
              )
-    (if (or (cpad-pressed? 0 select start)
+    (if (or (cpad-pressed? 0 start)
+            (and (cpad-pressed? 0 select) (!= *master-mode* 'game))
             (cond
               ((= *master-mode* 'menu)
                (cpad-pressed? 0 r3 r2 triangle circle)

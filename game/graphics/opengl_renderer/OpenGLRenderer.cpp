@@ -1125,9 +1125,6 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   if (g_enhanced_menu.open && m_enhanced_post) {
     m_enhanced_post->draw_menu();
   }
-  if (g_enhanced_menu.nap_open && m_enhanced_post) {
-    m_enhanced_post->draw_nap();
-  }
 
   m_profiler.finish();
 

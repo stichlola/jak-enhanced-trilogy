@@ -122,6 +122,29 @@ nothing touches a missing nav after `go-inactive`.
 
 ## Not done (yet)
 
+Next, the small ones first (the big ones below wait until these are done):
+
+- A real sleeping animation for the nap (Mixamo clips, retargeted to Jak's skeleton in Blender and
+  linked into `jakb-ag` as a build-actor art group with `:master-art-group`).
+- The nap in Jak 1 too (it needs a lying-down animation of its own).
+- Smaller subtitles by default (the PS2 size takes too much of a Full HD screen), and later an
+  accessibility option to make them bigger again.
+- New ambient sounds: raindrops on the ground, roofs and water, dripping after the rain, wind in the
+  night desert, crickets.
+- A more modern minimap (Jak II and 3): the HUD's round map (`minimap.gc`, `hud-map`) redrawn with a
+  cleaner look (sharper, a modern frame and icons), keeping the game's own map data and markers.
+- A photo mode: the game held still, a free camera, filters, the HUD hidden.
+- Weather by zone and by season: each zone gets its own set of possible weathers that it cycles
+  through (the desert's sandstorms and clear nights, Haven's rain, the forest's fog...) instead of one
+  pool for every open area; then seasons that shift those sets (wetter, colder, drier) over time.
+
+The big ones (after the above):
+
+- The bridge levels and the continuous trilogy (TRILOGIA.md, phase 4); one menu and save, Daxter and
+  the trilogy's total time.
+- Life in the Jak 2 plaza (below).
+- HD textures for every area, chosen in the launcher at the first start.
+- Linux / Steam Deck releases.
 - Hardware ray tracing (OpenGL has no access to it: Vulkan interop). The reflections are traced in
   software (above); ray-traced shadows and indirect light could use the same hierarchies.
 - Life in the Jak 2 plaza (`piazza`): passers-by, traffic, guards and Metal Heads come from the

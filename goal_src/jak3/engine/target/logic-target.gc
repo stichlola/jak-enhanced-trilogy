@@ -302,6 +302,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   (none)
   )
 
+(define-extern enhanced-nap-ui-open (function none))
 (define *enhanced-nap-wanted* 0)
 (define *enhanced-nap-wait* 0)
 
@@ -314,6 +315,10 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
       )
     )
   (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
+    ((12)
+     ;; the nap window (N, the Enhanced menu's button)
+     (enhanced-nap-ui-open)
+     )
     ((11)
      ;; a nap (the nap window, N): how many hours; target-stance starts it
      (set! *enhanced-nap-wanted* (string->int *enhanced-menu-buf*))
@@ -2272,13 +2277,16 @@ capture exactly."
   ;; Enhanced: grass bends away from Jak
   (when *target*
     ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts), 3 on foot,
-    ;; 4 on the board, 5 driving or boarding over water (spray and a wake)
+    ;; 4 on the board, 5 driving or boarding over water (spray and a wake), 6 on the board in the air
+    ;; (a jump: no dust)
     (let ((v *enhanced-player-vec*))
       (vector-copy! v (-> *target* control trans))
       (set! (-> v w) (cond
                        ((and (focus-test? *target* pilot board) (enhanced-over-water? v)) 5.0)
                        ((focus-test? *target* pilot) 2.0)
-                       ((focus-test? *target* board) 4.0)
+                       ((focus-test? *target* board)
+                        (if (time-elapsed? (-> *target* control last-time-on-surface) (seconds 0.15)) 6.0 4.0)
+                        )
                        ((and (logtest? (-> *target* control status) (collide-status on-surface))
                              (let ((m (-> *target* control ground-pat material)))
                                (or (= m (pat-material sand)) (= m (pat-material quicksand)) (= m (pat-material dirt))
