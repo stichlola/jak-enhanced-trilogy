@@ -1,8 +1,38 @@
 #include "ProgressRenderer.h"
 
+#include <algorithm>
+#include <vector>
+
+namespace {
+std::vector<GLuint> g_minimap_textures;
+}
+
+bool ProgressRenderer::is_minimap_texture(GLuint tex) {
+  return tex != 0 &&
+         std::find(g_minimap_textures.begin(), g_minimap_textures.end(), tex) != g_minimap_textures.end();
+}
+
 ProgressRenderer::ProgressRenderer(const std::string& name, int my_id, int batch_size)
     : DirectRenderer(name, my_id, batch_size),
-      m_minimap_fb(kMinimapWidth, kMinimapHeight, GL_UNSIGNED_INT_8_8_8_8_REV) {}
+      m_minimap_fb(kMinimapWidth * kMinimapScale,
+                   kMinimapHeight * kMinimapScale,
+                   GL_UNSIGNED_INT_8_8_8_8_REV) {
+  g_minimap_textures.push_back(m_minimap_fb.texture());
+  // a full mip chain: the 512 x 512 map is drawn smaller than that on screen
+  glBindTexture(GL_TEXTURE_2D, m_minimap_fb.texture());
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 9);
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+// after the game has drawn the map: its smaller mip levels, for the screen
+void ProgressRenderer::finish_minimap() {
+  if (m_minimap_drawn) {
+    m_minimap_drawn = false;
+    glBindTexture(GL_TEXTURE_2D, m_minimap_fb.texture());
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+}
 
 void ProgressRenderer::pre_render() {
   m_current_fbp = kScreenFbp;
@@ -11,6 +41,7 @@ void ProgressRenderer::pre_render() {
 void ProgressRenderer::post_render() {
   m_fb_ctxt.reset();
   m_offscreen_mode = false;
+  finish_minimap();
 }
 
 void ProgressRenderer::init_textures(TexturePool& texture_pool, GameVersion version) {
@@ -39,6 +70,7 @@ void ProgressRenderer::handle_frame(u64 val,
       case kScreenFbp:  // 408
         m_fb_ctxt.reset();
         m_offscreen_mode = false;
+        finish_minimap();
         break;
       case kMinimapFbp:  // 126
         m_fb_ctxt.emplace(m_minimap_fb);
@@ -46,6 +78,7 @@ void ProgressRenderer::handle_frame(u64 val,
         // one that we assume will get written to now.
         render_state->texture_pool->move_existing_to_vram(m_minimap_gpu_tex, kMinimapVramAddr);
         m_offscreen_mode = true;
+        m_minimap_drawn = true;
         break;
       default:
         fmt::print("Unknown fbp in ProgressRenderer: {}\n", f.fbp());

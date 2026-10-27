@@ -116,6 +116,7 @@ class DirectRenderer : public BucketRenderer {
   void update_gl_test();
   void update_gl_texture(SharedRenderState* render_state, int unit);
   bool m_offscreen_mode = false;
+  float m_tex_px_scale = 1.f;  // Enhanced: texels per game texel of the bound texture (the minimap)
 
   struct TestState {
     void from_register(GsTest reg);

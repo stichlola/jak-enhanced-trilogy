@@ -14,6 +14,8 @@ uniform float ta0;
 uniform int scissor_enable;
 // game width, game height, viewport width, viewport height
 uniform vec4 game_sizes;
+// Enhanced: texels per game texel of the texture on unit 0 (the minimap is drawn 4x larger)
+uniform float tex_px_scale;
 
 uniform vec4 fog_color;
 
@@ -49,8 +51,9 @@ vec4 sample_tex(vec2 coord, uint unit) {
 
 vec4 sample_tex_px(vec2 coordf, uint unit) {
   ivec2 coord;
-  coord.x = int(coordf.x / 16);
-  coord.y = int(coordf.y / 16);
+  float px = unit == 0u ? max(tex_px_scale, 1.0) : 1.0;
+  coord.x = int(coordf.x / 16 * px);
+  coord.y = int(coordf.y / 16 * px);
   switch (unit) {
     case 0: return texelFetch(tex_T20, coord, 0);
     case 1: return texelFetch(tex_T21, coord, 0);

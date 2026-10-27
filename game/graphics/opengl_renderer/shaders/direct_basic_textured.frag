@@ -16,6 +16,8 @@ uniform int scissor_enable;
 uniform bool greater;
 // game width, game height, viewport width, viewport height
 uniform vec4 game_sizes;
+// Enhanced: texels per game texel of the bound texture (the minimap is drawn 4x larger)
+uniform float tex_px_scale;
 
 uniform vec4 fog_color;
 
@@ -31,7 +33,7 @@ vec4 sample_tex(vec2 coord, uint unit) {
 vec4 sample_tex_px(vec2 coordf, uint unit) {
   // note: there is still fractional texels and filtering in this mode.
   vec2 coord_px = coordf / 16.f;
-  vec2 tex_size = vec2(textureSize(tex_T20, 0));
+  vec2 tex_size = vec2(textureSize(tex_T20, 0)) / max(tex_px_scale, 1.0);
   // but texture perspective correction is disabled.
   // current uses are on quads with the same z so it doesn't really matter.
   return textureProj(tex_T20, vec4(coord_px / tex_size, 1, 1));

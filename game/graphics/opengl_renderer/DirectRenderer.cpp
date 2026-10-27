@@ -1,5 +1,7 @@
 #include "DirectRenderer.h"
 
+#include "game/graphics/opengl_renderer/ProgressRenderer.h"
+
 #include "common/dma/gs.h"
 #include "common/log/log.h"
 #include "common/util/Assert.h"
@@ -270,6 +272,7 @@ void DirectRenderer::flush_pending(SharedRenderState* render_state, ScopedProfil
               m_scissor_enable && !m_offscreen_mode);
   glUniform4f(glGetUniformLocation(current_shader, "game_sizes"), 512.0f,
               game_height[render_state->version], viewport_size[2], viewport_size[3]);
+  glUniform1f(glGetUniformLocation(current_shader, "tex_px_scale"), m_tex_px_scale);
 
   int draw_count = 0;
   int num_tris = 0;
@@ -419,6 +422,12 @@ void DirectRenderer::update_gl_texture(SharedRenderState* render_state, int unit
 
   glActiveTexture(GL_TEXTURE20 + unit);
   glBindTexture(GL_TEXTURE_2D, *tex);
+  // Enhanced: the minimap is drawn larger than the game thinks (ProgressRenderer)
+  if (unit == 0) {
+    m_tex_px_scale = ProgressRenderer::is_minimap_texture(*tex)
+                         ? (float)ProgressRenderer::kMinimapScale
+                         : 1.f;
+  }
   // Note: CLAMP and CLAMP_TO_EDGE are different...
   if (state.m_clamp_state.clamp_s) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -432,7 +441,8 @@ void DirectRenderer::update_gl_texture(SharedRenderState* render_state, int unit
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
   }
 
-  if (state.enable_tex_filt) {
+  // (Enhanced: the minimap, drawn offscreen at 4x, filters its map so its edges aren't stairs)
+  if (state.enable_tex_filt || m_offscreen_mode) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                     m_debug_state.disable_mipmap ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);

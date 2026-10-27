@@ -12,6 +12,13 @@ class ProgressRenderer : public DirectRenderer {
   static constexpr int kMinimapVramAddr = 4032;
   static constexpr int kMinimapWidth = 128;
   static constexpr int kMinimapHeight = 128;
+  // Enhanced: the minimap is drawn at 4x the PS2's 128 x 128 (the game still sees a 128 x 128
+  // texture: the offscreen draw maps the GS's coordinates to the whole framebuffer), so it isn't a
+  // blurry upscale on a modern screen
+  static constexpr int kMinimapScale = 4;
+  // the minimaps' GL textures (one per progress renderer: Jak 3 has three): the direct renderers
+  // sample them in the game's 128 x 128 texels (tex_px_scale in direct_basic_textured*.frag)
+  static bool is_minimap_texture(GLuint tex);
   static constexpr int kScreenFbp = 408;
   static constexpr int kMinimapFbp = 126;
   ProgressRenderer(const std::string& name, int my_id, int batch_size);
@@ -25,4 +32,6 @@ class ProgressRenderer : public DirectRenderer {
   FramebufferTexturePair m_minimap_fb;
   std::optional<FramebufferTexturePairContext> m_fb_ctxt;
   u32 m_current_fbp = kScreenFbp;
+  bool m_minimap_drawn = false;
+  void finish_minimap();
 };
