@@ -116,6 +116,11 @@ the game's sfx volume (group 0) and goes quiet while the sfx group is paused (th
 "Ambient sounds" (volume, 0 = off). The loops were made with ElevenLabs' sound effects and leveled
 by `scripts/enhanced/ambient_sounds.py` (`--convert` redoes the leveling from the downloads).
 
+Subtitles: smaller than the PS2's by default (bank scale 0.65 in Jak II and 3, 0.38 in Jak 1, in
+`subtitle*-h.gc` / `pc/subtitle.gc`); the menu's "Subtitle size" (Small, Medium, Large = the PS2
+size, Extra large) multiplies it (`pc-enhanced-subtitle-size`, percent), and the Jak II/3 subtitle
+box grows with it.
+
 ## Known issues
 
 - Water and PBR (metal/glass) reflections and refraction: fewer artifacts than before, but still
@@ -159,8 +164,6 @@ not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-
 
 Next, the small ones first (the big ones below wait until these are done):
 
-- An accessibility option for bigger subtitles (the default is now smaller than the PS2 size: bank
-  scale 0.65 in Jak II and 3, 0.38 in Jak 1, in `subtitle*-h.gc` / `pc/subtitle.gc`).
 - More ambient sounds: rain on roofs and metal under cover, birds by day, frogs in the swamp, the
   sea's waves, Haven's distant hum.
 - A more modern minimap (Jak II and 3): the HUD's round map (`minimap.gc`, `hud-map`) redrawn with a

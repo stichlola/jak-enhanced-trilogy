@@ -3865,6 +3865,21 @@ void EnhancedPost::draw_menu() {
     ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
+    // the subtitles' size (accessibility): the default is smaller than the PS2's
+    {
+      static const int kSizes[] = {100, 120, 138, 170};
+      int pick = 0;
+      for (int i = 0; i < 4; i++) {
+        if (g_enhanced_menu.subtitle_size >= kSizes[i]) {
+          pick = i;
+        }
+      }
+      static const char* const kSizeNames[] = {"Small", "Medium", "Large (original)", "Extra large"};
+      ImGui::SetNextItemWidth(200);
+      if (ImGui::Combo("Subtitle size", &pick, kSizeNames, 4)) {
+        g_enhanced_menu.subtitle_size = kSizes[pick];
+      }
+    }
     weather_menu(s, "Weather");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
@@ -4064,6 +4079,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["vivid"] = s.vivid;
   j["population"] = m_population;
   j["fov"] = g_enhanced_menu.fov.load();
+  j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
 }
@@ -4132,6 +4148,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
     int fov = g_enhanced_menu.fov;
     get("fov", fov);
     g_enhanced_menu.fov = fov;
+    int subtitle_size = g_enhanced_menu.subtitle_size;
+    get("subtitle_size", subtitle_size);
+    g_enhanced_menu.subtitle_size = subtitle_size;
   }
   m_population = std::clamp(m_population, 0, 3);
   bool map = true;  // ("show_minimap": the old "minimap" key saved it off by default)

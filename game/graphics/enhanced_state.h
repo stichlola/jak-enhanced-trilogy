@@ -135,6 +135,9 @@ struct EnhancedMenu {
   std::atomic<int> opens = 0;
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
+  // the subtitles' size, percent of Enhanced's default (pc-enhanced-subtitle-size): 100 small,
+  // 120 medium, 138 large (the PS2 size), 170 extra large
+  std::atomic<int> subtitle_size = 100;
   std::mutex mutex;
   int request = 0;
   std::string arg;

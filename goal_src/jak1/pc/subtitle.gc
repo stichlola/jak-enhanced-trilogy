@@ -405,6 +405,10 @@
 (defun subtitle-str-adjust ((pos int))
   (if (< pos 0) -1 (the int (/ pos (/ 1024.0 60)))))
 
+;; Enhanced: the menu's subtitle size, times the bank's scale
+(defun enhanced-subtitle-size ()
+  (* 0.01 (the float (pc-enhanced-subtitle-size))))
+
 (defbehavior setup-subtitle-font subtitle ()
   "setup the subtitle font."
   ;; set font settings.
@@ -416,7 +420,7 @@
            224))
   (set-width! (-> self font) (the int (* (-> *SUBTITLE-bank* width) 512)))
   (set-height! (-> self font) (the int (* (-> *SUBTITLE-bank* lines) 11)))
-  (set-scale! (-> self font) (-> *SUBTITLE-bank* scale)))
+  (set-scale! (-> self font) (* (-> *SUBTITLE-bank* scale) (enhanced-subtitle-size))))
 
 (defbehavior draw-subtitle subtitle ()
   "draw the current subtitle using the current font."
@@ -529,7 +533,7 @@
         ((!= *master-mode* 'game))
         ((and (< (time-passed) (seconds 5)) (= (-> self notice-id) (text-id subtitle-hint)))
          (when (not (-> *pc-settings* subtitles?))
-           (set-scale! (-> self font) (* (-> *SUBTITLE-bank* scale) 1.5))
+           (set-scale! (-> self font) (* (-> *SUBTITLE-bank* scale) 1.5 (enhanced-subtitle-size)))
            (print-game-subtitle (lookup-text! *common-text* (-> self notice-id) #f) (-> self font) #f 128 22)))
         ((and (= (-> self cur-channel) (pc-subtitle-channel movie))
               (< (time-passed) (seconds 2))
