@@ -118,6 +118,7 @@ uniform vec4 player_view;       // Jak (view space, game units), w: valid
 uniform int spot_count;         // vehicles' headlights: view space + strength, the way they point
 uniform vec4 spot_pos[8];
 uniform vec4 spot_dir[8];
+uniform vec4 lantern;           // Jak's lantern in the desert at night: view space, strength
 uniform int beacon_count;       // far glows drawn as points of light: view space + size
 uniform vec4 beacon_pos[24];
 uniform vec4 beacon_color[24];  // rgb, strength
@@ -1906,12 +1907,12 @@ void main() {
       float d = length(tl);
       vec3 l = tl / max(d, 1.0);
       float facing = dot(-l, spot_dir[i].xyz);
-      float cone = smoothstep(0.74, 0.95, facing) + 0.12 * smoothstep(0.4, 0.8, facing);
       float dm = d / 4096.0;
+      float ndl = clamp(dot(nn, l) * 0.85 + 0.15, 0.0, 1.0);
+      float cone = smoothstep(0.74, 0.95, facing) + 0.12 * smoothstep(0.4, 0.8, facing);
       // gentler in the first meters (the ground under the lamps would burn white)
       float fall = 1.0 / (1.0 + dm * dm / 700.0) * (1.0 - smoothstep(65.0, 100.0, dm)) *
                    (0.4 + 0.6 * smoothstep(2.0, 12.0, dm));
-      float ndl = clamp(dot(nn, l) * 0.85 + 0.15, 0.0, 1.0);
       added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 2.6;
     }
     // per-pixel jitter of the shadow steps (the TAA averages it)
@@ -1929,7 +1930,8 @@ void main() {
         float ndl = dot(nn, to_light / max(d, 1.0));
         float lit = clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
         // the strongest lights (sorted first) cast shadows where they still matter
-        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02) {
+        // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
+        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5) {
           lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter);
         }
         added += light_color[i].rgb * (k * k) * lit;
@@ -2489,6 +2491,23 @@ void main() {
       }
     }
   }
+  // Jak's lantern: the flame a warm point by Daxter, its glow in the night air around it (the air
+  // glows even where Jak hides the flame)
+  if (lantern.w > 0.0 && lantern.z > 0.5 * 4096.0) {
+    vec3 lp = lantern.xyz;
+    vec2 luv = 0.5 * vec2(proj.z * lp.x, proj.w * lp.y) / lp.z + 0.5;
+    vec2 dpx = (tex_coord - luv) / texel.y;
+    dpx.x *= aspect_px;
+    float r = length(dpx);
+    float core_px = max(2.0, 0.08 * 4096.0 * abs(proj.w) * 0.5 / lp.z / texel.y);
+    float ld = texture(tex_T3, clamp(luv, vec2(0.0), vec2(1.0))).r;
+    float vis = (ld <= 1e-7 || view_z(ld) > lp.z - 0.3 * 4096.0) ? 1.0 : 0.0;
+    float flame = exp(-r * r / (core_px * core_px)) * 2.2 * vis;
+    float halo = exp(-r / (core_px * 4.0)) * 0.6 + exp(-r / (core_px * 16.0)) * 0.2;
+    // the flame white-yellow in its heart, the glow deep orange
+    c += (vec3(1.0, 0.82, 0.5) * flame + vec3(1.0, 0.5, 0.18) * halo * (0.4 + 0.6 * vis)) * lantern.w;
+  }
+
   // the headlamps themselves seen from in front: a blinding point and a short streak
   for (int i = 0; i < spot_count; i++) {
     vec3 sp = spot_pos[i].xyz;

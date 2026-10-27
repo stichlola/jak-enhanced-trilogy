@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include "kmachine.h"
 
 #include <algorithm>
@@ -1185,6 +1186,52 @@ void pc_enhanced_headlight(u32 pos_ptr, u32 dir_ptr) {
   }
 }
 
+// Enhanced: what a particle group's name says it is: a fire, a lamp, a blue lamp, a candle, or
+// nothing that lights (holograms, explosions, shots, thrusters, smoke, lava)
+static int enhanced_fire_kind(const std::string& name) {
+  auto has = [&](const char* w) { return name.find(w) != std::string::npos; };
+  for (const char* w : {"holo", "explosion", "shot", "trail", "thrust", "afterburn", "interceptor",
+                        "tracer", "missile", "fma-", "smoke", "dest", "lava", "fireball", "embers",
+                        "flash", "geyser"}) {
+    if (has(w)) {
+      return -1;
+    }
+  }
+  const bool lamp = has("lamp") || has("lantern");
+  if (has("blue") && (lamp || has("fire"))) {
+    return EnhancedFires::BLUE;
+  }
+  if (lamp) {
+    return EnhancedFires::LAMP;
+  }
+  if (has("candle")) {
+    return EnhancedFires::CANDLE;
+  }
+  if (has("torch") || has("fire") || has("flame") || has("brazier") || has("burn")) {
+    return EnhancedFires::FIRE;
+  }
+  return -1;
+}
+
+// Enhanced: a particle spawner near the camera, its position and its group's name
+void pc_enhanced_fire(u32 pos_ptr, u32 name_ptr) {
+  static std::unordered_map<u32, int> kinds;  // by the name's address (the groups are static)
+  auto it = kinds.find(name_ptr);
+  if (it == kinds.end()) {
+    it = kinds.emplace(name_ptr, enhanced_fire_kind(Ptr<String>(name_ptr).c()->data())).first;
+  }
+  if (it->second < 0) {
+    return;
+  }
+  auto* p = Ptr<float>(pos_ptr).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_fires.mutex);
+  if (g_enhanced_fires.count < EnhancedFires::kMax) {
+    std::memcpy(g_enhanced_fires.pending[g_enhanced_fires.count], p, sizeof(float) * 3);
+    g_enhanced_fires.kind[g_enhanced_fires.count] = it->second;
+    g_enhanced_fires.count++;
+  }
+}
+
 // Enhanced: the lamps near the camera, count pairs of vectors (position + radius, color)
 void pc_enhanced_set_lights(u32 vec_ptr, u32 count) {
   auto* v = Ptr<float>(vec_ptr).c();
@@ -1387,6 +1434,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
   make_func_symbol_func("pc-enhanced-headlight", (void*)pc_enhanced_headlight);
+  make_func_symbol_func("pc-enhanced-fire", (void*)pc_enhanced_fire);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);

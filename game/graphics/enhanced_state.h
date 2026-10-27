@@ -163,6 +163,20 @@ struct EnhancedHeadlights {
 };
 extern EnhancedHeadlights g_enhanced_headlights;
 
+// Enhanced: the fires and lamps the levels place (particle spawners: torches, braziers, barrel
+// fires, gas lamps) near the camera this frame, world position (game units) and kind. Many of
+// them make no glow the renderer could light from (a torch is just its flame), so they become
+// lights of their own.
+struct EnhancedFires {
+  static constexpr int kMax = 96;
+  enum Kind { FIRE = 0, LAMP = 1, BLUE = 2, CANDLE = 3 };
+  float pending[kMax][3];
+  int kind[kMax];
+  int count = 0;
+  std::mutex mutex;
+};
+extern EnhancedFires g_enhanced_fires;
+
 // Is the Jak 2 plaza (Jak 3's custom level piazza) built? It's made from a Jak 2 disc by hand
 // (local/blender/piazza_jak2.blend), so most installs don't have it: then no passages are cut
 // into Haven and nothing tries to load it.

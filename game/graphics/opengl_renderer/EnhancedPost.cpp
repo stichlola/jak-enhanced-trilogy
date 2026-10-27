@@ -36,6 +36,7 @@ EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedExplosions g_enhanced_explosions;
 EnhancedHeadlights g_enhanced_headlights;
+EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
 EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
@@ -1228,6 +1229,141 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
+    // the fires and lamps the levels place (torches, braziers, gas lamps): each its own light,
+    // stronger as the night falls, reaching further than the glows (a town's torches light its
+    // gate from across the desert). Not where a glow already lights the same spot.
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_fires.mutex);
+      if (g_enhanced_fires.count > 0) {
+        m_fire_spawners.clear();
+        for (int i = 0; i < g_enhanced_fires.count; i++) {
+          const float* fp = g_enhanced_fires.pending[i];
+          m_fire_spawners.push_back({fp[0], fp[1], fp[2], (float)g_enhanced_fires.kind[i]});
+        }
+        g_enhanced_fires.count = 0;
+        m_fire_spawners_time = m_time;
+      } else if (m_time - m_fire_spawners_time > 0.3) {
+        m_fire_spawners.clear();
+      }
+    }
+    const float fire_night = std::max(m_night, night_darkness());
+    const size_t glow_lights = candidates.size();
+    for (const auto& fs : m_fire_spawners) {
+      if (!on || !m_settings.fire) {
+        break;
+      }
+      const int kind = (int)fs[3];
+      // a little above the spawner: the flame, not its base; a fire's light wanders with its
+      // flames (the shadows around it tremble)
+      const float ft = (float)m_time + std::fmod(std::abs(fs[0] * 0.011f + fs[2] * 0.017f), 6.2832f);
+      const float wander = kind == EnhancedFires::FIRE ? 0.12f * kMeter : 0.f;
+      const float wp[3] = {fs[0] + wander * std::sin(ft * 7.3f) * std::sin(ft * 2.1f),
+                           fs[1] + (kind == EnhancedFires::CANDLE ? 0.2f : 0.6f) * kMeter +
+                               wander * 0.6f * std::sin(ft * 9.7f),
+                           fs[2] + wander * std::cos(ft * 6.1f) * std::sin(ft * 1.7f)};
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (wp[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      const float reach = kind == EnhancedFires::CANDLE ? 4.f : (kind == EnhancedFires::FIRE ? 13.f : 11.f);
+      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f);
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      bool lit_already = false;
+      for (size_t j = 0; j < glow_lights && !lit_already; j++) {
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          float dk = candidates[j].pos[k] - c.pos[k];
+          d2 += dk * dk;
+        }
+        lit_already = d2 < 3.f * kMeter * 3.f * kMeter;
+      }
+      static const float kColors[4][3] = {
+          {1.f, 0.55f, 0.22f}, {1.f, 0.82f, 0.55f}, {0.45f, 0.65f, 1.f}, {1.f, 0.7f, 0.35f}};
+      const float* col3 = kColors[kind & 3];
+      if (c.pos[2] > 0.f && dist > 40.f * kMeter && dist < 2500.f * kMeter) {
+        Beacon b;
+        std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+        b.pos[3] = 1.f * kMeter;
+        std::memcpy(b.color, col3, sizeof(float) * 3);
+        b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+        b.score = 2.f / (dist / kMeter);
+        beacons.push_back(b);
+      }
+      if (lit_already || c.pos[2] < -c.pos[3] || dist > 400.f * kMeter) {
+        continue;
+      }
+      float k = (0.35f + 0.9f * fire_night) * m_settings.light_strength;
+      if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
+        float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        k *= 0.8f + 0.2f * (0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                            0.2f * std::sin(t * 37.f + 2.3f * seed));
+      }
+      for (int i = 0; i < 3; i++) {
+        c.color[i] = col3[i] * k * (kind == EnhancedFires::CANDLE ? 0.5f : 1.2f);
+      }
+      c.color[3] = 0.f;
+      // far ones still count (their light on a gate across the sand), near ones first
+      c.score = 1.5f * c.pos[3] / (dist + c.pos[3]);
+      candidates.push_back(c);
+    }
+    // Jak's lantern: on foot or on the board in the desert as the night darkens, a Wastelander's oil
+    // lantern Daxter holds up on Jak's shoulder (Damas's people cross the sands by night with
+    // them): a warm flickering light all around, swinging a little as Jak walks
+    m_lantern[3] = 0.f;
+    {
+      const auto& pl = g_enhanced_player;
+      const bool on_foot = pl.valid && (pl.state == 1 || pl.state == 3 || pl.state == 4);
+      const float want = (m_settings.desert_lamp && m_pond && on_foot)
+                             ? std::clamp((std::max(m_night, night_darkness()) - 0.25f) / 0.4f, 0.f, 1.f)
+                             : 0.f;
+      m_lamp_on += (want - m_lamp_on) * 0.05f;
+      if (pl.valid && m_time > m_lamp_last_time) {
+        float dx = pl.pos[0] - m_lamp_last[0], dz = pl.pos[2] - m_lamp_last[2];
+        float v = std::sqrt(dx * dx + dz * dz) / kMeter / (float)(m_time - m_lamp_last_time);
+        if (v < 30.f) {
+          m_lamp_walk += (std::min(v / 7.f, 1.f) - m_lamp_walk) * 0.1f;
+        }
+        std::memcpy(m_lamp_last, pl.pos, sizeof(m_lamp_last));
+        m_lamp_last_time = m_time;
+      }
+      if (on && pl.valid && m_lamp_on > 0.01f) {
+        float fx = cam.rot[0][2], fz = cam.rot[2][2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1e-3f);
+        fx /= len;
+        fz /= len;
+        const float t = (float)m_time;
+        const float swing = (0.02f + 0.08f * m_lamp_walk) * std::sin(t * (2.f + 2.6f * m_lamp_walk));
+        // held up and out by Daxter on the left shoulder
+        const float wp[3] = {pl.pos[0] + fz * 0.6f * kMeter + fx * (0.15f + swing) * kMeter,
+                             pl.pos[1] + 1.95f * kMeter,
+                             pl.pos[2] - fx * 0.6f * kMeter + fz * (0.15f + swing) * kMeter};
+        Candidate c;
+        for (int col = 0; col < 3; col++) {
+          c.pos[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += (wp[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        c.pos[3] = 14.f * kMeter;
+        const float seed = 1.7f;
+        const float flick = 0.8f + 0.2f * (0.5f * std::sin(t * 11.f + seed) +
+                                           0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                                           0.2f * std::sin(t * 37.f + 2.3f * seed));
+        const float k = m_lamp_on * flick * m_settings.light_strength;
+        c.color[0] = 1.25f * k;
+        c.color[1] = 0.6f * k;
+        c.color[2] = 0.2f * k;
+        c.color[3] = 1.f;  // carried: no shadow of Jak from it
+        c.score = 100.f;  // always among the lights
+        candidates.push_back(c);
+        std::memcpy(m_lantern, c.pos, sizeof(float) * 3);
+        m_lantern[3] = m_lamp_on * flick;
+      }
+    }
     // the lights placed by hand (lights.json), the night ones lit as the night falls
     for (const auto& ml : g_manual_lights[game_index()]) {
       const float lit = ml.night ? std::max(m_night, night_darkness()) : 1.f;
@@ -1691,11 +1827,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       constexpr int kSpots = 8;
+      const auto& spots_src = m_headlights;
       std::vector<std::pair<float, int>> order;
-      for (int i = 0; i < (int)m_headlights.size(); i++) {
+      for (int i = 0; i < (int)spots_src.size(); i++) {
         float d2 = 0.f;
         for (int k = 0; k < 3; k++) {
-          float dk = m_headlights[i][k] - cam.trans[k];
+          float dk = spots_src[i][k] - cam.trans[k];
           d2 += dk * dk;
         }
         order.push_back({d2, i});
@@ -1709,7 +1846,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         if (spots == kSpots || shown <= 0.01f || !m_settings.lights) {
           break;
         }
-        const auto& h = m_headlights[i];
+        const auto& h = spots_src[i];
         for (int col = 0; col < 3; col++) {
           for (int row = 0; row < 3; row++) {
             spot_pos[spots * 4 + col] += (h[row] - cam.trans[row]) * cam.rot[row][col];
@@ -1724,6 +1861,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
     {
@@ -3495,6 +3633,7 @@ void EnhancedPost::draw_menu() {
     if (check("Lens flare", &flare)) {
       s.lens_flare = flare ? 0.6f : 0.f;
     }
+    check("Jak's lantern in the desert", &s.desert_lamp);
     bool smoke = s.lit_smoke > 0.f;
     if (check("Lit smoke", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
@@ -3697,6 +3836,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["dark_nights"] = s.dark_nights;
   j["cloud_shadows"] = s.cloud_shadows;
   j["lens_flare"] = s.lens_flare;
+  j["desert_lamp"] = s.desert_lamp;
   j["light_spill"] = s.light_spill;
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
@@ -3755,6 +3895,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("dark_nights", s.dark_nights);
   get("cloud_shadows", s.cloud_shadows);
   get("lens_flare", s.lens_flare);
+  get("desert_lamp", s.desert_lamp);
   get("light_spill", s.light_spill);
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
@@ -3818,6 +3959,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.dark_nights = d.dark_nights;
   s.cloud_shadows = d.cloud_shadows;
   s.lens_flare = d.lens_flare;
+  s.desert_lamp = d.desert_lamp;
   s.light_spill = d.light_spill;
   s.lit_smoke = d.lit_smoke;
   s.far_view = d.far_view;
