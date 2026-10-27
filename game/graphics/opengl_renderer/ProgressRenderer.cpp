@@ -1,23 +1,14 @@
 #include "ProgressRenderer.h"
 
-#include <algorithm>
-#include <vector>
-
-namespace {
-std::vector<GLuint> g_minimap_textures;
-}
-
-bool ProgressRenderer::is_minimap_texture(GLuint tex) {
-  return tex != 0 &&
-         std::find(g_minimap_textures.begin(), g_minimap_textures.end(), tex) != g_minimap_textures.end();
-}
+#include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 
 ProgressRenderer::ProgressRenderer(const std::string& name, int my_id, int batch_size)
     : DirectRenderer(name, my_id, batch_size),
       m_minimap_fb(kMinimapWidth * kMinimapScale,
                    kMinimapHeight * kMinimapScale,
                    GL_UNSIGNED_INT_8_8_8_8_REV) {
-  g_minimap_textures.push_back(m_minimap_fb.texture());
+  // (the direct renderers sample it in the game's 128 x 128 texels)
+  enhanced_set_texel_scale(m_minimap_fb.texture(), (float)kMinimapScale);
   // a full mip chain: the 512 x 512 map is drawn smaller than that on screen
   glBindTexture(GL_TEXTURE_2D, m_minimap_fb.texture());
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 9);

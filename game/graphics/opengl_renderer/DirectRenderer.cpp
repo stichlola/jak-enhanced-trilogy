@@ -1,6 +1,6 @@
 #include "DirectRenderer.h"
 
-#include "game/graphics/opengl_renderer/ProgressRenderer.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 
 #include "common/dma/gs.h"
 #include "common/log/log.h"
@@ -422,11 +422,9 @@ void DirectRenderer::update_gl_texture(SharedRenderState* render_state, int unit
 
   glActiveTexture(GL_TEXTURE20 + unit);
   glBindTexture(GL_TEXTURE_2D, *tex);
-  // Enhanced: the minimap is drawn larger than the game thinks (ProgressRenderer)
+  // Enhanced: the minimap and its maps are larger than the game thinks (EnhancedMapTextures)
   if (unit == 0) {
-    m_tex_px_scale = ProgressRenderer::is_minimap_texture(*tex)
-                         ? (float)ProgressRenderer::kMinimapScale
-                         : 1.f;
+    m_tex_px_scale = enhanced_texel_scale(*tex);
   }
   // Note: CLAMP and CLAMP_TO_EDGE are different...
   if (state.m_clamp_state.clamp_s) {

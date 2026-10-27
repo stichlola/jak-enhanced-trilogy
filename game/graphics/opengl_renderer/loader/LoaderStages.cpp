@@ -1,5 +1,6 @@
 #include "LoaderStages.h"
 
+#include "EnhancedMapTextures.h"
 #include "Loader.h"
 
 #include "common/global_profiler/GlobalProfiler.h"
@@ -14,8 +15,17 @@ u64 add_texture(TexturePool& pool, const tfrag3::Texture& tex, bool is_common) {
   glActiveTexture(GL_TEXTURE0);
   glGenTextures(1, &gl_tex);
   glBindTexture(GL_TEXTURE_2D, gl_tex);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w, tex.h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
-               tex.data.data());
+  // Enhanced: the minimap's district maps are redrawn at 4x (the pool still sees the game's size)
+  std::vector<u32> sharp;
+  if (enhanced_upscale_map(tex, sharp)) {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w * kEnhancedMapScale, tex.h * kEnhancedMapScale, 0,
+                 GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, sharp.data());
+    enhanced_set_texel_scale(gl_tex, (float)kEnhancedMapScale);
+  } else {
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w, tex.h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                 tex.data.data());
+    enhanced_forget_texture(gl_tex);
+  }
   glGenerateMipmap(GL_TEXTURE_2D);
   float aniso = 0.0f;
   glGetFloatv(GL_MAX_TEXTURE_MAX_ANISOTROPY, &aniso);

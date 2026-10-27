@@ -1,5 +1,7 @@
 #include "Loader.h"
 
+#include "EnhancedMapTextures.h"
+
 #include <ranges>
 
 #include "common/global_profiler/GlobalProfiler.h"
@@ -621,6 +623,7 @@ void Loader::update(TexturePool& texture_pool) {
     if (!did_gpu_stuff && !m_garbage_textures.empty()) {
       for (int i = 0; i < 20 && !m_garbage_textures.empty(); i++) {
         glDeleteTextures(1, &m_garbage_textures.back());
+        enhanced_forget_texture(m_garbage_textures.back());
         m_garbage_textures.pop_back();
       }
     }
@@ -655,6 +658,7 @@ void Loader::unload_level_data(const std::string& name, LevelData& lev, TextureP
   }
   for (auto tex : lev.textures) {
     glDeleteTextures(1, &tex);
+    enhanced_forget_texture(tex);
   }
   for (auto& tie_geo : lev.tie_data) {
     for (auto& tie_tree : tie_geo) {
@@ -720,6 +724,7 @@ void Loader::do_reload_common(TexturePool& tex_pool) {
   }
   for (auto tex : m_common_level.textures) {
     glDeleteTextures(1, &tex);
+    enhanced_forget_texture(tex);
   }
   for (auto& model : m_common_level.level->merc_data.models) {
     auto it = m_all_merc_models.find(model.name);
@@ -744,8 +749,10 @@ void Loader::do_reload(TexturePool& texture_pool) {
   for (auto buf : m_garbage_buffers)
     glDeleteBuffers(1, &buf);
   m_garbage_buffers.clear();
-  for (auto tex : m_garbage_textures)
+  for (auto tex : m_garbage_textures) {
     glDeleteTextures(1, &tex);
+    enhanced_forget_texture(tex);
+  }
   m_garbage_textures.clear();
 
   set_want_levels(m_desired_levels);

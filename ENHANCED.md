@@ -123,6 +123,13 @@ Subtitles: smaller than the PS2's by default (bank scale 0.65 in Jak II and 3, 0
 size, Extra large) multiplies it (`pc-enhanced-subtitle-size`, percent), and the Jak II/3 subtitle
 box grows with it.
 
+Minimap (Jak II and 3): drawn at 4x (512 x 512, `ProgressRenderer::kMinimapScale`, mipmapped),
+and the district maps (`map-...` in `...-minimap` pages, 4-bit) redrawn at 4x as they load
+(`loader/EnhancedMapTextures.cpp`: each output pixel takes the color covering most of it, from a
+blurred mask of each color, so the edges are smooth and the colors stay flat). The game still
+addresses both in its own texels: `enhanced_texel_scale` gives the direct renderer the factor
+(`tex_px_scale` in the direct shaders).
+
 ## Known issues
 
 - Water and PBR (metal/glass) reflections and refraction: fewer artifacts than before, but still
@@ -168,8 +175,8 @@ Next, the small ones first (the big ones below wait until these are done):
 
 - Rain on roofs and metal when Jak is under cover (needs a "covered" test: the sky hidden above
   Jak).
-- A more modern minimap (Jak II and 3): the HUD's round map (`minimap.gc`, `hud-map`) redrawn with a
-  cleaner look (sharper, a modern frame and icons), keeping the game's own map data and markers.
+- The minimap's icons redrawn in high resolution (`mini-map-icons`, 128 x 128 atlas of ~20 px
+  icons) and a modern frame.
 - A photo mode: the game held still, a free camera, filters, the HUD hidden.
 - Weather by zone and by season: each zone gets its own set of possible weathers that it cycles
   through (the desert's sandstorms and clear nights, Haven's rain, the forest's fog...) instead of one
