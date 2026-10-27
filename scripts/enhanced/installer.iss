@@ -97,6 +97,7 @@ Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs create
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"
+Name: "{group}\Report a problem"; Filename: "{app}\Report a problem.bat"; WorkingDir: "{app}"
 Name: "{group}\{cm:UninstallProgram,Jak Enhanced Trilogy}"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Tasks: desktopicon
 

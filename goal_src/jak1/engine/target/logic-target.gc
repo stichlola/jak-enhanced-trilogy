@@ -605,7 +605,6 @@
 
 ;; Enhanced: the nap (target2.gc): the hours asked for, carried out once Jak stands still
 (define-extern enhanced-nap-ui-open (function none))
-(define-extern enhanced-wheel-open (function none))
 (define *enhanced-nap-wanted* 0)
 (define *enhanced-nap-wait* 0)
 
@@ -634,8 +633,7 @@
     ((11)
      (set! *enhanced-nap-wanted* (string->int *enhanced-menu-buf*))
      (set! *enhanced-nap-wait* 0))
-    ((12) (enhanced-nap-ui-open))
-    ((13) (enhanced-wheel-open)))
+    ((12) (enhanced-nap-ui-open)))
   (none))
 
 (define-extern enhanced-update-pushers (function none))

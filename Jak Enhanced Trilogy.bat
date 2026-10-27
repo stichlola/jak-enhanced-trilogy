@@ -52,6 +52,22 @@ rem update unzipped over the old folder keeps the extracted discs)
 set "VER="
 if exist "%PROJ%\VERSION" set /p VER=<"%PROJ%\VERSION"
 
+rem A newer release on GitHub? (the release only; 4 seconds at most, nothing happens offline; the
+rem player chooses whether to open the page: nothing is downloaded by itself)
+if defined VER (
+  set "LATEST="
+  for /f "usebackq delims=" %%L in (`powershell -NoProfile -Command "try { (Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest').tag_name } catch {}"`) do set "LATEST=%%L"
+  for /f "delims=-" %%V in ("!VER!") do set "MINE=%%V"
+  if defined LATEST if /i not "!LATEST!"=="!MINE!" (
+    powershell -NoProfile -Command "$v = { param($s) $p = @($s.TrimStart('v') -split '\.') + @('0','0','0'); [version]($p[0..2] -join '.') }; if ((& $v '!LATEST!') -gt (& $v '!MINE!')) { exit 1 }" || (
+      echo.
+      echo A new version is out: !LATEST! ^(you have !MINE!^).
+      choice /c UC /t 8 /d C /m "U opens the download page, C carries on"
+      if not errorlevel 2 start "" "https://github.com/stichlola/jak-enhanced-trilogy/releases/latest"
+    )
+  )
+)
+
 rem What still needs setting up: the build once, then each new disc
 set "NEED_BUILD="
 if not exist "%BIN%\gk.exe" set "NEED_BUILD=1"
@@ -143,6 +159,7 @@ if %COUNT% gtr 1 (
 echo.
 echo Starting Jak %PICK%.
 echo   \  (the key left of 1)  opens the Enhanced menu: graphics, weather, time of day...
+echo   Select / N             a nap: the hours go by while the world around runs fast
 echo   F9                     switches to the next game of the trilogy
 rem Jak 3 comes with a save in slot 4: the whole game finished, everything unlocked. Only into an
 rem empty slot (delete or overwrite it in the game). The folder name has a "!": no delayed expansion.

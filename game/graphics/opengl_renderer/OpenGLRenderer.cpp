@@ -1126,7 +1126,6 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     m_enhanced_post->draw_menu();
   } else if (m_enhanced_post) {
     m_enhanced_post->draw_photo_hint();
-    m_enhanced_post->draw_game_wheel();
   }
 
   m_profiler.finish();

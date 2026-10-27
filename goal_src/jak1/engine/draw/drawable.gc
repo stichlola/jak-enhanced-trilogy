@@ -966,6 +966,10 @@
 
 (define *screen-shot* #f)
 
+;; Enhanced: how much faster the world runs (the nap: the hours go by, and the people and creatures
+;; around with them). set-time-ratios keeps it within 4x, the most its physics takes
+(define *enhanced-nap-speed* 1.0)
+
 (defun display-frame-start ((disp display) (new-frame-idx int) (odd-even int))
   "Set up a new frame. Call this before drawing anything.
    new-frame-idx is the display frame that will be set up.
@@ -994,7 +998,7 @@
         |#
         ))
     ;; inform display system of our speed. This will adjust the scaling used in all physics calculations
-    (set-time-ratios *display* time-ratio)
+    (set-time-ratios *display* (* time-ratio *enhanced-nap-speed*))
     ;; set our "old" counters.  In the event of a game load/save, these will not jump
     (set! (-> disp old-base-frame-counter) (-> disp base-frame-counter))
     (set! (-> disp old-game-frame-counter) (-> disp game-frame-counter))

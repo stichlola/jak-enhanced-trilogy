@@ -60,8 +60,9 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 | | Keyboard | Pad |
 |---|---|---|
 | Enhanced menu | **F1** or **`\`** | **Select + R3** (Xbox: View + RS) |
-| Game wheel: another game of the trilogy, the nap | **N** | **Select** (Xbox: View) |
-| In the wheel | stick picks, **A** plays, **Y** naps, **B** back | |
+| Nap: the hours go by while the world around runs fast | **N** | **Select** (Xbox: View) |
+| Next game of the trilogy | **F9** | |
+| Something wrong? | `Report a problem.bat`: logs, graphics card and settings in a ZIP on your Desktop | |
 | Photo mode | **F3** (F2 takes the picture) | |
 
 The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT RT, Menu).
@@ -73,7 +74,7 @@ The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT 
   per area; more grass and plants that bend; footprints and tire ruts.
 - **Weather**: fair, clouds, rain, storms, fog, snow, sandstorms, different on every visit; puddles
   that fill and dry; ambient sounds (rain, wind, crickets, birds, frogs, the sea, the city).
-- **Gameplay**: a game wheel to switch between the three games (each resumes its newest save); nap through the hours; photo mode; city population from Low to Extreme; Jak II and 3 tweaks
+- **Gameplay**: nap through the hours while the world runs fast; F9 to the next game of the trilogy (each resumes its newest save); photo mode; city population from Low to Extreme; Jak II and 3 tweaks
   (ammo, guns, jetboard).
 - **HUD**: a smaller, modern minimap with redrawn icons and maps; subtitle size.
 - **Menu**: presets (Classic, Performance, Medium, Maximum), a switch for every effect, weather, time

@@ -45,7 +45,16 @@ def main():
     parser.add_argument("--version", default="")
     parser.add_argument("--out", type=Path, default=ROOT / "out/release")
     parser.add_argument("--installer", action="store_true", help="also the setup .exe (Inno Setup 6)")
+    parser.add_argument("--skip-shader-check", action="store_true",
+                        help="don't stop on shader errors (check_shaders.py: glslang, ASCII only)")
     args = parser.parse_args()
+
+    # every shader compiled by Khronos' reference compiler and ASCII only, as AMD's driver wants them
+    # (NVIDIA's lets through what AMD refuses: a release once wouldn't start on AMD cards)
+    if not args.skip_shader_check:
+        check = subprocess.run([sys.executable, str(ROOT / "scripts/enhanced/check_shaders.py")], cwd=ROOT)
+        if check.returncode != 0:
+            sys.exit("shader check failed (see above); --skip-shader-check to package anyway")
 
     dest = args.out / NAME
     if dest.exists():
@@ -70,7 +79,8 @@ def main():
                          text=True).stdout.strip()
     (dest / "data/VERSION").write_text(f"{args.version or 'dev'}-{rev}", encoding="ascii")
 
-    shutil.copy2(ROOT / "Jak Enhanced Trilogy.bat", dest / "Jak Enhanced Trilogy.bat")
+    for bat in ("Jak Enhanced Trilogy.bat", "Report a problem.bat"):
+        shutil.copy2(ROOT / bat, dest / bat)
     (dest / "ISO").mkdir()
     shutil.copy2(ROOT / "ISO/PUT-YOUR-ISO-FILES-HERE.txt", dest / "ISO/PUT-YOUR-ISO-FILES-HERE.txt")
     (dest / "README.txt").write_text(
@@ -81,7 +91,9 @@ def main():
         "The first time you play a game it extracts your disc (20-40 minutes, only once), then asks\r\n"
         "whether to make the HD textures from it (optional: 30 minutes to 2 hours a game).\r\n"
         "In the game: F1 (or \\, or Select + R3 on a pad) opens the Enhanced menu; Select (View on an\r\n"
-        "Xbox pad) or N opens the game wheel: the stick picks a game, A plays it, Y the nap window.\r\n\r\n"
+        "Xbox pad) or N opens the nap window: Jak sleeps the hours away while the world runs fast.\r\n\r\n"
+        "Something wrong? Double-click \"Report a problem.bat\": it puts your newest logs, graphics card,\r\n"
+        "driver and settings in a ZIP on your Desktop to attach to a message (nothing is sent by itself).\r\n\r\n"
         "Free and unofficial: no donations of any kind are accepted for this project.\r\n\r\n"
         "https://github.com/stichlola/jak-enhanced-trilogy\r\n", encoding="ascii")
 

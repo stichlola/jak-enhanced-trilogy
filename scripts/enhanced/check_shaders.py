@@ -51,6 +51,10 @@ def main():
             bad += 1
             line = data[:at].count(b"\n") + 1
             print(f"== {path.name}: non-ASCII byte 0x{data[at]:02X} on line {line}")
+    if not glslang.exists():
+        print(f"glslang not found ({glslang}): only the ASCII check ran")
+        print(f"{bad} shader(s) with errors")
+        sys.exit(1 if bad else 0)
     with tempfile.TemporaryDirectory() as tmp:
         for vpath in sorted(SHADERS.glob("*.vert")):
             name = vpath.stem

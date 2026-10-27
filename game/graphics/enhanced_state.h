@@ -149,9 +149,6 @@ struct EnhancedMenu {
   std::atomic<bool> photo = false;
   std::atomic<bool> photo_active = false;
   std::atomic<double> photo_entered_at = 0.0;
-  // the game wheel (Select, N; pc-enhanced-wheel): -1 closed, 0 open with nothing picked, 1..3 the
-  // game picked. The games read the stick and the buttons, the renderer draws it
-  std::atomic<int> wheel = -1;
   std::mutex mutex;
   int request = 0;
   std::string arg;

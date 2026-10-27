@@ -1,0 +1,24 @@
+name: Enhanced shaders
+
+# Every shader compiled by Khronos' reference compiler (as strict as AMD's driver) and checked for
+# bytes that aren't ASCII (a UTF-8 byte order mark once kept the game from starting on AMD cards)
+on:
+  push:
+    paths:
+      - "game/graphics/opengl_renderer/shaders/**"
+      - "scripts/enhanced/check_shaders.py"
+  pull_request:
+    paths:
+      - "game/graphics/opengl_renderer/shaders/**"
+      - "scripts/enhanced/check_shaders.py"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install glslang
+        run: sudo apt-get update && sudo apt-get install -y glslang-tools
+      - name: Check the shaders
+        run: python3 scripts/enhanced/check_shaders.py "$(command -v glslang || command -v glslangValidator)"

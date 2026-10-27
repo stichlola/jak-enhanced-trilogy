@@ -25,10 +25,12 @@ DEST = SRC / "tripo"
 PROMPT = (
     "Redraw this exact map in a different art style, changing nothing else. Keep every coastline, "
     "island, river, road, wall, building outline, mountain and marker at exactly the same place, size "
-    "and shape, and keep the same framing and the same colors of land and water. Style: a hand-drawn "
-    "fantasy adventure map on aged parchment paper, fine sepia ink outlines and hatching, soft "
-    "watercolor washes, subtle paper grain. No new objects, no text, no labels, no compass, no border, "
-    "no frame."
+    "and shape, and keep the same framing. Keep the colors: the sea and every river and lake stay "
+    "teal blue water, the land keeps its sand and rock tones, glowing orange or green spots keep "
+    "glowing, and any lettering already on the map stays where it is. Style: a hand-drawn fantasy "
+    "adventure map on aged parchment paper, fine sepia ink outlines and hatching, soft watercolor "
+    "washes, subtle paper grain. No new objects, no new text or labels, no compass, no border, no "
+    "frame."
 )
 
 

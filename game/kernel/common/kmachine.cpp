@@ -1269,9 +1269,8 @@ u64 pc_enhanced_menu_state() {
 
 // Enhanced: whether the HUD shows the minimap (the menu's switch)
 u64 pc_enhanced_minimap() {
-  // (hidden in photo mode and under the game wheel)
-  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active &&
-                        g_enhanced_menu.wheel < 0);
+  // (hidden in photo mode)
+  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active);
 }
 
 // Enhanced: the field of view in play, percent of the game's (the Enhanced menu)
@@ -1279,20 +1278,14 @@ u64 pc_enhanced_fov() {
   return (u64)std::clamp(g_enhanced_menu.fov.load(), 70, 150);
 }
 
-// Enhanced: the game wheel, as the game has it (-1 closed, 0 nothing picked, 1..3 the game picked)
-u64 pc_enhanced_wheel(s32 pick) {
-  g_enhanced_menu.wheel = pick;
-  return 0;
-}
-
-// Enhanced: play another game of the trilogy (1..3; the game wheel, after the game saved), the
+// Enhanced: play another game of the trilogy (1..3; for the start menu to come), the
 // same process booting it; that game then picks its newest save up (pc-enhanced-switch-restore)
 
 u64 pc_enhanced_switch_game(u32 game) {
   if (game < 1 || game > 3 || game == (u32)g_game_version || MasterExit != RuntimeExitStatus::RUNNING) {
     return 0;
   }
-  lg::info("[enhanced] the game wheel switches to {}", version_to_game_name((GameVersion)game));
+  lg::info("[enhanced] switching to {}", version_to_game_name((GameVersion)game));
   g_enhanced_switch_restore = true;
   g_switch_game_to = (GameVersion)game;
   MasterExit = RuntimeExitStatus::SWITCH_GAME;
@@ -1538,7 +1531,6 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
-  make_func_symbol_func("pc-enhanced-wheel", (void*)pc_enhanced_wheel);
   make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
   make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);
 

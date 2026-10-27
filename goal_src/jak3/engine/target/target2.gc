@@ -82,10 +82,21 @@
   (none)
   )
 
+;; the world around Jak runs this much faster while he sleeps (the people, creatures and cars on
+;; the entity clock, the scenery and the sky on the background clock; Jak's own clock as it is)
+(defconstant ENHANCED_NAP_SPEED 6.0)
+
+(defun enhanced-nap-world ((speed float))
+  (update-rates! (-> *display* entity-clock) speed)
+  (update-rates! (-> *display* bg-clock) speed)
+  (none)
+  )
+
 (defstate target-enhanced-nap (target)
   :event target-standard-event-handler
   :exit (behavior ()
     ;; woken before the hours went by: the clock back as it was
+    (enhanced-nap-world 1.0)
     (when (> *enhanced-nap-left* 0.0)
       (set! *enhanced-nap-left* 0.0)
       (enhanced-nap-clock *enhanced-nap-ratio*)
@@ -130,7 +141,9 @@
           (set! *enhanced-nap-ratio* (-> tod time-ratio))
           (set! *enhanced-nap-left* hours)
           (let ((last (-> tod time-of-day)))
-            (enhanced-nap-clock (* 12.0 hours))
+            ;; (the sky's clock runs with the world's, so the hours go by in the same five seconds)
+            (enhanced-nap-world ENHANCED_NAP_SPEED)
+            (enhanced-nap-clock (/ (* 12.0 hours) ENHANCED_NAP_SPEED))
             (while (> *enhanced-nap-left* 0.0)
               (suspend)
               ;; breathing slowly (or settling down to sleep, as target-load-wait holds him)
@@ -150,6 +163,7 @@
               )
             )
           (set! *enhanced-nap-left* 0.0)
+          (enhanced-nap-world 1.0)
           (enhanced-nap-clock *enhanced-nap-ratio*)
           )
         )
