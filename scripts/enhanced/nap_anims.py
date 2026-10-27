@@ -2,11 +2,13 @@
 
     blender -b -P scripts/enhanced/nap_anims.py -- <jakb-lod0.glb> <mixamo fbx folder> <out.glb>
 
-jakb-lod0.glb is the decompiler's export of Jak (decompiler_out/jak3/levels/common); the Mixamo
+jakb-lod0.glb is the decompiler's export of Jak 3's Jak (decompiler_out/jak3/levels/common, with
+"rip_levels"); Jak 1's is eichar-lod0.glb, and the animations are then named eichar-nap-... (the
+prefix is the glb's own, before "-lod0"). The Mixamo
 clips (X Bot, FBX, 30 fps, no skin) are downloaded by hand from mixamo.com: getting_up_back,
 pose_hands_behind_head_crossed and yawn. The output holds Jak's skeleton (without the "align"
 joint, which build-actor adds itself), a one-triangle mesh and four animations, for
-(build-actor "jak-nap" :master-art-group "jakb-ag") in game.gp:
+(build-actor "jak-nap" :master-art-group "jakb-ag") in game.gp (Jak 1: "eichar-ag"):
 
     jakb-nap-lie     lying down on his back (getting up, played backwards and faster)
     jakb-nap-sleep   asleep with his hands behind his head, a big cartoon breath (loops)
@@ -47,7 +49,8 @@ for side, s in (("L", "Left"), ("R", "Right")):
         side + "thigh": s + "UpLeg", side + "knee": s + "Leg", side + "ankle": s + "Foot",
         side + "ball": s + "ToeBase",
     })
-STAND_HEIGHT = 1.028  # main's height in Jak's own standing animations (glTF Y, meters)
+STAND_HEIGHT = 1.028  # main's height in Jak's own standing animations (glTF Y, meters): read from
+                      # <prefix>-stance-loop in jak_skeleton()
 
 # glTF (Y up) <-> Blender (Z up)
 C = Matrix.Rotation(math.radians(90), 4, "X")
@@ -74,8 +77,19 @@ def node_matrix(nd):
 def jak_skeleton(glb):
     """Jak's joints (prejoint first) with their rest local matrices, glTF space; main unscaled, at
     the standing height (the bind pose is drawn 1.4x bigger)"""
-    j, _ = read_glb(glb)
+    global STAND_HEIGHT
+    j, binary = read_glb(glb)
     nodes = j["nodes"]
+    prefix = Path(glb).name.split("-lod0")[0]
+    for an in j.get("animations", []):
+        if an["name"] != prefix + "-stance-loop":
+            continue
+        for ch in an["channels"]:
+            if nodes[ch["target"]["node"]].get("name") == "main" and ch["target"]["path"] == "translation":
+                acc = j["accessors"][an["samplers"][ch["sampler"]]["output"]]
+                view = j["bufferViews"][acc["bufferView"]]
+                at = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+                STAND_HEIGHT = struct.unpack("<3f", binary[at:at + 12])[1]
     joints = j["skins"][0]["joints"]
     names = [nodes[i]["name"] for i in joints]
     parent = {}
@@ -329,9 +343,10 @@ def main():
     stretch = retarget(skel, rest, frames, stretch_tweak)
     stretch = shift(resample(stretch, 1.3), skel, (0, 0))
 
-    write_glb(out, glb, skel, [("jakb-nap-lie", lie), ("jakb-nap-sleep", sleep),
-                                ("jakb-nap-getup", getup), ("jakb-nap-stretch", stretch)])
-    print("NAP ANIMS", out, len(lie), len(sleep), len(getup), len(stretch))
+    prefix = Path(glb).name.split("-lod0")[0]
+    write_glb(out, glb, skel, [(prefix + "-nap-lie", lie), (prefix + "-nap-sleep", sleep),
+                                (prefix + "-nap-getup", getup), (prefix + "-nap-stretch", stretch)])
+    print("NAP ANIMS", out, "stand %.3f" % STAND_HEIGHT, len(lie), len(sleep), len(getup), len(stretch))
 
 
 main()

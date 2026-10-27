@@ -325,6 +325,7 @@
   "fuelcell-naked-ag.go"
   "eichar-ag.go"
   "sidekick-ag.go"
+  "jak-nap-ag.go" ;; Enhanced: the nap's animations (build-actor in game.gp)
   "deathcam-ag.go"
   "game-cnt.go"
   "rigid-body-h.o"

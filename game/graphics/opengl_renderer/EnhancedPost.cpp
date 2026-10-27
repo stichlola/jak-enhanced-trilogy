@@ -3740,8 +3740,8 @@ void EnhancedPost::draw_menu() {
         apply_preset(preset_ids[i]);
       }
     }
-    // the game's nap window (Jak II and 3: Jak 1 has no lying-down animation)
-    if (g_game_version != GameVersion::Jak1 && ImGui::Button("Nap...  (N, Select)")) {
+    // the game's nap window
+    if (ImGui::Button("Nap...  (N, Select)")) {
       g_enhanced_menu.ask(12, "");
       g_enhanced_menu.open = false;
     }

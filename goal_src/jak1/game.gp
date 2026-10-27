@@ -1678,6 +1678,9 @@
 ;; - joint-channel: how many joint channels the actor should have. defaults to 6.
 ;; more complicated actors like jak that make a lot of use of animation blending can have 24+ channels.
 (build-actor "test-actor" :gen-mesh #t)
+;; Enhanced: Jak's nap (lying down, asleep, getting up, a stretch); the glb is made by
+;; scripts/enhanced/nap_anims.py, target2.gc plays it from *enhanced-nap-ag*
+(build-actor "jak-nap" :texture-bucket #f :master-art-group "eichar-ag")
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; Game Engine Code

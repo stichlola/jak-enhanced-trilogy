@@ -217,6 +217,9 @@
       (go target-stance))
   :post target-no-move-post)
 
+(define-extern *enhanced-nap-wanted* int)
+(define-extern target-enhanced-nap (state target))
+
 (defstate target-stance (target)
   :event target-standard-event-handler
   :enter
@@ -230,6 +233,9 @@
   :trans
     (behavior ()
       ((-> self state-hook))
+      ;; Enhanced: a nap asked for (the nap window): Jak stands still on the ground
+      (if (and (> *enhanced-nap-wanted* 0) (logtest? (-> self control status) (cshape-moving-flags onsurf)))
+        (go target-enhanced-nap))
       (if (logtest? (-> self water flag) (water-flag wading)) (go target-wade-stance))
       (when (= (-> self control ground-pat material) (pat-material ice))
         (set! (-> self control bend-target) 0.0)

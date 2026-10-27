@@ -680,6 +680,10 @@
     (if (-> this data s3-0) (mem-usage (-> this data s3-0) usage flags)))
   this)
 
+;; Enhanced: the nap's animations (jak-nap-ag in GAME.CGO, built by build-actor in game.gp). Jak 1
+;; links only level art groups into Jak's, so the nap plays them from here (target2.gc)
+(define *enhanced-nap-ag* (the-as art-group #f))
+
 (defmethod relocate ((this art-group) (heap kheap) (name (pointer uint8)))
   "Handle a loaded art-group."
   (let ((s4-0 (clear *temp-string*)))
@@ -694,6 +698,7 @@
             (else
              (let ((s5-1 (-> *level* loading-level)))
                (if (or (not s5-1) (= (-> s5-1 name) 'default)) (login this)) ;; not part of level load, just normal login.
+               (if (string= (-> this name) "jak-nap") (set! *enhanced-nap-ag* this))
                (if s5-1 (set-loaded-art (-> s5-1 art-group) this))) ;; part of level load, add to level's ag, but don't log in yet.
              this))))
   (none))

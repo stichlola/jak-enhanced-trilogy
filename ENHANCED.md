@@ -120,7 +120,7 @@ got no nav and crashed. `citizen-spawn` now stops while that mesh has fewer than
 citizen refuses `traffic-activate` (from the missions and the war zone too) on a full mesh, and
 nothing touches a missing nav after `go-inactive`.
 
-### The nap's animations (Jak 3)
+### The nap's animations
 
 Jak lies down on his back, sleeps with a big cartoon breath, gets up and stretches: four Mixamo
 clips (X Bot, FBX) retargeted onto Jak's skeleton by `scripts/enhanced/nap_anims.py` (Blender
@@ -130,6 +130,12 @@ adds it), a one-triangle mesh and the animations; `(build-actor "jak-nap" :maste
 "jakb-ag")` makes `jak-nap-ag.go`, which goes in GAME.CGO after Jak's other sub-groups and fills free
 slots of `jakb-ag` as it loads. `target-enhanced-nap` finds them by name (`jakb-nap-lie`, `-sleep`,
 `-getup`, `-stretch`) and falls back on the trip and painful-land animations without them.
+Jak 1 (`eichar-lod0.glb`, ripped with `"rip_levels": true`, `"dgo_names": ["CGO/GAME.CGO"]`; the
+glb lands in `decompiler_out/jak1/levels/common` whatever the output folder) gets the same four as
+`eichar-nap-...`; Jak 1 links only level art groups into Jak's, so `relocate` keeps `jak-nap` in
+`*enhanced-nap-ag*` and target2.gc plays them from there. Its nap window is drawn with sprites and
+the pause text (main.gc): the screen is 512 x 224 there, `middle` centers on x, there is no font
+scale, and the large font has only capitals and the button pictures.
 Every joint needs all three channels on every frame (build-actor fills missing ones with identity,
 not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-actor crashes.
 
@@ -137,7 +143,6 @@ not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-
 
 Next, the small ones first (the big ones below wait until these are done):
 
-- The nap in Jak 1 too (it needs a lying-down animation of its own).
 - Smaller subtitles by default (the PS2 size takes too much of a Full HD screen), and later an
   accessibility option to make them bigger again.
 - New ambient sounds: raindrops on the ground, roofs and water, dripping after the rain, wind in the

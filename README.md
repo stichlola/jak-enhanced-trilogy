@@ -44,7 +44,7 @@ release over the old folder: your extracted discs stay.
 | | Keyboard | Pad |
 |---|---|---|
 | Enhanced menu | **F1** or **`\`** | **Select + R3** |
-| Nap (Jak II and 3) | **N** | **Select** |
+| Nap | **N** | **Select** |
 | Next game of the trilogy | **F9** | |
 | Jak's lantern (Jak 3, desert) | | hold **triangle** |
 | OpenGOAL's debug toolbar | **F12** | |
@@ -69,7 +69,8 @@ release over the old folder: your extracted discs stay.
 - 20 weather presets in the menu.
 
 **Gameplay**
-- **Nap** (Jak II and 3): pick 1-12 hours; Jak lies down and the sun or moon crosses the sky.
+- **Nap**: pick 1-12 hours; Jak lies down, sleeps while the sun or moon crosses the sky, gets up
+  and stretches.
 - City population from Low to Extreme (Jak II and 3).
 - Jak 3: faster jetboard, faster guns with twice the ammo, a charged scattergun, desert driving modes.
 - Jak II: twice the ammo, every gun, upgrade and Dark Jak power from the start.

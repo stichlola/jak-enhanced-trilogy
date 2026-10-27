@@ -78,6 +78,9 @@
   "Are we in a movie?"
   (logtest? (-> *kernel-context* prevent-from-run) (process-mask movie)))
 
+(define-extern enhanced-nap-ui-draw (function dma-buffer none))
+(define-extern *enhanced-nap-ui* symbol)
+
 (defun set-master-mode ((new-mode symbol))
   "Update pause masks for the given mode, and set *master-mode*"
   ;; og:preserve-this PAL patch here
@@ -502,7 +505,9 @@
                                                (-> disp frames (-> disp on-screen) frame debug-buf)
                                                (-> disp frames (-> disp on-screen) frame global-buf)))
                                        (bucket-id debug))
-            (if (and (= *master-mode* 'pause) (!= *cheat-mode* 'camera))
+            ;; Enhanced: the nap window (target2.gc) instead of the pause text
+            (enhanced-nap-ui-draw s3-1)
+            (if (and (= *master-mode* 'pause) (!= *cheat-mode* 'camera) (not *enhanced-nap-ui*))
               (draw-string-xy (lookup-text! *common-text* (text-id pause) #f)
                               s3-1
                               256

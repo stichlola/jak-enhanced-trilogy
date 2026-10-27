@@ -1148,8 +1148,13 @@
           (format *stdcon* "~0kend = #x~x~%" global-end)))))
   disp)
 
+(define-extern enhanced-nap-ui-update (function none))
+(define-extern *enhanced-nap-ui* symbol)
+
 (defun determine-pause-mode ()
   "Update pause system"
+  ;; Enhanced: the nap window (target2.gc) takes Select, and its own buttons while open
+  (enhanced-nap-ui-update)
   ;; debug frame advance
   (when (and *debug-pause* (= *master-mode* 'pause))
     (logclear! (-> *cpad-list* cpads 0 button0-abs 0) (pad-buttons start r2))
@@ -1159,7 +1164,9 @@
       (service-cpads))
     (toggle-pause))
   (when (or (not *progress-process*) (can-go-back? (-> *progress-process* 0)))
-    (if (or (cpad-pressed? 0 select r3 start) ;; push pause
+    ;; (Enhanced: Select in the game opens the nap window instead)
+    (if (or (and (not *enhanced-nap-ui*)
+                 (or (cpad-pressed? 0 r3 start) (and (cpad-pressed? 0 select) (!= *master-mode* 'game)))) ;; push pause
             (and (logtest? (-> *cpad-list* cpads 0 valid) 128) ;; controller lost
                  (= *master-mode* 'game)
                  (>= (-> *display* base-frame-counter) (-> *game-info* blackout-time))
