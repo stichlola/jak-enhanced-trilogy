@@ -6,6 +6,8 @@
 
 #include "sfxblock.h"
 
+#include "game/sound/common/enhanced_ambience.h"
+
 #include "fmt/format.h"
 
 #ifdef _WIN32
@@ -127,6 +129,8 @@ void Player::Tick(s16Output* stream, int samples) {
     htick++;
     *stream++ = mSynth.Tick();
   }
+  // Enhanced: the ambient loops (rain, wind, crickets) on top
+  ambience::mix(stream - samples, samples);
 }
 
 u32 Player::PlaySound(BankHandle bank_id, u32 sound_id, s32 vol, s32 pan, s32 pm, s32 pb) {
@@ -262,6 +266,10 @@ void Player::SetMasterVolume(u32 group, s32 volume) {
     return;
 
   mVmanager.SetMasterVol(group, volume);
+  // Enhanced: the ambient loops follow the sfx volume
+  if (group == 0) {
+    ambience::set_sfx_volume(volume);
+  }
 
   // Master volume
   if (group == 16) {
@@ -322,6 +330,10 @@ void Player::ContinueSound(s32 sound_id) {
 
 void Player::PauseAllSoundsInGroup(u8 group) {
   std::scoped_lock lock(mTickLock);
+  // Enhanced: the sfx paused (the pause menu): the ambient loops fade out too
+  if (group & 1) {
+    ambience::set_paused(true);
+  }
 
   for (auto& h : mHandlers) {
     if ((1 << h.second->Group()) & group) {
@@ -332,6 +344,9 @@ void Player::PauseAllSoundsInGroup(u8 group) {
 
 void Player::ContinueAllSoundsInGroup(u8 group) {
   std::scoped_lock lock(mTickLock);
+  if (group & 1) {
+    ambience::set_paused(false);
+  }
 
   for (auto& h : mHandlers) {
     if ((1 << h.second->Group()) & group) {

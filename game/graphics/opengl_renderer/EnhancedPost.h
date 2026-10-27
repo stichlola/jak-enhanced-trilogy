@@ -207,6 +207,7 @@ class EnhancedPost {
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
     float cine_aperture = 1.0f;
     float blast_sparks = 1.0f;     // explosions throw sparks and leave hot air (0 = off)
+    float ambience = 0.7f;         // the ambient sounds' volume: rain, dripping, wind, crickets (0 = off)
   };
 
   EnhancedPost();

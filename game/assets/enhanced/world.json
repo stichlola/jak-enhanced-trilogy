@@ -66,6 +66,9 @@
   //   fog: the distance fog and the volumetric mist. A number (fixed: 1 = full, 0 = none) or
   //     spells {"period": s, "clear": chance of none, "light": chance of a little, "light_amount"}
   //     (the rest are full); rain and morning mist bring some back. Default: 1
+  // "ambience": the zone's ambient sound loops (game/assets/enhanced/sounds), 0..1 each:
+  //   crickets (at night, quiet in the rain), wind_night (at night), wind (always). Rain, dripping
+  //   after it and the storm's wind follow the weather wherever it's outdoors
   "zones": {
     "other": {
       "day": {"lift": [0, 0, 0], "gain": [1, 1, 1], "saturation": 1.0, "contrast": 0.0, "warmth": 0.0, "clouds": 0.4},
@@ -76,7 +79,8 @@
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
-      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}}
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}},
+      "ambience": {"crickets": 0.15}
     },
     // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
     // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
@@ -89,13 +93,15 @@
     "desert": {
       "day": {"lift": [0.004, 0.004, 0.008], "gain": [1.02, 1, 0.97], "saturation": 1.0, "contrast": 0.14, "warmth": 0.0, "clouds": 0.2},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25},
-      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "harder": {"dust": 0.5}, "harder_from": 120, "harder_to": 210, "game_dust": true}
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "harder": {"dust": 0.5}, "harder_from": 120, "harder_to": 210, "game_dust": true},
+      "ambience": {"wind_night": 1.0, "wind": 0.15}
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
       "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "showers": {"period": 420, "chance": 0.5, "thunder": 0.4}, "morning_mist": 0.5}
+      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "showers": {"period": 420, "chance": 0.5, "thunder": 0.4}, "morning_mist": 0.5},
+      "ambience": {"crickets": 1.0, "wind_night": 0.2}
     },
     // Metal Heads: sickly purple shadows
     "metalhead": {
@@ -126,7 +132,8 @@
     "wilds": {
       "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
-      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25}, "showers": {"period": 480, "chance": 0.45, "thunder": 0.4}}
+      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25}, "showers": {"period": 480, "chance": 0.45, "thunder": 0.4}},
+      "ambience": {"crickets": 0.6, "wind_night": 0.5, "wind": 0.15}
     },
     // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night. Ten-minute
     // spells: mostly fair, some with a shower, a few with a thunderstorm. The game is saturated
@@ -134,31 +141,36 @@
     "islands": {
       "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
-      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "showers": {"period": 600, "chance": 0.4, "thunder": 0.4}, "sunny": 0.3}
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "showers": {"period": 600, "chance": 0.4, "thunder": 0.4}, "sunny": 0.3},
+      "ambience": {"crickets": 0.9}
     },
     // the jungle: deep greens, the rain comes often
     "jungle": {
       "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.3, "morning_mist": 0.5}
+      "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.3, "morning_mist": 0.5},
+      "ambience": {"crickets": 1.0}
     },
     // Boggy Billy's swamp: it always rains, harder now and then, under a low fog
     "swamp": {
       "day": {"lift": [0.004, 0.008, 0.004], "gain": [0.98, 1, 0.94], "saturation": 0.88, "contrast": 0.04, "warmth": 0.0, "clouds": 0.75},
       "night": {"lift": [0, 0.006, 0.02], "gain": [0.96, 0.98, 1.02], "saturation": 0.9, "contrast": 0.05, "warmth": -0.02, "clouds": 0.75},
-      "weather": {"rain": 0.6, "mist": 0.6, "wet": 1.0, "harder": {"rain": 0.4}, "harder_from": 60, "harder_to": 180}
+      "weather": {"rain": 0.6, "mist": 0.6, "wet": 1.0, "harder": {"rain": 0.4}, "harder_from": 60, "harder_to": 180},
+      "ambience": {"crickets": 0.8}
     },
     // Misty Island: the fog never lifts, a drizzle now and then
     "misty": {
       "day": {"lift": [0.004, 0.008, 0.004], "gain": [0.98, 1, 0.94], "saturation": 0.88, "contrast": 0.04, "warmth": 0.0, "clouds": 0.75},
       "night": {"lift": [0, 0.006, 0.02], "gain": [0.96, 0.98, 1.02], "saturation": 0.9, "contrast": 0.05, "warmth": -0.02, "clouds": 0.75},
-      "weather": {"mist": 0.9, "wet": 0.4, "harder": {"rain": 0.4, "wet": 0.6}, "harder_from": 60, "harder_to": 160}
+      "weather": {"mist": 0.9, "wet": 0.4, "harder": {"rain": 0.4, "wet": 0.6}, "harder_from": 60, "harder_to": 160},
+      "ambience": {"crickets": 0.4, "wind": 0.2}
     },
     // Snowy Mountain: cold, blue shadows; it always snows, harder now and then
     "snow": {
       "day": {"lift": [0, 0.006, 0.02], "gain": [1, 1.02, 1.06], "saturation": 0.95, "contrast": 0.05, "warmth": -0.04, "clouds": 0.6},
       "night": {"lift": [0, 0.006, 0.035], "gain": [0.97, 0.99, 1.06], "saturation": 0.92, "contrast": 0.06, "warmth": -0.05, "clouds": 0.6},
-      "weather": {"snow": 0.55, "mist": 0.35, "clouds": 0.8, "harder": {"snow": 0.45, "mist": 0.25}, "harder_from": 90, "harder_to": 200}
+      "weather": {"snow": 0.55, "mist": 0.35, "clouds": 0.8, "harder": {"snow": 0.45, "mist": 0.25}, "harder_from": 90, "harder_to": 200},
+      "ambience": {"wind": 0.6, "wind_night": 0.4}
     }
   }
 }

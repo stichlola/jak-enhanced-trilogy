@@ -15,6 +15,7 @@ set(SOUND_SOURCES
   common/synth.cpp
   common/voice.cpp
   common/envelope.cpp
+  common/enhanced_ambience.cpp
   sndshim.cpp
   sdshim.cpp
   )

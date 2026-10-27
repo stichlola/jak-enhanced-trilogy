@@ -18,6 +18,7 @@
 
 #include "game/graphics/pipelines/opengl.h"
 #include "game/runtime.h"
+#include "game/sound/common/enhanced_ambience.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -91,10 +92,15 @@ struct ZoneWeather {
   float fog = 1.f;
   float fog_period = 0.f, fog_clear = 0.f, fog_light = 0.f, fog_light_amount = 0.35f;
 };
+// the zone's ambient sound loops (0..1): crickets and wind_night at night, wind always
+struct ZoneAmbience {
+  float crickets = 0.f, wind_night = 0.f, wind = 0.f;
+};
 struct WorldZone {
   std::string name;
   ZoneLook look[2];  // day, night
   ZoneWeather weather;
+  ZoneAmbience ambience;
 };
 struct World {
   float gi[3] = {0.6f, 0.6f, 1.f};  // Jak 1, 2, 3
@@ -277,6 +283,12 @@ void load_world() {
             we.fog_light_amount = f.value("light_amount", 0.35f);
           }
         }
+      }
+      if (z.contains("ambience")) {
+        const auto& aj = z["ambience"];
+        zone.ambience.crickets = aj.value("crickets", 0.f);
+        zone.ambience.wind_night = aj.value("wind_night", 0.f);
+        zone.ambience.wind = aj.value("wind", 0.f);
       }
       if (name == "other") {
         w.zones[0] = zone;
@@ -837,6 +849,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   ScopedProfilerNode& prof) {
   if (!m_settings.enabled) {
     g_enhanced_camera.valid = false;
+    // the ambient sounds go quiet with the rest of Enhanced
+    static const float silent[snd::ambience::kLayers] = {};
+    snd::ambience::set_targets(silent);
     return;
   }
   if (w != m_scene_w || h != m_scene_h) {
@@ -2364,6 +2379,29 @@ void EnhancedPost::update_scene() {
   ease(m_puddle, wet, 1.f - std::exp(-dt / (wet > m_puddle ? 20.f : 220.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
 
+  // the ambient sound loops (game/sound/common/enhanced_ambience): rain, light and then heavy, the
+  // dripping once it stops while the puddles are still there, the storm's (and sandstorm's) wind,
+  // the zone's night wind and crickets (quiet in the rain); turned down in cutscenes
+  {
+    using namespace snd::ambience;
+    const ZoneAmbience& a = zone.ambience;
+    const float r = std::clamp(m_rain, 0.f, 1.f);
+    const float heavy = std::clamp((r - 0.45f) / 0.45f, 0.f, 1.f);
+    float g[kLayers];
+    g[RainLight] = std::min(1.f, r * 1.6f) * (1.f - 0.5f * heavy);
+    g[RainHeavy] = std::max(heavy, m_storm * r);
+    g[Drips] = outdoors ? std::clamp(m_puddle * 1.5f - r * 3.f, 0.f, 1.f) : 0.f;
+    g[WindNight] = std::max(a.wind, a.wind_night * m_night);
+    g[WindStorm] = std::clamp(std::max(m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f), 0.f, 1.f);
+    g[Crickets] = a.crickets * m_night * (1.f - std::clamp(r * 3.f, 0.f, 1.f)) *
+                  (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
+    for (float& v : g) {
+      v *= 1.f - 0.6f * m_movie;
+    }
+    set_targets(g);
+    set_volume(s.ambience);
+  }
+
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
   const float wa = 0.7f + 0.5f * (float)std::sin(m_time * 0.013);
   float wx = std::sin(wa), wz = std::cos(wa);
@@ -3825,6 +3863,8 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderFloat("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
     weather_menu(s, "Weather");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
@@ -4018,6 +4058,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["clouds"] = s.clouds;
   j["cine_dof"] = s.cine_dof;
   j["blast_sparks"] = s.blast_sparks;
+  j["ambience"] = s.ambience;
   j["weather"] = s.weather;
   j["weather_mix"] = s.weather_mix;
   j["vivid"] = s.vivid;
@@ -4081,6 +4122,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("clouds", s.clouds);
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);
+  get("ambience", s.ambience);
   get("weather", s.weather);
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
   get("weather_mix", s.weather_mix);
