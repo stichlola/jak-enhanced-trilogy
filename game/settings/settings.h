@@ -37,7 +37,8 @@ struct DebugSettings {
   bool text_check_range = false;
   float text_max_range = 0;
 
-  u32 hide_imgui_key = SDLK_LALT;
+  // Enhanced: F12, not Left Alt (Alt+Tab kept opening the debug toolbar)
+  u32 hide_imgui_key = SDLK_F12;
 
   KeyWithModifiers toggle_fullscreen_key =
       KeyWithModifiers(SDLK_RETURN, InputModifiers(SDL_KMOD_ALT));

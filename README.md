@@ -47,6 +47,7 @@ release over the old folder: your extracted discs stay.
 | Nap (Jak II and 3) | **N** | **Select** |
 | Next game of the trilogy | **F9** | |
 | Jak's lantern (Jak 3, desert) | | hold **triangle** |
+| OpenGOAL's debug toolbar | **F12** | |
 
 ## What's new
 
