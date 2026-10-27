@@ -5,15 +5,28 @@
 ;; name in dgo: hud-classes
 ;; dgos: GAME
 
+;; Enhanced: the minimap's size, as in minimap.gc (the menu's "Minimap size", percent)
+(defun enhanced-hud-map-scale ()
+  (* 0.01 (the float (pc-enhanced-minimap-size))))
+
+;; how far the ring's top moves down as it shrinks (its height on screen at full size)
+(defconstant ENHANCED_RING_HEIGHT 118.0)
+
 ;; DECOMP BEGINS
 
 (defmethod draw ((this hud-map))
+  ;; Enhanced: the menu's "Minimap size" (smaller by default), the bottom right corner kept in place
   (set-hud-piece-position!
     (-> this sprites 1)
     (the int (+ (- 512.0 (* 20.0 (-> *video-params* relative-x-scale))) (* 140.0 (-> this offset))))
-    (the int (+ 281.0 (* 140.0 (-> this offset))))
+    (the int (+ 281.0 (* (- 1.0 (enhanced-hud-map-scale)) ENHANCED_RING_HEIGHT) (* 140.0 (-> this offset))))
     )
-  (set-as-offset-from! (-> this sprites 0) (-> this sprites 1 pos) 11 -11)
+  (set-as-offset-from!
+    (-> this sprites 0)
+    (-> this sprites 1 pos)
+    (the int (* 11.0 (enhanced-hud-map-scale)))
+    (the int (* -11.0 (enhanced-hud-map-scale)))
+    )
   (set! (-> this sprites 0 color w)
         (the int (+ 70.0 (* 70.0 (sin (* 182.04445 (the float (-> this values 1 current)))))))
         )
@@ -23,16 +36,16 @@
   (set! (-> *minimap* color z)
         (the int (- 96.0 (* 32.0 (sin (* 182.04445 (the float (-> this values 1 current)))))))
         )
-  (set! (-> this sprites 0 scale-x) 1.0)
-  (set! (-> this sprites 0 scale-y) 1.0)
+  (set! (-> this sprites 0 scale-x) (enhanced-hud-map-scale))
+  (set! (-> this sprites 0 scale-y) (enhanced-hud-map-scale))
   (cond
     ((>= (-> *setting-control* user-current race-minimap) 1)
      (set! (-> this sprites 1 scale-x) 0.0)
      (set! (-> this sprites 1 scale-y) 0.0)
      )
     (else
-      (set! (-> this sprites 1 scale-x) 0.85)
-      (set! (-> this sprites 1 scale-y) 0.85)
+      (set! (-> this sprites 1 scale-x) (* 0.85 (enhanced-hud-map-scale)))
+      (set! (-> this sprites 1 scale-y) (* 0.85 (enhanced-hud-map-scale)))
       )
     )
   (let ((t9-5 (method-of-type hud draw)))
@@ -43,7 +56,12 @@
      (with-dma-buffer-add-bucket ((s4-0 (-> *display* frames (-> *display* on-screen) global-buf))
                                   (bucket-id hud-draw-hud-alpha)
                                   )
-       (set-as-offset-from! (-> this sprites 2) (-> this sprites 1 pos) 2 -3)
+       (set-as-offset-from!
+         (-> this sprites 2)
+         (-> this sprites 1 pos)
+         (the int (* 2.0 (enhanced-hud-map-scale)))
+         (the int (* -3.0 (enhanced-hud-map-scale)))
+         )
        (draw-1 *minimap* s4-0 (-> this sprites 2 pos) #t)
        )
      )

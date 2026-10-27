@@ -1893,6 +1893,11 @@
   (none)
   )
 
+;; Enhanced: the minimap's size on screen (the menu's "Minimap size", percent): the map, its icons
+;; and the ring shrink around the ring's corner
+(defun enhanced-minimap-scale ()
+  (* 0.01 (the float (pc-enhanced-minimap-size))))
+
 (defmethod sub-draw-1-1 ((this minimap) (arg0 minimap-draw-work))
   (let ((s5-0 (-> arg0 buf)))
     (set-display-gs-state s5-0 (the-as int (-> *map-texture-base* vram-page)) 128 128 0 0)
@@ -2077,12 +2082,12 @@
                            )
     (let ((f30-0 (-> *video-params* relative-x-scale)))
       (let ((v1-20 (the-as object (-> s5-0 base)))
-            (t0-0 (the int (* 112.0 f30-0)))
+            (t0-0 (the int (* 112.0 f30-0 (enhanced-minimap-scale))))
             )
         0
         0
         (let ((a2-0 (* (+ (-> arg0 draw-pos y) 1840) 16))
-              (a0-19 (* (+ (-> arg0 draw-pos y) 1952) 16))
+              (a0-19 (* (+ (-> arg0 draw-pos y) 1840 (the int (* 112.0 (enhanced-minimap-scale)))) 16))
               (a1-7 (-> arg0 draw-pos z))
               )
           (cond
@@ -2146,7 +2151,7 @@
          (set-vector! (-> arg0 mat vector 1) 0.0 1.0 0.0 0.0)
          ;; og:preserve-this
          (set-vector! (-> arg0 mat vector 2) (* (-> sv-52 vector 0 x) (- (#if PC_PORT 1.0 f30-0))) 0.0 (-> sv-52 vector 0 z) 0.0)
-         (set-vector! (-> arg0 mat trans) 0.0 0.0 (the float (+ (-> arg0 draw-pos y) 1896)) 1.0)
+         (set-vector! (-> arg0 mat trans) 0.0 0.0 (+ (the float (+ (-> arg0 draw-pos y) 1840)) (* 56.0 (enhanced-minimap-scale))) 1.0)
          )
         (else
           (let ((v1-39 (-> arg0 mat)))
@@ -2159,15 +2164,18 @@
           (set-vector! (-> arg0 mat vector 1) 0.0 1.0 0.0 0.0)
           ;; og:preserve-this
           (set-vector! (-> arg0 mat vector 2) (* (-> sv-52 vector 0 x) (#if PC_PORT 1.0 f30-0)) 0.0 (-> sv-52 vector 0 z) 0.0)
-          (set-vector! (-> arg0 mat trans) 0.0 0.0 (the float (+ (-> arg0 draw-pos y) 1896)) 1.0)
+          (set-vector! (-> arg0 mat trans) 0.0 0.0 (+ (the float (+ (-> arg0 draw-pos y) 1840)) (* 56.0 (enhanced-minimap-scale))) 1.0)
           )
         )
-      (let ((v1-44 (the int (* 56.0 f30-0))))
+      (let ((v1-44 (the int (* 56.0 f30-0 (enhanced-minimap-scale)))))
         (if (-> arg0 justify-right)
             (set! (-> arg0 mat trans x) (the float (+ (- 1792 v1-44) (-> arg0 draw-pos x))))
             (set! (-> arg0 mat trans x) (the float (+ v1-44 1792 (-> arg0 draw-pos x))))
             )
         )
+      ;; Enhanced: a smaller minimap, the icons closer together (and the arrow smaller)
+      (vector-float*! (-> arg0 mat vector 0) (-> arg0 mat vector 0) (enhanced-minimap-scale))
+      (vector-float*! (-> arg0 mat vector 2) (-> arg0 mat vector 2) (enhanced-minimap-scale))
       (when *target*
         (vector-z-quaternion! (the-as vector sv-52) (-> *target* control quat))
         (vector-xz-normalize! (the-as vector sv-52) 1.0)
@@ -2177,13 +2185,13 @@
         (let ((s3-2 (the-as object (-> s5-0 base)))
               (s2-1 (get-texture map-target-marker common))
               (s1-2 (new 'stack-no-clear 'matrix))
-              (v1-57 (the int (* 56.0 f30-0)))
+              (v1-57 (the int (* 56.0 f30-0 (enhanced-minimap-scale))))
               )
           (when s2-1
             (set-vector! (-> s1-2 vector 0) (* (-> sv-52 vector 0 z) f30-0) 0.0 (- (-> sv-52 vector 0 x)) 0.0)
             (set-vector! (-> s1-2 vector 1) 0.0 1.0 0.0 0.0)
             (set-vector! (-> s1-2 vector 2) (* (-> sv-52 vector 0 x) f30-0) 0.0 (-> sv-52 vector 0 z) 1.0)
-            (set-vector! (-> s1-2 trans) 0.0 0.0 (the float (+ (-> arg0 draw-pos y) 1896)) 1.0)
+            (set-vector! (-> s1-2 trans) 0.0 0.0 (+ (the float (+ (-> arg0 draw-pos y) 1840)) (* 56.0 (enhanced-minimap-scale))) 1.0)
             (if (-> arg0 justify-right)
                 (set! (-> s1-2 trans x) (the float (+ (- 1792 v1-57) (-> arg0 draw-pos x))))
                 (set! (-> s1-2 trans x) (the float (+ v1-57 1792 (-> arg0 draw-pos x))))
@@ -2458,8 +2466,8 @@
                      )
                    )
                  )
-            (let ((f1-16 (* 20.0 (-> *video-params* relative-x-scale) f0-48))
-                  (f0-49 (* 20.0 f0-48))
+            (let ((f1-16 (* 20.0 (-> *video-params* relative-x-scale) f0-48 (enhanced-minimap-scale)))
+                  (f0-49 (* 20.0 f0-48 (enhanced-minimap-scale)))
                   )
               (set! (-> arg0 corner 0 x) (the float (the int (- (-> s3-2 x) (* 0.5 f1-16)))))
               (set! (-> arg0 corner 0 z) (the float (the int (- (-> s3-2 z) (* 0.5 f0-49)))))

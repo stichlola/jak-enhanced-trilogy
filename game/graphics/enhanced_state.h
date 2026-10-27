@@ -138,6 +138,8 @@ struct EnhancedMenu {
   // the subtitles' size, percent of Enhanced's default (pc-enhanced-subtitle-size): 100 small,
   // 120 medium, 138 large (the PS2 size), 170 extra large
   std::atomic<int> subtitle_size = 100;
+  // the minimap's size on screen, percent of the PS2's (pc-enhanced-minimap-size): smaller by default
+  std::atomic<int> minimap_size = 70;
   std::mutex mutex;
   int request = 0;
   std::string arg;

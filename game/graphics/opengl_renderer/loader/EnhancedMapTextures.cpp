@@ -6,6 +6,14 @@
 #include <mutex>
 #include <unordered_map>
 
+#include "common/log/log.h"
+#include "common/util/FileUtil.h"
+#include "common/versions/versions.h"
+
+#include "game/runtime.h"
+
+#include "third-party/stb_image/stb_image.h"
+
 namespace {
 std::mutex g_scale_mutex;
 std::unordered_map<GLuint, float> g_texel_scale;
@@ -89,6 +97,34 @@ bool enhanced_upscale_map(const tfrag3::Texture& tex, std::vector<u32>& out) {
     }
   }
   return true;
+}
+
+bool enhanced_hd_minimap_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale) {
+  if (!ends_with(tex.debug_tpage_name, "-minimap") || tex.w <= 0 || tex.h <= 0) {
+    return false;
+  }
+  const auto path = file_util::get_jak_project_dir() / "out" / "enhanced" / "minimap" /
+                    version_to_game_name(g_game_version) / tex.debug_tpage_name /
+                    (tex.debug_name + ".png");
+  if (!fs::exists(path)) {
+    return false;
+  }
+  int w, h;
+  u8* data = stbi_load(path.string().c_str(), &w, &h, nullptr, 4);
+  if (!data) {
+    return false;
+  }
+  scale = w / tex.w;
+  const bool ok = scale >= 1 && w == tex.w * scale && h == tex.h * scale;
+  if (ok) {
+    out.resize((size_t)w * h);
+    std::memcpy(out.data(), data, out.size() * 4);
+    lg::info("[enhanced] {} {}: HD x{}", tex.debug_tpage_name, tex.debug_name, scale);
+  } else {
+    lg::error("[enhanced] {}: {}x{} is not a multiple of {}x{}", path.string(), w, h, tex.w, tex.h);
+  }
+  stbi_image_free(data);
+  return ok;
 }
 
 void enhanced_set_texel_scale(GLuint tex, float scale) {

@@ -291,6 +291,7 @@
 (define-extern pc-enhanced-minimap? (function symbol))
 (define-extern pc-enhanced-menu-state (function int))
 (define-extern pc-enhanced-subtitle-size (function int))
+(define-extern pc-enhanced-minimap-size (function int))
 
 (define-extern pc-encode-utf8-string (function string string none))
 

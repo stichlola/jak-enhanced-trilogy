@@ -1280,6 +1280,11 @@ u64 pc_enhanced_subtitle_size() {
   return (u64)std::clamp(g_enhanced_menu.subtitle_size.load(), 50, 250);
 }
 
+// Enhanced: the minimap's size on screen, percent of the PS2's (the Enhanced menu)
+u64 pc_enhanced_minimap_size() {
+  return (u64)std::clamp(g_enhanced_menu.minimap_size.load(), 40, 150);
+}
+
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
@@ -1452,6 +1457,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
+  make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

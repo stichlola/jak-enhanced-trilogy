@@ -3972,6 +3972,13 @@ void EnhancedPost::draw_menu() {
     if (ImGui::Checkbox("Minimap", &map)) {
       g_enhanced_menu.minimap = map;
     }
+    ImGui::BeginDisabled(!map);
+    ImGui::SetNextItemWidth(200);
+    int map_size = g_enhanced_menu.minimap_size;
+    if (ImGui::SliderInt("Minimap size %", &map_size, 50, 100)) {
+      g_enhanced_menu.minimap_size = map_size;
+    }
+    ImGui::EndDisabled();
   }
   save_menu_settings();
   if (ImGui::CollapsingHeader("Time of day", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -4091,6 +4098,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["fov"] = g_enhanced_menu.fov.load();
   j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
+  j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   return j.dump(2);
 }
 
@@ -4166,6 +4174,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   bool map = true;  // ("show_minimap": the old "minimap" key saved it off by default)
   get("show_minimap", map);
   g_enhanced_menu.minimap = map;
+  int map_size = g_enhanced_menu.minimap_size;
+  get("minimap_size", map_size);
+  g_enhanced_menu.minimap_size = map_size;
 }
 
 namespace {

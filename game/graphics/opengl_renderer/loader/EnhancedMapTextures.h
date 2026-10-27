@@ -17,6 +17,11 @@
 bool enhanced_upscale_map(const tfrag3::Texture& tex, std::vector<u32>& out);
 constexpr int kEnhancedMapScale = 4;
 
+// a minimap texture redrawn ahead (the HD icons, scripts/enhanced/minimap_icons.py, and the district
+// maps, minimap_maps.py): out/enhanced/minimap/<game>/<tpage>/<name>.png, a whole multiple of the
+// game's size (scale), in the PS2's alpha (128 opaque). Not in git: made from the game's art
+bool enhanced_hd_minimap_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale);
+
 void enhanced_set_texel_scale(GLuint tex, float scale);
 void enhanced_forget_texture(GLuint tex);
 float enhanced_texel_scale(GLuint tex);

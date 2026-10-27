@@ -129,6 +129,16 @@ and the district maps (`map-...` in `...-minimap` pages, 4-bit) redrawn at 4x as
 blurred mask of each color, so the edges are smooth and the colors stay flat). The game still
 addresses both in its own texels: `enhanced_texel_scale` gives the direct renderer the factor
 (`tex_px_scale` in the direct shaders).
+Smaller by default: the menu's "Minimap size %" (70, `pc-enhanced-minimap-size`) scales the map, its
+icons, Jak's arrow and the ring together (`enhanced-minimap-scale` in `minimap.gc`, hud-map's draw
+in `hud-classes.gc`), the bottom right corner kept in place.
+HD art, made ahead and loaded instead of the game's when present (not in git: made from the games'
+art): `out/enhanced/minimap/<game>/<tpage>/<name>.png`, a whole multiple of the texture's size.
+`scripts/enhanced/minimap_icons.py` redraws the 47 icons of `mini-map-icons` with Tripo
+(image to image, four sheets of 12 with a description of each; 8x atlas), and
+`scripts/enhanced/minimap_maps.py` redraws every district map at 4x in a modern style (the same
+shapes; calmer palette, raised blocks with a lit bevel and a shadow on the streets, outlines, deeper
+water with a light rim; the painted maps of the desert enlarged with Real-ESRGAN).
 
 ## Known issues
 
@@ -175,8 +185,9 @@ Next, the small ones first (the big ones below wait until these are done):
 
 - Rain on roofs and metal when Jak is under cover (needs a "covered" test: the sky hidden above
   Jak).
-- The minimap's icons redrawn in high resolution (`mini-map-icons`, 128 x 128 atlas of ~20 px
-  icons) and a modern frame.
+- The big map of the pause menu (Jak 3: `bigmap.gc`, a scrolling image from `WOMAP.STR`
+  uploaded 256 x 416 at a time) in the same style as the minimap's district maps; a modern frame for
+  the minimap.
 - A photo mode: the game held still, a free camera, filters, the HUD hidden.
 - Weather by zone and by season: each zone gets its own set of possible weathers that it cycles
   through (the desert's sandstorms and clear nights, Haven's rain, the forest's fog...) instead of one
