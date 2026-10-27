@@ -20,6 +20,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/screenshot.h"
 #include "game/kernel/common/Ptr.h"
+#include "game/kernel/common/kboot.h"
 #include "game/kernel/common/kernel_types.h"
 #include "game/kernel/common/kprint.h"
 #include "game/kernel/common/kscheme.h"
@@ -1268,12 +1269,65 @@ u64 pc_enhanced_menu_state() {
 
 // Enhanced: whether the HUD shows the minimap (the menu's switch)
 u64 pc_enhanced_minimap() {
-  return bool_to_symbol(g_enhanced_menu.minimap);
+  // (hidden in photo mode and under the game wheel)
+  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active &&
+                        g_enhanced_menu.wheel < 0);
 }
 
 // Enhanced: the field of view in play, percent of the game's (the Enhanced menu)
 u64 pc_enhanced_fov() {
   return (u64)std::clamp(g_enhanced_menu.fov.load(), 70, 150);
+}
+
+// Enhanced: the game wheel, as the game has it (-1 closed, 0 nothing picked, 1..3 the game picked)
+u64 pc_enhanced_wheel(s32 pick) {
+  g_enhanced_menu.wheel = pick;
+  return 0;
+}
+
+// Enhanced: play another game of the trilogy (1..3; the game wheel, after the game saved), the
+// same process booting it; that game then picks its newest save up (pc-enhanced-switch-restore)
+
+u64 pc_enhanced_switch_game(u32 game) {
+  if (game < 1 || game > 3 || game == (u32)g_game_version || MasterExit != RuntimeExitStatus::RUNNING) {
+    return 0;
+  }
+  lg::info("[enhanced] the game wheel switches to {}", version_to_game_name((GameVersion)game));
+  g_enhanced_switch_restore = true;
+  g_switch_game_to = (GameVersion)game;
+  MasterExit = RuntimeExitStatus::SWITCH_GAME;
+  return 1;
+}
+
+// Enhanced: once, after a switch: the save file (0..3) last written in this game, -1 for none
+// (or no switch)
+s64 pc_enhanced_switch_restore() {
+  if (!g_enhanced_switch_restore) {
+    return -1;
+  }
+  g_enhanced_switch_restore = false;
+  static const char* const kSerial[4] = {"", "BASCUS-97124AYBABTU!", "BASCUS-97265AYBABTU!",
+                                         "BASCUS-97330AYBABTU!"};
+  const int v = (int)g_game_version;
+  if (v < 1 || v > 3) {
+    return -1;
+  }
+  const auto dir = file_util::get_user_memcard_dir(g_game_version) / kSerial[v];
+  s64 best = -1;
+  fs::file_time_type newest{};
+  for (int file = 0; file < 4; file++) {
+    for (int bank = 0; bank < 2; bank++) {
+      std::error_code ec;
+      const auto path = dir / fmt::format("bank{}.bin", file * 2 + bank);
+      const auto when = fs::last_write_time(path, ec);
+      if (!ec && (best < 0 || when > newest)) {
+        newest = when;
+        best = file;
+      }
+    }
+  }
+  lg::info("[enhanced] after the switch: save file {}", best);
+  return best;
 }
 
 // Enhanced: the subtitles' size, percent of the default (the Enhanced menu)
@@ -1484,6 +1538,9 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
+  make_func_symbol_func("pc-enhanced-wheel", (void*)pc_enhanced_wheel);
+  make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
+  make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

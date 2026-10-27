@@ -31,6 +31,8 @@ extern RuntimeExitStatus MasterExit;
 
 // Trilogy: the game to boot next when MasterExit is SWITCH_GAME
 extern GameVersion g_switch_game_to;
+// Enhanced: after a switch, the game booted loads its newest save (pc-enhanced-switch-restore)
+extern bool g_enhanced_switch_restore;
 
 // Set to 1 to load game engine after boot automatically
 extern u32 DiskBoot;

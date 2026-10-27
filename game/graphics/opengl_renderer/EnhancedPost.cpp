@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <cfloat>
 #include <ctime>
 #include <random>
 #include <vector>
@@ -4035,6 +4036,82 @@ void EnhancedPost::draw_photo_hint() {
   ImGui::TextUnformatted("Photo mode   left stick: move   right stick: look   L1 / R1: down / up   "
                          "R2: slower   F2: picture   F1: filters   F3 or Start: back");
   ImGui::End();
+}
+
+// the game wheel (Select, N): three slices, Jak 1 upper left, Jak II upper right, Jak 3 below, the
+// one picked lit and pushed out. The game reads the stick and the buttons (pc-enhanced-wheel)
+void EnhancedPost::draw_game_wheel() {
+  const int pick = g_enhanced_menu.wheel.load();
+  if (pick < 0) {
+    return;
+  }
+  struct Slice {
+    float from, to;  // degrees on screen: 0 to the right, clockwise
+    const char* name;
+    const char* sub;
+    ImU32 color, lit;
+  };
+  static const Slice kSlices[3] = {
+      {150.f, 270.f, "Jak", "and Daxter", IM_COL32(46, 84, 40, 225), IM_COL32(92, 160, 70, 240)},
+      {-90.f, 30.f, "Jak II", "Renegade", IM_COL32(40, 56, 84, 225), IM_COL32(74, 112, 170, 240)},
+      {30.f, 150.f, "Jak 3", "Wasteland", IM_COL32(96, 60, 28, 225), IM_COL32(196, 124, 52, 240)}};
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  ImFont* font = ImGui::GetFont();
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const ImVec2 c(size.x * 0.5f, size.y * 0.47f);
+  const float r = size.y * 0.34f, r0 = r * 0.24f;
+  constexpr float kRad = 3.14159265f / 180.f;
+  const auto at = [&](float deg, float rad) {
+    return ImVec2(c.x + std::cos(deg * kRad) * rad, c.y + std::sin(deg * kRad) * rad);
+  };
+  const auto text = [&](const char* s, float px, ImVec2 p, ImU32 col) {
+    const ImVec2 ts = font->CalcTextSizeA(px, FLT_MAX, 0.f, s);
+    dl->AddText(font, px, ImVec2(p.x - ts.x * 0.5f + 2, p.y - ts.y * 0.5f + 2), IM_COL32(0, 0, 0, 160), s);
+    dl->AddText(font, px, ImVec2(p.x - ts.x * 0.5f, p.y - ts.y * 0.5f), col, s);
+  };
+  dl->AddRectFilled(ImVec2(0, 0), size, IM_COL32(0, 0, 0, 120));
+  for (int i = 0; i < 3; i++) {
+    const auto& sl = kSlices[i];
+    const bool lit = pick == i + 1;
+    const float mid = (sl.from + sl.to) * 0.5f;
+    // the slice picked moves out a little
+    const ImVec2 off = lit ? ImVec2(std::cos(mid * kRad) * r * 0.05f, std::sin(mid * kRad) * r * 0.05f)
+                           : ImVec2(0, 0);
+    const float a0 = sl.from + 1.5f, a1 = sl.to - 1.5f;
+    constexpr int kSteps = 40;
+    // (the slice in quads, without the antialiased edges that would show as seams between them)
+    const auto flags = dl->Flags;
+    dl->Flags &= ~ImDrawListFlags_AntiAliasedFill;
+    for (int k = 0; k < kSteps; k++) {
+      const float b0 = a0 + (a1 - a0) * k / kSteps, b1 = a0 + (a1 - a0) * (k + 1) / kSteps;
+      const ImVec2 p[4] = {at(b0, r0), at(b0, r), at(b1, r), at(b1, r0)};
+      dl->AddQuadFilled(ImVec2(p[0].x + off.x, p[0].y + off.y), ImVec2(p[1].x + off.x, p[1].y + off.y),
+                        ImVec2(p[2].x + off.x, p[2].y + off.y), ImVec2(p[3].x + off.x, p[3].y + off.y),
+                        lit ? sl.lit : sl.color);
+    }
+    dl->Flags = flags;
+    // the rim
+    dl->PathClear();
+    dl->PathArcTo(ImVec2(c.x + off.x, c.y + off.y), r, a0 * kRad, a1 * kRad, kSteps);
+    dl->PathStroke(lit ? IM_COL32(255, 236, 160, 255) : IM_COL32(200, 190, 150, 140), 0,
+                   lit ? 4.f : 2.f);
+    ImVec2 label = at(mid, (r0 + r) * 0.55f);
+    label.x += off.x;
+    label.y += off.y;
+    const ImU32 col = lit ? IM_COL32(255, 244, 200, 255) : IM_COL32(230, 220, 190, 200);
+    text(sl.name, r * 0.2f, ImVec2(label.x, label.y - r * 0.06f), col);
+    text(sl.sub, r * 0.09f, ImVec2(label.x, label.y + r * 0.1f), col);
+    if ((int)g_game_version == i + 1) {
+      text("playing", r * 0.075f, ImVec2(label.x, label.y + r * 0.2f), IM_COL32(255, 220, 120, 230));
+    }
+  }
+  // the middle: what X does
+  dl->AddCircleFilled(c, r0 * 0.92f, IM_COL32(16, 16, 20, 235), 48);
+  dl->AddCircle(c, r0 * 0.92f, IM_COL32(200, 190, 150, 160), 48, 2.f);
+  const char* what = pick == 0 ? "Pick a game" : pick == (int)g_game_version ? "Back to it" : "Play";
+  text(what, r * 0.075f, c, IM_COL32(240, 230, 200, 255));
+  text("Left stick: pick     X: play     Square / Triangle: nap     Circle: back", size.y * 0.026f,
+       ImVec2(c.x, c.y + r + size.y * 0.06f), IM_COL32(240, 230, 200, 230));
 }
 
 void EnhancedPost::draw_menu() {

@@ -1526,6 +1526,7 @@
 ;; clock or a continue point; it's carried out here.
 (define *enhanced-menu-buf* (new 'global 'string 64 (the-as string #f)))
 (define-extern enhanced-nap-ui-open (function none))
+(define-extern enhanced-wheel-open (function none))
 (define *enhanced-nap-wanted* 0)
 (define *enhanced-nap-wait* 0)
 
@@ -1593,8 +1594,12 @@
     )
   (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
     ((12)
-     ;; the nap window (N, the Enhanced menu's button)
+     ;; the nap window (the Enhanced menu's button)
      (enhanced-nap-ui-open)
+     )
+    ((13)
+     ;; the game wheel (N)
+     (enhanced-wheel-open)
      )
     ((11)
      ;; a nap (the nap window, N): how many hours; target-stance starts it

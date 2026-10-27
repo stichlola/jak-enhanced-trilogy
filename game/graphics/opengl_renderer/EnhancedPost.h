@@ -275,6 +275,8 @@ class EnhancedPost {
   void draw_menu();
   // photo mode's controls, a few seconds after it comes on
   void draw_photo_hint();
+  // the game wheel (Select, N): which game of the trilogy to play
+  void draw_game_wheel();
 
  private:
   static constexpr int kLevels = 6;
