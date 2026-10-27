@@ -38,6 +38,32 @@ struct Logger {
 Logger gLogger;
 
 namespace internal {
+/*!
+ * Enhanced: the console only takes valid UTF-8 (on Windows fmt converts what it prints for the
+ * console and throws on anything else, which closed the game): stray bytes, from a driver's message
+ * or the game's own text, are printed as '?'. The log file keeps them as they are.
+ */
+std::string console_safe(const char* message) {
+  std::string out;
+  const auto* s = reinterpret_cast<const unsigned char*>(message);
+  while (*s) {
+    const unsigned char c = *s;
+    const int len = c < 0x80 ? 1 : (c >> 5) == 0x6 ? 2 : (c >> 4) == 0xe ? 3 : (c >> 3) == 0x1e ? 4 : 0;
+    bool ok = len > 0;
+    for (int i = 1; i < len && ok; i++) {
+      ok = (s[i] & 0xc0) == 0x80;
+    }
+    if (ok) {
+      out.append(reinterpret_cast<const char*>(s), len);
+      s += len;
+    } else {
+      out.push_back('?');
+      s++;
+    }
+  }
+  return out;
+}
+
 const char* log_level_names[] = {"trace", "debug", "info", "warn", "error", "die", "die"};
 const fmt::color log_colors[] = {
     fmt::color::gray, fmt::color::turquoise, fmt::color::light_green, fmt::color::yellow,
@@ -76,7 +102,7 @@ void log_message(level log_level, LogTime& now, const char* message) {
       } else {
         fmt::print(fg(log_colors[int(log_level)]), "{}", log_level_names[int(log_level)]);
       }
-      fmt::print("] {}\n", message);
+      fmt::print("] {}\n", console_safe(message));
       if (log_level >= gLogger.flush_level) {
         fflush(stdout);
         fflush(stderr);
@@ -107,7 +133,7 @@ void log_print(const char* message) {
     }
 
     if (gLogger.stdout_log_level < lg::level::off_unless_die) {
-      fmt::print("{}", message);
+      fmt::print("{}", internal::console_safe(message));
       fflush(stdout);
       fflush(stderr);
     }

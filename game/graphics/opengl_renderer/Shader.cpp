@@ -90,7 +90,8 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
 
   constexpr int len = 1024;
   int compile_ok;
-  char err[len];
+  // (a driver that gives no reason leaves it as it is: it was printed as whatever the stack held)
+  char err[len] = "(no reason given by the driver)";
 
   glGetShaderiv(m_vert_shader, GL_COMPILE_STATUS, &compile_ok);
   if (!compile_ok) {
