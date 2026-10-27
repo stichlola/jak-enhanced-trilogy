@@ -128,6 +128,7 @@ extern EnhancedTimeOfDay g_enhanced_tod;
 struct EnhancedMenu {
   bool open = false;
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
+  std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
   std::mutex mutex;
   int request = 0;
   std::string arg;

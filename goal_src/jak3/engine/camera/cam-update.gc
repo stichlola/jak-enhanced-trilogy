@@ -311,6 +311,9 @@
 
 (define *start-pos* (new 'global 'vector))
 
+;; Enhanced: the field of view in play, times this (the Enhanced menu's setting, percent)
+(define *enhanced-fov-scale* 1.0)
+
 (defun update-camera ()
   (with-pp
     (let ((gp-0 *math-camera*))
@@ -401,7 +404,15 @@
                (matrix-copy! *save-camera-inv-rot* *camera-other-matrix*)
                )
               ((and *camera-combiner* (not *external-cam-mode*))
-               (set! (-> gp-0 fov) (-> *camera-combiner* fov))
+               ;; Enhanced: a wider (or narrower) view in play, from the menu; cutscenes as filmed
+               (set! (-> gp-0 fov) (if (movie?)
+                                       (-> *camera-combiner* fov)
+                                       (begin
+                                         (set! *enhanced-fov-scale* (* 0.01 (the float (pc-enhanced-fov))))
+                                         (fmin 23665.777 (* (-> *camera-combiner* fov) *enhanced-fov-scale*))
+                                         )
+                                       )
+                     )
                (vector-copy! (-> gp-0 trans) (-> *camera-combiner* trans))
                (+! (-> gp-0 trans y) f28-0)
                (matrix-copy! (-> gp-0 inv-camera-rot) (-> *camera-combiner* inv-camera-rot))

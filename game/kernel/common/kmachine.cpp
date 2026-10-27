@@ -1216,6 +1216,11 @@ u64 pc_enhanced_minimap() {
   return bool_to_symbol(g_enhanced_menu.minimap);
 }
 
+// Enhanced: the field of view in play, percent of the game's (the Enhanced menu)
+u64 pc_enhanced_fov() {
+  return (u64)std::clamp(g_enhanced_menu.fov.load(), 70, 150);
+}
+
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
@@ -1384,6 +1389,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-headlight", (void*)pc_enhanced_headlight);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
+  make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

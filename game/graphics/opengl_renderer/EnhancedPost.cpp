@@ -3350,6 +3350,11 @@ void EnhancedPost::draw_menu() {
     if (ImGui::Combo("Population", &m_population, "Low\0Normal\0High\0Extreme\0")) {
       g_enhanced_menu.ask(6, std::to_string(m_population));
     }
+    ImGui::SetNextItemWidth(200);
+    int fov = g_enhanced_menu.fov;
+    if (ImGui::SliderInt("Field of view %", &fov, 80, 140)) {
+      g_enhanced_menu.fov = fov;
+    }
     bool map = g_enhanced_menu.minimap;
     if (ImGui::Checkbox("Minimap", &map)) {
       g_enhanced_menu.minimap = map;
@@ -3464,6 +3469,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["weather_mix"] = s.weather_mix;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
+  j["fov"] = g_enhanced_menu.fov.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   return j.dump(2);
 }
@@ -3522,6 +3528,11 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("weather_mix", s.weather_mix);
   get("vivid", s.vivid);
   get("population", m_population);
+  {
+    int fov = g_enhanced_menu.fov;
+    get("fov", fov);
+    g_enhanced_menu.fov = fov;
+  }
   m_population = std::clamp(m_population, 0, 3);
   bool map = true;  // ("show_minimap": the old "minimap" key saved it off by default)
   get("show_minimap", map);

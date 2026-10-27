@@ -304,6 +304,7 @@
 (define-extern pc-enhanced-headlight (function pointer pointer none))
 (define-extern pc-enhanced-poll-request (function string int int))
 (define-extern pc-enhanced-minimap? (function symbol))
+(define-extern pc-enhanced-fov (function int))
 
 (define-extern pc-encode-utf8-string (function string string none))
 
