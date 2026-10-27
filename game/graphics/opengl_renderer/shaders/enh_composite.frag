@@ -2523,11 +2523,16 @@ void main() {
         continue;
       }
       float hs = max(h, lr * 0.08);
-      float inte = (atan((t1 - tc) / hs) - atan((t0 - tc) / hs)) * lr / hs;
+      // (capped: a bright light passing right by the ray, a dark eco blast in the rain, would
+      // otherwise flood the view in its color)
+      float inte = min((atan((t1 - tc) / hs) - atan((t0 - tc) / hs)) * lr / hs, 6.0);
       shine += light_color[i].rgb * inte * (1.0 - smoothstep(lr * 0.5, lr * 1.5, h)) *
                smoothstep(2.0 * 4096.0, 6.0 * 4096.0, length(lp));
     }
-    c += shine * min(air, 1.0) * 0.012;
+    shine *= min(air, 1.0) * 0.012;
+    // all of them together at most a soft glow (scaled down, its hue kept)
+    float shine_max = max(shine.r, max(shine.g, shine.b));
+    c += shine * min(1.0, 0.3 / max(shine_max, 1e-4));
     for (int i = 0; i < min(light_count, 16); i++) {
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);
