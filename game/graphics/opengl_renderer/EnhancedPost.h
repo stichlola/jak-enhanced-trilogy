@@ -277,6 +277,9 @@ class EnhancedPost {
   void draw_photo_hint();
   // the game wheel (Select, N): which game of the trilogy to play
   void draw_game_wheel();
+  // its portraits (game/assets/enhanced/wheel/jakN.png), loaded the first time it opens; 0 if missing
+  GLuint m_wheel_tex[3] = {0, 0, 0};
+  bool m_wheel_loaded = false;
 
  private:
   static constexpr int kLevels = 6;

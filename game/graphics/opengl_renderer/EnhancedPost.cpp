@@ -24,6 +24,7 @@
 #include "game/sound/common/enhanced_ambience.h"
 
 #include "third-party/imgui/imgui.h"
+#include "third-party/stb_image/stb_image.h"
 
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
@@ -4055,11 +4056,33 @@ void EnhancedPost::draw_game_wheel() {
       {150.f, 270.f, "Jak", "and Daxter", IM_COL32(46, 84, 40, 225), IM_COL32(92, 160, 70, 240)},
       {-90.f, 30.f, "Jak II", "Renegade", IM_COL32(40, 56, 84, 225), IM_COL32(74, 112, 170, 240)},
       {30.f, 150.f, "Jak 3", "Wasteland", IM_COL32(96, 60, 28, 225), IM_COL32(196, 124, 52, 240)}};
+  if (!m_wheel_loaded) {
+    m_wheel_loaded = true;
+    for (int i = 0; i < 3; i++) {
+      const auto path = file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "wheel" /
+                        fmt::format("jak{}.png", i + 1);
+      int w, h;
+      u8* data = stbi_load(path.string().c_str(), &w, &h, nullptr, 4);
+      if (!data) {
+        continue;
+      }
+      glGenTextures(1, &m_wheel_tex[i]);
+      glBindTexture(GL_TEXTURE_2D, m_wheel_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+      glGenerateMipmap(GL_TEXTURE_2D);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      stbi_image_free(data);
+    }
+  }
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   ImFont* font = ImGui::GetFont();
   const ImVec2 size = ImGui::GetIO().DisplaySize;
-  const ImVec2 c(size.x * 0.5f, size.y * 0.47f);
-  const float r = size.y * 0.34f, r0 = r * 0.24f;
+  const ImVec2 c(size.x * 0.5f, size.y * 0.45f);
+  const float r = size.y * 0.32f, r0 = r * 0.24f;
   constexpr float kRad = 3.14159265f / 180.f;
   const auto at = [&](float deg, float rad) {
     return ImVec2(c.x + std::cos(deg * kRad) * rad, c.y + std::sin(deg * kRad) * rad);
@@ -4082,12 +4105,32 @@ void EnhancedPost::draw_game_wheel() {
     // (the slice in quads, without the antialiased edges that would show as seams between them)
     const auto flags = dl->Flags;
     dl->Flags &= ~ImDrawListFlags_AntiAliasedFill;
+    // the portrait, if there is one: a square over the whole slice (its bounding box), cut to it
+    const GLuint tex = m_wheel_tex[i];
+    ImVec2 lo(1e9f, 1e9f), hi(-1e9f, -1e9f);
+    for (int k = 0; k <= kSteps; k++) {
+      for (const float rad : {r0, r}) {
+        const ImVec2 p = at(a0 + (a1 - a0) * k / kSteps, rad);
+        lo = ImVec2(std::min(lo.x, p.x), std::min(lo.y, p.y));
+        hi = ImVec2(std::max(hi.x, p.x), std::max(hi.y, p.y));
+      }
+    }
+    // (moved so each face sits in its slice: Jak 3's would be under the middle)
+    static const float kShift[3][2] = {{0.f, 0.02f}, {-0.06f, 0.04f}, {0.f, 0.3f}};
+    const float side = std::max(hi.x - lo.x, hi.y - lo.y) * (i == 2 ? 1.15f : 1.f);
+    const ImVec2 pc((lo.x + hi.x) * 0.5f + kShift[i][0] * side, (lo.y + hi.y) * 0.5f + kShift[i][1] * side);
+    const auto uv = [&](ImVec2 p) { return ImVec2((p.x - pc.x) / side + 0.5f, (p.y - pc.y) / side + 0.5f); };
     for (int k = 0; k < kSteps; k++) {
       const float b0 = a0 + (a1 - a0) * k / kSteps, b1 = a0 + (a1 - a0) * (k + 1) / kSteps;
       const ImVec2 p[4] = {at(b0, r0), at(b0, r), at(b1, r), at(b1, r0)};
-      dl->AddQuadFilled(ImVec2(p[0].x + off.x, p[0].y + off.y), ImVec2(p[1].x + off.x, p[1].y + off.y),
-                        ImVec2(p[2].x + off.x, p[2].y + off.y), ImVec2(p[3].x + off.x, p[3].y + off.y),
-                        lit ? sl.lit : sl.color);
+      const ImVec2 q[4] = {ImVec2(p[0].x + off.x, p[0].y + off.y), ImVec2(p[1].x + off.x, p[1].y + off.y),
+                           ImVec2(p[2].x + off.x, p[2].y + off.y), ImVec2(p[3].x + off.x, p[3].y + off.y)};
+      if (tex) {
+        dl->AddImageQuad((ImTextureID)(intptr_t)tex, q[0], q[1], q[2], q[3], uv(p[0]), uv(p[1]), uv(p[2]),
+                         uv(p[3]), lit ? IM_COL32(255, 255, 255, 255) : IM_COL32(120, 120, 120, 235));
+      } else {
+        dl->AddQuadFilled(q[0], q[1], q[2], q[3], lit ? sl.lit : sl.color);
+      }
     }
     dl->Flags = flags;
     // the rim
@@ -4095,14 +4138,29 @@ void EnhancedPost::draw_game_wheel() {
     dl->PathArcTo(ImVec2(c.x + off.x, c.y + off.y), r, a0 * kRad, a1 * kRad, kSteps);
     dl->PathStroke(lit ? IM_COL32(255, 236, 160, 255) : IM_COL32(200, 190, 150, 140), 0,
                    lit ? 4.f : 2.f);
-    ImVec2 label = at(mid, (r0 + r) * 0.55f);
-    label.x += off.x;
-    label.y += off.y;
     const ImU32 col = lit ? IM_COL32(255, 244, 200, 255) : IM_COL32(230, 220, 190, 200);
-    text(sl.name, r * 0.2f, ImVec2(label.x, label.y - r * 0.06f), col);
-    text(sl.sub, r * 0.09f, ImVec2(label.x, label.y + r * 0.1f), col);
-    if ((int)g_game_version == i + 1) {
-      text("playing", r * 0.075f, ImVec2(label.x, label.y + r * 0.2f), IM_COL32(255, 220, 120, 230));
+    const bool playing = (int)g_game_version == i + 1;
+    if (tex) {
+      // with a portrait: the name on a dark plate outside the wheel, off the faces
+      const ImVec2 out = at(mid, r * (i == 2 ? 1.16f : 1.3f));
+      const ImVec2 label(out.x + off.x, out.y + off.y);
+      const float pw = r * 0.5f, ph = r * (playing ? 0.21f : 0.15f);
+      dl->AddRectFilled(ImVec2(label.x - pw * 0.5f, label.y - r * 0.075f),
+                        ImVec2(label.x + pw * 0.5f, label.y - r * 0.075f + ph), IM_COL32(10, 10, 14, 170),
+                        r * 0.03f);
+      text(sl.name, r * 0.13f, label, col);
+      if (playing) {
+        text("playing", r * 0.065f, ImVec2(label.x, label.y + r * 0.095f), IM_COL32(255, 220, 120, 230));
+      }
+    } else {
+      ImVec2 label = at(mid, (r0 + r) * 0.55f);
+      label.x += off.x;
+      label.y += off.y;
+      text(sl.name, r * 0.2f, ImVec2(label.x, label.y - r * 0.06f), col);
+      text(sl.sub, r * 0.09f, ImVec2(label.x, label.y + r * 0.1f), col);
+      if (playing) {
+        text("playing", r * 0.075f, ImVec2(label.x, label.y + r * 0.2f), IM_COL32(255, 220, 120, 230));
+      }
     }
   }
   // the middle: what X does
@@ -4111,7 +4169,7 @@ void EnhancedPost::draw_game_wheel() {
   const char* what = pick == 0 ? "Pick a game" : pick == (int)g_game_version ? "Back to it" : "Play";
   text(what, r * 0.075f, c, IM_COL32(240, 230, 200, 255));
   text("Left stick: pick     X: play     Square / Triangle: nap     Circle: back", size.y * 0.026f,
-       ImVec2(c.x, c.y + r + size.y * 0.06f), IM_COL32(240, 230, 200, 230));
+       ImVec2(c.x, c.y + r + size.y * 0.14f), IM_COL32(240, 230, 200, 230));
 }
 
 void EnhancedPost::draw_menu() {

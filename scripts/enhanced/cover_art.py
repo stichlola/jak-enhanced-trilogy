@@ -2,13 +2,15 @@
 
   python scripts/enhanced/cover_art.py ref               # the reference pictures (free)
   python scripts/enhanced/cover_art.py image cover|icon  # one painted by Tripo (~5 credits each)
+  python scripts/enhanced/cover_art.py image wheel1|wheel2|wheel3  # the game wheel's portraits
   python scripts/enhanced/cover_art.py compose           # title, banner, installer pictures, .ico
 
 `ref` poses Jak 1 (Daxter on his shoulder), Jak II and Jak 3 (each with the Morph Gun) from the games'
 models (the decompiler's glbs; Jak 3 from jak3-ue5's staging) and renders them in Blender
 (cover_art_blender.py), then lays them on a 2000 x 1500 collage: three panels split by glowing
 diagonal seams (a jungle, a neon night city, the desert at sunset), the top kept calm for the title.
-Also a 1024 x 1024 icon reference: Jak 3's head with Daxter. These are renders of the game's models:
+Also a 1024 x 1024 icon reference: Jak 3's head with Daxter, and the game wheel's three portraits
+(wheelN: each Jak from the waist up over his game's panel). These are renders of the game's models:
 they stay in local/cover_art and only go to Tripo as references.
 
 `image` sends one of them to Tripo (image to image) to paint it as key art, characters kept as they
@@ -75,6 +77,19 @@ PROMPTS = {
         "Right: Jak 3 with a red scarf over his face, brown desert armor, holding the gun, in a desert "
         "at sunset, orange sky, sand dunes, rusted wrecks. Keep the top quarter of the picture as calm "
         "sky and background with nothing important in it. Absolutely no text, letters, logo or watermark."),
+    "wheel1": STYLE + (
+        "A character portrait for a game select menu, from the waist up: young Jak with spiky "
+        "blond-green hair, goggles, blue tunic, with Daxter, an orange otter-weasel with goggles, on his "
+        "shoulder, in a lush tropical jungle with ancient stone ruins, golden light through the leaves "
+        "and crackling blue eco sparks. No text, letters, logo or watermark."),
+    "wheel2": STYLE + (
+        "A character portrait for a game select menu, from the waist up: Jak with long green hair, "
+        "goatee, blue armor and a red scarf, holding his gun, in a dark futuristic city at night, tall "
+        "towers with blue and purple neon. No text, letters, logo or watermark."),
+    "wheel3": STYLE + (
+        "A character portrait for a game select menu, from the waist up: Jak with long green hair, "
+        "goggles, brown desert armor and a red scarf over his mouth, holding his gun, in a desert at sunset, orange "
+        "sky, sand dunes, rusted wrecks. No text, letters, logo or watermark."),
     "icon": STYLE + (
         "An app icon: Jak's head, long green hair, brown goggles with a red lens, pointed ears, red "
         "scarf, with Daxter (orange otter-weasel with goggles) on his shoulder, bold readable shapes, "
@@ -212,11 +227,28 @@ def icon_ref(head):
     return bg
 
 
+def wheel_ref(n, char):
+    """A game wheel portrait: the Jak of game n from the waist up over his panel (1024 square)"""
+    rng = random.Random(7)
+    panel = (panel_jungle, panel_city, panel_desert)[n - 1](rng)
+    x0 = (0, 500, 1000)[n - 1]
+    bg = panel.crop((x0, 250, x0 + 1000, 1250)).resize((1024, 1024)).filter(ImageFilter.GaussianBlur(6))
+    bg = bg.convert("RGBA")
+    char = char.crop(char.getbbox())
+    char = char.crop((0, 0, char.width, int(char.height * 0.62)))
+    s = 980 / char.height
+    char = char.resize((int(char.width * s), 980), Image.LANCZOS)
+    bg.alpha_composite(char, ((1024 - char.width) // 2, 1024 - 980))
+    return bg
+
+
 def cmd_ref():
     OUT.mkdir(parents=True, exist_ok=True)
     chars = [render(n, (900, 1350)) for n in ("jak1", "jak2", "jak3")]
     collage(chars).convert("RGB").save(OUT / "cover_ref.png")
     icon_ref(render("icon", (1024, 1024))).convert("RGB").save(OUT / "icon_ref.png")
+    for n, char in enumerate(chars, 1):
+        wheel_ref(n, char).convert("RGB").save(OUT / f"wheel{n}_ref.png")
     print(f"{OUT / 'cover_ref.png'}\n{OUT / 'icon_ref.png'}")
 
 
