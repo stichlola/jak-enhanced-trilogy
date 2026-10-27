@@ -106,6 +106,14 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Dark nights**: where no light reaches, the night is dark (the desert almost black under the
   stars); lamps, fires and windows light the world in their own colors and glow in the night haze.
   The eyes adapt a little to a dark view. A menu switch brings back the game's own nights.
+  What shines (windows, signs, fires) spills its light on the surfaces next to it; a strong
+  colored light bleaches toward white instead of flattening into one color.
+- **Your own lights**: where a place is too dark, the Enhanced menu's *Place a light* puts a lamp
+  where Jak stands (color, reach, flicker); they're kept in `game/assets/enhanced/lights.json`.
+- **Reflections at night**: wet streets, metal and water reflect the dark world, not the game's
+  bright night; lamps and headlights draw shimmering columns on the water and highlights on metal.
+- **Cloud shadows**: the clouds' shadows drift over the ground by day.
+- **Lens flare**: looking toward the sun, ghosts and a streak in the lens (menu switch).
 - **Night sky**: twinkling stars, a faint milky way, the moon and its halo; Haven and Spargus glow
   warm on the low sky.
 - **Headlights** (Jak 3): vehicles light the road ahead with real beams, visible in the night air.
