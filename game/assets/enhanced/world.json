@@ -67,8 +67,9 @@
   //     spells {"period": s, "clear": chance of none, "light": chance of a little, "light_amount"}
   //     (the rest are full); rain and morning mist bring some back. Default: 1
   // "ambience": the zone's ambient sound loops (game/assets/enhanced/sounds), 0..1 each:
-  //   crickets (at night, quiet in the rain), wind_night (at night), wind (always). Rain, dripping
-  //   after it and the storm's wind follow the weather wherever it's outdoors
+  //   crickets (at night, quiet in the rain), birds (by day, quiet in the rain), frogs (mostly at
+  //   night and when wet), wind_night (at night), wind, waves, city (always). Rain, dripping after
+  //   it and the storm's wind follow the weather wherever it's outdoors
   "zones": {
     "other": {
       "day": {"lift": [0, 0, 0], "gain": [1, 1, 1], "saturation": 1.0, "contrast": 0.0, "warmth": 0.0, "clouds": 0.4},
@@ -80,14 +81,15 @@
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}},
-      "ambience": {"crickets": 0.15}
+      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
     },
     // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
     // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
     "haven-industrial": {
       "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5},
       "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65},
-      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}}
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}},
+      "ambience": {"city": 0.75}
     },
     // desert: sun-baked by day, cold blue night
     "desert": {
@@ -101,7 +103,7 @@
       "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
       "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "showers": {"period": 420, "chance": 0.5, "thunder": 0.4}, "morning_mist": 0.5},
-      "ambience": {"crickets": 1.0, "wind_night": 0.2}
+      "ambience": {"crickets": 1.0, "wind_night": 0.2, "birds": 0.9, "frogs": 0.3}
     },
     // Metal Heads: sickly purple shadows
     "metalhead": {
@@ -133,7 +135,7 @@
       "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
       "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25}, "showers": {"period": 480, "chance": 0.45, "thunder": 0.4}},
-      "ambience": {"crickets": 0.6, "wind_night": 0.5, "wind": 0.15}
+      "ambience": {"crickets": 0.6, "wind_night": 0.5, "wind": 0.15, "birds": 0.5}
     },
     // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night. Ten-minute
     // spells: mostly fair, some with a shower, a few with a thunderstorm. The game is saturated
@@ -142,28 +144,28 @@
       "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
       "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "showers": {"period": 600, "chance": 0.4, "thunder": 0.4}, "sunny": 0.3},
-      "ambience": {"crickets": 0.9}
+      "ambience": {"crickets": 0.9, "birds": 0.8, "waves": 0.6, "frogs": 0.2}
     },
     // the jungle: deep greens, the rain comes often
     "jungle": {
       "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
       "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.3, "morning_mist": 0.5},
-      "ambience": {"crickets": 1.0}
+      "ambience": {"crickets": 1.0, "birds": 1.0, "frogs": 0.5}
     },
     // Boggy Billy's swamp: it always rains, harder now and then, under a low fog
     "swamp": {
       "day": {"lift": [0.004, 0.008, 0.004], "gain": [0.98, 1, 0.94], "saturation": 0.88, "contrast": 0.04, "warmth": 0.0, "clouds": 0.75},
       "night": {"lift": [0, 0.006, 0.02], "gain": [0.96, 0.98, 1.02], "saturation": 0.9, "contrast": 0.05, "warmth": -0.02, "clouds": 0.75},
       "weather": {"rain": 0.6, "mist": 0.6, "wet": 1.0, "harder": {"rain": 0.4}, "harder_from": 60, "harder_to": 180},
-      "ambience": {"crickets": 0.8}
+      "ambience": {"crickets": 0.8, "frogs": 1.0, "birds": 0.2}
     },
     // Misty Island: the fog never lifts, a drizzle now and then
     "misty": {
       "day": {"lift": [0.004, 0.008, 0.004], "gain": [0.98, 1, 0.94], "saturation": 0.88, "contrast": 0.04, "warmth": 0.0, "clouds": 0.75},
       "night": {"lift": [0, 0.006, 0.02], "gain": [0.96, 0.98, 1.02], "saturation": 0.9, "contrast": 0.05, "warmth": -0.02, "clouds": 0.75},
       "weather": {"mist": 0.9, "wet": 0.4, "harder": {"rain": 0.4, "wet": 0.6}, "harder_from": 60, "harder_to": 160},
-      "ambience": {"crickets": 0.4, "wind": 0.2}
+      "ambience": {"crickets": 0.4, "wind": 0.2, "waves": 0.5}
     },
     // Snowy Mountain: cold, blue shadows; it always snows, harder now and then
     "snow": {

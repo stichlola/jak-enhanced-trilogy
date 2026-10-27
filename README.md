@@ -68,7 +68,7 @@ release over the old folder: your extracted discs stay.
 - Rain with splashes and puddles that fill and dry; lightning; snow; the desert's sandstorms.
 - 20 weather presets in the menu.
 - Ambient sounds: the rain, light and heavy; dripping after it; wind in storms and on desert nights;
-  crickets at night.
+  crickets and frogs at night, birds by day, the sea, Haven's hum.
 
 **Gameplay**
 - **Nap**: pick 1-12 hours; Jak lies down, sleeps while the sun or moon crosses the sky, gets up

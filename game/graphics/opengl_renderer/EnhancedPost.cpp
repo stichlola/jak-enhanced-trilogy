@@ -92,9 +92,10 @@ struct ZoneWeather {
   float fog = 1.f;
   float fog_period = 0.f, fog_clear = 0.f, fog_light = 0.f, fog_light_amount = 0.35f;
 };
-// the zone's ambient sound loops (0..1): crickets and wind_night at night, wind always
+// the zone's ambient sound loops (0..1): crickets and wind_night at night, birds by day, frogs
+// mostly at night, wind, waves and city always
 struct ZoneAmbience {
-  float crickets = 0.f, wind_night = 0.f, wind = 0.f;
+  float crickets = 0.f, wind_night = 0.f, wind = 0.f, birds = 0.f, frogs = 0.f, waves = 0.f, city = 0.f;
 };
 struct WorldZone {
   std::string name;
@@ -289,6 +290,10 @@ void load_world() {
         zone.ambience.crickets = aj.value("crickets", 0.f);
         zone.ambience.wind_night = aj.value("wind_night", 0.f);
         zone.ambience.wind = aj.value("wind", 0.f);
+        zone.ambience.birds = aj.value("birds", 0.f);
+        zone.ambience.frogs = aj.value("frogs", 0.f);
+        zone.ambience.waves = aj.value("waves", 0.f);
+        zone.ambience.city = aj.value("city", 0.f);
       }
       if (name == "other") {
         w.zones[0] = zone;
@@ -2393,8 +2398,13 @@ void EnhancedPost::update_scene() {
     g[Drips] = outdoors ? std::clamp(m_puddle * 1.5f - r * 3.f, 0.f, 1.f) : 0.f;
     g[WindNight] = std::max(a.wind, a.wind_night * m_night);
     g[WindStorm] = std::clamp(std::max(m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f), 0.f, 1.f);
-    g[Crickets] = a.crickets * m_night * (1.f - std::clamp(r * 3.f, 0.f, 1.f)) *
-                  (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
+    const float calm = (1.f - std::clamp(r * 3.f, 0.f, 1.f)) * (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
+    g[Crickets] = a.crickets * m_night * calm;
+    g[Birds] = a.birds * (1.f - m_night) * calm;
+    // frogs: loudest at night and when it's wet, quiet in a downpour
+    g[Frogs] = a.frogs * (0.25f + 0.75f * std::max(m_night, std::clamp(m_wet, 0.f, 1.f))) * (1.f - 0.6f * heavy);
+    g[Waves] = a.waves;
+    g[City] = a.city * (1.f - 0.3f * m_night);
     for (float& v : g) {
       v *= 1.f - 0.6f * m_movie;
     }

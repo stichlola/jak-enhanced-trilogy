@@ -105,16 +105,18 @@ plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not m
 `JAK_ENHANCED_MENU=8:<vehicle type>` puts Jak in a new vehicle (0-2 bikes, needs ctycarb; 3-5 cars,
 ctycara; 7 Hellcat) once its level is in, for testing.
 
-Ambient sounds (`game/sound/common/enhanced_ambience.*`): six loops in
-`game/assets/enhanced/sounds` (light rain, heavy rain, dripping, night wind, storm wind, crickets;
-48 kHz stereo WAV) mixed on top of the game's sound in `Player::Tick` (989snd, all three games).
+Ambient sounds (`game/sound/common/enhanced_ambience.*`): ten loops in
+`game/assets/enhanced/sounds` (light rain, heavy rain, dripping, night wind, storm wind, crickets,
+birds, frogs, waves, a city's hum; 48 kHz stereo WAV) mixed on top of the game's sound in `Player::Tick` (989snd, all three games).
 `EnhancedPost::update_scene` sets each one's level every frame: the rain from the weather's rain
 and storm, the dripping once the rain stops while the puddles last, the storm wind from the
 thunderstorm and the sandstorms, the zone's `"ambience"` in world.json (`crickets` and `wind_night`
-at night, `wind` always), a little lower in cutscenes. The audio thread fades them (2.5 s), follows
+at night, `birds` by day, `frogs` mostly at night and in the wet, `wind`, `waves` and `city`
+always), a little lower in cutscenes. The audio thread fades them (2.5 s), follows
 the game's sfx volume (group 0) and goes quiet while the sfx group is paused (the pause menu). Menu:
 "Ambient sounds" (volume, 0 = off). The loops were made with ElevenLabs' sound effects and leveled
-by `scripts/enhanced/ambient_sounds.py` (`--convert` redoes the leveling from the downloads).
+by `scripts/enhanced/ambient_sounds.py` (`--convert` redoes the leveling from the downloads; the
+last half second of each is faded into its start, so the seam doesn't click).
 
 Subtitles: smaller than the PS2's by default (bank scale 0.65 in Jak II and 3, 0.38 in Jak 1, in
 `subtitle*-h.gc` / `pc/subtitle.gc`); the menu's "Subtitle size" (Small, Medium, Large = the PS2
@@ -164,8 +166,8 @@ not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-
 
 Next, the small ones first (the big ones below wait until these are done):
 
-- More ambient sounds: rain on roofs and metal under cover, birds by day, frogs in the swamp, the
-  sea's waves, Haven's distant hum.
+- Rain on roofs and metal when Jak is under cover (needs a "covered" test: the sky hidden above
+  Jak).
 - A more modern minimap (Jak II and 3): the HUD's round map (`minimap.gc`, `hud-map`) redrawn with a
   cleaner look (sharper, a modern frame and icons), keeping the game's own map data and markers.
 - A photo mode: the game held still, a free camera, filters, the HUD hidden.

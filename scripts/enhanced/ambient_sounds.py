@@ -8,11 +8,13 @@ The key comes from ELEVENLABS_API_KEY. Each sound is asked for as a seamless loo
 with ffmpeg to 48 kHz stereo 16-bit WAV, the format the game's mixer plays (game/sound/common/
 enhanced_ambience.cpp). The raw downloads stay in local/ambience (not in git).
 """
+import array
 import json
 import os
 import subprocess
 import sys
 import urllib.request
+import wave
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,7 +25,7 @@ RAW = ROOT / "local" / "ambience"
 # The loops come back at very different levels; each is brought to its own loudness (LUFS), the
 # mix between them (heavy rain over light, crickets well under the game)
 LOUDNESS = {"rain_light": -25, "rain_heavy": -19, "drips": -28, "wind_night": -26, "wind_storm": -20,
-            "crickets": -28}
+            "crickets": -28, "birds": -29, "frogs": -28, "waves": -25, "city": -30}
 SOUNDS = {
     "rain_light": ("Gentle steady rain falling on grass, leaves and stone ground, soft constant "
                    "patter, calm ambience, no thunder, no music", 20),
@@ -37,6 +39,14 @@ SOUNDS = {
                    "ambience, no thunder, no music", 20),
     "crickets": ("Crickets chirping at night in a meadow, calm warm summer night ambience, a few "
                  "distant, no birds, no music", 20),
+    "birds": ("Tropical birds singing in the trees by day, a few distant songbirds and calls, calm "
+              "nature ambience, no wind, no music, no voices", 20),
+    "frogs": ("Frogs croaking in a swamp at night, a chorus of tree frogs and toads, wet marsh "
+              "ambience, no music", 20),
+    "waves": ("Gentle sea waves washing on a sandy beach, slow steady surf, calm ocean ambience, no "
+              "seagulls, no music", 20),
+    "city": ("Distant hum of a big futuristic city: far away traffic drone, machinery, muffled "
+             "crowd murmur, steady low ambience, no sirens, no music, no clear voices", 20),
 }
 
 
@@ -80,7 +90,24 @@ def convert(raw, name):
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-af",
                     f"volume={gain:.1f}dB,alimiter=limit=0.9:level=false", "-ar", "48000", "-ac", "2",
                     "-c:a", "pcm_s16le", str(wav)], check=True)
+    crossfade_loop(wav)
     return wav
+
+
+def crossfade_loop(wav, seconds=0.5):
+    """Hide the loop's seam: the last half second is faded into the first and cut off."""
+    with wave.open(str(wav)) as w:
+        params = w.getparams()
+        a = array.array("h", w.readframes(w.getnframes()))
+    n = int(48000 * seconds) * 2
+    head, tail = a[:n], a[-n:]
+    for i in range(n):
+        t = (i // 2) / (n // 2)
+        a[i] = int(max(-32768, min(32767, head[i] * t + tail[i] * (1.0 - t))))
+    del a[-n:]
+    with wave.open(str(wav), "wb") as w:
+        w.setparams(params)
+        w.writeframes(a.tobytes())
 
 
 def main():

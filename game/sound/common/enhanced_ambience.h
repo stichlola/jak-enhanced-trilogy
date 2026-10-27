@@ -1,16 +1,28 @@
 #pragma once
 
-// Enhanced: ambient sound loops (rain, dripping, wind, crickets) mixed on top of the game's own
-// sound. The renderer (EnhancedPost::update_scene) says how loud each layer should be from the
-// weather, the zone and the hour; the audio thread fades each one there and mixes it in
-// (Player::Tick). The loops are game/assets/enhanced/sounds/<name>.wav, 48 kHz stereo 16-bit, made
-// by scripts/enhanced/ambient_sounds.py.
+// Enhanced: ambient sound loops (rain, dripping, wind, crickets, birds, frogs, waves, a city) mixed
+// on top of the game's own sound. The renderer (EnhancedPost::update_scene) says how loud each
+// layer should be from the weather, the zone and the hour; the audio thread fades each one there
+// and mixes it in (Player::Tick). The loops are game/assets/enhanced/sounds/<name>.wav, 48 kHz
+// stereo 16-bit, made by scripts/enhanced/ambient_sounds.py.
 
 #include "game/sound/common/sound_types.h"
 
 namespace snd::ambience {
 
-enum Layer { RainLight, RainHeavy, Drips, WindNight, WindStorm, Crickets, kLayers };
+enum Layer {
+  RainLight,
+  RainHeavy,
+  Drips,
+  WindNight,
+  WindStorm,
+  Crickets,
+  Birds,
+  Frogs,
+  Waves,
+  City,
+  kLayers
+};
 
 // render thread: how loud each layer should be (0..1, before the volume). The first call loads the
 // loops (those missing stay silent)
