@@ -79,14 +79,22 @@ if defined NEED_EXTRACT (
   )
 )
 
-rem The optional HD textures pack (unzipped here, it lands in data\custom_assets\jakN\texture_replacements):
-rem the levels take it in only when they're extracted, so extract them again once
-for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" if exist "%PROJ%\custom_assets\jak%%G\texture_replacements" if not exist "%PROJ%\out\jak%%G\hd-textures.done" (
+rem The optional HD textures, made here from the player's own disc (scripts\enhanced\hd_setup.py,
+rem Python installed with winget when missing): asked once per game
+for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" if not exist "%PROJ%\out\jak%%G\hd-textures.asked" (
   echo.
-  echo HD textures found for Jak %%G: putting them in the game ^(20-40 minutes, only this once^).
-  "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -d -c "!JAK%%G_ISO!" || goto :failed
-  echo done> "%PROJ%\out\jak%%G\hd-textures.done"
-  if defined VER echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
+  echo HD textures for Jak %%G: every texture of the game redrawn 4x by an AI ^(Real-ESRGAN^) on your
+  echo graphics card, from your own disc. It takes a while: about 30 minutes for Jak 1, 1-2 hours for
+  echo Jak II or Jak 3 ^(depends on the graphics card^), and 1-4 GB more on disk. The game works the
+  echo same without them. To be asked again, delete out\jak%%G\hd-textures.asked.
+  set "HD=n"
+  set /p "HD=Make the HD textures for Jak %%G now? (y/N): "
+  echo asked> "%PROJ%\out\jak%%G\hd-textures.asked"
+  if /i "!HD!"=="y" (
+    where py >nul 2>nul || winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+    set "PATH=%LOCALAPPDATA%\Programs\Python\Launcher;%PATH%"
+    py -3 "%PROJ%\scripts\enhanced\hd_setup.py" --games jak%%G --bin "%BIN%" || goto :failed
+  )
 )
 
 rem An update: the games compiled by an older version are compiled again (a minute or two each)

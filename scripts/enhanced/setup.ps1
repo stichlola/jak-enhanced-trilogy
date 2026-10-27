@@ -8,7 +8,9 @@
 # 2. builds the game, the compiler and the extractor (Release, clang-cl)
 # 3. extracts your ISOs, decompiles their data and compiles the games (OpenGOAL's extractor: 20-40
 #    min a game)
-# 4. writes Play-Jak1/2/3-Enhanced.bat for each game, and Play-Jak-Enhanced-Trilogy.bat (starts from
+# 4. optional, asked (or -HdTextures / -NoHdTextures): the HD textures, made here from your discs by
+#    Real-ESRGAN on the graphics card (hd_setup.py: 1-3 hours for the three games, ~10 GB)
+# 5. writes Play-Jak1/2/3-Enhanced.bat for each game, and Play-Jak-Enhanced-Trilogy.bat (starts from
 #    the first game you have; F9 in the game switches to the next one)
 #
 # -SkipTools / -SkipBuild / -SkipExtract skip a step (to rebuild after a code change: -SkipTools -SkipExtract).
@@ -20,7 +22,9 @@ param(
   [string]$Jak3Iso = "",
   [switch]$SkipTools,
   [switch]$SkipBuild,
-  [switch]$SkipExtract
+  [switch]$SkipExtract,
+  [switch]$HdTextures,
+  [switch]$NoHdTextures
 )
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot\..\..").Path
@@ -93,6 +97,27 @@ if (-not $SkipExtract) {
     Set-Content -Encoding ascii "$root\goal_src\user\user.txt" "player"
     $entries = ($repl.Keys | Sort-Object | ForEach-Object { "`"$_`": {`"gameVersionFolder`": `"$($repl[$_])`"}" }) -join ", "
     Set-Content -Encoding ascii "$root\goal_src\user\player\repl-config.json" "{$entries}"
+  }
+}
+
+# the HD textures: optional, they take a while
+$extracted = @("jak1", "jak2", "jak3") | Where-Object { Test-Path "$root\out\$_\iso" }
+if ($extracted -and -not $NoHdTextures) {
+  $doHd = $HdTextures
+  if (-not $doHd) {
+    Write-Host ""
+    Write-Host "HD textures: every texture redrawn 4x by Real-ESRGAN on your graphics card (needs Vulkan),"
+    Write-Host "from your own discs. About 1-3 hours for the three games (30-60 min a game), ~10 GB more on"
+    Write-Host "disk. The game works without them; you can add them later with -SkipTools -SkipBuild"
+    Write-Host "-SkipExtract -HdTextures."
+    $doHd = (Read-Host "Make the HD textures now? [y/N]") -match "^[yYsS]"
+  }
+  if ($doHd) {
+    if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
+      winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
+    }
+    & py -3 "$PSScriptRoot\hd_setup.py" --games @extracted
+    if ($LASTEXITCODE -ne 0) { throw "HD textures failed (exit $LASTEXITCODE)" }
   }
 }
 

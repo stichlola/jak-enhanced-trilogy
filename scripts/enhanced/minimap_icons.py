@@ -9,8 +9,8 @@ decompiler's texture dump; its 47 picture icons go to Tripo in four 4 x 3 sheets
 light gray background, with a description of every icon. The redrawn icons are cut back out of the
 answer (the background flooded away from the edges up to the icons' dark outlines) and put in the
 same cells of a 1024 x 1024 atlas; the plain dots are drawn here. Everything stays in
-local/minimap_icons (made from the games' art: not in git); the atlases are also copied where the
-game loads them, out/enhanced/minimap/<game>/<tpage>/mini-map-icons.png (EnhancedMapTextures.cpp).
+local/minimap_icons; the finished atlases (new drawings) go in the repo where the game loads them,
+game/assets/enhanced/hud/<game>/<tpage>/mini-map-icons.png (EnhancedMapTextures.cpp).
 The Tripo key comes from TRIPO_API_KEY and is never printed.
 """
 import json
@@ -222,8 +222,9 @@ def atlas():
     size = 128 * UP
     for game, path in ATLAS.items():
         old = Image.open(path).convert("RGBA")
-        # start from the game's atlas, 8x and smooth (the dots, and any icon not redrawn)
-        new = opaque(old).resize((size, size), Image.LANCZOS)
+        # only the new drawings go in the repo: the cells not redrawn (the dots, the markers) are left
+        # "see-through magenta", which the game fills from its own atlas enlarged
+        new = Image.new("RGBA", (size, size), (255, 0, 255, 0))
         for s in range(4):
             sheet_path = OUT / f"hd{s}.png"
             if not sheet_path.exists():
@@ -244,7 +245,7 @@ def atlas():
                 f = min(bw / icon.width, bh / icon.height)
                 icon = icon.resize((max(1, int(icon.width * f)), max(1, int(icon.height * f))), Image.LANCZOS)
                 x0, y0 = i * CELL * UP, j * CELL * UP
-                new.paste((0, 0, 0, 0), (x0, y0, x0 + CELL * UP, y0 + CELL * UP))
+                new.paste((0, 0, 0, 0), (x0, y0, x0 + CELL * UP, y0 + CELL * UP))  # redrawn: not filled
                 cx = x0 + (ob[0] + ob[2]) * UP // 2 - icon.width // 2
                 cy = y0 + (ob[1] + ob[3]) * UP // 2 - icon.height // 2
                 new.alpha_composite(icon, (cx, cy))
@@ -252,7 +253,7 @@ def atlas():
         r, g, b, a = new.split()
         done = Image.merge("RGBA", (r, g, b, a.point(lambda v: (v + 1) // 2)))
         done.save(OUT / f"{game}-mini-map-icons.png")
-        game_copy = ROOT / "out" / "enhanced" / "minimap" / game / path.parent.name / "mini-map-icons.png"
+        game_copy = ROOT / "game" / "assets" / "enhanced" / "hud" / game / path.parent.name / "mini-map-icons.png"
         game_copy.parent.mkdir(parents=True, exist_ok=True)
         done.save(game_copy)
         print(f"{game}: {OUT / f'{game}-mini-map-icons.png'} (the game's copy: {game_copy})")

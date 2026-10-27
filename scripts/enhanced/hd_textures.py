@@ -1,19 +1,25 @@
 """Jak Enhanced Trilogy: 4x AI-upscaled textures as OpenGOAL texture replacements.
 
-    python scripts/enhanced/hd_textures.py [--game jak1|jak2|jak3] [--tpages REGEX] [--gpu 0]
+    python scripts/enhanced/hd_textures.py [--game jak1|jak2|jak3] [--tpages REGEX] [--gpu 0] [--hud]
 
 Reads the decompiler's texture dump (decompiler_out/<folder>/textures/<tpage>/<name>.png, made
 with "save_texture_pngs": true), upscales each one 4x with Real-ESRGAN (wrap-padded so tiling
 textures stay seamless) and writes custom_assets/<game>/texture_replacements/<tpage>/<name>.png.
-Decals, cutouts and glass (any texel with alpha < 120/128, see translucent.ps1) get the upscaled
-colors but their original alpha, resized smoothly (alpha_restore.ps1): the upscaler would move
+Decals, cutouts and glass (any texel with alpha < 120/128, see translucent()) get the upscaled
+colors but their original alpha, resized smoothly (restore_alpha): the upscaler would move
 and soften their transparency. --opaque-only leaves them at their original resolution. The
 decompiler also skips a replacement that doesn't match its texture when
 scaled back down (TextureDB::replace_texture), since texture names aren't unique. The decompiler
 picks those up when it extracts the levels again (levels_extract), so the .fr3
 files carry the HD textures. Results are cached by content hash, so re-runs only do new ones.
 
-Real-ESRGAN and the wrap helper come from the jak3-ue5 checkout (--tools).
+--hud does the HUD and menu art instead (the "...-minimap" pages, Jak 1's Hud and zoomerhud: health,
+weapons, the pause menu's pictures...; not the fonts, nor the minimap's maps and icons, which have
+their own scripts) and writes it to out/enhanced/hud/<game>/<tpage>/<name>.png: the game loads it
+as the level loads (EnhancedMapTextures.cpp) and keeps drawing it at its own size, so no new
+extraction is needed.
+
+Real-ESRGAN comes from out/tools (hd_setup.py downloads it) or the jak3-ue5 checkout.
 """
 
 import argparse
@@ -25,79 +31,107 @@ import sys
 import tempfile
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
+
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "out/enhanced-upscale-cache"
 PAD = 16
 
-# per game: the decompiler's output folder and the pages upscaled by default. Jak 3: Spargus, the
-# desert and its sub-areas, the vehicles, plus Jak/Daxter and the guns (Haven still to do);
-# Jak 1 and 2: everything
-GAMES = {
-    "jak1": ("jak1_pal", r"."),
-    "jak2": ("jak2_pal", r"."),
-    "jak3": ("jak3_pal", r"^(was|des|wca|wcb|wasstad|desert|wcar|wvehicle|jak|daxter|gun|common|lj|dk)"),
-}
+GAMES = ("jak1", "jak2", "jak3")
 # HUD, fonts and minimaps are drawn 1:1 on screen or decoded by the game: leave them alone.
 EXCLUDE = r"(minimap|hud|font|progress|-sprite$|warp|ocean)"
+# --hud: the HUD and menu pages, but not the fonts nor the minimap's own art
+HUD_TPAGES = r"(-minimap$|^Hud$|^zoomerhud$)"
+HUD_EXCLUDE = r"(^map-|^mini-map-icons$|font)"
+
+
+def find_dump(game):
+    """The decompiler's texture dump of a game (decompiler_out/jak3_pal, jak3...: the disc's version)"""
+    dumps = [folder / "textures" for folder in (ROOT / "decompiler_out").glob(f"{game}*")
+             if re.fullmatch(rf"{game}(_[a-z0-9]+)?", folder.name) and (folder / "textures").is_dir()]
+    if dumps:  # the fullest, if there are several
+        return max(dumps, key=lambda d: sum(1 for _ in d.glob("*/*.png")))
+    raise SystemExit(f"no texture dump of {game} in decompiler_out (decompile with save_texture_pngs)")
+
+
+def find_esrgan():
+    """Real-ESRGAN: downloaded by hd_setup.py into out/tools, or the jak3-ue5 checkout's"""
+    for exe in (ROOT / "out/tools/realesrgan/realesrgan-ncnn-vulkan.exe",
+                ROOT.parent / "jak3-ue5/tools/realesrgan/bin/realesrgan-ncnn-vulkan.exe"):
+        if exe.exists():
+            return exe
+    raise SystemExit("Real-ESRGAN not found: run scripts/enhanced/hd_setup.py")
 
 
 def png_size(data):
     return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
 
 
-def run_batch(files, tools, model, gpu):
-    esrgan = tools / "realesrgan/bin/realesrgan-ncnn-vulkan.exe"
-    wrap = tools / "glb/wrap.ps1"
+def run_batch(files, model, gpu):
+    esrgan = find_esrgan()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
-        for name in ("src", "padded", "scaled"):
+        for name in ("padded", "scaled"):
             (tmp / name).mkdir()
+        # each texture surrounded by copies of itself, so tiling ones stay seamless
         for key, path in files.items():
-            shutil.copyfile(path, tmp / "src" / f"{key}.png")
-
-        def wrap_step(mode, src, dst):
-            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrap), mode,
-                            str(src), str(dst), "-Pad", str(PAD), "-Scale", "4"], check=True)
-
-        wrap_step("pad", tmp / "src", tmp / "padded")
+            rgba = np.asarray(Image.open(path).convert("RGBA"))
+            Image.fromarray(np.pad(rgba, ((PAD, PAD), (PAD, PAD), (0, 0)), mode="wrap")).save(
+                tmp / "padded" / f"{key}.png")
         command = [str(esrgan), "-i", str(tmp / "padded"), "-o", str(tmp / "scaled"), "-n", model, "-s", "4",
                    "-m", str(esrgan.parent / "models"), "-f", "png"]
         if gpu is not None:
             command += ["-g", str(gpu)]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        wrap_step("crop", tmp / "scaled", CACHE / model)
+        border = PAD * 4
+        for key in files:
+            scaled = Image.open(tmp / "scaled" / f"{key}.png")
+            scaled.crop((border, border, scaled.width - border, scaled.height - border)).save(
+                CACHE / model / f"{key}.png")
 
 
 def translucent(todo):
-    """Keys of the textures with any translucent texel (see translucent.ps1)."""
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp = Path(tmp)
-        for _, png, key in todo:
-            shutil.copyfile(png, tmp / f"{key}.png")
-        result = subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                                 str(Path(__file__).with_name("translucent.ps1")), str(tmp)],
-                                check=True, capture_output=True, text=True)
-    return {Path(name).stem for name in result.stdout.split()}
+    """Keys of the textures with any translucent texel (PS2 alpha below 120 of 128): decals, cutouts
+    and glass, often blended so that even the color of "transparent" texels shows"""
+    keys = set()
+    for _, png, key in todo:
+        if np.asarray(Image.open(png).convert("RGBA"))[..., 3].min() < 120:
+            keys.add(key)
+    return keys
+
+
+def restore_alpha(original, scaled, out):
+    """The upscaled colors with the original alpha resized smoothly: the upscaler would move and soften
+    the transparency, and cutouts and decals must blend as in the game"""
+    big = Image.open(scaled).convert("RGBA")
+    alpha = Image.open(original).convert("RGBA").getchannel("A").resize(big.size, Image.BICUBIC)
+    big.putalpha(alpha)
+    big.save(out)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--game", choices=sorted(GAMES), default="jak3")
+    parser.add_argument("--game", choices=GAMES, default="jak3")
     parser.add_argument("--tpages", help="regex of texture pages to upscale (default: per game)")
     parser.add_argument("--model", default="realesrgan-x4plus")
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--min-size", type=int, default=16, help="skip textures smaller than this (px)")
     parser.add_argument("--max-size", type=int, default=256, help="skip textures larger than this (px)")
     parser.add_argument("--batch", type=int, default=200)
-    parser.add_argument("--tools", type=Path, default=ROOT.parent / "jak3-ue5/tools")
     parser.add_argument("--opaque-only", action="store_true", help="skip translucent textures")
+    parser.add_argument("--hud", action="store_true", help="the HUD and menu art (out/enhanced/hud)")
     args = parser.parse_args()
     global OUT
-    folder, default_tpages = GAMES[args.game]
-    dump = ROOT / "decompiler_out" / folder / "textures"
+    default_tpages = r"."
+    dump = find_dump(args.game)
     OUT = ROOT / "custom_assets" / args.game / "texture_replacements"
+    if args.hud:
+        OUT = ROOT / "out" / "enhanced" / "hud" / args.game
+        default_tpages = HUD_TPAGES
+        args.max_size = max(args.max_size, 512)
 
-    pick, skip = re.compile(args.tpages or default_tpages), re.compile(EXCLUDE)
+    pick, skip = re.compile(args.tpages or default_tpages), re.compile(HUD_EXCLUDE if args.hud else EXCLUDE)
     todo = []
     for tpage in sorted(p for p in dump.iterdir() if p.is_dir()):
         if not pick.search(tpage.name) or skip.search(tpage.name):
@@ -130,7 +164,7 @@ def main():
     keys = list(missing)
     for start in range(0, len(keys), args.batch):
         batch = {key: missing[key] for key in keys[start:start + args.batch]}
-        run_batch(batch, args.tools, args.model, args.gpu)
+        run_batch(batch, args.model, args.gpu)
         print(f"  upscaled {min(start + args.batch, len(keys))}/{len(keys)}", flush=True)
 
     # translucent ones: the upscaled colors with the original alpha, cached apart
@@ -139,18 +173,8 @@ def main():
     pending = {key: unique[key][1] for key in see_through
                if not (alpha_dir / f"{key}.png").exists() and (CACHE / args.model / f"{key}.png").exists()}
     if pending:
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp = Path(tmp)
-            (tmp / "orig").mkdir()
-            (tmp / "scaled").mkdir()
-            for key, png in pending.items():
-                shutil.copyfile(png, tmp / "orig" / f"{key}.png")
-                shutil.copyfile(CACHE / args.model / f"{key}.png", tmp / "scaled" / f"{key}.png")
-            subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-                            str(Path(__file__).with_name("alpha_restore.ps1")), str(tmp / "orig"),
-                            str(tmp / "scaled")], check=True)
-            for key in pending:
-                shutil.copyfile(tmp / "scaled" / f"{key}.png", alpha_dir / f"{key}.png")
+        for key, png in pending.items():
+            restore_alpha(png, CACHE / args.model / f"{key}.png", alpha_dir / f"{key}.png")
         print(f"{len(pending)} translucent textures given back their original alpha")
 
     written = 0

@@ -7,8 +7,8 @@ Most are flat 4-bit drawings (Haven's tiles: dark blocks, white streets, blue wa
 they keep their exact shapes (each color region's edge smoothed at 4x) and get a new look: a calmer
 palette, raised blocks with a lit bevel and a soft shadow on the streets, thin outlines, water deeper
 away from the shore with a light rim. The painted ones (the desert, Spargus...) are enlarged with
-Real-ESRGAN (from the jak3-ue5 project's tools). The results go where the game loads them,
-out/enhanced/minimap/<game>/<tpage>/<name>.png (EnhancedMapTextures.cpp): made from the games' art,
+Real-ESRGAN (find_esrgan in hd_textures.py). The results go where the game loads them,
+out/enhanced/hud/<game>/<tpage>/<name>.png (EnhancedMapTextures.cpp): made from the games' art,
 so not in git. --preview also writes local/minimap_maps/preview.png, before and after.
 """
 import shutil
@@ -22,10 +22,9 @@ from PIL import Image
 from scipy import ndimage
 
 ROOT = Path(__file__).resolve().parents[2]
-DUMP = Path(r"C:/Users/david/Desktop/coding/jak-project/decompiler_out")
-GAMES = {"jak2": DUMP / "jak2_pal/textures", "jak3": DUMP / "jak3_pal/textures"}
-ESRGAN = Path(r"C:/Users/david/Desktop/coding/jak3-ue5/tools/realesrgan/bin/realesrgan-ncnn-vulkan.exe")
-OUT = ROOT / "out" / "enhanced" / "minimap"
+sys.path.insert(0, str(Path(__file__).parent))
+from hd_textures import find_dump, find_esrgan  # noqa: E402
+OUT = ROOT / "out" / "enhanced" / "hud"
 S = 4  # the game's kEnhancedMapScale
 
 # the restyled palette
@@ -134,8 +133,9 @@ def painted(items, tmp):
     dst.mkdir()
     for i, (a, _) in enumerate(items):
         Image.fromarray(a[..., :3].astype(np.uint8), "RGB").save(src / f"{i}.png")
-    subprocess.run([str(ESRGAN), "-i", str(src), "-o", str(dst), "-n", "realesrgan-x4plus", "-s", "4",
-                    "-m", str(ESRGAN.parent / "models"), "-f", "png"], check=True, capture_output=True)
+    esrgan = find_esrgan()
+    subprocess.run([str(esrgan), "-i", str(src), "-o", str(dst), "-n", "realesrgan-x4plus", "-s", "4",
+                    "-m", str(esrgan.parent / "models"), "-f", "png"], check=True, capture_output=True)
     out = []
     for i, (a, path) in enumerate(items):
         rgb = np.asarray(Image.open(dst / f"{i}.png").convert("RGB")).astype(float)
@@ -148,7 +148,11 @@ def main():
     args = sys.argv[1:]
     only = set(args[args.index("--only") + 1:]) if "--only" in args else None
     maps = []
-    for game, textures in GAMES.items():
+    for game in ("jak2", "jak3"):
+        try:
+            textures = find_dump(game)
+        except SystemExit:
+            continue  # that game isn't extracted
         for path in sorted(textures.glob("*-minimap/map-*.png")):
             if only and path.stem not in only:
                 continue

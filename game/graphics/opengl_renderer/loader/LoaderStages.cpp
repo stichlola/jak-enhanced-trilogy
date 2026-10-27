@@ -15,11 +15,11 @@ u64 add_texture(TexturePool& pool, const tfrag3::Texture& tex, bool is_common) {
   glActiveTexture(GL_TEXTURE0);
   glGenTextures(1, &gl_tex);
   glBindTexture(GL_TEXTURE_2D, gl_tex);
-  // Enhanced: the minimap's HD icons (if made), and its district maps redrawn at 4x (the pool still
-  // sees the game's size)
+  // Enhanced: HD HUD, menu and minimap art (if made), else the district maps redrawn at 4x (the pool
+  // still sees the game's size)
   std::vector<u32> sharp;
   int hd_scale = 1;
-  if (enhanced_hd_minimap_texture(tex, sharp, hd_scale)) {
+  if (enhanced_hd_screen_texture(tex, sharp, hd_scale)) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w * hd_scale, tex.h * hd_scale, 0, GL_RGBA,
                  GL_UNSIGNED_INT_8_8_8_8_REV, sharp.data());
     enhanced_set_texel_scale(gl_tex, (float)hd_scale);

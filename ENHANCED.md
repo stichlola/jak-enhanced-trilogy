@@ -60,7 +60,7 @@ Laptop (the game stays at its 60 fps cap).
 | Motion blur | Camera only: each pixel reprojected into the previous frame's camera; sharp within 10 m (Jak), skipped on cuts |
 | Sea reflections | Screen-space rays on the far sea (depth kept right after OCEAN_MID_FAR) and the near sea (OceanNear made to write its surface, then the depth restored); ripples plus a long open-sea swell (normals only, calm in the shallows), Fresnel, sky fallback; in shallow water the sea bed is bent by the waves (refraction, only where the bent ray still lands under water) and lit by drifting caustics. The flat see-through discs the game draws a few cm over the water (splashes, ripples) stay water, and the game's own color shows through wherever it is brighter than ours (the foam) |
 | Desert sand | `scripts/enhanced/desert_sand.py`: the jak3-ue5 Tripo sand tile, color-matched to the Wang atlas, in `out/enhanced/desert_sand.png`; the hfrag dunes sample it in world space every 64 m instead of the Wang montage |
-| HD textures | `scripts/enhanced/hd_textures.py`: 4x Real-ESRGAN of the opaque textures of Spargus, the desert, vehicles, Jak/Daxter and guns (~2800) into `custom_assets/jak3/texture_replacements` (git-ignored), then extract the levels again (fr3 0.9 → 2.6 GB). Decals/cutouts/glass stay original (their blending shows the color of "transparent" texels); the decompiler skips a replacement that doesn't match its texture scaled back down, because texture names aren't unique |
+| HD textures | Made by each player from their own disc, never shipped: the launcher asks once per game and runs `scripts/enhanced/hd_setup.py` (pip, Real-ESRGAN downloaded into `out/tools`, texture dump, `hd_textures.py` 4x into `custom_assets/<game>/texture_replacements`, `--hud` and `minimap_maps.py` into `out/enhanced/hud`, levels extracted again). Decals/cutouts/glass keep their original alpha; the decompiler skips a replacement that doesn't match its texture scaled back down (texture names aren't unique). HUD and menu art is loaded at runtime with its texel scale (`EnhancedMapTextures.cpp`), so it needs no new extraction. The Tripo icons are new drawings and live in the repo (`game/assets/enhanced/hud`); their cells not redrawn are see-through magenta, filled from the game's own atlas |
 
 **In-game menu: `\`** opens and closes it (EnhancedPost::draw_menu): every effect on/off, lamp
 strength, population and the minimap (hidden unless switched on: `pc-enhanced-minimap?` in
@@ -133,7 +133,7 @@ Smaller by default: the menu's "Minimap size %" (70, `pc-enhanced-minimap-size`)
 icons, Jak's arrow and the ring together (`enhanced-minimap-scale` in `minimap.gc`, hud-map's draw
 in `hud-classes.gc`), the bottom right corner kept in place.
 HD art, made ahead and loaded instead of the game's when present (not in git: made from the games'
-art): `out/enhanced/minimap/<game>/<tpage>/<name>.png`, a whole multiple of the texture's size.
+art): `out/enhanced/hud/<game>/<tpage>/<name>.png`, a whole multiple of the texture's size.
 `scripts/enhanced/minimap_icons.py` redraws the 47 icons of `mini-map-icons` with Tripo
 (image to image, four sheets of 12 with a description of each; 8x atlas), and
 `scripts/enhanced/minimap_maps.py` redraws every district map at 4x in a modern style (the same

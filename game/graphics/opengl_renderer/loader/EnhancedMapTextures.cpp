@@ -99,14 +99,41 @@ bool enhanced_upscale_map(const tfrag3::Texture& tex, std::vector<u32>& out) {
   return true;
 }
 
-bool enhanced_hd_minimap_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale) {
-  if (!ends_with(tex.debug_tpage_name, "-minimap") || tex.w <= 0 || tex.h <= 0) {
+bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale) {
+  if (tex.w <= 0 || tex.h <= 0) {
     return false;
   }
-  const auto path = file_util::get_jak_project_dir() / "out" / "enhanced" / "minimap" /
-                    version_to_game_name(g_game_version) / tex.debug_tpage_name /
-                    (tex.debug_name + ".png");
-  if (!fs::exists(path)) {
+  // only pages that have a folder (asked once per page)
+  // made on this machine (out/, from the game's art) first, then the repo's own (game/assets: the
+  // minimap icons redrawn with Tripo)
+  static std::mutex dirs_mutex;
+  static std::unordered_map<std::string, std::vector<fs::path>> dirs;
+  std::vector<fs::path> roots;
+  {
+    std::lock_guard<std::mutex> lock(dirs_mutex);
+    auto it = dirs.find(tex.debug_tpage_name);
+    if (it == dirs.end()) {
+      const auto game = version_to_game_name(g_game_version);
+      std::vector<fs::path> found;
+      for (const auto& root : {file_util::get_jak_project_dir() / "out" / "enhanced" / "hud",
+                               file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" /
+                                   "hud"}) {
+        if (fs::is_directory(root / game / tex.debug_tpage_name)) {
+          found.push_back(root / game / tex.debug_tpage_name);
+        }
+      }
+      it = dirs.emplace(tex.debug_tpage_name, found).first;
+    }
+    roots = it->second;
+  }
+  fs::path path;
+  for (const auto& dir : roots) {
+    if (fs::exists(dir / (tex.debug_name + ".png"))) {
+      path = dir / (tex.debug_name + ".png");
+      break;
+    }
+  }
+  if (path.empty()) {
     return false;
   }
   int w, h;
@@ -119,6 +146,30 @@ bool enhanced_hd_minimap_texture(const tfrag3::Texture& tex, std::vector<u32>& o
   if (ok) {
     out.resize((size_t)w * h);
     std::memcpy(out.data(), data, out.size() * 4);
+    // see-through magenta (alpha 0): not redrawn, the game's own texel there, enlarged smoothly
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        u32& px = out[(size_t)y * w + x];
+        if (px != 0x00ff00ffu) {
+          continue;
+        }
+        const float fx = std::clamp((x + 0.5f) / scale - 0.5f, 0.f, tex.w - 1.f);
+        const float fy = std::clamp((y + 0.5f) / scale - 0.5f, 0.f, tex.h - 1.f);
+        const int x0 = (int)fx, y0 = (int)fy;
+        const int x1 = std::min(x0 + 1, (int)tex.w - 1), y1 = std::min(y0 + 1, (int)tex.h - 1);
+        const float tx = fx - x0, ty = fy - y0;
+        u32 mixed = 0;
+        for (int c = 0; c < 4; c++) {
+          auto ch = [&](int sx, int sy) {
+            return (float)((tex.data[(size_t)sy * tex.w + sx] >> (8 * c)) & 0xff);
+          };
+          const float v = (ch(x0, y0) * (1 - tx) + ch(x1, y0) * tx) * (1 - ty) +
+                          (ch(x0, y1) * (1 - tx) + ch(x1, y1) * tx) * ty;
+          mixed |= (u32)std::clamp((int)(v + 0.5f), 0, 255) << (8 * c);
+        }
+        px = mixed;
+      }
+    }
     lg::info("[enhanced] {} {}: HD x{}", tex.debug_tpage_name, tex.debug_name, scale);
   } else {
     lg::error("[enhanced] {}: {}x{} is not a multiple of {}x{}", path.string(), w, h, tex.w, tex.h);

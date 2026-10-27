@@ -26,6 +26,9 @@ DATA = [
     "game/assets",
     "game/graphics/opengl_renderer/shaders",
     "custom_assets",
+    "scripts/enhanced/hd_setup.py",  # the HD textures, made by the player (the launcher asks)
+    "scripts/enhanced/hd_textures.py",
+    "scripts/enhanced/minimap_maps.py",
 ]
 
 
@@ -46,7 +49,7 @@ def main():
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
-    for exe in ("gk.exe", "goalc.exe", "extractor.exe"):
+    for exe in ("gk.exe", "goalc.exe", "extractor.exe", "decompiler.exe"):
         shutil.copy2(args.bin / exe, dest / exe)
 
     count = 0
