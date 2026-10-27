@@ -457,13 +457,68 @@ def save_bmp(img, path, size):
     img.convert("RGB").resize(size, Image.LANCZOS).save(path, "BMP")
 
 
+WHEEL = ROOT / "game/assets/enhanced/wheel"
+# where each portrait's Jak stands (its middle across, 0..1): Jak 1 with Daxter beside him
+PORTRAIT_X = (0.47, 0.56, 0.5)
+
+
+def portrait_art():
+    """The three game-wheel portraits (game/assets/enhanced/wheel) as the cover's three panels, split
+    by slanted glowing seams, darkened at the top for the title; None without them."""
+    paths = [WHEEL / f"jak{n}.png" for n in (1, 2, 3)]
+    if not all(p.exists() for p in paths):
+        return None
+    art = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+    slant = 90
+    seams = [0, W // 3, 2 * W // 3, W]
+    for i, path in enumerate(paths):
+        pic = Image.open(path).convert("RGBA").resize((H, H), Image.LANCZOS)
+        mid = (seams[i] + seams[i + 1]) // 2
+        # (pasted with Jak on the panel's middle; a negative offset is cut off on the left)
+        layer = Image.new("RGBA", (W, H))
+        left = int(mid - PORTRAIT_X[i] * H)
+        layer.alpha_composite(pic.crop((max(0, -left), 0, H, H)), (max(0, left), 0))
+        mask = Image.new("L", (W, H))
+        x0t, x0b = seams[i] + (slant if i else 0), seams[i] - (slant if i else 0)
+        x1t, x1b = seams[i + 1] + (slant if i < 2 else 0), seams[i + 1] - (slant if i < 2 else 0)
+        ImageDraw.Draw(mask).polygon([(x0t, 0), (x1t, 0), (x1b, H), (x0b, H)], fill=255)
+        art = Image.composite(layer, art, mask)
+    # the seams: a thin bright line with a soft glow
+    glow = Image.new("L", (W, H))
+    d = ImageDraw.Draw(glow)
+    for x in seams[1:3]:
+        d.line([(x + slant, 0), (x - slant, H)], fill=255, width=6)
+    halo = Image.new("RGBA", (W, H), (255, 236, 190, 255))
+    halo.putalpha(glow.filter(ImageFilter.GaussianBlur(10)))
+    art.alpha_composite(halo)
+    line = Image.new("RGBA", (W, H), (255, 250, 235, 255))
+    line.putalpha(glow.point(lambda v: 230 if v > 128 else 0))
+    art.alpha_composite(line)
+    # the top darkened under the title
+    shade = Image.new("L", (1, H))
+    for y in range(H):
+        shade.putpixel((0, y), int(210 * max(0.0, 1.0 - y / (H * TITLE * 1.6)) ** 1.5))
+    dark = Image.new("RGBA", (W, H), (8, 6, 14, 255))
+    dark.putalpha(shade.resize((W, H)))
+    art.alpha_composite(dark)
+    return art
+
+
+def portrait_icon():
+    """Jak 3's face (the wheel's portrait), square."""
+    pic = Image.open(WHEEL / "jak3.png").convert("RGBA")
+    return pic.crop((222, 70, 802, 650)).resize((1024, 1024), Image.LANCZOS)
+
+
 def cmd_compose():
     dest = OUT / "out"
     dest.mkdir(parents=True, exist_ok=True)
-    src, painted = latest("cover")
-    if not painted:
-        print(f"no painting yet: composing the reference ({src.name}) to check the layout")
-    art = cover_crop(Image.open(src).convert("RGBA"), W / H).resize((W, H), Image.LANCZOS)
+    art = portrait_art()
+    if art is None:
+        src, painted = latest("cover")
+        if not painted:
+            print(f"no painting yet: composing the reference ({src.name}) to check the layout")
+        art = cover_crop(Image.open(src).convert("RGBA"), W / H).resize((W, H), Image.LANCZOS)
     cover = art.copy()
     title = title_block(int(W * 0.86))
     cover.alpha_composite(title, ((W - title.width) // 2, int(H * TITLE / 2 - title.height / 2) + 10))
@@ -479,10 +534,13 @@ def cmd_compose():
     save_bmp(tall, dest / "wizard-164x314.bmp", (164, 314))
     save_bmp(tall, dest / "wizard-328x628.bmp", (328, 628))
     # the icon: the painted (or reference) head, rounded corners
-    src, painted_icon = latest("icon")
-    if not painted_icon:
-        print(f"no icon painting yet: using {src.name}")
-    ic = cover_crop(Image.open(src).convert("RGBA"), 1.0).resize((1024, 1024), Image.LANCZOS)
+    if (WHEEL / "jak3.png").exists():
+        ic = portrait_icon()
+    else:
+        src, painted_icon = latest("icon")
+        if not painted_icon:
+            print(f"no icon painting yet: using {src.name}")
+        ic = cover_crop(Image.open(src).convert("RGBA"), 1.0).resize((1024, 1024), Image.LANCZOS)
     mask = Image.new("L", (1024, 1024))
     ImageDraw.Draw(mask).rounded_rectangle((0, 0, 1023, 1023), radius=190, fill=255)
     ic.putalpha(ImageChops.multiply(ic.getchannel("A"), mask))

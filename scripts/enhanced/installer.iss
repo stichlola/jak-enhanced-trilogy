@@ -26,7 +26,11 @@ DefaultGroupName=Jak Enhanced Trilogy
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputBaseFilename=Setup-Jak-Enhanced-Trilogy-{#MyVersion}
-UninstallDisplayIcon={app}\gk.exe
+; the art: cover_art.py compose (the game wheel's portraits) -> game/assets/enhanced/art
+SetupIconFile=..\..\game\assets\enhanced\art\jak-enhanced.ico
+WizardImageFile=..\..\game\assets\enhanced\art\wizard-164x314.bmp,..\..\game\assets\enhanced\art\wizard-328x628.bmp
+WizardSmallImageFile=..\..\game\assets\enhanced\art\wizard-small-55x55.bmp,..\..\game\assets\enhanced\art\wizard-small-110x110.bmp
+UninstallDisplayIcon={app}\data\game\assets\enhanced\art\jak-enhanced.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
@@ -92,9 +96,9 @@ Name: "desktopicon"; Description: "{cm:Desktop}"
 Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\gk.exe"
+Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"
 Name: "{group}\{cm:UninstallProgram,Jak Enhanced Trilogy}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\gk.exe"; Tasks: desktopicon
+Name: "{userdesktop}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; Description: "{cm:PlayNow}"; Flags: postinstall shellexec nowait skipifsilent

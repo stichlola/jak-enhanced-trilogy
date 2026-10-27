@@ -80,8 +80,8 @@ def main():
         "2. Double-click \"Jak Enhanced Trilogy.bat\".\r\n\r\n"
         "The first time you play a game it extracts your disc (20-40 minutes, only once), then asks\r\n"
         "whether to make the HD textures from it (optional: 30 minutes to 2 hours a game).\r\n"
-        "In the game: F1 (or \\, or Select + R3 on a pad) opens the Enhanced menu, F9 switches to\r\n"
-        "the next game.\r\n\r\n"
+        "In the game: F1 (or \\, or Select + R3 on a pad) opens the Enhanced menu; Select (View on an\r\n"
+        "Xbox pad) or N opens the game wheel: the stick picks a game, A plays it, Y the nap window.\r\n\r\n"
         "Free and unofficial: no donations of any kind are accepted for this project.\r\n\r\n"
         "https://github.com/stichlola/jak-enhanced-trilogy\r\n", encoding="ascii")
 

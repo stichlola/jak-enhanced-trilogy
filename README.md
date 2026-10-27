@@ -1,5 +1,7 @@
 # Jak Enhanced Trilogy
 
+![Jak Enhanced Trilogy](game/assets/enhanced/art/banner-1280x640.png)
+
 A remaster of the **Jak and Daxter trilogy** for PC (Windows), built on [OpenGOAL](https://opengoal.dev):
 modern lighting, living weather, reflections, denser vegetation and cities, a modern minimap, optional
 HD textures, and an in-game menu that turns every change on and off.
@@ -43,14 +45,8 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 ## To do
 
 - **Pause map**: the big map restyled like the minimap's district maps; a modern minimap frame.
-- **Photo mode**: game held still, free camera, filters, no HUD.
-- **Weather by zone and season**: each zone its own weathers (desert sandstorms, Haven rain, forest
-  fog), seasons shifting them.
-- **Rain under cover**: rain on roofs and metal when Jak is sheltered.
 - **New art made with Tripo** (original, so it lives in this repository):
-  - icons: the pause map's icons, Jak 1 and Enhanced-menu icons (weather, time of day, presets), an
-    app and installer icon;
-  - images: installer and launcher art, a README banner, the game picker's covers;
+  - icons: the pause map's icons, Jak 1 and Enhanced-menu icons (weather, time of day, presets);
   - painted maps: the Jak 3 and Jak II pause maps redrawn, the minimap frame;
   - tileable PBR materials (color, normal, height, roughness): puddle and rain ripples, wet asphalt,
     snow, sand ripples, mud for footprints and tire ruts, close-up detail for rock, grass and sand;
@@ -63,9 +59,12 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 
 | | Keyboard | Pad |
 |---|---|---|
-| Enhanced menu | **F1** or **`\`** | **Select + R3** |
-| Nap | **N** | **Select** |
-| Next game of the trilogy | **F9** | |
+| Enhanced menu | **F1** or **`\`** | **Select + R3** (Xbox: View + RS) |
+| Game wheel: another game of the trilogy, the nap | **N** | **Select** (Xbox: View) |
+| In the wheel | stick picks, **A** plays, **Y** naps, **B** back | |
+| Photo mode | **F3** (F2 takes the picture) | |
+
+The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT RT, Menu).
 
 ## What's new
 
@@ -74,7 +73,7 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
   per area; more grass and plants that bend; footprints and tire ruts.
 - **Weather**: fair, clouds, rain, storms, fog, snow, sandstorms, different on every visit; puddles
   that fill and dry; ambient sounds (rain, wind, crickets, birds, frogs, the sea, the city).
-- **Gameplay**: nap through the hours; city population from Low to Extreme; Jak II and 3 tweaks
+- **Gameplay**: a game wheel to switch between the three games (each resumes its newest save); nap through the hours; photo mode; city population from Low to Extreme; Jak II and 3 tweaks
   (ammo, guns, jetboard).
 - **HUD**: a smaller, modern minimap with redrawn icons and maps; subtitle size.
 - **Menu**: presets (Classic, Performance, Medium, Maximum), a switch for every effect, weather, time
