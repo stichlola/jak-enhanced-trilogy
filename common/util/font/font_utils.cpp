@@ -10,6 +10,7 @@
 #include "font_utils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <stdexcept>
 #include <string_view>
 
@@ -110,11 +111,12 @@ bool font_bank_exists(GameTextVersion version) {
 }
 
 /*!
- * Enhanced: the face buttons drawn as an Xbox pad's (the letter in its colour over the round
- * button) instead of the PlayStation symbols. Only on the way into the game: the PlayStation
- * sequences still read back as <PAD_X> and the rest.
+ * Enhanced: the buttons named as an Xbox pad's: the face buttons' letters in their colours over the
+ * round button instead of the PlayStation symbols, Start as Menu (the shoulder names LB RB LT RT
+ * are the font's own glyphs, redrawn: scripts/enhanced/xbox_font_glyphs.py). Only on the way into
+ * the game: the PlayStation sequences still read back as <PAD_X> and the rest.
  */
-static std::string xbox_face_buttons(const std::string& str) {
+static std::string xbox_buttons(const std::string& str) {
   static const std::pair<std::string_view, std::string_view> kSwaps[] = {
       {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
       {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~25L~+5HB~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
@@ -125,6 +127,20 @@ static std::string xbox_face_buttons(const std::string& str) {
     for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {
       out.replace(at, ps.size(), xbox);
     }
+  }
+  // the Start button is the Menu button ("PRESS START", "Press the Start Button" and the
+  // translations: START as a word of its own, not the Scandinavian "START OM" of the speedrun menu)
+  const auto letter = [](char c) { return std::isalpha((unsigned char)c) || (c & 0x80); };
+  for (size_t at = out.find("START"); at != std::string::npos; at = out.find("START", at + 4)) {
+    if ((at > 0 && letter(out[at - 1])) || (at + 5 < out.size() && letter(out[at + 5])) ||
+        out.compare(at, 8, "START OM") == 0) {
+      continue;
+    }
+    out.replace(at, 5, "MENU");
+  }
+  for (size_t at = out.find("the Start Button"); at != std::string::npos;
+       at = out.find("the Start Button", at + 1)) {
+    out.replace(at, 16, "the Menu Button");
   }
   return out;
 }
@@ -146,7 +162,7 @@ std::string GameTextFontBank::replace_to_game(const std::string& str) const {
       i += remap->utf8_string.size();
     }
   }
-  return xbox_face_buttons(newstr);
+  return xbox_buttons(newstr);
 }
 
 std::string GameTextFontBank::encode_utf8_to_game(const std::string& str) const {
