@@ -1122,8 +1122,8 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     m_render_state.loader->draw_debug_window();
   }
 
-  if (g_enhanced_menu.start_menu && m_enhanced_post) {
-    m_enhanced_post->draw_start_menu();
+  if (g_enhanced_menu.start_menu) {
+    // (drawn by the display every frame: draw_start_menu)
   } else if (g_enhanced_menu.open && m_enhanced_post) {
     m_enhanced_post->draw_menu();
   } else if (m_enhanced_post) {
@@ -1809,4 +1809,10 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
     m_blackout_renderer.draw(Vector4f(0, 0, 0, 1.f - alp), render_state, prof);
   }
   glEnable(GL_DEPTH_TEST);
+}
+
+void OpenGLRenderer::draw_start_menu() {
+  if (m_enhanced_post) {
+    m_enhanced_post->draw_start_menu();
+  }
 }

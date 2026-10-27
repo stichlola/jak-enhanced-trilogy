@@ -173,4 +173,6 @@ void sceSifInit();
 void LIBRARY_INIT();
 void LIBRARY_register(::IOP* i);
 void LIBRARY_kill();
+// Enhanced: the EE won't boot the game (the start menu picked another): the IOP stops waiting for OVERLORD
+void LIBRARY_cancel_boot();
 }  // namespace iop

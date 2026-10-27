@@ -64,6 +64,10 @@ void LIBRARY_kill() {
   iop->kill_from_ee();
 }
 
+void LIBRARY_cancel_boot() {
+  iop->send_status(IOP_OVERLORD_STOP);
+}
+
 /*!
  * How much free memory is there, in bytes?
  */

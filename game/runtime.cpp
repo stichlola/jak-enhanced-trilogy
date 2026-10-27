@@ -34,6 +34,7 @@
 #include "common/versions/versions.h"
 
 #include "game/external/discord.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/gfx.h"
 #include "game/kernel/common/fileio.h"
 #include "game/kernel/common/kdgo.h"
@@ -260,6 +261,21 @@ void ee_runner(SystemThreadInterface& iface) {
 
   // Added for OpenGOAL's debugger
   xdbg::allow_debugging();
+
+  // Enhanced: the trilogy's start menu holds the game's boot until a game is picked (the one booting
+  // now, or another: then the runtime ends and boots that one)
+  while (g_enhanced_menu.start_menu && MasterExit == RuntimeExitStatus::RUNNING) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  if (MasterExit != RuntimeExitStatus::RUNNING) {
+    lg::info("[EE] not booted: the start menu picked another game");
+    // (the IOP waits for OVERLORD and DECI2 for the kernel's protocols: neither will come)
+    iop::LIBRARY_cancel_boot();
+    iop::LIBRARY_kill();
+    ee::sceDeci2Disable();
+    iface.trigger_shutdown();
+    return;
+  }
 
   switch (g_game_version) {
     case GameVersion::Jak1:

@@ -74,6 +74,8 @@ class OpenGLRenderer {
   // rendering interface: takes the dma chain from the game, and some size/debug settings from
   // the graphics system.
   void render(DmaFollower dma, const RenderOptions& settings);
+  // Enhanced: the trilogy's start menu, drawn every display frame (the game waits for it: no frames)
+  void draw_start_menu();
 
  private:
   void setup_frame(const RenderOptions& settings);

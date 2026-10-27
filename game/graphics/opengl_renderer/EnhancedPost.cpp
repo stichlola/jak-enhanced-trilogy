@@ -4165,10 +4165,10 @@ void EnhancedPost::draw_start_menu() {
     const ImVec2 ts = font->CalcTextSizeA(px, FLT_MAX, 0.f, text);
     dl->AddText(font, px, ImVec2(x - ts.x * 0.5f, y), c, text);
   };
-  // the game booting behind, darkened: deep blue at the top to black
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, col(0.03f, 0.05f, 0.10f, 0.93f),
-                              col(0.03f, 0.05f, 0.10f, 0.93f), col(0.f, 0.f, 0.f, 0.97f),
-                              col(0.f, 0.f, 0.f, 0.97f));
+  // opaque (the game waits to boot: nothing is drawn behind), deep blue at the top to black
+  const ImU32 top = ImGui::ColorConvertFloat4ToU32(ImVec4(0.03f, 0.05f, 0.10f, 1.f));
+  const ImU32 bottom = ImGui::ColorConvertFloat4ToU32(ImVec4(0.f, 0.f, 0.f, 1.f));
+  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, top, top, bottom, bottom);
   // the lettering pictures at a given height, centered on x (text when a picture is missing)
   auto lettering = [&](int which, float height, float x, float y, float shade, const char* text) {
     if (!m_start_text[which]) {

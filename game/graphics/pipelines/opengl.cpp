@@ -775,6 +775,27 @@ void GLDisplay::render() {
     }
   }
 
+  // Enhanced: the start menu, over nothing (the game waits to boot until a game is picked)
+  if (g_enhanced_menu.start_menu) {
+    // full screen from the start (borderless, on the saved display): a window left from a windowed
+    // session would show the menu small until the game sets its own size
+    static bool menu_full_screen = false;
+    if (!menu_full_screen) {
+      menu_full_screen = true;
+      if (m_display_manager->get_display_mode() ==
+          game_settings::DisplaySettings::DisplayMode::Windowed) {
+        m_display_manager->enqueue_set_window_display_mode(
+            game_settings::DisplaySettings::DisplayMode::Borderless, 0, 0);
+      }
+    }
+    // (no game frame drew the window: bind and clear it here)
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glViewport(0, 0, fbuf_w, fbuf_h);
+    glClearColor(0.f, 0.f, 0.f, 1.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    g_gfx_data->ogl_renderer.draw_start_menu();
+  }
+
   // render debug
   if (is_imgui_visible()) {
     auto p = scoped_prof("debug-gui");
