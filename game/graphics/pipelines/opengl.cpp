@@ -332,19 +332,22 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
   m_input_manager->register_command(
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
-  // Enhanced: \ opens and closes the in-game Enhanced menu
-  m_input_manager->register_command(
-      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_BACKSLASH, [&](const SDL_Event& event) {
-        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
-          g_enhanced_menu.open = !g_enhanced_menu.open;
-          // free the cursor to click the menu (the mouse camera locks it), lock it again after
-          if (m_input_manager->mouse_controls_camera()) {
-            SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
-          }
-          m_input_manager->hide_cursor(!g_enhanced_menu.open &&
-                                       m_input_manager->auto_hiding_cursor());
-        }
-      }));
+  // Enhanced: \ or F1 opens and closes the in-game Enhanced menu (F1 for keyboards where \ is
+  // hard to find or doesn't come through as itself)
+  const auto toggle_enhanced_menu = [&](const SDL_Event& event) {
+    if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
+      g_enhanced_menu.open = !g_enhanced_menu.open;
+      // free the cursor to click the menu (the mouse camera locks it), lock it again after
+      if (m_input_manager->mouse_controls_camera()) {
+        SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
+      }
+      m_input_manager->hide_cursor(!g_enhanced_menu.open && m_input_manager->auto_hiding_cursor());
+    }
+  };
+  for (const auto key : {SDLK_BACKSLASH, SDLK_F1}) {
+    m_input_manager->register_command(CommandBinding::Source::KEYBOARD,
+                                      CommandBinding(key, toggle_enhanced_menu));
+  }
 
   // Trilogy prototype: F9 boots the next game (Jak 1 -> 2 -> 3 -> 1) in the same process
   m_input_manager->register_command(
