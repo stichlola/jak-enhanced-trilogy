@@ -1105,11 +1105,20 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                   0.2f * std::sin(t * 37.f + 2.3f * seed);
         intensity *= 0.82f + 0.18f * n;
       }
+      // a glow of one pure hue (a red warning lamp, an indicator): its light stays small and
+      // soft, or a few of them flood a whole district in red (Haven's industrial district)
+      {
+        float lo = std::min(l.color[0], std::min(l.color[1], l.color[2]));
+        float second = bright - peak - lo;
+        float pure = std::clamp((0.3f - second / peak) / 0.2f, 0.f, 1.f);
+        intensity *= 1.f - 0.65f * pure;
+        c.pos[3] = radius * (1.f - 0.45f * pure);
+      }
       for (int k = 0; k < 3; k++) {
         c.color[k] = l.color[k] / peak * intensity;
       }
       c.color[3] = 0.f;
-      c.score = bright * radius / (dist + radius);
+      c.score = bright * c.pos[3] / (dist + c.pos[3]);
       // a light is often drawn as two glows at the same spot: keep the one
       bool dup = false;
       for (auto& o : candidates) {
@@ -1830,6 +1839,18 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     const float dark = night_darkness();
     glUniform2f(glGetUniformLocation(id, "night_dark"), dark, 1.f + 1.6f * dark);
     glUniform1f(glGetUniformLocation(id, "light_spill"), m_settings.light_spill);
+    {
+      // Spargus lights the sky over it at night, a warm glow on the horizon seen from the desert
+      // (out of town, fading with the distance)
+      const float sx = 2050.f * kMeter, sz = -230.f * kMeter;
+      const float dx = cam.trans[0] - sx, dz = cam.trans[2] - sz;
+      const float dist_m = std::sqrt(dx * dx + dz * dz) / kMeter;
+      const float k = (g_game_version == GameVersion::Jak3 && m_pond)
+                          ? dark * std::clamp((dist_m - 350.f) / 400.f, 0.f, 1.f) *
+                                std::exp(-dist_m / 4000.f) * m_settings.light_strength
+                          : 0.f;
+      glUniform4f(glGetUniformLocation(id, "town_glow"), sx, sz, k, 0.f);
+    }
     glUniform1f(glGetUniformLocation(id, "cloud_shadows"), m_settings.cloud_shadows ? 1.f : 0.f);
     glUniform1f(glGetUniformLocation(id, "lens_flare"),
                 g_enhanced_scene.movie ? 0.f : m_settings.lens_flare);
@@ -2040,12 +2061,16 @@ void EnhancedPost::update_scene() {
   m_zone = zone_of(level);
   m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
   m_city = g_game_version != GameVersion::Jak1 &&
-           ((m_zone > 0 && m_zone < (int)g_world.zones.size() && g_world.zones[m_zone].name == "haven") ||
+           ((m_zone > 0 && m_zone < (int)g_world.zones.size() &&
+             g_world.zones[m_zone].name.rfind("haven", 0) == 0) ||
             level.rfind("was", 0) == 0);
   // every visit to a zone picks its weather anew: the spells start from a random point of their
-  // cycle (the first visit of a session too)
-  if (m_zone != m_visit_zone && !level.empty() && level != "none") {
-    m_visit_zone = m_zone;
+  // cycle (the first visit of a session too). A district ("haven-industrial") is a visit of its
+  // town: walking into it doesn't change the weather
+  const std::string& zone_name = g_world.zones[m_zone].name;
+  const std::string visit = zone_name.substr(0, zone_name.find('-'));
+  if (visit != m_visit_zone && !level.empty() && level != "none") {
+    m_visit_zone = visit;
     // (std::rand is never seeded: it would pick the same each run)
     static std::mt19937 rng{std::random_device{}()};
     m_visit_offset = std::uniform_real_distribution<double>(0.0, 100000.0)(rng);

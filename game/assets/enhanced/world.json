@@ -38,6 +38,7 @@
     "jak3": [
       {"zone": "forest", "prefixes": ["for", "lfor"]},
       {"zone": "metalhead", "prefixes": ["mhc", "nst", "lmh", "nes"]},
+      {"zone": "haven-industrial", "prefixes": ["ctyind"]},
       {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide"]},
       {"zone": "desert", "prefixes": ["was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"]},
       {"zone": "under", "prefixes": ["sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"]},
@@ -75,6 +76,13 @@
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}}
+    },
+    // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
+    // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
+    "haven-industrial": {
+      "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5},
+      "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}}
     },
     // desert: sun-baked by day, cold blue night

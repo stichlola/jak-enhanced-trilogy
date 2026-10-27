@@ -487,7 +487,7 @@ class EnhancedPost {
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
   float m_snow = 0.f;   // snowfall (0..1)
-  int m_visit_zone = -1;        // the zone Jak was last in, and where its weather cycle starts
+  std::string m_visit_zone;     // the zone (town) Jak was last in; m_visit_offset: where its weather cycle starts
   double m_visit_offset = 0.0;
   float m_fog = 0.f;    // how much of the distance fog and the volumetric mist (0..1)
   float m_heat = 0.f;   // hot air shimmering up from lava (0..1)

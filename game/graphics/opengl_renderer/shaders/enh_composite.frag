@@ -119,6 +119,7 @@ uniform int spot_count;         // vehicles' headlights: view space + strength, 
 uniform vec4 spot_pos[8];
 uniform vec4 spot_dir[8];
 uniform vec4 lantern;           // Jak's lantern in the desert at night: view space, strength
+uniform vec4 town_glow;         // a town lighting the night sky over it: world x, z, strength
 uniform int beacon_count;       // far glows drawn as points of light: view space + size
 uniform vec4 beacon_pos[24];
 uniform vec4 beacon_color[24];  // rgb, strength
@@ -1635,6 +1636,15 @@ void main() {
       }
       wc += lsum * lamp_night * (0.4 + 0.6 * water_strength);
     }
+    // the far lights too (across a harbor, the desert's fires by an oasis): thin columns of light
+    // broken up by the waves
+    for (int i = 0; i < beacon_count; i++) {
+      vec3 l = normalize(beacon_pos[i].xyz - p);
+      float nh = max(dot(n, normalize(l - vdir)), 0.0);
+      float fade = exp(-length(beacon_pos[i].xyz) / (1800.0 * 4096.0));
+      wc += beacon_color[i].rgb * beacon_color[i].w * fade * (pow(nh, 700.0) * 3.0 + pow(nh, 90.0) * 0.08) *
+            (0.4 + 0.6 * water_strength);
+    }
 
     // sun glints: a tight highlight plus a broad sheen toward the sun
     if (sun_dir.w > 0.0) {
@@ -2466,6 +2476,23 @@ void main() {
   // bloom and god rays
   c += texture(tex_T1, tex_coord).rgb * bloom_strength;
   c += texture(tex_T4, tex_coord).rgb * shafts_strength;
+
+  // a town's glow over the horizon at night: warm, low, spread over the town's width, on the sky
+  // and the far haze
+  if (town_glow.z > 0.0) {
+    vec3 wd = normalize(view_to_world * ray);
+    vec2 to = town_glow.xy - cam_pos.xz;
+    float dist = length(to);
+    vec2 hd = normalize(wd.xz + vec2(1e-5));
+    float ang = acos(clamp(dot(hd, to / dist), -1.0, 1.0));
+    // the town's half width seen from here, at least a few degrees
+    float half_w = max(atan(300.0 * 4096.0 / dist), 0.06);
+    float across = exp(-pow(ang / (half_w * 1.6), 2.0));
+    float elev = wd.y;
+    float above = exp(-max(elev + 0.01, 0.0) / 0.16) * smoothstep(-0.06, 0.0, elev);
+    float far_w = d <= 1e-7 ? 1.0 : smoothstep(400.0 * 4096.0, 1500.0 * 4096.0, z) * 0.6;
+    c += vec3(1.0, 0.55, 0.25) * 0.5 * across * above * far_w * town_glow.z;
+  }
 
   // far lights at night: each far glow a point of light with a soft halo that keeps a few pixels
   // however far it is (the game's own glow shrinks to nothing), hidden behind what's in front

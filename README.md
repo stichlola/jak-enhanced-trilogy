@@ -127,7 +127,10 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   Hold triangle (half a second) to switch it on or off anywhere, any hour. Off in vehicles. The
   first time you stand in the desert, night falls and it rises for you, with a word on it.
 - **Far lights**: at night far fires, lamps and vehicles stay visible as points of light with a
-  soft halo (across the desert, over the harbor), and so do the lights you place.
+  soft halo (across the desert, over the harbor), and so do the lights you place; on the water
+  they draw shimmering columns. From the night desert, Spargus glows warm over the horizon.
+- **Warning lamps** (one pure color) light only a little around them: Haven's industrial
+  district is no longer flooded in red at night, and its own grade is a little cooler.
 - **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their
   color; a partial white balance takes off the strongest color casts.
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
