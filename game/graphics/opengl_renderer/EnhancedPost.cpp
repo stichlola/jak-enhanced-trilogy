@@ -3346,8 +3346,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
 void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
-  // no close button: \ closes it (and gives the mouse back to the camera)
-  if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\ closes )", nullptr,
+  // no close button: \ or F1 closes it (and gives the mouse back to the camera)
+  if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\ or F1 closes )", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;

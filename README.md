@@ -39,7 +39,7 @@ The Drive packs are the ones made for this project.
 secrets) to try every feature at once. A new game starts as the original; delete or overwrite the
 slot when you like (the launcher only fills it while it's empty).
 
-> **Tip:** in the game, press **`\`** (the key left of `1`) for the **Enhanced menu**: graphics
+> **Tip:** in the game, press **F1** (or **`\`**) for the **Enhanced menu**: graphics
 > presets, every effect, weather, time of day. **F9** switches to the next game of the trilogy.
 
 ### Developers: from the source code
@@ -182,7 +182,7 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - Jak 2: twice the ammo; every gun, upgrade, the jetboard and Dark Jak's powers from the start (the
   security passes stay with the story).
 
-### In-game menu (press `\`)
+### In-game menu (press F1 or `\`)
 - **Graphics**: three presets (Classic: the game as it was; Medium: the costly effects off; Maximum:
   everything) and a switch for every effect. Also vegetation density, lamp strength, vivid colors,
   the weather and the water effects.
