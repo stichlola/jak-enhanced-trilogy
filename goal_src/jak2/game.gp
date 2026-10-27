@@ -91,6 +91,8 @@
   )
 (hash-table-set! *file-entry-map* "dir-tpages.go" #f)
 
+;; Enhanced: built by build-actor (below), not copied from the disc
+(hash-table-set! *file-entry-map* "jak-nap-ag.go" #f)
 (cgo-file "game.gd" '("$OUT/obj/gcommon.o" "$OUT/obj/gstate.o" "$OUT/obj/gstring.o" "$OUT/obj/gkernel.o"))
 
 ;; note: some of these dependencies are slightly wrong because cgo-file doesn't really handle
@@ -324,6 +326,9 @@
 ;; - joint-channel: how many joint channels the actor should have. defaults to 6.
 ;; more complicated actors like jak that make a lot of use of animation blending can have 24+ channels.
 (build-actor "test-actor" :force-run #t :gen-mesh #t)
+;; Enhanced: Jak's nap (lying down, asleep, getting up, a stretch); the glb is made by
+;; scripts/enhanced/nap_anims.py, target2.gc plays it from *enhanced-nap-ag*
+(build-actor "jak-nap" :texture-bucket #f :master-art-group "jakb-ag")
 
 ;;;;;;;;;;;;;;;;;;;;;
 ;; ANIMATIONS

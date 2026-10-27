@@ -426,6 +426,7 @@
   "jak-board+0-ag.go"
   "jak-dark+0-ag.go"
   "jak-swim+0-ag.go"
+  "jak-nap-ag.go" ;; Enhanced: the nap's animations (build-actor in game.gp)
   "blocking-plane-ag.go"
   "los-control-h.o"
   "airlock.o"

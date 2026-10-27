@@ -189,7 +189,8 @@
 
 (define *SUBTITLE2-bank*
     (new 'static 'subtitle2-bank
-                  :scale 0.9
+                  ;; Enhanced: smaller than the PS2 size (0.9), which takes too much of a Full HD screen
+                  :scale 0.65
                   :width 0.65
                   :lines 2.0
                   ))

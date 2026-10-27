@@ -963,6 +963,9 @@
   )
 
 ;; WARN: Return type mismatch art-group vs none.
+;; Enhanced: the nap's animations (jak-nap-ag in GAME.CGO, built by build-actor in game.gp)
+(define *enhanced-nap-ag* (the-as art-group #f))
+
 (defmethod relocate ((this art-group) (heap kheap) (name (pointer uint8)))
   (let ((s4-0 (clear *temp-string*)))
     (string<-charp s4-0 name)
@@ -1014,6 +1017,10 @@
                   (login this)
                   (if (needs-link? this)
                       (link-art! this)
+                      )
+                  ;; Enhanced: the nap's animations (target2.gc)
+                  (if (string= (-> this name) "jak-nap")
+                      (set! *enhanced-nap-ag* this)
                       )
                   )
                 (if s5-1

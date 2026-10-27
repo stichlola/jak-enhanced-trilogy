@@ -136,6 +136,11 @@ glb lands in `decompiler_out/jak1/levels/common` whatever the output folder) get
 `*enhanced-nap-ag*` and target2.gc plays them from there. Its nap window is drawn with sprites and
 the pause text (main.gc): the screen is 512 x 224 there, `middle` centers on x, there is no font
 scale, and the large font has only capitals and the button pictures.
+Jak II (`jakb-lod0.glb` from its GAME.CGO, master `jakb-ag`) links only art groups that start with
+an animation, so it keeps `jak-nap` in `*enhanced-nap-ag*` the same way (joint.gc).
+A GAME.CGO-only rip also rewrites `out/<game>/fr3/GAME.fr3` without the levels' animated textures
+(Jak II then dies on "no texture named security-env-dest"): rip into a copy, or run the full
+decompiler afterwards.
 Every joint needs all three channels on every frame (build-actor fills missing ones with identity,
 not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-actor crashes.
 
@@ -143,8 +148,8 @@ not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-
 
 Next, the small ones first (the big ones below wait until these are done):
 
-- Smaller subtitles by default (the PS2 size takes too much of a Full HD screen), and later an
-  accessibility option to make them bigger again.
+- An accessibility option for bigger subtitles (the default is now smaller than the PS2 size: bank
+  scale 0.65 in Jak II and 3, 0.38 in Jak 1, in `subtitle*-h.gc` / `pc/subtitle.gc`).
 - New ambient sounds: raindrops on the ground, roofs and water, dripping after the rain, wind in the
   night desert, crickets.
 - A more modern minimap (Jak II and 3): the HUD's round map (`minimap.gc`, `hud-map`) redrawn with a

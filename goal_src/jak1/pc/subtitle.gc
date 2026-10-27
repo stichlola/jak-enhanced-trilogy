@@ -108,7 +108,8 @@
    (hint-height   float)))
 
 (define *SUBTITLE-bank*
-  (new 'static 'subtitle-bank :scale 0.5 :width 0.87 :height 0.75 :lines 2.0 :notice-height 0.2 :hint-height 0.8))
+  ;; Enhanced: scale 0.38, smaller than the PS2 size (0.5), which takes too much of a Full HD screen
+  (new 'static 'subtitle-bank :scale 0.38 :width 0.87 :height 0.75 :lines 2.0 :notice-height 0.2 :hint-height 0.8))
 
 ;; the subtitle process! it lives on the PC actor pool and awaits for incoming subtitle messages, or a movie
 (deftype subtitle (process)
