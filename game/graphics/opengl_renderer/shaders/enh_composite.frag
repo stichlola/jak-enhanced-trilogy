@@ -110,6 +110,8 @@ uniform sampler2D tex_T13;      // the sun shadow map as plain depths (soft shad
 uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per meter, soft (1) or not
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
+uniform float light_spill;      // at night the bright pixels light the surfaces near them
+uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
 uniform vec2 night_dark;        // dark nights: how dark (0..1), the lights' gain
 uniform vec4 player_view;       // Jak (view space, game units), w: valid
 uniform int spot_count;         // vehicles' headlights: view space + strength, the way they point
@@ -338,6 +340,18 @@ bool rt_trace(vec3 o, vec3 d, float tmax, out vec3 color, out float dist) {
   return true;
 }
 
+// dark nights on a color taken from the scene (reflections read it before the night darkens it):
+// the same darkening, what shines by itself kept
+vec3 night_dim(vec3 col) {
+  if (night_dark.x <= 0.0) {
+    return col;
+  }
+  float l = luma(col);
+  vec3 moon = vec3(l) * vec3(0.7, 0.82, 1.1);
+  vec3 darkened = mix(col, moon, 0.45 * night_dark.x) * (1.0 - 0.9 * night_dark.x);
+  return mix(darkened, col, smoothstep(0.4, 0.85, l));
+}
+
 // a reflection: the screen-space one where it found something (ssr_hit), else what the ray meets
 // in the levels (rt_mode), else env (the screen where the ray vanishes, or the fog color)
 vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float tmax,
@@ -358,7 +372,7 @@ vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float
       env = mix(env, rc, amount);
     }
   }
-  return mix(env, ssr, ssr_hit);
+  return night_dim(mix(env, ssr, ssr_hit));
 }
 
 // what a surface reflects along r (view space): the scene where the ray meets the depth buffer
@@ -1524,7 +1538,7 @@ void main() {
     // shaded a little by the ripples so it keeps some texture; clearer where it's shallow, where
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
-    vec3 body = mix(water_deep_color, water_shallow_color, clear_water) * shade;
+    vec3 body = night_dim(mix(water_deep_color, water_shallow_color, clear_water) * shade);
     // (only a little of the game's own water texture shows: it's a small repeating tile)
     vec3 wc = mix(body, c, clear_water * 0.3 * water_unify + (1.0 - water_unify));
 
@@ -1587,6 +1601,34 @@ void main() {
     refl = reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0,
                               1.0 - smoothstep(150.0 * 4096.0, 200.0 * 4096.0, z));
     wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
+
+    // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
+    // column toward the eye (a harbor at night); it reaches much further than the lamp's light
+    float lamp_night = max(night_dark.x, clouds.w);
+    if ((light_count > 0 || spot_count > 0) && lamp_night > 0.0) {
+      vec3 lsum = vec3(0.0);
+      for (int i = 0; i < light_count; i++) {
+        vec3 tl = light_pos[i].xyz - p;
+        float d = length(tl);
+        vec3 h = normalize(tl / max(d, 1.0) - vdir);
+        float nh = max(dot(n, h), 0.0);
+        float sp = pow(nh, 500.0) * 5.0 + pow(nh, 70.0) * 0.2;
+        float rr = d / max(light_pos[i].w, 4096.0);
+        lsum += light_color[i].rgb * sp / (1.0 + 0.04 * rr * rr);
+      }
+      for (int i = 0; i < spot_count; i++) {
+        vec3 tl = spot_pos[i].xyz - p;
+        float d = length(tl);
+        vec3 l = tl / max(d, 1.0);
+        vec3 h = normalize(l - vdir);
+        float nh = max(dot(n, h), 0.0);
+        // only toward where the headlight points (seen from the front it's blinding, from behind dark)
+        float facing_us = smoothstep(0.3, 0.8, dot(-l, spot_dir[i].xyz));
+        lsum += vec3(1.0, 0.93, 0.8) * (pow(nh, 500.0) * 6.0 + pow(nh, 70.0) * 0.25) * facing_us *
+                spot_pos[i].w / (1.0 + d * d / (60.0 * 60.0 * 4096.0 * 4096.0));
+      }
+      wc += lsum * lamp_night * (0.4 + 0.6 * water_strength);
+    }
 
     // sun glints: a tight highlight plus a broad sheen toward the sun
     if (sun_dir.w > 0.0) {
@@ -1789,6 +1831,26 @@ void main() {
     }
   }
 
+  // cloud shadows: each point looks up toward the sun through the same cloud field the sky draws;
+  // where a cloud is in the way it's in shade. The patches drift with the clouds over the ground
+  // (fainter when the sky is all cloud: then it's all shade, and the game's light is already dull)
+  if (cloud_shadows > 0.0 && clouds.x > 0.0 && clouds.w < 0.6 && sky_sun.w > 0.0 && z > 0.0 &&
+      wsurf == 0.0) {
+    vec3 sw = world_dir(sky_sun.xyz);
+    if (sw.y > 0.06) {
+      vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
+      float lo = 0.6 - clouds.y * 0.42;
+      float d = 0.0;
+      for (int k = 0; k < 3; k++) {
+        float hy = 1200.0 + 250.0 * float(k);
+        d += cloud_density(wp + sw * ((hy - wp.y) / sw.y), lo, 2);
+      }
+      float cs = (1.0 - exp(-d * 2.5)) * min(clouds.x, 1.0) * (1.0 - clouds.w) *
+                 smoothstep(0.06, 0.2, sw.y) * (1.0 - smoothstep(0.75, 0.97, clouds.y));
+      c *= vec3(1.0) - 0.5 * cs * vec3(1.03, 0.97, 0.86);
+    }
+  }
+
   // dark nights: where no light reaches the world goes dark (the moon's blue left in it); what
   // shines by itself (windows, fires, lamps: the brightest pixels) stays. The lights below then
   // light the surfaces in their own colors.
@@ -1817,6 +1879,15 @@ void main() {
     }
     seen /= 20.0;
     exposure = clamp(0.05 / max(seen, 1e-3), 1.0, 1.0 + 1.2 * night_dark.x);
+  }
+
+  // light spill: at night what shines by itself (windows, signs, fires, the lamps' bulbs) lights
+  // the surfaces near it on screen, in their own color: the bloom (the bright pixels spread wide)
+  // taken as the light falling there. Not on what shines itself.
+  if (light_spill > 0.0 && night_dark.x > 0.0 && z > 0.0 && wsurf == 0.0) {
+    vec3 spill = texture(tex_T1, tex_coord).rgb;
+    float self_lit = smoothstep(0.4, 0.85, luma(albedo));
+    c += albedo * min(spill, vec3(0.5)) * 1.3 * light_spill * night_dark.x * (1.0 - self_lit);
   }
 
   // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
@@ -1860,6 +1931,8 @@ void main() {
         }
       }
     }
+    // many lamps together (a factory's red floods) saturate softly instead of adding up without end
+    added /= 1.0 + 0.35 * max(added.r, max(added.g, added.b));
     if (night_dark.x > 0.0) {
       // at night the light shows the surface's own color, brighter
       // (the game tints the night blue: the surface's own color, warmer, under a lamp)
@@ -1918,6 +1991,20 @@ void main() {
         float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
         c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
         c += vec3(1.0, 0.95, 0.85) * pow(sr, 300.0) * 2.0 * sunlit * mk;
+      }
+      // the lamps' highlights on it (a factory's pipes, a car's paint at night): metal's broad and
+      // tinted by the metal, gloss tight and in the lamp's own color
+      for (int i = 0; i < light_count; i++) {
+        vec3 tl = light_pos[i].xyz - p;
+        float d = length(tl);
+        float rr = d / max(light_pos[i].w, 1.0);
+        if (rr < 1.6) {
+          float lr = max(dot(r, tl / max(d, 1.0)), 0.0);
+          float near = 1.0 - smoothstep(0.5, 1.6, rr);
+          vec3 tint = mat == 1 ? clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5 : vec3(1.0);
+          float sp = mat == 1 ? pow(lr, 40.0) * 0.9 : pow(lr, 150.0) * 1.6;
+          c += light_color[i].rgb * tint * sp * near * mk * fade * (1.0 + night_dark.x);
+        }
       }
     }
   }
@@ -2372,6 +2459,10 @@ void main() {
   // 0.7 up (the hue kept: sunlit sand and walls keep their color instead of burning to yellow and
   // white), then each channel
   {
+    // a strongly colored light past full (a red lamp on a wall) bleaches toward white as film and
+    // eyes see it, instead of flattening into one pure, detail-less color
+    float mx = max(c.r, max(c.g, c.b));
+    c = mix(c, vec3(mx), clamp((mx - 1.0) * 0.35, 0.0, 0.45));
     float hl = luma(c);
     if (hl > 0.7) {
       float over = hl - 0.7;

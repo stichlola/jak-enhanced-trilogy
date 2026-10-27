@@ -1138,8 +1138,11 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     render_ms += m_profiler.root_time() * 1000.0;
     double elapsed = std::chrono::duration<double>(clock::now() - window_start).count();
     if (elapsed >= 5.0) {
-      lg::info("[enhanced] average {:.1f} fps, renderer {:.2f} ms/frame, post {}", frames / elapsed,
-               render_ms / frames, m_enhanced_post && m_enhanced_post->active() ? "on" : "off");
+      lg::info("[enhanced] average {:.1f} fps, renderer {:.2f} ms/frame, post {}, Jak at {:.1f} {:.1f} {:.1f} m in {}",
+               frames / elapsed, render_ms / frames,
+               m_enhanced_post && m_enhanced_post->active() ? "on" : "off",
+               g_enhanced_player.pos[0] / 4096.f, g_enhanced_player.pos[1] / 4096.f,
+               g_enhanced_player.pos[2] / 4096.f, g_enhanced_scene.level);
       window_start = clock::now();
       frames = 0;
       render_ms = 0;

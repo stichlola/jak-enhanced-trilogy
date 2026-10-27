@@ -150,6 +150,8 @@ class EnhancedPost {
     float wake = 1.0f;      // rings on the water where Jak swims or rides
     float prints = 1.0f;    // footprints and ruts in the sand
     float dark_nights = 1.0f;  // nights dark where no light reaches (0 = the game's own)
+    bool cloud_shadows = true;  // the clouds shade the ground in drifting patches
+    float light_spill = 1.0f;   // at night what shines lights the surfaces around it
     float lit_smoke = 0.8f; // the dynamic lights brighten and tint the smoke and dust near them
     bool far_view = true;   // no occlusion culling from the game's precomputed visibility
     float relief = 1.0f;    // the textures' shading read as small bumps under the sun

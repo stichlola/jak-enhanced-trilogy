@@ -314,6 +314,80 @@ void load_world() {
   }
 }
 
+// lights.json: lights placed by hand where the game has none (a dark street, a camp in the
+// desert), per game. World position and radius in meters, a color, whether it flickers like a
+// fire and whether it's lit at night only. The Enhanced menu adds one where Jak stands.
+struct ManualLight {
+  std::string note;
+  float pos[3] = {};  // game units
+  float radius = 8.f * 4096.f;
+  float color[3] = {1.f, 0.7f, 0.4f};
+  bool flicker = false;
+  bool night = true;
+};
+std::vector<ManualLight> g_manual_lights[3];
+
+fs::path manual_lights_path() {
+  return file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "lights.json";
+}
+
+void load_manual_lights() {
+  for (auto& l : g_manual_lights) {
+    l.clear();
+  }
+  std::error_code ec;
+  if (!fs::exists(manual_lights_path(), ec)) {
+    return;
+  }
+  try {
+    auto j = parse_commented_json(file_util::read_text_file(manual_lights_path()), "lights.json");
+    const char* games[3] = {"jak1", "jak2", "jak3"};
+    for (int g = 0; g < 3; g++) {
+      if (!j.contains(games[g])) {
+        continue;
+      }
+      for (const auto& e : j[games[g]]) {
+        ManualLight l;
+        l.note = e.value("note", "");
+        for (int k = 0; k < 3; k++) {
+          l.pos[k] = e.at("pos")[k].get<float>() * 4096.f;
+          if (e.contains("color")) {
+            l.color[k] = e["color"][k].get<float>();
+          }
+        }
+        l.radius = e.value("radius", 8.f) * 4096.f;
+        l.flicker = e.value("flicker", false);
+        l.night = e.value("night", true);
+        g_manual_lights[g].push_back(l);
+      }
+    }
+    lg::info("[enhanced] lights.json: {} lights", g_manual_lights[game_index()].size());
+  } catch (const std::exception& e) {
+    lg::error("[enhanced] lights.json not loaded: {}", e.what());
+  }
+}
+
+void save_manual_lights() {
+  nlohmann::json j = nlohmann::json::object();
+  const char* games[3] = {"jak1", "jak2", "jak3"};
+  for (int g = 0; g < 3; g++) {
+    auto arr = nlohmann::json::array();
+    for (const auto& l : g_manual_lights[g]) {
+      auto r = [](float v) { return std::round(v * 100.f) / 100.f; };
+      arr.push_back({{"note", l.note},
+                     {"pos", {r(l.pos[0] / 4096.f), r(l.pos[1] / 4096.f), r(l.pos[2] / 4096.f)}},
+                     {"radius", r(l.radius / 4096.f)},
+                     {"color", {r(l.color[0]), r(l.color[1]), r(l.color[2])}},
+                     {"flicker", l.flicker},
+                     {"night", l.night}});
+    }
+    if (!arr.empty()) {
+      j[games[g]] = arr;
+    }
+  }
+  file_util::write_text_file(manual_lights_path(), j.dump(2));
+}
+
 // once a second: load world.json again if it was saved since
 void poll_world() {
   static int frames = 0;
@@ -331,6 +405,7 @@ void poll_world() {
       last = t;
     }
     load_world();
+    load_manual_lights();
   }
 }
 
@@ -1127,6 +1202,38 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
+    // the lights placed by hand (lights.json), the night ones lit as the night falls
+    for (const auto& ml : g_manual_lights[game_index()]) {
+      const float lit = ml.night ? std::max(m_night, night_darkness()) : 1.f;
+      if (!on || lit <= 0.01f) {
+        break;
+      }
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (ml.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      c.pos[3] = std::min(ml.radius, 40.f * kMeter);
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      if (c.pos[2] < -c.pos[3] || dist > 150.f * kMeter) {
+        continue;
+      }
+      float k = lit * m_settings.light_strength * m_settings.lamp_strength;
+      if (ml.flicker) {
+        float seed = std::fmod(std::abs(ml.pos[0] * 0.013f + ml.pos[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        k *= 0.82f + 0.18f * (0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                              0.2f * std::sin(t * 37.f + 2.3f * seed));
+      }
+      for (int i = 0; i < 3; i++) {
+        c.color[i] = ml.color[i] * k;
+      }
+      c.color[3] = 0.f;
+      c.score = (ml.color[0] + ml.color[1] + ml.color[2]) * c.pos[3] / (dist + c.pos[3]);
+      candidates.push_back(c);
+    }
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
     const int n = std::min((int)candidates.size(), kLights);
@@ -1486,6 +1593,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     // shine stronger into it
     const float dark = night_darkness();
     glUniform2f(glGetUniformLocation(id, "night_dark"), dark, 1.f + 1.6f * dark);
+    glUniform1f(glGetUniformLocation(id, "light_spill"), m_settings.light_spill);
+    glUniform1f(glGetUniformLocation(id, "cloud_shadows"), m_settings.cloud_shadows ? 1.f : 0.f);
     {
       // Jak in view space: the dark spares a little around him (he stays readable)
       const auto& pl = g_enhanced_player;
@@ -1627,7 +1736,7 @@ float EnhancedPost::night_darkness() const {
   if (m_settings.dark_nights <= 0.f || !m_ssao_ready) {
     return 0.f;
   }
-  const float zone = m_city ? 0.55f : (m_pond ? 0.9f : 0.75f);
+  const float zone = m_city ? 0.68f : (m_pond ? 0.9f : 0.78f);
   return m_night * zone * m_settings.dark_nights;
 }
 
@@ -3291,6 +3400,11 @@ void EnhancedPost::draw_menu() {
     if (check("Dark nights", &dark)) {
       s.dark_nights = dark ? 1.f : 0.f;
     }
+    bool spill = s.light_spill > 0.f;
+    if (check("Light spill at night", &spill)) {
+      s.light_spill = spill ? 1.f : 0.f;
+    }
+    check("Cloud shadows", &s.cloud_shadows);
     bool smoke = s.lit_smoke > 0.f;
     if (check("Lit smoke", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
@@ -3327,6 +3441,50 @@ void EnhancedPost::draw_menu() {
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
+    if (ImGui::TreeNode("Place a light")) {
+      // a light of your own where Jak stands, 2.5 m up (saved in game/assets/enhanced/lights.json)
+      static float color[3] = {1.f, 0.62f, 0.32f};
+      static float radius = 8.f;
+      static bool flicker = false;
+      ImGui::SetNextItemWidth(200);
+      ImGui::ColorEdit3("Color##ml", color);
+      ImGui::SetNextItemWidth(200);
+      ImGui::SliderFloat("Radius (m)##ml", &radius, 2.f, 40.f, "%.0f");
+      ImGui::Checkbox("Flickers like a fire##ml", &flicker);
+      auto& list = g_manual_lights[game_index()];
+      const auto& pl = g_enhanced_player;
+      if (ImGui::Button("Add a light here") && pl.valid) {
+        ManualLight l;
+        l.note = g_enhanced_scene.level;
+        l.pos[0] = pl.pos[0];
+        l.pos[1] = pl.pos[1] + 2.5f * 4096.f;
+        l.pos[2] = pl.pos[2];
+        l.radius = radius * 4096.f;
+        std::memcpy(l.color, color, sizeof(color));
+        l.flicker = flicker;
+        list.push_back(l);
+        save_manual_lights();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Remove the nearest") && pl.valid && !list.empty()) {
+        size_t best = 0;
+        float best_d2 = 1e30f;
+        for (size_t i = 0; i < list.size(); i++) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            d2 += (list[i].pos[k] - pl.pos[k]) * (list[i].pos[k] - pl.pos[k]);
+          }
+          if (d2 < best_d2) {
+            best_d2 = d2;
+            best = i;
+          }
+        }
+        list.erase(list.begin() + best);
+        save_manual_lights();
+      }
+      ImGui::Text("%d lights of your own in this game", (int)list.size());
+      ImGui::TreePop();
+    }
     ImGui::EndDisabled();
     ImGui::SeparatorText("Water");
     n = 0;
@@ -3447,6 +3605,8 @@ std::string EnhancedPost::menu_settings_json() const {
   j["geometry_normals"] = s.geometry_normals;
   j["prints"] = s.prints;
   j["dark_nights"] = s.dark_nights;
+  j["cloud_shadows"] = s.cloud_shadows;
+  j["light_spill"] = s.light_spill;
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
   j["materials"] = s.materials;
@@ -3502,6 +3662,8 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("geometry_normals", s.geometry_normals);
   get("prints", s.prints);
   get("dark_nights", s.dark_nights);
+  get("cloud_shadows", s.cloud_shadows);
+  get("light_spill", s.light_spill);
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
   get("materials", s.materials);
@@ -3562,6 +3724,8 @@ void EnhancedPost::apply_preset(int preset) {
   s.geometry_normals = d.geometry_normals;
   s.prints = d.prints;
   s.dark_nights = d.dark_nights;
+  s.cloud_shadows = d.cloud_shadows;
+  s.light_spill = d.light_spill;
   s.lit_smoke = d.lit_smoke;
   s.far_view = d.far_view;
   s.materials = d.materials;
