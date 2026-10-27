@@ -121,9 +121,10 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Torches and fires light their surroundings** (Jak 3): every torch, brazier, barrel fire and
   gas lamp the levels place is a real light, flickering, its shadows trembling with the flame;
   Spargus's gate torches light the gate from across the desert.
-- **Jak's lantern** (Jak 3): on foot in the desert at night, Daxter holds up a Wastelander's oil
-  lantern (Damas's people cross the sands by night with them): warm light all around, the flame
-  glowing by his shoulder, swinging as Jak walks. Off in vehicles; a menu switch.
+- **Jak's lantern** (Jak 3): a Wastelander's lantern bulb (Damas's people cross the sands by night
+  with them), a little machine of its own: on foot in the desert at night it rises off Jak's
+  shoulder and hovers up to his right, trailing him a little, its warm light shifting as it moves.
+  Hold triangle (half a second) to switch it on or off anywhere, any hour. Off in vehicles.
 - **Far lights**: at night far fires, lamps and vehicles stay visible as points of light with a
   soft halo (across the desert, over the harbor), and so do the lights you place.
 - **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their

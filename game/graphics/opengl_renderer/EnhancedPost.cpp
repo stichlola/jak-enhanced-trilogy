@@ -1310,58 +1310,104 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.score = 1.5f * c.pos[3] / (dist + c.pos[3]);
       candidates.push_back(c);
     }
-    // Jak's lantern: on foot or on the board in the desert as the night darkens, a Wastelander's oil
-    // lantern Daxter holds up on Jak's shoulder (Damas's people cross the sands by night with
-    // them): a warm flickering light all around, swinging a little as Jak walks
+    // Jak's lantern: on foot or on the board in the desert as the night darkens, a Wastelander's
+    // lantern bulb (Damas's people cross the sands by night with them), a little machine of its own:
+    // it rises off Jak's shoulder as the dark comes, hovers up to his right and follows him on a
+    // spring, lagging, swaying and settling, so its warm light shifts as he moves
     m_lantern[3] = 0.f;
     {
       const auto& pl = g_enhanced_player;
-      const bool on_foot = pl.valid && (pl.state == 1 || pl.state == 3 || pl.state == 4);
-      const float want = (m_settings.desert_lamp && m_pond && on_foot)
-                             ? std::clamp((std::max(m_night, night_darkness()) - 0.25f) / 0.4f, 0.f, 1.f)
-                             : 0.f;
-      m_lamp_on += (want - m_lamp_on) * 0.05f;
-      if (pl.valid && m_time > m_lamp_last_time) {
-        float dx = pl.pos[0] - m_lamp_last[0], dz = pl.pos[2] - m_lamp_last[2];
-        float v = std::sqrt(dx * dx + dz * dz) / kMeter / (float)(m_time - m_lamp_last_time);
-        if (v < 30.f) {
-          m_lamp_walk += (std::min(v / 7.f, 1.f) - m_lamp_walk) * 0.1f;
+      const bool on_foot = pl.valid && pl.state != 2 && pl.state != 5;
+      // on by itself in the desert at night; holding triangle switches it on anywhere, any hour,
+      // or off (switched off it stays off until the next desert night)
+      const float auto_on = (m_settings.desert_lamp && m_pond)
+                                ? std::clamp((std::max(m_night, night_darkness()) - 0.25f) / 0.4f, 0.f, 1.f)
+                                : 0.f;
+      if (pl.valid && pl.lamp_toggles != m_lamp_toggles_seen) {
+        if (m_lamp_toggles_seen >= 0) {
+          const bool lit = m_lamp_mode == 1 || (m_lamp_mode == 0 && auto_on > 0.5f);
+          m_lamp_mode = lit ? 2 : 1;
         }
-        std::memcpy(m_lamp_last, pl.pos, sizeof(m_lamp_last));
-        m_lamp_last_time = m_time;
+        m_lamp_toggles_seen = pl.lamp_toggles;
       }
+      if (m_lamp_mode == 2 && auto_on <= 0.f) {
+        m_lamp_mode = 0;
+      }
+      const float lit = m_lamp_mode == 1 ? 1.f : (m_lamp_mode == 2 ? 0.f : auto_on);
+      const float want = on_foot ? lit : 0.f;
+      m_lamp_on += (want - m_lamp_on) * 0.05f;
+      const float dt = std::clamp((float)(m_time - m_bulb_time), 0.f, 0.1f);
+      m_bulb_time = m_time;
       if (on && pl.valid && m_lamp_on > 0.01f) {
         float fx = cam.rot[0][2], fz = cam.rot[2][2];
         float len = std::max(std::sqrt(fx * fx + fz * fz), 1e-3f);
         fx /= len;
         fz /= len;
+        // the camera's right, flat
+        const float rx = -fz, rz = fx;
         const float t = (float)m_time;
-        const float swing = (0.02f + 0.08f * m_lamp_walk) * std::sin(t * (2.f + 2.6f * m_lamp_walk));
-        // held up and out by Daxter on the left shoulder
-        const float wp[3] = {pl.pos[0] + fz * 0.6f * kMeter + fx * (0.15f + swing) * kMeter,
-                             pl.pos[1] + 1.95f * kMeter,
-                             pl.pos[2] - fx * 0.6f * kMeter + fz * (0.15f + swing) * kMeter};
+        // its spot: up to Jak's right and a little behind, drifting on its own
+        const float drift_side = 0.18f * std::sin(t * 0.63f) + 0.07f * std::sin(t * 1.9f + 0.4f);
+        const float drift_up = 0.14f * std::sin(t * 0.91f + 1.1f) + 0.05f * std::sin(t * 2.7f);
+        const float drift_fwd = 0.15f * std::sin(t * 0.47f + 2.3f);
+        const float side = 1.0f + drift_side, up = 2.35f + drift_up, fwd = -0.3f + drift_fwd;
+        // its place next to Jak (m), where it heads
+        const float target[3] = {rx * side + fx * fwd, up, rz * side + fz * fwd};
+        // Jak's velocity (m/s): the bulb keeps up with him, but his starts, stops and turns jolt it
+        float jv[3] = {0.f, 0.f, 0.f};
+        if (m_bulb_out && dt > 0.f) {
+          for (int k = 0; k < 3; k++) {
+            jv[k] = (pl.pos[k] - m_bulb_jak[k]) / kMeter / dt;
+          }
+        }
+        const float jump2 = jv[0] * jv[0] + jv[1] * jv[1] + jv[2] * jv[2];
+        if (!m_bulb_out || jump2 > 40.f * 40.f) {
+          // it starts on Jak's shoulder (or catches up after a teleport)
+          m_bulb_off[0] = rx * 0.3f;
+          m_bulb_off[1] = 1.5f;
+          m_bulb_off[2] = rz * 0.3f;
+          for (int k = 0; k < 3; k++) {
+            m_bulb_vel[k] = 0.f;
+            m_bulb_jv[k] = 0.f;
+            jv[k] = 0.f;
+          }
+          m_bulb_out = true;
+        }
+        // a soft spring, near critical damping: it trails Jak a little as he moves (half a meter at a
+        // run), sways a touch when he starts, stops or turns, settles without bouncing
+        const float kSpring = 10.f, kDamp = 5.6f;
+        for (int k = 0; k < 3; k++) {
+          m_bulb_vel[k] -= (jv[k] - m_bulb_jv[k]) * 0.12f;
+          m_bulb_jv[k] += (jv[k] - m_bulb_jv[k]) * std::min(1.f, dt * 6.f);
+          const float trail = std::clamp(-m_bulb_jv[k] * 0.08f, -0.8f, 0.8f);
+          float a = kSpring * (target[k] + trail - m_bulb_off[k]) - kDamp * m_bulb_vel[k];
+          m_bulb_vel[k] += a * dt;
+          m_bulb_off[k] += m_bulb_vel[k] * dt;
+          m_bulb_jak[k] = pl.pos[k];
+          m_bulb_pos[k] = pl.pos[k] + m_bulb_off[k] * kMeter;
+        }
         Candidate c;
         for (int col = 0; col < 3; col++) {
           c.pos[col] = 0.f;
           for (int row = 0; row < 3; row++) {
-            c.pos[col] += (wp[row] - cam.trans[row]) * cam.rot[row][col];
+            c.pos[col] += (m_bulb_pos[row] - cam.trans[row]) * cam.rot[row][col];
           }
         }
         c.pos[3] = 14.f * kMeter;
-        const float seed = 1.7f;
-        const float flick = 0.8f + 0.2f * (0.5f * std::sin(t * 11.f + seed) +
-                                           0.3f * std::sin(t * 23.f + 1.7f * seed) +
-                                           0.2f * std::sin(t * 37.f + 2.3f * seed));
-        const float k = m_lamp_on * flick * m_settings.light_strength;
+        // a steady bulb with a faint hum in it
+        const float hum = 0.94f + 0.04f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
+                          0.02f * std::sin(t * 41.f);
+        const float k = m_lamp_on * hum * m_settings.light_strength;
         c.color[0] = 1.25f * k;
-        c.color[1] = 0.6f * k;
-        c.color[2] = 0.2f * k;
-        c.color[3] = 1.f;  // carried: no shadow of Jak from it
+        c.color[1] = 0.62f * k;
+        c.color[2] = 0.22f * k;
+        c.color[3] = 1.f;  // with Jak: no shadow of him from it
         c.score = 100.f;  // always among the lights
         candidates.push_back(c);
         std::memcpy(m_lantern, c.pos, sizeof(float) * 3);
-        m_lantern[3] = m_lamp_on * flick;
+        m_lantern[3] = m_lamp_on * hum;
+      } else if (m_lamp_on <= 0.01f) {
+        m_bulb_out = false;  // next time it rises off the shoulder again
       }
     }
     // the lights placed by hand (lights.json), the night ones lit as the night falls

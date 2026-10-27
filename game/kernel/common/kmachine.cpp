@@ -1103,7 +1103,9 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   g_enhanced_player.pos[0] = v[0];
   g_enhanced_player.pos[1] = v[1];
   g_enhanced_player.pos[2] = v[2];
-  g_enhanced_player.state = (int)v[3];
+  // w: the state, plus 8 x the count of lantern switches (holding triangle), mod 64
+  g_enhanced_player.state = (int)v[3] & 7;
+  g_enhanced_player.lamp_toggles = (int)v[3] >> 3;
   g_enhanced_player.valid = true;
 }
 

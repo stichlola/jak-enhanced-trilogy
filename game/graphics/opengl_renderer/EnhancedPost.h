@@ -514,10 +514,18 @@ class EnhancedPost {
   // the next frame's
   std::vector<std::array<float, 8>> m_headlights;
   float m_lamp_on = 0.f;  // Jak's lamp in the desert, fading in and out
-  float m_lamp_walk = 0.f;  // how fast Jak walks, 0..1 (the lantern swings)
   float m_lantern[4] = {};  // view space, strength (0: none)
-  float m_lamp_last[3] = {};
-  double m_lamp_last_time = 0.0;
+  // the lantern bulb following Jak on a spring: its place next to him (m) and how fast it moves
+  // there (m/s), Jak's last position and velocity, and where it is (world, game units)
+  float m_bulb_off[3] = {};
+  float m_bulb_vel[3] = {};
+  float m_bulb_jak[3] = {};
+  float m_bulb_jv[3] = {};
+  float m_bulb_pos[3] = {};
+  bool m_bulb_out = false;
+  int m_lamp_mode = 0;           // 0 by itself (desert nights), 1 switched on, 2 switched off
+  int m_lamp_toggles_seen = -1;  // the player's switch count last seen
+  double m_bulb_time = 0.0;
   std::vector<std::array<float, 4>> m_fire_spawners;  // world xyz, kind (EnhancedFires)
   double m_fire_spawners_time = 0.0;
   double m_headlights_time = -1.0;

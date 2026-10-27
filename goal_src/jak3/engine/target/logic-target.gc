@@ -447,6 +447,8 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 (define-extern enhanced-update-pushers (function none))
 
 (define *enhanced-player-vec* (new 'static 'vector))
+(define *enhanced-lamp-hold* 0.0)
+(define *enhanced-lamp-toggles* 0)
 (define-extern *enhanced-pusher-count* int)
 
 (define *enhanced-census* (new 'static 'array int32 4))
@@ -2224,6 +2226,17 @@ capture exactly."
   (enhanced-piazza-autoload)
   (enhanced-review-update)
   (enhanced-menu-update)
+  ;; Enhanced: holding triangle on foot (half a second) switches Jak's lantern on or off; counted
+  ;; and sent with the player's state (a tap still enters vehicles and talks)
+  (when *target*
+    (if (and (cpad-hold? 0 triangle) (not (focus-test? *target* pilot)))
+        (+! *enhanced-lamp-hold* (seconds-per-frame))
+        (set! *enhanced-lamp-hold* 0.0)
+        )
+    (when (and (>= *enhanced-lamp-hold* 0.5) (< (- *enhanced-lamp-hold* (seconds-per-frame)) 0.5))
+      (set! *enhanced-lamp-toggles* (logand (+ *enhanced-lamp-toggles* 1) 63))
+      )
+    )
   ;; Enhanced: grass bends away from Jak
   (when *target*
     ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts), 3 on foot,
@@ -2248,6 +2261,8 @@ capture exactly."
                        (else 0.0)
                        )
             )
+      ;; + 8 x the lantern switch count (the renderer sees each long press as a change)
+      (+! (-> v w) (* 8.0 (the float *enhanced-lamp-toggles*)))
       (pc-enhanced-set-player (the-as pointer v))
       )
     )

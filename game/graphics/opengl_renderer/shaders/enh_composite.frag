@@ -2491,8 +2491,8 @@ void main() {
       }
     }
   }
-  // Jak's lantern: the flame a warm point by Daxter, its glow in the night air around it (the air
-  // glows even where Jak hides the flame)
+  // Jak's lantern bulb: a warm point hovering by him in a thin metal rim, its glow in the night air
+  // around it (the air glows even where something hides the bulb)
   if (lantern.w > 0.0 && lantern.z > 0.5 * 4096.0) {
     vec3 lp = lantern.xyz;
     vec2 luv = 0.5 * vec2(proj.z * lp.x, proj.w * lp.y) / lp.z + 0.5;
@@ -2502,10 +2502,16 @@ void main() {
     float core_px = max(2.0, 0.08 * 4096.0 * abs(proj.w) * 0.5 / lp.z / texel.y);
     float ld = texture(tex_T3, clamp(luv, vec2(0.0), vec2(1.0))).r;
     float vis = (ld <= 1e-7 || view_z(ld) > lp.z - 0.3 * 4096.0) ? 1.0 : 0.0;
-    float flame = exp(-r * r / (core_px * core_px)) * 2.2 * vis;
+    float bulb = exp(-r * r / (core_px * core_px)) * 2.2 * vis;
+    // its casing: a thin dark band with a bright edge where the bulb's light catches the metal
+    float band = exp(-pow((r - core_px * 1.7) / (core_px * 0.35), 2.0)) * vis;
+    float edge = exp(-pow((r - core_px * 2.05) / (core_px * 0.18), 2.0)) * vis *
+                 (0.6 + 0.4 * dpx.y / max(r, 1e-3));
     float halo = exp(-r / (core_px * 4.0)) * 0.6 + exp(-r / (core_px * 16.0)) * 0.2;
-    // the flame white-yellow in its heart, the glow deep orange
-    c += (vec3(1.0, 0.82, 0.5) * flame + vec3(1.0, 0.5, 0.18) * halo * (0.4 + 0.6 * vis)) * lantern.w;
+    c *= 1.0 - 0.55 * band * lantern.w;
+    // white-yellow in its heart, the glow deep orange
+    c += (vec3(1.0, 0.82, 0.5) * bulb + vec3(1.0, 0.7, 0.4) * edge * 0.5 +
+          vec3(1.0, 0.5, 0.18) * halo * (0.4 + 0.6 * vis)) * lantern.w;
   }
 
   // the headlamps themselves seen from in front: a blinding point and a short streak
