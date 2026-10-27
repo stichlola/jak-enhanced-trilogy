@@ -5,8 +5,8 @@
 NVIDIA's driver accepts GLSL the spec doesn't; AMD's refuses it, and the shader is then missing in
 the game. This prepares each pair the way Shader.cpp does (the HEIGHT_SCALE / SCISSOR_ macros, the
 cut volumes' and the TAA jitter's wrapped main()) and has glslang compile and link it (glslang from
-https://github.com/KhronosGroup/glslang/releases, default local/tools/glslang/x/bin). Prints the
-errors, exit code 1 if any.
+https://github.com/KhronosGroup/glslang/releases, default local/tools/glslang/x/bin). Also flags any
+byte that isn't ASCII (AMD refuses those, glslang doesn't). Prints the errors, exit code 1 if any.
 """
 import re
 import subprocess
@@ -42,6 +42,15 @@ def prepare(name, vert, frag):
 def main():
     glslang = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "local/tools/glslang/x/bin/glslang.exe"
     bad = 0
+    # AMD's driver takes ASCII only (a UTF-8 byte order mark failed enh_volume there); glslang
+    # doesn't mind, so this is checked apart. Shader.cpp blanks such bytes anyway.
+    for path in sorted(SHADERS.glob("*.*")):
+        data = path.read_bytes()
+        at = next((i for i, b in enumerate(data) if b >= 0x80), None)
+        if at is not None:
+            bad += 1
+            line = data[:at].count(b"\n") + 1
+            print(f"== {path.name}: non-ASCII byte 0x{data[at]:02X} on line {line}")
     with tempfile.TemporaryDirectory() as tmp:
         for vpath in sorted(SHADERS.glob("*.vert")):
             name = vpath.stem

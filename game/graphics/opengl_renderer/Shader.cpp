@@ -23,6 +23,19 @@ bool enhanced_jitters(const std::string& name) {
   }
   return false;
 }
+
+// Enhanced: GLSL source must be plain ASCII for AMD's driver (a UTF-8 byte order mark, or an
+// accented letter in a comment, fails the whole shader there; NVIDIA lets it through). Anything
+// else becomes a space.
+std::string ascii_only(const std::string& src) {
+  std::string out = src;
+  for (char& c : out) {
+    if (static_cast<unsigned char>(c) >= 0x80) {
+      c = ' ';
+    }
+  }
+  return out;
+}
 }  // namespace
 
 Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(shader_name) {
@@ -31,10 +44,10 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   const std::string scissor_adjust = "512.0 / " + scissor_height;
 
   // read the shader source
-  auto vert_src =
-      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"}));
-  auto frag_src =
-      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".frag"}));
+  auto vert_src = ascii_only(
+      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
+  auto frag_src = ascii_only(
+      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".frag"})));
 
   vert_src = std::regex_replace(vert_src, std::regex("HEIGHT_SCALE"), height_scale);
   vert_src = std::regex_replace(vert_src, std::regex("SCISSOR_HEIGHT"), scissor_height);

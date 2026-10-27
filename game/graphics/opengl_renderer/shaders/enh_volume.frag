@@ -1,4 +1,4 @@
-﻿#version 410 core
+#version 410 core
 
 // Jak Enhanced Trilogy: volumetric mist. Half resolution: along each view ray, up to the scene's depth,
 // a ground mist (thicker low, drifting with the wind as 3D noise) scatters the fog color and the
