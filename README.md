@@ -67,6 +67,8 @@ release over the old folder: your extracted discs stay.
   fixed where the game wants it (the swamp's rain, Misty Island's fog, the mountain's snow).
 - Rain with splashes and puddles that fill and dry; lightning; snow; the desert's sandstorms.
 - 20 weather presets in the menu.
+- Ambient sounds: the rain, light and heavy; dripping after it; wind in storms and on desert nights;
+  crickets at night.
 
 **Gameplay**
 - **Nap**: pick 1-12 hours; Jak lies down, sleeps while the sun or moon crosses the sky, gets up
@@ -110,7 +112,7 @@ everything can be switched off, write down how it works).
 - **Naughty Dog**, for the trilogy; **Ratchet & Clank Enhanced**, the inspiration.
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) for the HD textures, [Dear ImGui](https://github.com/ocornut/imgui)
   for the menu, the effects' techniques from their authors; the desert sand texture made with
-  [Tripo](https://www.tripo3d.ai).
+  [Tripo](https://www.tripo3d.ai), the ambient sounds with [ElevenLabs](https://elevenlabs.io).
 
 ## Legal
 

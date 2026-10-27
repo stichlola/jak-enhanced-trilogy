@@ -1,10 +1,11 @@
 """Make the ambient sound loops (game/assets/enhanced/sounds/*.wav) with ElevenLabs' sound effects.
 
   python scripts/enhanced/ambient_sounds.py [name ...]   (no names: the missing ones)
-  python scripts/enhanced/ambient_sounds.py --force rain_light
+  python scripts/enhanced/ambient_sounds.py --force rain_light   (asks again)
+  python scripts/enhanced/ambient_sounds.py --convert             (the downloads again, no request)
 
 The key comes from ELEVENLABS_API_KEY. Each sound is asked for as a seamless loop and converted
-with ffmpeg to 48 kHz stereo 16-bit WAV, the format the game's mixer plays (game/sound/989snd/
+with ffmpeg to 48 kHz stereo 16-bit WAV, the format the game's mixer plays (game/sound/common/
 enhanced_ambience.cpp). The raw downloads stay in local/ambience (not in git).
 """
 import json
@@ -19,6 +20,10 @@ OUT = ROOT / "game" / "assets" / "enhanced" / "sounds"
 RAW = ROOT / "local" / "ambience"
 
 # name: (prompt, seconds). Kept free of music and of single loud events, so they loop unnoticed.
+# The loops come back at very different levels; each is brought to its own loudness (LUFS), the
+# mix between them (heavy rain over light, crickets well under the game)
+LOUDNESS = {"rain_light": -25, "rain_heavy": -19, "drips": -28, "wind_night": -26, "wind_storm": -20,
+            "crickets": -28}
 SOUNDS = {
     "rain_light": ("Gentle steady rain falling on grass, leaves and stone ground, soft constant "
                    "patter, calm ambience, no thunder, no music", 20),
@@ -60,10 +65,20 @@ def generate(name, prompt, seconds):
     return raw
 
 
+def loudness(path):
+    """Integrated loudness (LUFS)."""
+    r = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(path), "-af", "ebur128=framelog=quiet",
+                        "-f", "null", "-"], capture_output=True, text=True)
+    lines = [l for l in r.stderr.splitlines() if l.strip().startswith("I:")]
+    return float(lines[-1].split()[1])
+
+
 def convert(raw, name):
     OUT.mkdir(parents=True, exist_ok=True)
     wav = OUT / f"{name}.wav"
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-ar", "48000", "-ac", "2",
+    gain = LOUDNESS[name] - loudness(raw)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(raw), "-af",
+                    f"volume={gain:.1f}dB,alimiter=limit=0.9:level=false", "-ar", "48000", "-ac", "2",
                     "-c:a", "pcm_s16le", str(wav)], check=True)
     return wav
 
@@ -74,7 +89,7 @@ def main():
     names = [a for a in args if not a.startswith("--")] or list(SOUNDS)
     for name in names:
         prompt, seconds = SOUNDS[name]
-        if (OUT / f"{name}.wav").exists() and not force:
+        if (OUT / f"{name}.wav").exists() and not force and "--convert" not in args:
             print(f"{name}: there already")
             continue
         raw = RAW / f"{name}.mp3"
