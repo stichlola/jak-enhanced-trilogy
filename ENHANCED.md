@@ -120,12 +120,23 @@ got no nav and crashed. `citizen-spawn` now stops while that mesh has fewer than
 citizen refuses `traffic-activate` (from the missions and the war zone too) on a full mesh, and
 nothing touches a missing nav after `go-inactive`.
 
+### The nap's animations (Jak 3)
+
+Jak lies down on his back, sleeps with a big cartoon breath, gets up and stretches: four Mixamo
+clips (X Bot, FBX) retargeted onto Jak's skeleton by `scripts/enhanced/nap_anims.py` (Blender
+headless; each Jak joint takes its Mixamo joint's rotation from the T-pose, worked out in glTF space
+from the decompiler's `jakb-lod0.glb`). The glb holds only the skeleton (no `align`: build-actor
+adds it), a one-triangle mesh and the animations; `(build-actor "jak-nap" :master-art-group
+"jakb-ag")` makes `jak-nap-ag.go`, which goes in GAME.CGO after Jak's other sub-groups and fills free
+slots of `jakb-ag` as it loads. `target-enhanced-nap` finds them by name (`jakb-nap-lie`, `-sleep`,
+`-getup`, `-stretch`) and falls back on the trip and painful-land animations without them.
+Every joint needs all three channels on every frame (build-actor fills missing ones with identity,
+not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-actor crashes.
+
 ## Not done (yet)
 
 Next, the small ones first (the big ones below wait until these are done):
 
-- A real sleeping animation for the nap (Mixamo clips, retargeted to Jak's skeleton in Blender and
-  linked into `jakb-ag` as a build-actor art group with `:master-art-group`).
 - The nap in Jak 1 too (it needs a lying-down animation of its own).
 - Smaller subtitles by default (the PS2 size takes too much of a Full HD screen), and later an
   accessibility option to make them bigger again.
