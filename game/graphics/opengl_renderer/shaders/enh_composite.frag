@@ -112,6 +112,9 @@ uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day o
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
 uniform vec2 night_dark;        // dark nights: how dark (0..1), the lights' gain
 uniform vec4 player_view;       // Jak (view space, game units), w: valid
+uniform int spot_count;         // vehicles' headlights: view space + strength, the way they point
+uniform vec4 spot_pos[8];
+uniform vec4 spot_dir[8];
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
@@ -1778,7 +1781,11 @@ void main() {
       if (close_up > 0.0) {
         sh *= smoothstep(0.5 * close_up, close_up, z);
       }
-      c *= 1.0 - shadow_strength * sh;
+      // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
+      // and fuller (light and shadow apart)
+      c *= vec3(1.0) - shadow_strength * sh * vec3(1.05, 0.97, 0.8);
+      c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
+                       vec3(0.08, 0.07, 0.05);
     }
   }
 
@@ -1814,9 +1821,20 @@ void main() {
 
   // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
   // own color (the scene's color stands in for its albedo), with a smooth falloff to its radius
-  if (light_count > 0 && z > 0.0 && wsurf == 0.0) {
+  if ((light_count > 0 || spot_count > 0) && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surface_normal(tex_coord, p);
     vec3 added = vec3(0.0);
+    // headlights: a cone of warm white down the road, out to 55 m
+    for (int i = 0; i < spot_count; i++) {
+      vec3 tl = spot_pos[i].xyz - p;
+      float d = length(tl);
+      vec3 l = tl / max(d, 1.0);
+      float cone = smoothstep(0.78, 0.96, dot(-l, spot_dir[i].xyz));
+      float dm = d / 4096.0;
+      float fall = 1.0 / (1.0 + dm * dm / 250.0) * (1.0 - smoothstep(35.0, 55.0, dm));
+      float ndl = clamp(dot(nn, l) * 0.85 + 0.15, 0.0, 1.0);
+      added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 1.6;
+    }
     // per-pixel jitter of the shadow steps (the TAA averages it)
     float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
                          haze.w * 7.13);
@@ -1844,7 +1862,9 @@ void main() {
     }
     if (night_dark.x > 0.0) {
       // at night the light shows the surface's own color, brighter
-      c += (albedo + 0.12) * added * ao * night_dark.y;
+      // (the game tints the night blue: the surface's own color, warmer, under a lamp)
+      vec3 own = albedo * mix(vec3(1.0), vec3(1.3, 1.05, 0.72), night_dark.x);
+      c += (own + 0.12) * added * ao * night_dark.y;
     } else {
       c += (c + 0.12) * added * ao;
     }
@@ -2240,6 +2260,25 @@ void main() {
     }
   }
 
+  // headlight beams in the air: a few steps along the view through their cones
+  if (spot_count > 0) {
+    float air_b = weather.x * 0.8 + weather2.y + weather.y * 0.6 + weather2.x * 0.3 + clouds.w * 0.3;
+    float tmax = min(z > 0.0 ? length(p) : 1e9, 40.0 * 4096.0);
+    float beam = 0.0;
+    float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    for (int i = 0; i < spot_count; i++) {
+      for (int k = 0; k < 10; k++) {
+        float t = tmax * (float(k) + jit) / 10.0;
+        vec3 q = ray * t - spot_pos[i].xyz;
+        float dq = length(q);
+        float cone = smoothstep(0.86, 0.97, dot(q / max(dq, 1.0), spot_dir[i].xyz));
+        float dm = dq / 4096.0;
+        beam += cone * spot_pos[i].w / (1.0 + dm * dm / 40.0) * (1.0 - smoothstep(20.0, 40.0, dm)) * tmax / 10.0 / 4096.0;
+      }
+    }
+    c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.03;
+  }
+
   // halos: in rain, fog or dust the air around each light glows (scattering), less where the
   // light is behind something
   // (at night the air always holds some haze: the lamps glow in it, and light the air along the
@@ -2329,8 +2368,30 @@ void main() {
   c += texture(tex_T1, tex_coord).rgb * bloom_strength;
   c += texture(tex_T4, tex_coord).rgb * shafts_strength;
 
-  // highlights roll off instead of clipping (bloom can push past 1)
+  // highlights roll off instead of clipping (bloom can push past 1): first the brightness, from
+  // 0.7 up (the hue kept: sunlit sand and walls keep their color instead of burning to yellow and
+  // white), then each channel
+  {
+    float hl = luma(c);
+    if (hl > 0.7) {
+      float over = hl - 0.7;
+      c *= (0.7 + over / (1.0 + over * 2.2)) / hl;
+    }
+  }
   c = c / (1.0 + max(c - 0.85, 0.0) * 1.2);
+  // by day, a white balance: the scene's average color (a few points of it) brought part of the
+  // way to grey, so a strong cast (the desert's yellow afternoons) doesn't tint everything
+  if (clouds.w < 0.99) {
+    vec3 avg = vec3(0.0);
+    for (int j = 0; j < 4; j++) {
+      for (int i = 0; i < 5; i++) {
+        avg += texture(tex_T0, vec2((float(i) + 0.5) / 5.0, (float(j) + 0.5) / 4.0)).rgb;
+      }
+    }
+    avg = max(avg / 20.0, vec3(1e-3));
+    vec3 wb = clamp(vec3(luma(avg)) / avg, vec3(0.8), vec3(1.25));
+    c *= mix(vec3(1.0), wb, 0.35 * (1.0 - clouds.w));
+  }
 
   // grading: the area's tint (shadows lifted toward one color, highlights toward another), then
   // saturation, gentle S-curve, warm highlights / cool shadows
@@ -2342,7 +2403,8 @@ void main() {
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
   vec3 curve = c * c * (3.0 - 2.0 * c);
   c = mix(c, curve, contrast);
-  c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35);
+  // (less in the brightest parts: they'd go yellow)
+  c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35) * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
 
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky

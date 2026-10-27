@@ -301,6 +301,7 @@
 (define-extern pc-enhanced-gun-blast (function pointer pointer none))
 (define-extern pc-enhanced-getenv (function string string int symbol))
 (define-extern pc-enhanced-set-lights (function pointer int none))
+(define-extern pc-enhanced-headlight (function pointer pointer none))
 (define-extern pc-enhanced-poll-request (function string int int))
 (define-extern pc-enhanced-minimap? (function symbol))
 

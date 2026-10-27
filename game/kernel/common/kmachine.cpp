@@ -1173,6 +1173,18 @@ void pc_enhanced_gun_blast(u32 pos_ptr, u32 dir_ptr) {
   }
 }
 
+// Enhanced: a vehicle's headlight this frame: position + strength, direction
+void pc_enhanced_headlight(u32 pos_ptr, u32 dir_ptr) {
+  auto* p = Ptr<float>(pos_ptr).c();
+  auto* d = Ptr<float>(dir_ptr).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_headlights.mutex);
+  if (g_enhanced_headlights.count < EnhancedHeadlights::kMax) {
+    float* e = g_enhanced_headlights.pending[g_enhanced_headlights.count++];
+    std::memcpy(e, p, sizeof(float) * 4);
+    std::memcpy(e + 4, d, sizeof(float) * 4);
+  }
+}
+
 // Enhanced: the lamps near the camera, count pairs of vectors (position + radius, color)
 void pc_enhanced_set_lights(u32 vec_ptr, u32 count) {
   auto* v = Ptr<float>(vec_ptr).c();
@@ -1369,6 +1381,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-gun-blast", (void*)pc_enhanced_gun_blast);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
+  make_func_symbol_func("pc-enhanced-headlight", (void*)pc_enhanced_headlight);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
 

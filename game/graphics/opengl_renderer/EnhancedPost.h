@@ -504,6 +504,10 @@ class EnhancedPost {
   bool m_pond = false;  // the water here is a pond (Jak 3's desert oases)
   float m_night = 0.f;
   float night_darkness() const;
+  // the vehicles' headlights (world): position, strength; direction. Kept until the game sends
+  // the next frame's
+  std::vector<std::array<float, 8>> m_headlights;
+  double m_headlights_time = -1.0;
   bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)

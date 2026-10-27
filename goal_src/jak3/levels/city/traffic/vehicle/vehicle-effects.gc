@@ -145,6 +145,28 @@
     (vector-rotate*! (-> s5-0 vec1) (-> s5-0 vec1) (-> s5-0 mat0))
     (set! (-> this fog-fade) (calc-fade-from-fog (-> this root trans)))
     (set! (-> s5-0 float1) (* (-> this fog-fade) (-> this lights-factor)))
+    ;; Enhanced: the headlights light the way (the renderer shows them in the dark); the player's
+    ;; always on
+    (when (< (-> this camera-dist2) (* 327680.0 327680.0))
+      (let ((on (if (logtest? (vehicle-flag player-driving) (-> this v-flags))
+                    1.0
+                    (-> this lights-factor)
+                    )
+                )
+            (dir (new 'stack-no-clear 'vector))
+            )
+        (when (< 0.0 on)
+          (set-vector! dir 0.0 -0.07 1.0 0.0)
+          (vector-rotate*! dir dir (-> s5-0 mat0))
+          (vector-normalize! dir 1.0)
+          (dotimes (s4-2 (-> this info particles headlight-count))
+            (vector-matrix*! (-> s5-0 vec0) (-> this info particles headlight-local-pos s4-2) (-> s5-0 mat0))
+            (set! (-> s5-0 vec0 w) on)
+            (pc-enhanced-headlight (the-as pointer (-> s5-0 vec0)) (the-as pointer dir))
+            )
+          )
+        )
+      )
     (when (< 0.0 (-> s5-0 float1))
       (dotimes (s4-0 (-> this info particles headlight-count))
         (quad-copy!

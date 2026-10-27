@@ -152,6 +152,16 @@ struct EnhancedExplosions {
 };
 extern EnhancedExplosions g_enhanced_explosions;
 
+// The vehicles' headlights near the camera, sent by the game every frame (pc-enhanced-headlight):
+// world position (game units), strength; the way they point (unit)
+struct EnhancedHeadlights {
+  static constexpr int kMax = 16;
+  float pending[kMax][8];
+  int count = 0;
+  std::mutex mutex;
+};
+extern EnhancedHeadlights g_enhanced_headlights;
+
 // Is the Jak 2 plaza (Jak 3's custom level piazza) built? It's made from a Jak 2 disc by hand
 // (local/blender/piazza_jak2.blend), so most installs don't have it: then no passages are cut
 // into Haven and nothing tries to load it.

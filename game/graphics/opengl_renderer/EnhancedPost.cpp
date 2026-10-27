@@ -35,6 +35,7 @@ EnhancedCasters g_enhanced_casters;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedExplosions g_enhanced_explosions;
+EnhancedHeadlights g_enhanced_headlights;
 EnhancedMenu g_enhanced_menu;
 EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
@@ -1499,6 +1500,72 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     for (int i = 0; i < n; i++) {
       pos[i * 4 + 3] *= 1.f + 0.6f * dark;
+    }
+    {
+      // headlights: the nearest few, in view space, shown in the dark only
+      {
+        std::lock_guard<std::mutex> lock(g_enhanced_headlights.mutex);
+        if (g_enhanced_headlights.count > 0) {
+          m_headlights.clear();
+          for (int i = 0; i < g_enhanced_headlights.count; i++) {
+            std::array<float, 8> h;
+            std::memcpy(h.data(), g_enhanced_headlights.pending[i], sizeof(float) * 8);
+            m_headlights.push_back(h);
+          }
+          g_enhanced_headlights.count = 0;
+          m_headlights_time = m_time;
+        } else if (m_time - m_headlights_time > 0.2) {
+          m_headlights.clear();
+        }
+      }
+      // test switch: two headlights on Jak, pointing where the camera looks
+      static bool test_headlights = std::getenv("JAK_ENHANCED_HEADLIGHT_TEST") != nullptr;
+      if (test_headlights && g_enhanced_player.valid) {
+        const auto& pl = g_enhanced_player;
+        float fx = cam.rot[0][2], fz = cam.rot[2][2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1e-3f);
+        fx /= len;
+        fz /= len;
+        m_headlights.clear();
+        for (int k = 0; k < 2; k++) {
+          float side = (k ? 0.7f : -0.7f) * kMeter;
+          m_headlights.push_back({pl.pos[0] + fz * side + fx * kMeter, pl.pos[1] + 0.9f * kMeter,
+                                  pl.pos[2] - fx * side + fz * kMeter, 1.f, fx * 0.99f, -0.07f,
+                                  fz * 0.99f, 0.f});
+        }
+      }
+      constexpr int kSpots = 8;
+      std::vector<std::pair<float, int>> order;
+      for (int i = 0; i < (int)m_headlights.size(); i++) {
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          float dk = m_headlights[i][k] - cam.trans[k];
+          d2 += dk * dk;
+        }
+        order.push_back({d2, i});
+      }
+      std::sort(order.begin(), order.end());
+      float spot_pos[kSpots * 4] = {};
+      float spot_dir[kSpots * 4] = {};
+      int spots = 0;
+      const float shown = std::max(m_night, dark);
+      for (const auto& [d2, i] : order) {
+        if (spots == kSpots || shown <= 0.01f || !m_settings.lights) {
+          break;
+        }
+        const auto& h = m_headlights[i];
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            spot_pos[spots * 4 + col] += (h[row] - cam.trans[row]) * cam.rot[row][col];
+            spot_dir[spots * 4 + col] += h[4 + row] * cam.rot[row][col];
+          }
+        }
+        spot_pos[spots * 4 + 3] = h[3] * shown;
+        spots++;
+      }
+      glUniform1i(glGetUniformLocation(id, "spot_count"), spots);
+      glUniform4fv(glGetUniformLocation(id, "spot_pos"), kSpots, spot_pos);
+      glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
