@@ -178,6 +178,55 @@ bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& ou
   return ok;
 }
 
+bool enhanced_bigmap_window(int map,
+                            int map_w,
+                            int map_h,
+                            int strip,
+                            int row,
+                            std::vector<u32>& out,
+                            int& scale) {
+  // the map on screen, decoded once (the game uploads two or three windows of it every frame)
+  static int s_map = -1;
+  static int s_w = 0, s_h = 0;
+  static std::vector<u32> s_pixels;
+  if (map != s_map) {
+    s_map = map;
+    s_pixels.clear();
+    const auto path = file_util::get_jak_project_dir() / "game/assets/enhanced/bigmap" /
+                      version_to_game_name(g_game_version) / fmt::format("map{:02d}.jpg", map);
+    int w = 0, h = 0, n = 0;
+    unsigned char* data = stbi_load(path.string().c_str(), &w, &h, &n, 4);
+    if (!data) {
+      return false;
+    }
+    s_w = w;
+    s_h = h;
+    s_pixels.resize((size_t)w * h);
+    for (size_t i = 0; i < s_pixels.size(); i++) {
+      // opaque in the PS2's alpha
+      s_pixels[i] = (data[i * 4] | (data[i * 4 + 1] << 8) | (data[i * 4 + 2] << 16)) | (0x80u << 24);
+    }
+    stbi_image_free(data);
+    lg::info("[enhanced] pause map {}: HD {}x{}", map, w, h);
+  }
+  if (s_pixels.empty() || map_w <= 0 || map_h <= 0 || s_w % map_w || s_h % map_h ||
+      s_w / map_w != s_h / map_h) {
+    return false;
+  }
+  const int S = s_w / map_w;
+  constexpr int kW = 256, kH = 416;
+  out.resize((size_t)kW * S * kH * S);
+  for (int y = 0; y < kH * S; y++) {
+    const int sy = std::clamp(row * S + y, 0, s_h - 1);
+    for (int x = 0; x < kW * S; x++) {
+      const int sx = std::clamp(strip * kW * S + x, 0, s_w - 1);
+      out[(size_t)y * kW * S + x] = s_pixels[(size_t)sy * s_w + sx];
+    }
+  }
+  scale = S;
+  return true;
+}
+
 void enhanced_set_texel_scale(GLuint tex, float scale) {
   std::lock_guard<std::mutex> lock(g_scale_mutex);
   g_texel_scale[tex] = scale;

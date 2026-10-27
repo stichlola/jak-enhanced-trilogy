@@ -231,6 +231,8 @@
          )
     (-> s4-0 2)
     (set! sv-16 (* (-> s4-0 3) 256))
+    ;; og:preserve-this Enhanced: which map and where its image is, for the HD maps
+    (pc-enhanced-bigmap-image (the int (-> this load-index)) s4-0)
     (while (>= s0-0 s1-0)
       ;; og:preserve-this
       ; (texture-upload-dma this arg0 (+ (+ (-> s4-0 0) 16) (the-as uint s4-0)) 0 16 16 (gs-psm ct32))

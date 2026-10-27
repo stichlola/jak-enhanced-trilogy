@@ -25,6 +25,17 @@ constexpr int kEnhancedMapScale = 4;
 // replacements (baked into the levels), the game keeps addressing these in its own texels
 bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale);
 
+// Jak 3's pause map: the window the game uploads (256 x 416 texels from column strip * 256, row
+// row, of world map `map`, map_w x map_h) cut from game/assets/enhanced/bigmap/jak3/mapNN.jpg (a
+// whole multiple of the map's size, scale), PS2 alpha. False when that map has no HD picture
+bool enhanced_bigmap_window(int map,
+                            int map_w,
+                            int map_h,
+                            int strip,
+                            int row,
+                            std::vector<u32>& out,
+                            int& scale);
+
 void enhanced_set_texel_scale(GLuint tex, float scale);
 void enhanced_forget_texture(GLuint tex);
 float enhanced_texel_scale(GLuint tex);

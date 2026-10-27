@@ -1292,6 +1292,12 @@ u64 pc_enhanced_switch_game(u32 game) {
   return 1;
 }
 
+// Enhanced: Jak 3's pause map draws world map `map` from the image at `image` (EE address)
+void pc_enhanced_bigmap_image(u32 map, u32 image) {
+  g_enhanced_bigmap.map = (int)map;
+  g_enhanced_bigmap.image = image;
+}
+
 // Enhanced: once, after a switch: the save file (0..3) last written in this game, -1 for none
 // (or no switch)
 s64 pc_enhanced_switch_restore() {
@@ -1533,6 +1539,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
   make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
   make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);
+  make_func_symbol_func("pc-enhanced-bigmap-image", (void*)pc_enhanced_bigmap_image);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

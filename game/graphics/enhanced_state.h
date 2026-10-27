@@ -173,6 +173,16 @@ struct EnhancedMenu {
 };
 extern EnhancedMenu g_enhanced_menu;
 
+// Jak 3's pause map (bigmap.gc): which world map is loaded (its index in WOMAP.STR) and where its
+// image sits in the game's memory, set as the map draws (pc-enhanced-bigmap-image). The renderer
+// works out which window of which map each 256 x 416 upload is, and draws it from the HD maps
+// (bigmap_hd.py) instead
+struct EnhancedBigmap {
+  std::atomic<int> map{-1};
+  std::atomic<u32> image{0};
+};
+extern EnhancedBigmap g_enhanced_bigmap;
+
 // Explosions the game spawned (pc-enhanced-explosion, from explosion-init-by-other): world
 // position and radius (game units), picked up by the post pass for a flash and a shockwave.
 struct EnhancedExplosions {

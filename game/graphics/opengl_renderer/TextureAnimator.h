@@ -39,8 +39,14 @@ struct VramEntry {
   bool needs_pool_update = false;
   GpuTexture* pool_gpu_tex = nullptr;
 
+  // Enhanced: a window of Jak 3's pause map (map index, its size, the window's strip and row), drawn
+  // from the HD map instead (-1: not one)
+  int enh_bigmap = -1;
+  int enh_bigmap_w = 0, enh_bigmap_h = 0, enh_bigmap_strip = 0, enh_bigmap_row = 0;
+
   void reset() {
     data.clear();
+    enh_bigmap = -1;
     kind = Kind::INVALID;
     tex_height = 0;
     tex_width = 0;

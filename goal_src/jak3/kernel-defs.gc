@@ -309,6 +309,7 @@
 (define-extern pc-enhanced-photo (function int int))
 (define-extern pc-enhanced-switch-game (function int int))
 (define-extern pc-enhanced-switch-restore (function int))
+(define-extern pc-enhanced-bigmap-image (function int pointer none))
 (define-extern pc-enhanced-fov (function int))
 (define-extern pc-enhanced-subtitle-size (function int))
 (define-extern pc-enhanced-minimap-size (function int))

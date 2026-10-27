@@ -45,6 +45,7 @@ EnhancedExplosions g_enhanced_explosions;
 EnhancedHeadlights g_enhanced_headlights;
 EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
+EnhancedBigmap g_enhanced_bigmap;
 EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
 

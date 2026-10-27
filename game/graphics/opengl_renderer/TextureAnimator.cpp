@@ -6,6 +6,8 @@
 #include "common/util/FileUtil.h"
 #include "common/util/Timer.h"
 
+#include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 #include "game/graphics/opengl_renderer/slime_lut.h"
 #include "game/graphics/texture/TexturePool.h"
 
@@ -1539,6 +1541,25 @@ void TextureAnimator::force_to_gpu(int tbp) {
       entry.kind = VramEntry::Kind::GPU;
     } break;
     case VramEntry::Kind::GENERIC_PSMT8: {
+      // Enhanced: a window of Jak 3's pause map, from the HD map (the game keeps addressing it in
+      // its own texels: the direct renderer divides by the scale)
+      if (entry.enh_bigmap >= 0) {
+        std::vector<u32> hd;
+        int scale = 1;
+        if (enhanced_bigmap_window(entry.enh_bigmap, entry.enh_bigmap_w, entry.enh_bigmap_h,
+                                   entry.enh_bigmap_strip, entry.enh_bigmap_row, hd, scale)) {
+          const int tw = entry.tex_width * scale;
+          const int th = entry.tex_height * scale;
+          VramEntry* hd_entry = setup_vram_entry_for_gpu_texture(tw, th, tbp);
+          glBindTexture(GL_TEXTURE_2D, hd_entry->tex.value().texture());
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA,
+                       GL_UNSIGNED_INT_8_8_8_8_REV, hd.data());
+          glBindTexture(GL_TEXTURE_2D, 0);
+          enhanced_set_texel_scale(hd_entry->tex.value().texture(), (float)scale);
+          hd_entry->kind = VramEntry::Kind::GPU;
+          break;
+        }
+      }
       // we have data that was uploaded in PSMT8 format. Assume that it will also be read in this
       // format. Convert to normal format.
       int tw = entry.tex_width;
@@ -1564,6 +1585,7 @@ void TextureAnimator::force_to_gpu(int tbp) {
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
                    rgba_data.data());
       glBindTexture(GL_TEXTURE_2D, 0);
+      enhanced_forget_texture(entry.tex.value().texture());
       entry.kind = VramEntry::Kind::GPU;
     } break;
     case VramEntry::Kind::GENERIC_PSMT4: {
@@ -1796,6 +1818,23 @@ void TextureAnimator::handle_generic_upload(const DmaTransfer& tf, const u8* ee_
       vram.tex_width = upload->width;
       vram.tex_height = upload->height;
       memcpy(vram.data.data(), ee_mem + upload->data, vram.data.size());
+      // Enhanced: Jak 3's pause map uploads 256 x 416 windows of its image (a header of 4 words:
+      // the clut's offset, the pixels' offset, the width and height; then 256-wide strips, each
+      // height tall) to tbp 8: which strip and row this is, from where the window starts
+      if (upload->dest == 8 && upload->width == 256 && upload->height == 416 &&
+          g_enhanced_bigmap.image) {
+        const u32 image = g_enhanced_bigmap.image;
+        const u32* header = (const u32*)(ee_mem + image);
+        const s64 off = (s64)upload->data - (s64)(image + 16 + header[1]);
+        const s64 strip_size = (s64)header[3] * 256;
+        if (strip_size > 0 && off >= 0 && off < (s64)header[2] * header[3]) {
+          vram.enh_bigmap = g_enhanced_bigmap.map;
+          vram.enh_bigmap_w = (int)header[2];
+          vram.enh_bigmap_h = (int)header[3];
+          vram.enh_bigmap_strip = (int)(off / strip_size);
+          vram.enh_bigmap_row = (int)((off % strip_size) / 256);
+        }
+      }
       m_tex_looking_for_clut = &vram;
       if (upload->force_to_gpu) {
         m_force_to_gpu.insert(upload->dest);
