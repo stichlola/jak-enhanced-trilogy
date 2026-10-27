@@ -140,6 +140,7 @@
 (define-extern *enhanced-unlock-all* symbol) ;; level.gc
 (define-extern enhanced-recoil-update (function none :behavior target)) ;; gun-red-shot.gc
 (define-extern enhanced-charge-hint-draw (function none)) ;; task-control.gc
+(define-extern *enhanced-lamp-hint* int) ;; task-control.gc
 
 (defun enhanced-piazza-autoload ()
   "Keep the Jak 2 plaza (custom level piazza) in the wanted levels while Jak is around it in Haven:
@@ -320,6 +321,13 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
        (copy-string<-string *enhanced-tp-buf* *enhanced-menu-buf*)
        (enhanced-teleport)
        )
+     )
+    ((10)
+     ;; the first desert night: the hour, then a word on Jak's lantern
+     (when *time-of-day*
+       (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-menu-buf*))
+       )
+     (set! *enhanced-lamp-hint* 900)
      )
     ((4)
      (when *time-of-day*

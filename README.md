@@ -124,7 +124,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Jak's lantern** (Jak 3): a Wastelander's lantern bulb (Damas's people cross the sands by night
   with them), a little machine of its own: on foot in the desert at night it rises off Jak's
   shoulder and hovers up to his right, trailing him a little, its warm light shifting as it moves.
-  Hold triangle (half a second) to switch it on or off anywhere, any hour. Off in vehicles.
+  Hold triangle (half a second) to switch it on or off anywhere, any hour. Off in vehicles. The
+  first time you stand in the desert, night falls and it rises for you, with a word on it.
 - **Far lights**: at night far fires, lamps and vehicles stay visible as points of light with a
   soft halo (across the desert, over the harbor), and so do the lights you place.
 - **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their

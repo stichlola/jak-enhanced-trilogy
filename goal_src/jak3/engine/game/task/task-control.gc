@@ -13,7 +13,31 @@
 ;; left to show it (counted outside cutscenes)
 (define *enhanced-charge-hint* 0)
 
+(define *enhanced-lamp-hint* 0)
+
+;; Enhanced: the same for Jak's lantern, the first night he stands in the desert
+(defun enhanced-lamp-hint-draw ()
+  (when (and (> *enhanced-lamp-hint* 0) (not (movie?)))
+    (+! *enhanced-lamp-hint* -1)
+    (let ((font (new 'stack 'font-context *font-default-matrix* 56 70 0.0 (font-color default) (font-flags shadow kerning))))
+      (set-width! font 400)
+      (set-height! font 60)
+      (set! (-> font scale) 0.6)
+      (set! (-> font flags) (font-flags shadow kerning middle large))
+      (print-game-text
+        "Wastelander lantern: it lights up by itself on desert nights. Hold Triangle to switch it on or off"
+        font
+        #f
+        44
+        (bucket-id hud-draw-hud-alpha)
+        )
+      )
+    )
+  (none)
+  )
+
 (defun enhanced-charge-hint-draw ()
+  (enhanced-lamp-hint-draw)
   (when (and (> *enhanced-charge-hint* 0) (not (movie?)))
     (+! *enhanced-charge-hint* -1)
     (let ((font (new 'stack 'font-context *font-default-matrix* 56 70 0.0 (font-color default) (font-flags shadow kerning))))

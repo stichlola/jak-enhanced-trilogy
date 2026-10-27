@@ -1318,6 +1318,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     {
       const auto& pl = g_enhanced_player;
       const bool on_foot = pl.valid && pl.state != 2 && pl.state != 5;
+      // the first time Jak stands in the desert (once per install): night falls and the bulb rises,
+      // with a word on it on the screen (request 10: the hour, the hint)
+      if (!m_settings.lantern_intro_done && m_settings.desert_lamp && m_pond && pl.valid &&
+          (pl.state == 1 || pl.state == 3) && !g_enhanced_scene.movie) {
+        g_enhanced_menu.ask(10, "22");
+        m_lamp_mode = 0;
+        m_settings.lantern_intro_done = true;
+        save_menu_settings();
+      }
       // on by itself in the desert at night; holding triangle switches it on anywhere, any hour,
       // or off (switched off it stays off until the next desert night)
       const float auto_on = (m_settings.desert_lamp && m_pond)
@@ -3883,6 +3892,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["cloud_shadows"] = s.cloud_shadows;
   j["lens_flare"] = s.lens_flare;
   j["desert_lamp"] = s.desert_lamp;
+  j["lantern_intro_done"] = s.lantern_intro_done;
   j["light_spill"] = s.light_spill;
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
@@ -3942,6 +3952,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("cloud_shadows", s.cloud_shadows);
   get("lens_flare", s.lens_flare);
   get("desert_lamp", s.desert_lamp);
+  get("lantern_intro_done", s.lantern_intro_done);
   get("light_spill", s.light_spill);
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);

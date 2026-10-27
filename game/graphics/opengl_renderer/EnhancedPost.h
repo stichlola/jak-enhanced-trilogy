@@ -155,6 +155,7 @@ class EnhancedPost {
     // Jak's lantern: on foot in the desert at night a Wastelander's oil lantern Daxter holds up on
     // his shoulder (Damas's people cross the sands by night with them); off in vehicles
     bool desert_lamp = true;
+    bool lantern_intro_done = false;  // the first desert night with the lantern has been shown
     float light_spill = 1.0f;   // at night what shines lights the surfaces around it
     float lit_smoke = 0.8f; // the dynamic lights brighten and tint the smoke and dust near them
     bool far_view = true;   // no occlusion culling from the game's precomputed visibility
