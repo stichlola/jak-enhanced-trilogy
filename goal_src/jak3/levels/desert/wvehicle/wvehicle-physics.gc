@@ -67,6 +67,8 @@
                               )
         )
 
+(define-extern *enhanced-vehicle-in-air* int)
+
 (defmethod wvehicle-method-160 ((this wvehicle) (arg0 wvehicle-physics-work))
   (let ((v1-0 (-> this rbody)))
     (mem-copy! (the-as pointer (-> arg0 mat)) (the-as pointer (-> v1-0 matrix)) 64)
@@ -178,6 +180,10 @@
       )
     0
     )
+  ;; Enhanced: the player's vehicle off the ground (a jump) leaves no dust (logic-target.gc)
+  (if (and (logtest? (vehicle-flag player-driving) (-> this v-flags)) (logtest? (-> this v-flags) (vehicle-flag in-air)))
+      (set! *enhanced-vehicle-in-air* 3)
+      )
   0
   (none)
   )

@@ -23,7 +23,8 @@ extern EnhancedSun g_enhanced_sun;
 struct EnhancedPlayer {
   float pos[3] = {0.f, 0.f, 0.f};
   // 0 elsewhere, 1 on foot on soft ground (sand, dirt, snow), 2 driving, 3 on foot on other
-  // ground, 4 on the board, 5 driving or boarding over water, 6 on the board in the air
+  // ground, 4 on the board, 5 driving or boarding over water, 6 on the board in the air, 7 driving in
+  // the air
   int state = 0;
   int lamp_toggles = 0;  // how many times the player switched Jak's lantern (mod 64)
   bool valid = false;

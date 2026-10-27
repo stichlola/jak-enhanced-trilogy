@@ -1343,7 +1343,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_lantern[3] = 0.f;
     {
       const auto& pl = g_enhanced_player;
-      const bool on_foot = pl.valid && pl.state != 2 && pl.state != 5;
+      const bool on_foot = pl.valid && pl.state != 2 && pl.state != 5 && pl.state != 7;
       // the first time Jak stands in the desert (once per install): night falls and the bulb rises,
       // with a word on it on the screen (request 10: the hour, the hint)
       if (!m_settings.lantern_intro_done && m_settings.desert_lamp && m_pond && pl.valid &&
@@ -1755,7 +1755,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // dust behind a vehicle or the board crossing the desert (two plumes, off the back wheels),
       // spray where they cross water, and a burst where they hit it
       constexpr int kPuffs = 32;
-      const bool riding = pl.valid && (pl.state == 2 || pl.state == 4 || pl.state == 5 || pl.state == 6);
+      const bool riding = pl.valid && (pl.state == 2 || pl.state >= 4);
       if (riding && m_ride_last_time >= 0.0 && m_time > m_ride_last_time) {
         float dx = pl.pos[0] - m_ride_last[0], dz = pl.pos[2] - m_ride_last[2];
         float dist = std::sqrt(dx * dx + dz * dz) / kMeter;
@@ -1789,13 +1789,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       static const char* puff_test = std::getenv("JAK_ENHANCED_PUFF_TEST");
       static bool test_puffs = puff_test != nullptr;
       static bool test_spray = puff_test && std::strcmp(puff_test, "water") == 0;
-      if (pl.state == 2 || pl.state == 4 || pl.state == 6) {
-        m_last_ride_state = pl.state == 6 ? 4 : pl.state;
+      if (pl.state == 2 || pl.state == 4 || pl.state == 6 || pl.state == 7) {
+        m_last_ride_state = pl.state == 6 ? 4 : pl.state == 7 ? 2 : pl.state;
       }
       const bool board = pl.state == 4 || pl.state == 6 || (pl.state == 5 && m_last_ride_state == 4);
       const bool on_water = pl.state == 5 || test_spray;
-      // (none while the board is in the air: a jump leaves no dust)
-      if ((riding || test_puffs) && pl.valid && pl.state != 6 && m_time - m_puff_time > 0.06) {
+      // (none while the board or the vehicle is in the air: a jump leaves no dust)
+      if ((riding || test_puffs) && pl.valid && pl.state < 6 && m_time - m_puff_time > 0.06) {
         const float sp = test_puffs ? 20.f : m_ride_speed;
         const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
         // (the test: as if moving, along a 12 m trail)
