@@ -1124,6 +1124,8 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
 
   if (g_enhanced_menu.open && m_enhanced_post) {
     m_enhanced_post->draw_menu();
+  } else if (m_enhanced_post) {
+    m_enhanced_post->draw_photo_hint();
   }
 
   m_profiler.finish();

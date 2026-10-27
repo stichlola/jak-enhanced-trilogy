@@ -122,6 +122,8 @@
 ;; - 'menu: debug menu system open
 ;; - 'progress: progress menu open (start menu)
 
+(define-extern enhanced-photo-update (function none))
+
 (define *last-master-mode* 'game)
 
 (defun set-master-mode ((arg0 symbol))
@@ -901,6 +903,7 @@
 
     ;; using the position of the in-game camera, update visiblity and matrices for rendering.
     (with-profiler 'camera *profile-camera-color*
+      (enhanced-photo-update)
       (update-camera)
       )
 

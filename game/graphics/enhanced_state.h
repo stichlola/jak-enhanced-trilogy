@@ -31,6 +31,10 @@ struct EnhancedPlayer {
 };
 extern EnhancedPlayer g_enhanced_player;
 
+// OpenGOAL's debug toolbar (ImGui's menu bar at the top) only in a debug start (-debug): a player's
+// game never shows it, whatever debug-settings.json says (set by main from the arguments)
+extern bool g_enhanced_debug_toolbar;
+
 // The level Jak is in, the hour (0-24, fractional) and whether a cutscene plays, set every frame by
 // pc-enhanced-set-scene: grading per area, weather, cutscene depth of field
 struct EnhancedScene {
@@ -140,6 +144,11 @@ struct EnhancedMenu {
   std::atomic<int> subtitle_size = 100;
   // the minimap's size on screen, percent of the PS2's (pc-enhanced-minimap-size): smaller by default
   std::atomic<int> minimap_size = 70;
+  // photo mode (F2, the menu's button; pc-enhanced-photo): asked for, and on in the game (held still,
+  // a free camera, no HUD); entered_at: when it came on (the hint shows a few seconds)
+  std::atomic<bool> photo = false;
+  std::atomic<bool> photo_active = false;
+  std::atomic<double> photo_entered_at = 0.0;
   std::mutex mutex;
   int request = 0;
   std::string arg;

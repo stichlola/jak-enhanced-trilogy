@@ -81,6 +81,8 @@
 (define-extern enhanced-nap-ui-draw (function dma-buffer none))
 (define-extern *enhanced-nap-ui* symbol)
 
+(define-extern enhanced-photo-update (function none))
+
 (defun set-master-mode ((new-mode symbol))
   "Update pause masks for the given mode, and set *master-mode*"
   ;; og:preserve-this PAL patch here
@@ -419,6 +421,7 @@
         (main-cheats))
       (add-ee-profile-frame 'draw :r #x20 :g #x20)
       (with-profiler "camera"
+        (enhanced-photo-update)
         (update-camera))
       (add-ee-profile-frame 'draw :r #x40 :b #x40)
       (with-profiler "draw-hook"

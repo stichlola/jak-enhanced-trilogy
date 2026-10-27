@@ -145,6 +145,8 @@
   (= *kernel-boot-message* 'kiosk)
   )
 
+(define-extern enhanced-photo-update (function none))
+
 (define *last-master-mode* 'game)
 
 (defun set-master-mode ((arg0 symbol))
@@ -1486,6 +1488,7 @@
     ;; (movement of the camera is handled by the camera process, this is just preparing
     ;; to render)
     (with-profiler 'camera *profile-camera-color*
+      (enhanced-photo-update)
       (update-camera)
       (execute-cam-post-hook-engine)
       )

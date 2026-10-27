@@ -1521,3 +1521,42 @@
     (go hud-collecting (process->handle arg1)))
   0
   (none))
+
+;; Enhanced: photo mode (F3 or the Enhanced menu; pc-enhanced-photo): the game held still, a free
+;; camera on the first pad (left stick moves, right stick looks, L1 / R1 down and up, R2 slower),
+;; the HUD hidden (F2 takes the picture). Start (or F3) goes back to the game where it was
+(define *enhanced-photo* #f)
+
+(defun enhanced-photo-update ()
+  (let ((want (nonzero? (pc-enhanced-photo 0))))
+    (when (and *enhanced-photo* (cpad-pressed? 0 start))
+      ;; (the press is used up here: it doesn't pause the game)
+      (logclear! (-> *cpad-list* cpads 0 button0-abs 0) (pad-buttons start))
+      (logclear! (-> *cpad-list* cpads 0 button0-rel 0) (pad-buttons start))
+      (pc-enhanced-photo 1)
+      (set! want #f)
+      )
+    (cond
+      ((and want (not *enhanced-photo*) *target* (= *master-mode* 'game) (not (movie?)))
+       (set! *enhanced-photo* #t)
+       (external-cam-reset!)
+       (matrix-copy! *save-camera-inv-rot* (-> *math-camera* inv-camera-rot))
+       (set! *external-cam-mode* 'pad-0)
+       (hide-hud-quick)
+       (set-master-mode 'pause)
+       (pc-enhanced-photo 2)
+       )
+      ((and (not want) *enhanced-photo*)
+       (set! *enhanced-photo* #f)
+       (set! *external-cam-mode* #f)
+       (if (= *master-mode* 'pause)
+           (set-master-mode 'game)
+           )
+       (show-hud)
+       (pc-enhanced-photo 3)
+       )
+      )
+    )
+  (none)
+  )
+

@@ -2,6 +2,7 @@
 #include "kmachine.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <random>
 
@@ -1280,6 +1281,30 @@ u64 pc_enhanced_subtitle_size() {
   return (u64)std::clamp(g_enhanced_menu.subtitle_size.load(), 50, 250);
 }
 
+// Enhanced: photo mode. op 0: is it asked for (1/0); 1: the game left it (Start); 2: it's on in the
+// game; 3: it's off in the game; 4: ask for it (tests, from the REPL)
+u64 pc_enhanced_photo(u32 op) {
+  switch (op) {
+    case 4:
+      g_enhanced_menu.photo = true;
+      break;
+    case 1:
+      g_enhanced_menu.photo = false;
+      break;
+    case 2:
+      g_enhanced_menu.photo_active = true;
+      g_enhanced_menu.photo_entered_at =
+          std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+      break;
+    case 3:
+      g_enhanced_menu.photo_active = false;
+      break;
+    default:
+      break;
+  }
+  return g_enhanced_menu.photo ? 1 : 0;
+}
+
 // Enhanced: the minimap's size on screen, percent of the PS2's (the Enhanced menu)
 u64 pc_enhanced_minimap_size() {
   return (u64)std::clamp(g_enhanced_menu.minimap_size.load(), 40, 150);
@@ -1458,6 +1483,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
+  make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
 
   // text
   make_func_symbol_func("pc-encode-utf8-string", (void*)pc_encode_utf8_string);

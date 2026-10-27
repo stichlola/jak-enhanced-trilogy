@@ -204,6 +204,8 @@ class EnhancedPost {
     // the custom weather, mixed by hand: rain, thunderstorm, fog, ground mist, snow, dust, clouds,
     // the sun out after the rain, wet ground (< 0: as wet as it rains)
     std::array<float, 9> weather_mix = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.3f, 0.f, -1.f};
+    int photo_filter = 0;          // photo mode's filter (kPhotoFilters in EnhancedPost.cpp)
+    float photo_vignette = 0.f;    // photo mode's extra vignette
     int season = 0;                // the changing weather's season: 0 by the calendar, 1-4 spring..winter
     float vivid = 0.f;             // vivid colors: saturated greens and blues, warm sun, deep sky
     float rain_strength = 1.0f;
@@ -271,6 +273,8 @@ class EnhancedPost {
   bool far_view() const { return m_settings.enabled && m_settings.far_view; }
   // the in-game menu (\ key): the main switches, time of day, quick travel
   void draw_menu();
+  // photo mode's controls, a few seconds after it comes on
+  void draw_photo_hint();
 
  private:
   static constexpr int kLevels = 6;

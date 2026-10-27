@@ -1,6 +1,7 @@
 ﻿#include "EnhancedPost.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +27,7 @@
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
+bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
 std::atomic<int> g_enhanced_thunder{0};
@@ -170,6 +172,26 @@ const WeatherPreset kWeatherPresets[] = {
 };
 constexpr int kWeatherCount = sizeof(kWeatherPresets) / sizeof(kWeatherPresets[0]);
 constexpr int kWeatherCustom = kWeatherCount - 1;
+
+// photo mode's filters: a grade over the area's (saturation times, contrast and warmth plus, the
+// highlights tinted, the shadows lifted)
+struct PhotoFilter {
+  const char* name;
+  float saturation, contrast, warmth;
+  float gain[3], lift[3];
+};
+const PhotoFilter kPhotoFilters[] = {
+    {"None", 1.f, 0.f, 0.f, {1, 1, 1}, {0, 0, 0}},
+    {"Warm", 1.1f, 0.02f, 0.08f, {1.04f, 1.f, 0.94f}, {0, 0, 0}},
+    {"Cool", 0.95f, 0.02f, -0.08f, {0.95f, 1.f, 1.06f}, {0, 0, 0.01f}},
+    {"Vivid", 1.45f, 0.08f, 0.02f, {1, 1, 1}, {0, 0, 0}},
+    {"Faded", 0.72f, -0.06f, 0.02f, {0.97f, 0.97f, 0.95f}, {0.04f, 0.04f, 0.045f}},
+    {"Black and white", 0.f, 0.1f, 0.f, {1, 1, 1}, {0, 0, 0}},
+    {"Sepia", 0.05f, 0.06f, 0.32f, {1.f, 1.f, 1.f}, {0.02f, 0.012f, 0.f}},
+    {"Noir", 0.f, 0.32f, 0.f, {1.05f, 1.05f, 1.05f}, {-0.01f, -0.01f, -0.01f}},
+    {"Sunset", 1.15f, 0.06f, 0.12f, {1.1f, 0.95f, 0.85f}, {0.02f, 0.f, 0.02f}},
+};
+constexpr int kPhotoFilterCount = sizeof(kPhotoFilters) / sizeof(kPhotoFilters[0]);
 
 // the weather in a menu: the presets, and under them the mix (moving a slider makes it "Custom")
 void weather_menu(EnhancedPost::Settings& s, const char* id) {
@@ -2257,6 +2279,16 @@ void EnhancedPost::update_scene() {
     want.warmth += season.warmth;
     want.saturation += season.saturation;
   }
+  if (g_enhanced_menu.photo_active) {
+    const auto& pf = kPhotoFilters[std::clamp(s.photo_filter, 0, kPhotoFilterCount - 1)];
+    want.saturation *= pf.saturation;
+    want.contrast += pf.contrast;
+    want.warmth += pf.warmth;
+    for (int i = 0; i < 3; i++) {
+      want.gain[i] *= pf.gain[i];
+      want.lift[i] += pf.lift[i];
+    }
+  }
 
   // the game's own sandstorm, while its process runs (desert-dust-storm.gc)
   auto& gd = g_enhanced_dust;
@@ -3977,9 +4009,32 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
-  glUniform1f(glGetUniformLocation(id, "vignette"), m_settings.vignette);
+  glUniform1f(glGetUniformLocation(id, "vignette"),
+              m_settings.vignette + (g_enhanced_menu.photo_active ? m_settings.photo_vignette : 0.f));
   glUniform1f(glGetUniformLocation(id, "sharpen"), m_settings.sharpen);
   return shader;
+}
+
+void EnhancedPost::draw_photo_hint() {
+  if (!g_enhanced_menu.photo_active) {
+    return;
+  }
+  const double now =
+      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  const float age = (float)(now - g_enhanced_menu.photo_entered_at.load());
+  if (age > 6.f) {
+    return;
+  }
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  ImGui::SetNextWindowPos(ImVec2(size.x * 0.5f, size.y - 40.f), ImGuiCond_Always, ImVec2(0.5f, 1.f));
+  ImGui::SetNextWindowBgAlpha(0.6f * std::min(1.f, (6.f - age) * 2.f));
+  ImGui::Begin("##photo-hint", nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+                   ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
+                   ImGuiWindowFlags_NoNav);
+  ImGui::TextUnformatted("Photo mode   left stick: move   right stick: look   L1 / R1: down / up   "
+                         "R2: slower   F2: picture   F1: filters   F3 or Start: back");
+  ImGui::End();
 }
 
 void EnhancedPost::draw_menu() {
@@ -3998,6 +4053,29 @@ void EnhancedPost::draw_menu() {
     return;
   }
   auto& s = m_settings;
+  // photo mode: in and out, and while it's on its filter
+  if (ImGui::Button(g_enhanced_menu.photo ? "Leave photo mode  (F3, Start)" : "Photo mode  (F3)")) {
+    g_enhanced_menu.photo = !g_enhanced_menu.photo;
+    if (g_enhanced_menu.photo) {
+      g_enhanced_menu.open = false;
+    }
+  }
+  if (g_enhanced_menu.photo_active) {
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(170);
+    if (ImGui::BeginCombo("Filter", kPhotoFilters[std::clamp(s.photo_filter, 0, kPhotoFilterCount - 1)].name)) {
+      for (int i = 0; i < kPhotoFilterCount; i++) {
+        if (ImGui::Selectable(kPhotoFilters[i].name, s.photo_filter == i)) {
+          s.photo_filter = i;
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(120);
+    ImGui::SliderFloat("Vignette##photo", &s.photo_vignette, 0.f, 1.f, "%.2f");
+    ImGui::TextDisabled("Close this menu (F1), then F2 takes the picture (in your OpenGOAL screenshots folder).");
+  }
   if (ImGui::CollapsingHeader("Graphics", ImGuiTreeNodeFlags_DefaultOpen)) {
     // (in the menu's order: Performance sits between Classic and Medium)
     static const char* presets[] = {"Classic", "Performance", "Medium", "Maximum"};
@@ -4315,6 +4393,8 @@ std::string EnhancedPost::menu_settings_json() const {
   j["weather"] = s.weather;
   j["weather_mix"] = s.weather_mix;
   j["season"] = s.season;
+  j["photo_filter"] = s.photo_filter;
+  j["photo_vignette"] = s.photo_vignette;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
   j["fov"] = g_enhanced_menu.fov.load();
@@ -4383,6 +4463,8 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
   get("weather_mix", s.weather_mix);
   get("season", s.season);
+  get("photo_filter", s.photo_filter);
+  get("photo_vignette", s.photo_vignette);
   s.season = std::clamp(s.season, 0, 4);
   get("vivid", s.vivid);
   get("population", m_population);

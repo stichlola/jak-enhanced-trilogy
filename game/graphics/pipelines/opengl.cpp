@@ -295,7 +295,7 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
 
   prof().begin_event("startup::sdl::create_GLDisplay");
   auto display = std::make_shared<GLDisplay>(window, gl_context, is_main);
-  display->set_imgui_visible(Gfx::g_debug_settings.show_imgui);
+  display->set_imgui_visible(Gfx::g_debug_settings.show_imgui && g_enhanced_debug_toolbar);
   prof().end_event();
 
   {
@@ -323,7 +323,7 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
       CommandBinding::Source::KEYBOARD,
       CommandBinding(Gfx::g_debug_settings.hide_imgui_key, [&](const SDL_Event& event) {
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
-          if (!Gfx::g_debug_settings.ignore_hide_imgui) {
+          if (!Gfx::g_debug_settings.ignore_hide_imgui && g_enhanced_debug_toolbar) {
             set_imgui_visible(!is_imgui_visible());
           }
         }
@@ -370,6 +370,16 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
     m_input_manager->register_command(CommandBinding::Source::CONTROLLER,
                                       CommandBinding((u32)button, pad_enhanced_menu));
   }
+
+  // Enhanced: F3 in and out of photo mode (F2 takes the picture: OpenGOAL's screenshot)
+  m_input_manager->register_command(
+      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_F3, [&](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
+            !ImGui::GetIO().WantTextInput) {
+          g_enhanced_menu.photo = !g_enhanced_menu.photo;
+          g_enhanced_menu.open = false;
+        }
+      }));
 
   // Trilogy prototype: F9 boots the next game (Jak 1 -> 2 -> 3 -> 1) in the same process
   m_input_manager->register_command(

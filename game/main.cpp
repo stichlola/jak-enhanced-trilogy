@@ -5,6 +5,7 @@
 
 #define STBI_WINDOWS_UTF8
 
+#include <algorithm>
 #include <string>
 
 #include "runtime.h"
@@ -19,6 +20,7 @@
 #include "common/versions/versions.h"
 
 #include "game/common/game_common_types.h"
+#include "game/graphics/enhanced_state.h"
 #include "graphics/gfx_test.h"
 
 #include "third-party/CLI11.hpp"
@@ -245,6 +247,8 @@ int main(int argc, char** argv) {
   bool force_retail_next_time = false;
   // always start with an empty arg, as internally kmachine starts at `1` not `0`
   std::vector<const char*> arg_ptrs = {""};
+  g_enhanced_debug_toolbar =
+      std::find(game_args.begin(), game_args.end(), "-debug") != game_args.end();
   for (auto& str : game_args) {
     arg_ptrs.push_back(str.data());
   }
