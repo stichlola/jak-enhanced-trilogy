@@ -103,6 +103,14 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   originally had only baked vertex colors.
 - **Lights**: the levels' own lamps and every glow (torches, shots, explosions) light their
   surroundings and cast short shadows. Night lamps switch on at night.
+- **Dark nights**: where no light reaches, the night is dark (the desert almost black under the
+  stars); lamps, fires and windows light the world in their own colors and glow in the night haze.
+  The eyes adapt a little to a dark view. A menu switch brings back the game's own nights.
+- **Night sky**: twinkling stars, a faint milky way, the moon and its halo; Haven and Spargus glow
+  warm on the low sky.
+- **Headlights** (Jak 3): vehicles light the road ahead with real beams, visible in the night air.
+- **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their
+  color; a partial white balance takes off the strongest color casts.
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
 - **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
   arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
@@ -127,7 +135,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   (off by default for now: still artifacts, and slow).
 - **Vegetation**: more grass and plants around the original ones, and climbing plants on the walls
   near the level's own vines. Grass sways in the wind and bends away from Jak, enemies and vehicles.
-- **Footprints and tire ruts** in sand, dirt and snow.
+- **Footprints and tire ruts** in sand, dirt and snow; dust plumes behind vehicles and the
+  jetboard in the desert, spray, a wake and foam where they cross water.
 - **HD textures** (Jak 3): a 4x AI upscale of Spargus, the desert, the vehicles, Jak, Daxter and the
   guns (an optional step, see below).
 - **Draw distance**: no more buildings popping in around corners and over rooftops.
@@ -160,7 +169,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 
 ### Gameplay
 - Jak 3: faster jetboard, always at hand; guns fire 1.5x faster and carry twice the ammo; driving
-  modes for the desert vehicles (classic, sport, turbo).
+  modes for the desert vehicles (classic, sport, turbo). The scattergun charges: hold fire for a
+  huge, wide shot that throws enemies back and kicks Jak back too.
 - Jak 2: twice the ammo; every gun, upgrade, the jetboard and Dark Jak's powers from the start (the
   security passes stay with the story).
 
@@ -168,7 +178,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Graphics**: three presets (Classic: the game as it was; Medium: the costly effects off; Maximum:
   everything) and a switch for every effect. Also vegetation density, lamp strength, vivid colors,
   the weather and the water effects.
-- **City**: population (Low / Normal / High / Extreme) and the minimap, which is hidden by default.
+- **City**: population (Low / Normal / High / Extreme) and the minimap (shown by default).
+- **Field of view**: 80-140% of the game's, in play (cutscenes as filmed).
 - **Time of day**: six buttons (dawn to night), a slider, and a "freeze time" switch.
 - **Teleport** (Jak 3): quick travel to nine places in Haven, Spargus and the desert.
 
