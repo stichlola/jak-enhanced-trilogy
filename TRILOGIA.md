@@ -73,11 +73,12 @@ Si parte da Jak 2 perché il motore è quasi uguale a quello di Jak 3.
       ×0,45 (livelli più luminosi, neon più forti).
 - [x] Gameplay come in Jak 3: popolazione regolabile (0-3, menu o `JAK_ENHANCED_POPULATION`;
       tetto di 20 per tipo, i posti che il motore del traffico ha già), munizioni doppie, tutte le
-      armi, potenziamenti, jetboard e poteri di Dark Jak sbloccati, segreti comprati, minimappa
-      nascosta (si riaccende dal menu). I pass di sicurezza restano alla storia.
+      armi, potenziamenti, jetboard e poteri di Dark Jak sbloccati, segreti comprati (minimappa
+      più piccola, dimensione nel menu). I pass di sicurezza restano alla storia.
 - [ ] Meteo per zona. Haven intatta (Jak 2) è perfetta per pioggia e temporale di notte.
       Poi Fogne, Foresta, Montagna, Atollo, Palazzo, Strip.
-- [ ] Upscale delle texture con la cache come per Jak 3.
+- [x] Texture HD per i tre giochi: le fa il giocatore dal suo disco (il launcher lo chiede,
+      `scripts/enhanced/hd_setup.py`), anche HUD, menu e mappe della minimappa.
 - [ ] Prova: stessi punti, prima e dopo, fps (log "average … fps").
 
 ## Fase 3 — Migliorie grafiche su Jak 1

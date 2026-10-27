@@ -63,8 +63,8 @@ Laptop (the game stays at its 60 fps cap).
 | HD textures | Made by each player from their own disc, never shipped: the launcher asks once per game and runs `scripts/enhanced/hd_setup.py` (pip, Real-ESRGAN downloaded into `out/tools`, texture dump, `hd_textures.py` 4x into `custom_assets/<game>/texture_replacements`, `--hud` and `minimap_maps.py` into `out/enhanced/hud`, levels extracted again). Decals/cutouts/glass keep their original alpha; the decompiler skips a replacement that doesn't match its texture scaled back down (texture names aren't unique). HUD and menu art is loaded at runtime with its texel scale (`EnhancedMapTextures.cpp`), so it needs no new extraction. The Tripo icons are new drawings and live in the repo (`game/assets/enhanced/hud`); their cells not redrawn are see-through magenta, filled from the game's own atlas |
 
 **In-game menu: `\`** opens and closes it (EnhancedPost::draw_menu): every effect on/off, lamp
-strength, population and the minimap (hidden unless switched on: `pc-enhanced-minimap?` in
-hud-map's update-values!, `JAK_ENHANCED_MINIMAP=1`), the time of day (six hours, a slider, a frozen
+strength, population and the minimap (shown by default, `JAK_ENHANCED_MINIMAP=0` hides it:
+`pc-enhanced-minimap?` in hud-map's update-values!; its size, `pc-enhanced-minimap-size`), the time of day (six hours, a slider, a frozen
 clock) and quick travel to nine continue
 points (the piazza, port, Hip Hog, slums, industrial zone, central sector, Metal Head city, Spargus,
 desert). The renderer queues one request, the game polls it each frame
@@ -132,8 +132,10 @@ addresses both in its own texels: `enhanced_texel_scale` gives the direct render
 Smaller by default: the menu's "Minimap size %" (70, `pc-enhanced-minimap-size`) scales the map, its
 icons, Jak's arrow and the ring together (`enhanced-minimap-scale` in `minimap.gc`, hud-map's draw
 in `hud-classes.gc`), the bottom right corner kept in place.
-HD art, made ahead and loaded instead of the game's when present (not in git: made from the games'
-art): `out/enhanced/hud/<game>/<tpage>/<name>.png`, a whole multiple of the texture's size.
+HD art, loaded instead of the game's when present, a whole multiple of the texture's size:
+`out/enhanced/hud/<game>/<tpage>/<name>.png` (made on the player's machine from the games' art, not
+in git: the district maps, the HUD and menus 4x) or `game/assets/enhanced/hud/...` (new drawings, in
+git: the Tripo icons).
 `scripts/enhanced/minimap_icons.py` redraws the 47 icons of `mini-map-icons` with Tripo
 (image to image, four sheets of 12 with a description of each; 8x atlas), and
 `scripts/enhanced/minimap_maps.py` redraws every district map at 4x in a modern style (the same
@@ -198,7 +200,6 @@ The big ones (after the above):
 - The bridge levels and the continuous trilogy (TRILOGIA.md, phase 4); one menu and save, Daxter and
   the trilogy's total time.
 - Life in the Jak 2 plaza (below).
-- HD textures for every area, chosen in the launcher at the first start.
 - Linux / Steam Deck releases.
 - Hardware ray tracing (OpenGL has no access to it: Vulkan interop). The reflections are traced in
   software (above); ray-traced shadows and indirect light could use the same hierarchies.
