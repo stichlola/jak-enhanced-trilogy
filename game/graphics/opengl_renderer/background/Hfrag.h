@@ -41,6 +41,8 @@ class Hfrag : public BucketRenderer {
     u64 last_used_frame = 0;
 
     GLuint wang_texture;
+    // Enhanced: the grid's heights (512 x 512, R32F), for the smooth normals of the lights
+    GLuint enh_height_texture = 0;
 
     MontageTexture montage_texture[kNumBuckets];
     GLuint montage_vertices;

@@ -1,6 +1,22 @@
 #version 410 core
 
-out vec4 color;
+layout (location = 0) out vec4 color;
+layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
+in vec3 enh_normal;
+in vec3 enh_pos;
+
+// Enhanced: the smooth normal where it stays near the triangle's own face (as tfrag3.frag)
+vec4 enh_pack_normal(vec3 n) {
+  vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
+  float flen = length(f);
+  n = normalize(n);
+  if (flen > 0.0) {
+    f /= flen;
+    float d = dot(n, f);
+    n = abs(d) > 0.82 ? n * sign(d) : f;
+  }
+  return vec4(n * 0.5 + 0.5, 1.0);
+}
 
 in vec4 fragment_color;
 in vec2 tex_coord;
@@ -18,6 +34,7 @@ uniform int gfx_hack_no_tex;
 
 
 void main() {
+  enh_normal_out = enh_pack_normal(enh_normal);
   if (gfx_hack_no_tex == 0) {
     vec4 T0 = texture(tex_T0, tex_coord);
     if (enhanced_sand != 0) {

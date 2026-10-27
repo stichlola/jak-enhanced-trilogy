@@ -3,6 +3,8 @@
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 #include "third-party/imgui/imgui.h"
 #include "third-party/stb_image/stb_image.h"
 
@@ -221,6 +223,8 @@ void Hfrag::unload_hfrag_level(Hfrag::HfragLevel* lev) {
 
   glDeleteVertexArrays(1, &lev->montage_vao);
   glDeleteBuffers(1, &lev->montage_vertices);
+  glDeleteTextures(1, &lev->enh_height_texture);
+  lev->enh_height_texture = 0;
 
   lev->in_use = false;
   lev->name.clear();
@@ -293,6 +297,26 @@ void Hfrag::load_hfrag_level(const std::string& load_name,
   glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_1D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glBindVertexArray(0);
+
+  // Enhanced: the heights on their grid (vi = x + 512 z), so the vertex shader can take the slope
+  // from the neighbors: the dunes' triangles are 8 m wide, and lit by the depth-rebuilt normals
+  // each one showed as a flat facet under a headlight. Where the grid has no vertex: a huge value,
+  // the shader then uses the vertex's own height.
+  {
+    std::vector<float> heights(512 * 512, 1e30f);
+    for (const auto& v : lev->hfrag->vertices) {
+      if (v.vi < heights.size()) {
+        heights[v.vi] = v.height;
+      }
+    }
+    glActiveTexture(GL_TEXTURE2);
+    glGenTextures(1, &lev->enh_height_texture);
+    glBindTexture(GL_TEXTURE_2D, lev->enh_height_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, 512, 512, 0, GL_RED, GL_FLOAT, heights.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glActiveTexture(GL_TEXTURE0);
+  }
 
   // montage
 
@@ -454,9 +478,14 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
       glBindTexture(GL_TEXTURE_2D, m_enhanced_sand);
       glActiveTexture(GL_TEXTURE0);
     }
+    glUniform1i(glGetUniformLocation(id, "tex_T2"), 2);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, lev->enh_height_texture);
+    glActiveTexture(GL_TEXTURE0);
   }
 
-  // draw pass
+  // draw pass (Enhanced: with the world normals for the lights)
+  EnhancedNormalTarget normals;
   for (u32 bucket_idx = 0; bucket_idx < lev->hfrag->buckets.size(); bucket_idx++) {
     if (!m_bucket_used[bucket_idx]) {
       continue;  // no need to bind texture.

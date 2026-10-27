@@ -754,6 +754,12 @@ EnhancedPost::EnhancedPost() {
 EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
+  // the casters are global and outlive the renderer (the game wheel boots the next game in the
+  // same process): their buffer copies go with it, or the next game's Merc2 copies into dead names
+  for (auto& c : g_enhanced_casters.mod_copies) {
+    glDeleteBuffers(1, &c.buffer);
+  }
+  g_enhanced_casters = EnhancedCasters();
   if (m_focus_pbo[0]) {
     glDeleteBuffers(2, m_focus_pbo);
   }

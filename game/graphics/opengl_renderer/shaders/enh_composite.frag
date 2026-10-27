@@ -2125,7 +2125,7 @@ void main() {
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
-                   (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z)) * step(0.001, puddle_level);
+                   (1.0 - smoothstep(80.0 * 4096.0, 140.0 * 4096.0, z)) * step(0.001, puddle_level);
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
     wet = max(wet, puddle * wet_flat * water);
@@ -2486,10 +2486,11 @@ void main() {
         float cone = smoothstep(0.86, 0.97, dot(q / max(dq, 1.0), spot_dir[i].xyz));
         float dm = dq / 4096.0;
         beam += cone * spot_pos[i].w / (1.0 + dm * dm / 80.0) * (1.0 - smoothstep(35.0, 70.0, dm)) *
-                smoothstep(1.0, 6.0, dm) * tmax / 10.0 / 4096.0;
+                smoothstep(2.0, 12.0, dm) * tmax / 10.0 / 4096.0;
       }
     }
-    c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.03;
+    // (faint near the lamp: the beam shows down the road, not as a ball of light on the car)
+    c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.02;
     // dust hanging in the beams: always a little, a lot in the desert's dust, some in the rain
     if (spot_pos[0].w > 0.0) {
       float motes = beam_motes(ray, z, pixel_rad);
@@ -2670,8 +2671,8 @@ void main() {
         if (front > sp.z * 0.95 - 1.0 * 4096.0) {
           float r = length(dpx);
           float core_px = max(2.0, 0.12 * 4096.0 * abs(proj.w) * 0.5 / sp.z / texel.y);
-          float g = exp(-r * r / (core_px * core_px)) * 2.0 + exp(-r / 10.0) * 0.3 +
-                    exp(-abs(dpx.y) * 0.8) * exp(-abs(dpx.x) / 60.0) * 0.25;
+          float g = exp(-r * r / (core_px * core_px)) * 1.2 + exp(-r / 10.0) * 0.15 +
+                    exp(-abs(dpx.y) * 0.8) * exp(-abs(dpx.x) / 60.0) * 0.12;
           c += vec3(1.0, 0.94, 0.82) * g * glare;
         }
       }

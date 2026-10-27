@@ -19,10 +19,23 @@ out vec4 fragment_color;
 out vec2 tex_coord;
 out float fogginess;
 out vec2 world_xz;  // Enhanced: for the world-space sand
+uniform sampler2D tex_T2;  // Enhanced: the grid's heights (Hfrag.cpp), 1e30 where it has none
+out vec3 enh_normal;       // Enhanced: smooth world normal, from the neighbors' heights
+out vec3 enh_pos;          // Enhanced: world position relative to the camera
+
+float enh_height(int x, int z, float own) {
+  float h = texelFetch(tex_T2, ivec2(clamp(x, 0, 511), clamp(z, 0, 511)), 0).r;
+  return h > 1e29 ? own : h;
+}
 
 void main() {
   int vx = vi % 512;
   int vz = vi / 512;
+
+  float dx = enh_height(vx + 1, vz, position_in) - enh_height(vx - 1, vz, position_in);
+  float dz = enh_height(vx, vz + 1, position_in) - enh_height(vx, vz - 1, position_in);
+  enh_normal = normalize(vec3(-dx, 2.0 * 32768.0, -dz));
+  enh_pos = vec3(32768.0 * vx - cam_trans.x, position_in - cam_trans.y, 32768.0 * vz - cam_trans.z);
 
   tex_coord.x = (uv.x == 1) ? 1.f : 0.f;
   tex_coord.y = (uv.y == 1) ? 1.f : 0.f;
