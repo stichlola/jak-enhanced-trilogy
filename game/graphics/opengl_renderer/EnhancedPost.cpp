@@ -4079,7 +4079,19 @@ void EnhancedPost::draw_game_wheel() {
     }
   }
   ImDrawList* dl = ImGui::GetForegroundDrawList();
-  ImFont* font = ImGui::GetFont();
+  // the text font: Noto Sans (game/assets/fonts), added once, sharp at any size (ImGui's fonts are
+  // dynamic); the pixel font of the debug windows if it's missing
+  static ImFont* noto = nullptr;
+  static bool noto_tried = false;
+  if (!noto_tried) {
+    noto_tried = true;
+    const auto path =
+        file_util::get_jak_project_dir() / "game" / "assets" / "fonts" / "NotoSansJP-Medium.ttf";
+    if (fs::exists(path)) {
+      noto = ImGui::GetIO().Fonts->AddFontFromFileTTF(path.string().c_str(), 32.f);
+    }
+  }
+  ImFont* font = noto ? noto : ImGui::GetFont();
   const ImVec2 size = ImGui::GetIO().DisplaySize;
   const ImVec2 c(size.x * 0.5f, size.y * 0.45f);
   const float r = size.y * 0.32f, r0 = r * 0.24f;
@@ -4116,7 +4128,7 @@ void EnhancedPost::draw_game_wheel() {
       }
     }
     // (moved so each face sits in its slice: Jak 3's would be under the middle)
-    static const float kShift[3][2] = {{0.f, 0.02f}, {-0.06f, 0.04f}, {0.f, 0.3f}};
+    static const float kShift[3][2] = {{0.f, 0.02f}, {-0.06f, 0.04f}, {0.f, 0.1f}};
     const float side = std::max(hi.x - lo.x, hi.y - lo.y) * (i == 2 ? 1.15f : 1.f);
     const ImVec2 pc((lo.x + hi.x) * 0.5f + kShift[i][0] * side, (lo.y + hi.y) * 0.5f + kShift[i][1] * side);
     const auto uv = [&](ImVec2 p) { return ImVec2((p.x - pc.x) / side + 0.5f, (p.y - pc.y) / side + 0.5f); };
@@ -4144,13 +4156,14 @@ void EnhancedPost::draw_game_wheel() {
       // with a portrait: the name on a dark plate outside the wheel, off the faces
       const ImVec2 out = at(mid, r * (i == 2 ? 1.16f : 1.3f));
       const ImVec2 label(out.x + off.x, out.y + off.y);
-      const float pw = r * 0.5f, ph = r * (playing ? 0.21f : 0.15f);
+      const float pw = std::max(r * 0.5f, font->CalcTextSizeA(r * 0.15f, FLT_MAX, 0.f, sl.name).x + r * 0.12f),
+                  ph = r * (playing ? 0.23f : 0.16f);
       dl->AddRectFilled(ImVec2(label.x - pw * 0.5f, label.y - r * 0.075f),
                         ImVec2(label.x + pw * 0.5f, label.y - r * 0.075f + ph), IM_COL32(10, 10, 14, 170),
                         r * 0.03f);
-      text(sl.name, r * 0.13f, label, col);
+      text(sl.name, r * 0.15f, label, col);
       if (playing) {
-        text("playing", r * 0.065f, ImVec2(label.x, label.y + r * 0.095f), IM_COL32(255, 220, 120, 230));
+        text("playing now", r * 0.065f, ImVec2(label.x, label.y + r * 0.1f), IM_COL32(255, 220, 120, 230));
       }
     } else {
       ImVec2 label = at(mid, (r0 + r) * 0.55f);
@@ -4166,10 +4179,61 @@ void EnhancedPost::draw_game_wheel() {
   // the middle: what X does
   dl->AddCircleFilled(c, r0 * 0.92f, IM_COL32(16, 16, 20, 235), 48);
   dl->AddCircle(c, r0 * 0.92f, IM_COL32(200, 190, 150, 160), 48, 2.f);
-  const char* what = pick == 0 ? "Pick a game" : pick == (int)g_game_version ? "Back to it" : "Play";
-  text(what, r * 0.075f, c, IM_COL32(240, 230, 200, 255));
-  text("Left stick: pick     X: play     Square / Triangle: nap     Circle: back", size.y * 0.026f,
-       ImVec2(c.x, c.y + r + size.y * 0.14f), IM_COL32(240, 230, 200, 230));
+  const char* what = pick == 0 ? "Choose" : pick == (int)g_game_version ? "Resume" : "Play";
+  text(what, r * 0.1f, c, IM_COL32(240, 230, 200, 255));
+  // what the buttons do, with an Xbox pad's letters (A plays, Y the nap, B back)
+  const float px = size.y * 0.032f, br = px * 0.62f;
+  const auto button = [&](char kind, ImVec2 p) {
+    ImU32 fill = IM_COL32(20, 20, 24, 230);
+    const char* letter = nullptr;
+    switch (kind) {
+      case 'a':
+        fill = IM_COL32(70, 170, 60, 255);
+        letter = "A";
+        break;
+      case 'b':
+        fill = IM_COL32(200, 50, 50, 255);
+        letter = "B";
+        break;
+      case 'y':
+        fill = IM_COL32(225, 175, 30, 255);
+        letter = "Y";
+        break;
+      default:
+        break;
+    }
+    dl->AddCircleFilled(p, br, fill, 32);
+    dl->AddCircle(p, br, IM_COL32(230, 230, 230, 120), 32, 1.5f);
+    if (letter) {
+      text(letter, br * 1.3f, p, IM_COL32(255, 255, 255, 255));
+    } else {  // the left stick
+      const float s = br * 0.5f, w = std::max(2.f, br * 0.16f);
+      dl->AddCircleFilled(p, s * 0.95f, IM_COL32(200, 200, 200, 255), 24);
+      dl->AddCircle(p, s * 0.55f, IM_COL32(60, 60, 60, 255), 24, w * 0.6f);
+    }
+  };
+  struct Hint {
+    char kind;
+    const char* what;
+  };
+  const Hint hints[4] = {{'s', "Choose"}, {'a', "Play"}, {'y', "Nap"}, {'b', "Back"}};
+  const float gap = px * 1.4f;
+  float total = 0.f;
+  for (const auto& h : hints) {
+    total += br * 2.f + px * 0.35f + font->CalcTextSizeA(px, FLT_MAX, 0.f, h.what).x;
+  }
+  total += gap * 3.f;
+  float x = c.x - total * 0.5f;
+  const float y = c.y + r + size.y * 0.15f;
+  dl->AddRectFilled(ImVec2(x - px * 0.8f, y - px * 0.95f), ImVec2(x + total + px * 0.8f, y + px * 0.95f),
+                    IM_COL32(10, 10, 14, 170), px * 0.9f);
+  for (const auto& h : hints) {
+    button(h.kind, ImVec2(x + br, y));
+    x += br * 2.f + px * 0.35f;
+    const ImVec2 ts = font->CalcTextSizeA(px, FLT_MAX, 0.f, h.what);
+    dl->AddText(font, px, ImVec2(x, y - ts.y * 0.5f), IM_COL32(240, 232, 210, 255), h.what);
+    x += ts.x + gap;
+  }
 }
 
 void EnhancedPost::draw_menu() {

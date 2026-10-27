@@ -109,6 +109,26 @@ bool font_bank_exists(GameTextVersion version) {
   return g_font_banks.find(version) != g_font_banks.cend();
 }
 
+/*!
+ * Enhanced: the face buttons drawn as an Xbox pad's (the letter in its colour over the round
+ * button) instead of the PlayStation symbols. Only on the way into the game: the PlayStation
+ * sequences still read back as <PAD_X> and the rest.
+ */
+static std::string xbox_face_buttons(const std::string& str) {
+  static const std::pair<std::string_view, std::string_view> kSwaps[] = {
+      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~25L~+5HB~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~27L~+7HX~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H"}};
+  std::string out = str;
+  for (const auto& [ps, xbox] : kSwaps) {
+    for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {
+      out.replace(at, ps.size(), xbox);
+    }
+  }
+  return out;
+}
+
 std::string GameTextFontBank::replace_to_game(const std::string& str) const {
   std::string newstr;
   newstr.reserve(str.size());
@@ -126,7 +146,7 @@ std::string GameTextFontBank::replace_to_game(const std::string& str) const {
       i += remap->utf8_string.size();
     }
   }
-  return newstr;
+  return xbox_face_buttons(newstr);
 }
 
 std::string GameTextFontBank::encode_utf8_to_game(const std::string& str) const {

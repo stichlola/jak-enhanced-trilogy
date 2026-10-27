@@ -45,11 +45,11 @@ TITLE = 0.28  # the top of the cover kept calm for the title
 # the characters: the parts posed together (see cover_art_blender.py), the camera, the rim light
 CHARACTERS = {
     "jak1": {"yaw": 22, "rim": (1.0, 0.85, 0.45), "rim2": (0.45, 0.75, 1.0), "parts": [
-        {"glb": DUMP / "jak1/levels/common/eichar-lod0.glb", "action": "eichar-stance-loop"},
-        {"glb": DUMP / "jak1/levels/common/sidekick-lod0.glb", "action": "sidekick-stance-loop",
+        {"glb": DUMP / "jak1/levels/common/eichar-lod0.glb", "action": "eichar-stance-loop", "eyes": "jak"},
+        {"glb": DUMP / "jak1/levels/common/sidekick-lod0.glb", "action": "sidekick-stance-loop", "eyes": "daxter",
          "ride": "LshoulderPad"}]},
     "jak2": {"yaw": 28, "rim": (0.4, 0.55, 1.0), "rim2": (0.9, 0.35, 1.0), "parts": [
-        {"glb": DUMP / "jak2/levels/common/jakb-lod0.glb", "action": "jakb-gun-stance"},
+        {"glb": DUMP / "jak2/levels/common/jakb-lod0.glb", "action": "jakb-gun-stance", "eyes": "jak"},
         {"glb": DUMP / "jak2/levels/common/gun-lod0.glb", "action": "gun-idle-red", "attach": "gun"}]},
     "jak3": {"yaw": -22, "rim": (1.0, 0.6, 0.25), "rim2": (1.0, 0.8, 0.5), "parts": [
         {"glb": UE / "jak/jak.glb", "action": "jakb-gun-stance"},
@@ -67,6 +67,18 @@ STYLE = (
     "picture: the same faces, hair, ears, goggles, outfits, colors, proportions, poses, guns and "
     "places in the frame; only the rendering becomes painted and more detailed. "
 )
+# the game wheel's portraits: 3D renders, not paintings
+STYLE_3D = (
+    "Remake this picture as a modern high quality 3D CGI render, like a current-generation remastered "
+    "video game or a Pixar / DreamWorks animated feature film: the low-poly PS2 models rebuilt as smooth, "
+    "rounded, high-poly sculpted characters with no visible polygons or facets, natural anatomy, soft "
+    "skin with subsurface scattering, individual hair strands, physically based materials on cloth, leather "
+    "and metal, soft cinematic lighting with colored rim lights, depth of field on the background. Natural "
+    "expressive eyes with white sclera, colored iris and dark pupil, exactly where they are in the "
+    "picture. Keep every character EXACTLY as in the picture: the same faces, hair, ears, goggles, "
+    "outfits, colors, proportions, poses, guns and places in the frame. "
+)
+
 PROMPTS = {
     "cover": STYLE + (
         "Three vertical panels split by two glowing diagonal lightning seams (blue on the left, red on "
@@ -77,16 +89,16 @@ PROMPTS = {
         "Right: Jak 3 with a red scarf over his face, brown desert armor, holding the gun, in a desert "
         "at sunset, orange sky, sand dunes, rusted wrecks. Keep the top quarter of the picture as calm "
         "sky and background with nothing important in it. Absolutely no text, letters, logo or watermark."),
-    "wheel1": STYLE + (
+    "wheel1": STYLE_3D + (
         "A character portrait for a game select menu, from the waist up: young Jak with spiky "
         "blond-green hair, goggles, blue tunic, with Daxter, an orange otter-weasel with goggles, on his "
         "shoulder, in a lush tropical jungle with ancient stone ruins, golden light through the leaves "
         "and crackling blue eco sparks. No text, letters, logo or watermark."),
-    "wheel2": STYLE + (
+    "wheel2": STYLE_3D + (
         "A character portrait for a game select menu, from the waist up: Jak with long green hair, "
         "goatee, blue armor and a red scarf, holding his gun, in a dark futuristic city at night, tall "
         "towers with blue and purple neon. No text, letters, logo or watermark."),
-    "wheel3": STYLE + (
+    "wheel3": STYLE_3D + (
         "A character portrait for a game select menu, from the waist up: Jak with long green hair, "
         "goggles, brown desert armor and a red scarf over his mouth, holding his gun, in a desert at sunset, orange "
         "sky, sand dunes, rusted wrecks. No text, letters, logo or watermark."),
@@ -108,9 +120,59 @@ def blender():
     sys.exit("Blender not found (set BLENDER)")
 
 
-def render(name, size):
+# the ripped models carry 4 x 4 "programmer_eye" placeholders (the games draw the eyes at run time,
+# eye.gc): a painted eye goes in their place, as jak3-ue5's tools/glb/eyes.ps1 does for Jak 3
+EYE_TEX = ROOT / "decompiler_out" / "jak2_pal" / "textures"
+EYE_IN = 0.12
+
+
+def eye_png(kind, side=0.0):
+    """side: the iris moved toward the nose (a fraction of the eye, + to the right of the texture)"""
+    out = OUT / f"eye-{kind}{'' if not side else ('-r' if side > 0 else '-l')}.png"
+    size = 128
+    im = Image.new("RGBA", (size, size), (242, 240, 234, 255))
+    iris_path = EYE_TEX / ("atollext-vis-pris/jakb-eye.png" if kind == "jak" else "common/autoeye-iris.png")
+    for path, scale in ((iris_path, 0.72 if kind == "jak" else 0.62), (EYE_TEX / "common/autoeye-pupil.png", 0.34)):
+        part = Image.open(path).convert("RGBA")
+        w = int(size * scale)
+        h = int(w * part.height / part.width)
+        part = part.resize((w, h), Image.BICUBIC)
+        im.alpha_composite(part, ((size - w) // 2 + int(side * size), (size - h) // 2))
+    im.save(out)
+    return out
+
+
+def with_eyes(glb, kind):
+    """A copy of the glb with its eye placeholders painted (in local/cover_art/glb)"""
+    import base64
+    import struct
+    out = OUT / "glb" / f"{Path(glb).stem}-eyes.glb"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    data = Path(glb).read_bytes()
+    jlen = struct.unpack_from("<I", data, 12)[0]
+    gltf = json.loads(data[20:20 + jlen])
+    rest = data[20 + jlen:]
+    # each eye's iris a little toward the nose, so he looks ahead, not cross-eyed nor apart
+    def uri(side):
+        return "data:image/png;base64," + base64.b64encode(eye_png(kind, side).read_bytes()).decode()
+    for image in gltf.get("images", []):
+        name = image.get("name", "")
+        if "programmer_eye" in name:
+            image.pop("bufferView", None)
+            image["mimeType"] = "image/png"
+            image["uri"] = uri(-EYE_IN if "left" in name else EYE_IN if "right" in name else 0.0)
+    js = json.dumps(gltf).encode()
+    js += b" " * (-len(js) % 4)
+    body = struct.pack("<II", len(js), 0x4E4F534A) + js + rest
+    out.write_bytes(struct.pack("<III", 0x46546C67, 2, 12 + len(body)) + body)
+    return out
+
+
+def render(name, size, smooth=False):
     spec = dict(CHARACTERS[name])
-    spec["parts"] = [{**p, "glb": str(p["glb"])} for p in spec["parts"]]
+    spec["smooth"] = smooth
+    spec["parts"] = [{**p, "glb": str(with_eyes(p["glb"], p["eyes"]) if "eyes" in p else p["glb"])}
+                     for p in spec["parts"]]
     spec["out"] = str(OUT / f"{name}.png")
     spec["size"] = size
     job = OUT / f"{name}.json"

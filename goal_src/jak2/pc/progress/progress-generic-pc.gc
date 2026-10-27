@@ -536,14 +536,14 @@
      ;; the official spelling is probably "cross" (see PS2 development reference manuals), but that has less weight in the context of displaying the name to the user, I think?
      ;; "cross" seems to be mainly a UK thing (those weirdos)
      (if (language? uk-english)
-         "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Cross"
-         "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H X"))
+         "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H A"
+         "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H A"))
     (((controller-keybind square))
-     "~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H S~+7Vq~-7Vuare")
+     "~Y~22L<~Z~Y~27L~+7HX~Z~Y~1L>~Z~Y~23L[~Z~+26H X")
     (((controller-keybind circle))
-     "~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H Circle")
+     "~Y~22L<~Z~Y~25L~+5HB~Z~Y~1L>~Z~Y~23L[~Z~+26H B")
     (((controller-keybind triangle))
-     "~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Trian~+7Vg~-7Vle")
+     "~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H Y")
     (((controller-keybind dpad-up))
      "~Y~0L\ca1~Z~3L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad U~+7Vp~-7V")
     (((controller-keybind dpad-down))

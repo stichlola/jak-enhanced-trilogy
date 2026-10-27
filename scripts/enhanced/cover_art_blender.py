@@ -78,6 +78,23 @@ for part, arm in zip([p for p in job["parts"] if p.get("action")], armatures):
         arm.matrix_world = Matrix.Translation(seat - main) @ arm.matrix_world
 bpy.context.view_layer.update()
 
+# smoothed (the job's "smooth"): the shared corners welded, smooth shading, subdivided twice, so the
+# low-poly PS2 models read as modern CGI
+if job.get("smooth"):
+    import bmesh
+    for o in meshes:
+        bm = bmesh.new()
+        bm.from_mesh(o.data)
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=0.0004)
+        bm.to_mesh(o.data)
+        bm.free()
+        for poly in o.data.polygons:
+            poly.use_smooth = True
+        mod = o.modifiers.new("smooth", "SUBSURF")
+        mod.levels = mod.render_levels = 2
+        mod.boundary_smooth = "PRESERVE_CORNERS"
+    bpy.context.view_layer.update()
+
 # the materials: the ripper's vertex colors are the game's baked light (0.5 = as the texture);
 # multiply them in, doubled, so the faces keep the game's shading
 for o in meshes:

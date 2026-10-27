@@ -2526,7 +2526,7 @@
     ;; what the buttons do (the game's own button pictures: no format, its ~ codes would be eaten)
     (enhanced-nap-ui-box 86.0 276.0 426.0 318.0 #x408080 (the int (* 24.0 fade)) 2)
     (enhanced-nap-ui-text
-      "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Sleep    ~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Cancel"
+      "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H Sleep    ~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H Cancel"
       286.0
       0.6
       (font-color progress)
@@ -2540,7 +2540,7 @@
 ;; Enhanced: the game wheel (a pad's Select, N on a keyboard): which game of the trilogy to play, drawn
 ;; by the renderer (pc-enhanced-wheel; the world holds still meanwhile). The stick picks a slice (Jak 1
 ;; up left, Jak II up right, Jak 3 below), X plays it: this game saved first (when auto-save is on), the
-;; other booted in the same window, its newest save loaded. Square or triangle open the nap window,
+;; other booted in the same window, its newest save loaded. Triangle opens the nap window,
 ;; circle, Select or Start leave it
 (define *enhanced-wheel* #f)
 (define *enhanced-wheel-pick* 0) ;; 0 nothing yet, 1..3 the game
@@ -2610,7 +2610,7 @@
              )
            )
          )
-        ((cpad-pressed? 0 square triangle)
+        ((cpad-pressed? 0 triangle)
          (enhanced-wheel-close)
          (enhanced-nap-ui-open)
          )

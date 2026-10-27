@@ -141,7 +141,7 @@
       (go target-stance))
   :post target-no-stick-post)
 
-;; Enhanced: the nap window (the game wheel's square or triangle, or the Enhanced menu's button): how many
+;; Enhanced: the nap window (the game wheel's triangle, or the Enhanced menu's button): how many
 ;; hours Jak sleeps. The game pauses while it's open; X starts the nap (target-stance lays Jak down
 ;; once he stands on the ground), triangle, circle, Select or Start leave it
 (define *enhanced-nap-ui* #f)
@@ -237,7 +237,7 @@
       ;; what the buttons do (the game's own button pictures: no format, its ~ codes would be eaten)
       (enhanced-nap-ui-box buf 86 280 426 281 (new 'static 'rgba :r #x80 :g #x80 :b #x40 :a #x60))
       (enhanced-nap-ui-text buf
-                            "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H SLEEP    ~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H CANCEL"
+                            "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H SLEEP    ~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H CANCEL"
                             292
                             1.0))) ;; (the button pictures are in the large font only)
   (none))
@@ -245,7 +245,7 @@
 ;; Enhanced: the game wheel (a pad's Select, N on a keyboard): which game of the trilogy to play, drawn
 ;; by the renderer (pc-enhanced-wheel; the world holds still meanwhile). The stick picks a slice (Jak 1
 ;; up left, Jak II up right, Jak 3 below), X plays it: this game saved first (when auto-save is on), the
-;; other booted in the same window, its newest save loaded. Square or triangle open the nap window,
+;; other booted in the same window, its newest save loaded. Triangle opens the nap window,
 ;; circle, Select or Start leave it
 (define *enhanced-wheel* #f)
 (define *enhanced-wheel-pick* 0) ;; 0 nothing yet, 1..3 the game
@@ -315,7 +315,7 @@
              )
            )
          )
-        ((cpad-pressed? 0 square triangle)
+        ((cpad-pressed? 0 triangle)
          (enhanced-wheel-close)
          (enhanced-nap-ui-open)
          )
