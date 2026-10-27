@@ -563,7 +563,8 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
     float r;
     if (dust) {
       r = puff_info[i].x * (0.45 + 1.6 * sqrt(u));
-      c.y += r * 0.45 + 0.4 * age;
+      // kicked up off the ground: low at first, its lower half in the sand, rising slowly
+      c.y += r * 0.2 + 0.3 * age;
       c.xz += dust_wind.xy * age * 1.5;
     } else {
       r = puff_info[i].x * (0.5 + 1.1 * sqrt(u));
@@ -1907,7 +1908,9 @@ void main() {
       float facing = dot(-l, spot_dir[i].xyz);
       float cone = smoothstep(0.74, 0.95, facing) + 0.12 * smoothstep(0.4, 0.8, facing);
       float dm = d / 4096.0;
-      float fall = 1.0 / (1.0 + dm * dm / 700.0) * (1.0 - smoothstep(65.0, 100.0, dm));
+      // gentler in the first meters (the ground under the lamps would burn white)
+      float fall = 1.0 / (1.0 + dm * dm / 700.0) * (1.0 - smoothstep(65.0, 100.0, dm)) *
+                   (0.4 + 0.6 * smoothstep(2.0, 12.0, dm));
       float ndl = clamp(dot(nn, l) * 0.85 + 0.15, 0.0, 1.0);
       added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 2.6;
     }
@@ -2366,7 +2369,8 @@ void main() {
         float dq = length(q);
         float cone = smoothstep(0.86, 0.97, dot(q / max(dq, 1.0), spot_dir[i].xyz));
         float dm = dq / 4096.0;
-        beam += cone * spot_pos[i].w / (1.0 + dm * dm / 80.0) * (1.0 - smoothstep(35.0, 70.0, dm)) * tmax / 10.0 / 4096.0;
+        beam += cone * spot_pos[i].w / (1.0 + dm * dm / 80.0) * (1.0 - smoothstep(35.0, 70.0, dm)) *
+                smoothstep(1.0, 6.0, dm) * tmax / 10.0 / 4096.0;
       }
     }
     c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.03;

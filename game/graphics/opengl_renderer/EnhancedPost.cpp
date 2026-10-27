@@ -1064,8 +1064,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.pos[3] = radius;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
+      // (not a fire's sparks and embers either: tiny glows)
       if (dist > 40.f * kMeter && dist < 2500.f * kMeter && c.pos[2] > 0.f &&
-          l.size < 12.f * kMeter) {
+          l.size > 0.6f * kMeter && l.size < 12.f * kMeter) {
         float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
         if (peak > 0.f) {
           Beacon b;
@@ -1533,22 +1534,26 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         f.time = m_time;
         m_puffs.push_back(f);
       };
-      // test switch: puffs behind Jak at any speed, anywhere (dust on the ground, spray on water)
-      static bool test_puffs = std::getenv("JAK_ENHANCED_PUFF_TEST") != nullptr;
+      // test switch: puffs behind Jak at any speed, anywhere (dust; spray with the value "water")
+      static const char* puff_test = std::getenv("JAK_ENHANCED_PUFF_TEST");
+      static bool test_puffs = puff_test != nullptr;
+      static bool test_spray = puff_test && std::strcmp(puff_test, "water") == 0;
       if (pl.state == 2 || pl.state == 4) {
         m_last_ride_state = pl.state;
       }
       const bool board = pl.state == 4 || (pl.state == 5 && m_last_ride_state == 4);
-      const bool on_water = pl.state == 5 || (test_puffs && pl.state != 1);
+      const bool on_water = pl.state == 5 || test_spray;
       if ((riding || test_puffs) && pl.valid && m_time - m_puff_time > 0.06) {
         const float sp = test_puffs ? 20.f : m_ride_speed;
         const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
         // (the test: as if moving, along a 12 m trail)
-        const float back = (board ? 0.6f : 1.6f) + (test_puffs ? (float)std::fmod(m_time * 6.0, 12.0) : 0.f);
+        // (Jak sits ~1.4 m over the ground in a vehicle: the dust starts on the ground behind the
+        // back wheels, not up by the seat)
+        const float back = (board ? 0.6f : 2.2f) + (test_puffs ? (float)std::fmod(m_time * 6.0, 12.0) : 0.f);
         if (on_water && sp > 3.f && m_settings.wake > 0.f) {
           add_puff(back, side, board ? 0.2f : 0.6f, std::min(0.5f + sp * 0.04f, 2.f), 1, 1.1f);
         } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
-          add_puff(back, side, board ? 0.1f : 0.6f, std::min(0.6f + sp * 0.05f, 2.4f), 0, 2.2f);
+          add_puff(back, side, board ? 0.1f : 1.4f, std::min(0.6f + sp * 0.05f, 2.4f), 0, 2.2f);
         }
         m_puff_left = !m_puff_left;
         m_puff_time = m_time;
@@ -1727,13 +1732,31 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       std::sort(beacons.begin(), beacons.end(),
                 [](const Beacon& a, const Beacon& b) { return a.score > b.score; });
       const float shown = std::max(m_night, night_darkness());
-      const int nb = shown > 0.01f ? std::min((int)beacons.size(), kBeacons) : 0;
       float bpos[kBeacons * 4] = {};
       float bcol[kBeacons * 4] = {};
-      for (int i = 0; i < nb; i++) {
-        std::memcpy(bpos + i * 4, beacons[i].pos, sizeof(float) * 4);
-        std::memcpy(bcol + i * 4, beacons[i].color, sizeof(float) * 4);
-        bcol[i * 4 + 3] *= shown * m_settings.light_strength;
+      int nb = 0;
+      for (const auto& b : beacons) {
+        if (shown <= 0.01f || nb == kBeacons) {
+          break;
+        }
+        // one point per lamp: a glow next to a brighter one already taken (a flame is several
+        // glows) is part of it
+        bool merged = false;
+        for (int j = 0; j < nb && !merged; j++) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            float dk = bpos[j * 4 + k] - b.pos[k];
+            d2 += dk * dk;
+          }
+          merged = d2 < 4.f * kMeter * 4.f * kMeter;
+        }
+        if (merged) {
+          continue;
+        }
+        std::memcpy(bpos + nb * 4, b.pos, sizeof(float) * 4);
+        std::memcpy(bcol + nb * 4, b.color, sizeof(float) * 4);
+        bcol[nb * 4 + 3] *= shown * m_settings.light_strength;
+        nb++;
       }
       glUniform1i(glGetUniformLocation(id, "beacon_count"), nb);
       glUniform4fv(glGetUniformLocation(id, "beacon_pos"), kBeacons, bpos);
