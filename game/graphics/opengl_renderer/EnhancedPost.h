@@ -312,6 +312,9 @@ class EnhancedPost {
   GLuint m_black_tex = 0;
   // the start menu's portraits, the games set up, the one picked
   GLuint m_start_tex[3] = {0, 0, 0};
+  GLuint m_start_text[4] = {0, 0, 0, 0};  // the lettering: the title, the three names
+  float m_start_text_w[4] = {1, 1, 1, 1};
+  float m_start_text_h[4] = {1, 1, 1, 1};
   bool m_start_ready[3] = {false, false, false};
   bool m_start_loaded = false;
   int m_start_pick = 0;

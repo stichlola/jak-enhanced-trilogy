@@ -571,10 +571,22 @@ EnhancedPost::EnhancedPost() {
   } catch (std::exception& e) {
     lg::error("[enhanced] could not load the saved settings: {}", e.what());
   }
-  // the trilogy's start menu, once as the program starts (a game switch doesn't show it again)
-  if (std::getenv("JAK_ENHANCED_START_MENU") && !g_enhanced_menu.start_menu_shown) {
+  // the trilogy's start menu, once as the program starts (a game switch doesn't show it again):
+  // whenever more than one game is set up, but not in a debug start (-debug: the REPL and the test
+  // scripts boot straight into the game). JAK_ENHANCED_START_MENU=1 / 0 forces it on / off
+  if (!g_enhanced_menu.start_menu_shown) {
     g_enhanced_menu.start_menu_shown = true;
-    g_enhanced_menu.start_menu = true;
+    const char* force = std::getenv("JAK_ENHANCED_START_MENU");
+    if (force) {
+      g_enhanced_menu.start_menu = std::strcmp(force, "0") != 0;
+    } else if (!g_enhanced_debug_toolbar) {
+      int ready = 0;
+      for (int i = 1; i <= 3; i++) {
+        ready += i == (int)g_game_version ||
+                 fs::exists(file_util::get_jak_project_dir() / "out" / fmt::format("jak{}", i) / "iso");
+      }
+      g_enhanced_menu.start_menu = ready > 1;
+    }
   }
   // the game played last, for the launcher to boot it next time
   try {
@@ -770,10 +782,11 @@ EnhancedPost::EnhancedPost() {
 EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
-  for (auto& t : m_start_tex) {
-    if (t) {
-      glDeleteTextures(1, &t);
-      t = 0;
+  for (auto* t : {&m_start_tex[0], &m_start_tex[1], &m_start_tex[2], &m_start_text[0],
+                  &m_start_text[1], &m_start_text[2], &m_start_text[3]}) {
+    if (*t) {
+      glDeleteTextures(1, t);
+      *t = 0;
     }
   }
   // the casters are global and outlive the renderer (a game switch boots the next game in the
@@ -4050,31 +4063,43 @@ void EnhancedPost::draw_start_menu() {
     return;
   }
   static const char* const kTitles[3] = {"Jak and Daxter", "Jak II", "Jak 3"};
-  static const char* const kSubtitles[3] = {"The Precursor Legacy", "", ""};
   const int current = std::clamp((int)g_game_version - 1, 0, 2);
   if (!m_start_loaded) {
-    // the portraits (the old game wheel's), and which games are set up (their disc extracted)
+    // the portraits (the old game wheel's), the lettering (start_menu_text.py) and which games are
+    // set up (their disc extracted)
     m_start_loaded = true;
     m_start_opened_at = ImGui::GetTime();
     const auto proj = file_util::get_jak_project_dir();
-    for (int i = 0; i < 3; i++) {
-      m_start_ready[i] =
-          i == current || fs::exists(proj / "out" / fmt::format("jak{}", i + 1) / "iso");
-      const auto path = proj / "game/assets/enhanced/wheel" / fmt::format("jak{}.png", i + 1);
+    auto load = [&](const std::string& name, GLuint* tex, float* w_out, float* h_out) {
+      const auto path = proj / "game/assets/enhanced/wheel" / name;
       int w = 0, h = 0, n = 0;
       unsigned char* px = stbi_load(path.string().c_str(), &w, &h, &n, 4);
       if (!px) {
-        continue;
+        lg::warn("[enhanced] start menu: no {}", path.string());
+        return;
       }
-      glGenTextures(1, &m_start_tex[i]);
-      glBindTexture(GL_TEXTURE_2D, m_start_tex[i]);
+      glGenTextures(1, tex);
+      glBindTexture(GL_TEXTURE_2D, *tex);
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glGenerateMipmap(GL_TEXTURE_2D);
       glBindTexture(GL_TEXTURE_2D, 0);
       stbi_image_free(px);
+      *w_out = (float)w;
+      *h_out = (float)h;
+    };
+    float unused_w, unused_h;
+    for (int i = 0; i < 3; i++) {
+      m_start_ready[i] =
+          i == current || fs::exists(proj / "out" / fmt::format("jak{}", i + 1) / "iso");
+      load(fmt::format("jak{}.png", i + 1), &m_start_tex[i], &unused_w, &unused_h);
+    }
+    for (int i = 0; i < 4; i++) {
+      load(i == 0 ? std::string("title.png") : fmt::format("name{}.png", i), &m_start_text[i],
+           &m_start_text_w[i], &m_start_text_h[i]);
     }
     m_start_pick = current;
   }
@@ -4144,9 +4169,19 @@ void EnhancedPost::draw_start_menu() {
   dl->AddRectFilledMultiColor(ImVec2(0, 0), size, col(0.03f, 0.05f, 0.10f, 0.93f),
                               col(0.03f, 0.05f, 0.10f, 0.93f), col(0.f, 0.f, 0.f, 0.97f),
                               col(0.f, 0.f, 0.f, 0.97f));
-  text_centered(78.f * unit, size.x * 0.5f, size.y * 0.08f, col(0.96f, 0.82f, 0.38f, 1.f),
-                "Jak Enhanced Trilogy");
-  text_centered(26.f * unit, size.x * 0.5f, size.y * 0.08f + 92.f * unit,
+  // the lettering pictures at a given height, centered on x (text when a picture is missing)
+  auto lettering = [&](int which, float height, float x, float y, float shade, const char* text) {
+    if (!m_start_text[which]) {
+      text_centered(height * 0.8f, x, y, col(0.96f * shade, 0.62f * shade, 0.2f * shade, 1.f), text);
+      return;
+    }
+    const float w = height * m_start_text_w[which] / m_start_text_h[which];
+    dl->AddImage((ImTextureID)(intptr_t)m_start_text[which], ImVec2(x - w * 0.5f, y),
+                 ImVec2(x + w * 0.5f, y + height), ImVec2(0, 0), ImVec2(1, 1),
+                 col(shade, shade, shade, 1.f));
+  };
+  lettering(0, 96.f * unit, size.x * 0.5f, size.y * 0.07f, 1.f, "Jak Enhanced Trilogy");
+  text_centered(26.f * unit, size.x * 0.5f, size.y * 0.07f + 112.f * unit,
                 col(0.75f, 0.78f, 0.85f, 1.f), "Choose a game");
 
   // the three cards, the one picked larger, lit and framed in gold
@@ -4161,8 +4196,10 @@ void EnhancedPost::draw_start_menu() {
     const float grow = picked ? card * 0.05f : 0.f;
     const ImVec2 a(x0 + i * (card + gap) - grow, y0 - grow);
     const ImVec2 b(a.x + card + 2.f * grow, a.y + card + 2.f * grow);
-    // the mouse picks too, a click plays
-    if (m_start_ready[i] && io.MousePos.x >= a.x && io.MousePos.x < b.x &&
+    // the mouse picks too, a click plays (not in the first moment: the cursor appearing where it
+    // was reads as a move)
+    if (m_start_ready[i] && ImGui::GetTime() - m_start_opened_at > 0.5 && io.MousePos.x >= a.x &&
+        io.MousePos.x < b.x &&
         io.MousePos.y >= a.y && io.MousePos.y < b.y) {
       if (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f) {
         m_start_pick = i;
@@ -4187,11 +4224,7 @@ void EnhancedPost::draw_start_menu() {
                 10.f * unit, 0, picked ? 4.f * unit : 1.5f * unit);
     const float cx = (a.x + b.x) * 0.5f;
     const float shade = picked ? 1.f : 0.62f;
-    text_centered(40.f * unit, cx, b.y + 22.f * unit, col(shade, shade, shade, 1.f), kTitles[i]);
-    if (kSubtitles[i][0]) {
-      text_centered(22.f * unit, cx, b.y + 68.f * unit,
-                    col(0.7f * shade, 0.72f * shade, 0.78f * shade, 1.f), kSubtitles[i]);
-    }
+    lettering(i + 1, 54.f * unit, cx, b.y + 22.f * unit, shade, kTitles[i]);
     if (!m_start_ready[i]) {
       text_centered(24.f * unit, cx, (a.y + b.y) * 0.5f - 12.f * unit,
                     col(0.9f, 0.9f, 0.9f, 0.9f), "Not set up: its disc goes in the ISO folder");

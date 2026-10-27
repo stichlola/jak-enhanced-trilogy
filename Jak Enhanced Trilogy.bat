@@ -133,7 +133,7 @@ if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\
 )
 
 rem Which game boots: the one played last (the game writes it), else the first ready. With more than
-rem one ready, the game opens on the trilogy's start menu (JAK_ENHANCED_START_MENU) to pick another
+rem one ready, the game opens on the trilogy's start menu by itself to pick another
 set "COUNT=0"
 for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
   set /a COUNT+=1
@@ -148,8 +148,6 @@ set "PICK=%READY1%"
 set "LAST="
 if exist "%APPDATA%\OpenGOAL\enhanced-last-game.txt" set /p LAST=<"%APPDATA%\OpenGOAL\enhanced-last-game.txt"
 for %%G in (1 2 3) do if "!LAST!"=="%%G" if exist "%PROJ%\out\jak%%G\iso" set "PICK=%%G"
-set "JAK_ENHANCED_START_MENU="
-if %COUNT% gtr 1 set "JAK_ENHANCED_START_MENU=1"
 echo.
 echo Starting Jak %PICK%.
 echo   \  (the key left of 1)  opens the Enhanced menu: graphics, weather, time of day...

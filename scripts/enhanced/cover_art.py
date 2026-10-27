@@ -3,6 +3,7 @@
   python scripts/enhanced/cover_art.py ref               # the reference pictures (free)
   python scripts/enhanced/cover_art.py image cover|icon  # one painted by Tripo (~5 credits each)
   python scripts/enhanced/cover_art.py image wheel1|wheel2|wheel3  # the game wheel's portraits
+  python scripts/enhanced/cover_art.py image menu1|menu2|menu3     # the start menu's, from local/cover_art/menuN_ref.png
   python scripts/enhanced/cover_art.py compose           # title, banner, installer pictures, .ico
 
 `ref` poses Jak 1 (Daxter on his shoulder), Jak II and Jak 3 (each with the Morph Gun) from the games'
