@@ -1040,6 +1040,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float dist;
     };
     std::vector<Fire> fires;
+    // the glows too far to light anything: drawn as points of light that carry across the dark
+    // (a camp's fire, a town's lamps over the night desert)
+    struct Beacon {
+      float pos[4];    // view space, glow size
+      float color[4];  // rgb, how far in it is (fades in past 40 m)
+      float score;
+    };
+    std::vector<Beacon> beacons;
+    static int debug_beacons = 0;
     const bool on = m_settings.lights && have_scene && cam.valid;
     g_enhanced_smoke_lights.count = 0;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
@@ -1054,6 +1063,22 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float radius = std::clamp(l.size * m_settings.light_reach, 4.f * kMeter, 30.f * kMeter);
       c.pos[3] = radius;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
+      if (dist > 40.f * kMeter && dist < 2500.f * kMeter && c.pos[2] > 0.f &&
+          l.size < 12.f * kMeter) {
+        float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+        if (peak > 0.f) {
+          Beacon b;
+          std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+          b.pos[3] = l.size;
+          for (int k = 0; k < 3; k++) {
+            b.color[k] = l.color[k] / peak;
+          }
+          b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+          b.score = (l.color[0] + l.color[1] + l.color[2]) / (dist / kMeter);
+          beacons.push_back(b);
+        }
+      }
       // behind the camera beyond its reach, or far away (the moon is a glow too)
       if (c.pos[2] < -radius || dist > 150.f * kMeter) {
         continue;
@@ -1217,6 +1242,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       c.pos[3] = std::min(ml.radius, 40.f * kMeter);
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // it has no bulb of its own in the game: its beacon is the lamp, near or far
+      if (c.pos[2] > 0.f && dist < 2500.f * kMeter) {
+        float peak = std::max(ml.color[0], std::max(ml.color[1], ml.color[2]));
+        if (peak > 0.f) {
+          Beacon b;
+          std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+          b.pos[3] = 0.4f * kMeter;
+          for (int k = 0; k < 3; k++) {
+            b.color[k] = ml.color[k] / peak;
+          }
+          b.color[3] = lit;
+          b.score = 3.f * peak / std::max(dist / kMeter, 1.f);
+          beacons.push_back(b);
+        }
+      }
       if (c.pos[2] < -c.pos[3] || dist > 150.f * kMeter) {
         continue;
       }
@@ -1681,6 +1721,27 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
+    {
+      // the beacons, the brightest and nearest first, shown as the night falls
+      constexpr int kBeacons = 24;
+      std::sort(beacons.begin(), beacons.end(),
+                [](const Beacon& a, const Beacon& b) { return a.score > b.score; });
+      const float shown = std::max(m_night, night_darkness());
+      const int nb = shown > 0.01f ? std::min((int)beacons.size(), kBeacons) : 0;
+      float bpos[kBeacons * 4] = {};
+      float bcol[kBeacons * 4] = {};
+      for (int i = 0; i < nb; i++) {
+        std::memcpy(bpos + i * 4, beacons[i].pos, sizeof(float) * 4);
+        std::memcpy(bcol + i * 4, beacons[i].color, sizeof(float) * 4);
+        bcol[i * 4 + 3] *= shown * m_settings.light_strength;
+      }
+      glUniform1i(glGetUniformLocation(id, "beacon_count"), nb);
+      glUniform4fv(glGetUniformLocation(id, "beacon_pos"), kBeacons, bpos);
+      glUniform4fv(glGetUniformLocation(id, "beacon_color"), kBeacons, bcol);
+      if (m_settings.ssao_debug && (debug_beacons++ % 300) == 0) {
+        lg::info("[enhanced] beacons: {} far glows, {} shown", beacons.size(), nb);
+      }
+    }
     static int debug_counter = 0;
     if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
       lg::info("[enhanced] lights: {} glows, {} lamps, {} used", g_enhanced_lights.count, lamps, n);

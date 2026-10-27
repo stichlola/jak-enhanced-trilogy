@@ -118,6 +118,9 @@ uniform vec4 player_view;       // Jak (view space, game units), w: valid
 uniform int spot_count;         // vehicles' headlights: view space + strength, the way they point
 uniform vec4 spot_pos[8];
 uniform vec4 spot_dir[8];
+uniform int beacon_count;       // far glows drawn as points of light: view space + size
+uniform vec4 beacon_pos[24];
+uniform vec4 beacon_color[24];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
@@ -1896,16 +1899,17 @@ void main() {
   if ((light_count > 0 || spot_count > 0) && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surface_normal(tex_coord, p);
     vec3 added = vec3(0.0);
-    // headlights: a cone of warm white down the road, out to 55 m
+    // headlights: a cone of warm white down the road out to 100 m, and a dim spill around it
     for (int i = 0; i < spot_count; i++) {
       vec3 tl = spot_pos[i].xyz - p;
       float d = length(tl);
       vec3 l = tl / max(d, 1.0);
-      float cone = smoothstep(0.78, 0.96, dot(-l, spot_dir[i].xyz));
+      float facing = dot(-l, spot_dir[i].xyz);
+      float cone = smoothstep(0.74, 0.95, facing) + 0.12 * smoothstep(0.4, 0.8, facing);
       float dm = d / 4096.0;
-      float fall = 1.0 / (1.0 + dm * dm / 250.0) * (1.0 - smoothstep(35.0, 55.0, dm));
+      float fall = 1.0 / (1.0 + dm * dm / 700.0) * (1.0 - smoothstep(65.0, 100.0, dm));
       float ndl = clamp(dot(nn, l) * 0.85 + 0.15, 0.0, 1.0);
-      added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 1.6;
+      added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 2.6;
     }
     // per-pixel jitter of the shadow steps (the TAA averages it)
     float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
@@ -2350,8 +2354,9 @@ void main() {
 
   // headlight beams in the air: a few steps along the view through their cones
   if (spot_count > 0) {
-    float air_b = weather.x * 0.8 + weather2.y + weather.y * 0.6 + weather2.x * 0.3 + clouds.w * 0.3;
-    float tmax = min(z > 0.0 ? length(p) : 1e9, 40.0 * 4096.0);
+    float air_b = weather.x * 0.8 + weather2.y + weather.y * 0.6 + weather2.x * 0.3 + clouds.w * 0.3 +
+                  0.35 * night_dark.x;
+    float tmax = min(z > 0.0 ? length(p) : 1e9, 70.0 * 4096.0);
     float beam = 0.0;
     float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     for (int i = 0; i < spot_count; i++) {
@@ -2361,7 +2366,7 @@ void main() {
         float dq = length(q);
         float cone = smoothstep(0.86, 0.97, dot(q / max(dq, 1.0), spot_dir[i].xyz));
         float dm = dq / 4096.0;
-        beam += cone * spot_pos[i].w / (1.0 + dm * dm / 40.0) * (1.0 - smoothstep(20.0, 40.0, dm)) * tmax / 10.0 / 4096.0;
+        beam += cone * spot_pos[i].w / (1.0 + dm * dm / 80.0) * (1.0 - smoothstep(35.0, 70.0, dm)) * tmax / 10.0 / 4096.0;
       }
     }
     c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.03;
@@ -2455,6 +2460,53 @@ void main() {
   // bloom and god rays
   c += texture(tex_T1, tex_coord).rgb * bloom_strength;
   c += texture(tex_T4, tex_coord).rgb * shafts_strength;
+
+  // far lights at night: each far glow a point of light with a soft halo that keeps a few pixels
+  // however far it is (the game's own glow shrinks to nothing), hidden behind what's in front
+  float aspect_px = texel.y / texel.x;
+  float night_air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3;
+  for (int i = 0; i < beacon_count; i++) {
+    vec3 bp = beacon_pos[i].xyz;
+    vec2 buv = 0.5 * vec2(proj.z * bp.x, proj.w * bp.y) / bp.z + 0.5;
+    vec2 dpx = (tex_coord - buv) / texel.y;
+    dpx.x *= aspect_px;
+    float r2 = dot(dpx, dpx);
+    if (r2 < 40.0 * 40.0 && all(greaterThan(buv, vec2(0.0))) && all(lessThan(buv, vec2(1.0)))) {
+      float bd = texture(tex_T3, buv).r;
+      float front = bd <= 1e-7 ? 1e12 : view_z(bd);
+      if (front > bp.z * 0.97 - 2.0 * 4096.0) {
+        float dist_m = length(bp) / 4096.0;
+        // the glow's own size on screen, at least a couple of pixels
+        float core_px = max(1.6, beacon_pos[i].w * 0.35 * abs(proj.w) * 0.5 / bp.z / texel.y);
+        float core = exp(-r2 / (core_px * core_px));
+        float halo = exp(-sqrt(r2) / (5.0 + 6.0 * min(night_air, 1.0))) * 0.18;
+        float fade = exp(-dist_m / 1800.0);
+        c += beacon_color[i].rgb * (core * 1.4 + halo) * beacon_color[i].w * fade;
+      }
+    }
+  }
+  // the headlamps themselves seen from in front: a blinding point and a short streak
+  for (int i = 0; i < spot_count; i++) {
+    vec3 sp = spot_pos[i].xyz;
+    if (sp.z > 1.0 * 4096.0) {
+      float into = dot(normalize(-sp), spot_dir[i].xyz);
+      float glare = smoothstep(0.55, 0.95, into) * spot_pos[i].w;
+      if (glare > 0.0) {
+        vec2 suv = 0.5 * vec2(proj.z * sp.x, proj.w * sp.y) / sp.z + 0.5;
+        vec2 dpx = (tex_coord - suv) / texel.y;
+        dpx.x *= aspect_px;
+        float bd = texture(tex_T3, suv).r;
+        float front = bd <= 1e-7 ? 1e12 : view_z(bd);
+        if (front > sp.z * 0.95 - 1.0 * 4096.0) {
+          float r = length(dpx);
+          float core_px = max(2.0, 0.12 * 4096.0 * abs(proj.w) * 0.5 / sp.z / texel.y);
+          float g = exp(-r * r / (core_px * core_px)) * 2.0 + exp(-r / 10.0) * 0.3 +
+                    exp(-abs(dpx.y) * 0.8) * exp(-abs(dpx.x) / 60.0) * 0.25;
+          c += vec3(1.0, 0.94, 0.82) * g * glare;
+        }
+      }
+    }
+  }
 
   // lens flare: looking toward the sun, the lens's glass throws ghosts of it along the line through
   // the middle of the picture, a faint halo ring and a short streak. Only as much as the sun itself

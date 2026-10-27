@@ -116,7 +116,10 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Lens flare**: looking toward the sun, ghosts and a streak in the lens (menu switch).
 - **Night sky**: twinkling stars, a faint milky way, the moon and its halo; Haven and Spargus glow
   warm on the low sky.
-- **Headlights** (Jak 3): vehicles light the road ahead with real beams, visible in the night air.
+- **Headlights** (Jak 3): vehicles light the road ahead with real beams out to 100 m, visible in
+  the night air; seen from the front the lamps glare.
+- **Far lights**: at night far fires, lamps and vehicles stay visible as points of light with a
+  soft halo (across the desert, over the harbor), and so do the lights you place.
 - **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their
   color; a partial white balance takes off the strongest color casts.
 - **Fires** flicker, the air above them shimmers, and embers rise from them.
