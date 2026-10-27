@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <random>
 #include <vector>
 
@@ -76,6 +77,18 @@ namespace {
 struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds;
 };
+// the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
+// likelier than others
+enum SpellKind { kFair, kOvercast, kShower, kThunder, kFogSpell, kSandstorm, kSnowSpell, kSpellKinds };
+const char* const kSpellNames[kSpellKinds] = {"fair", "overcast", "shower", "thunder", "fog", "sandstorm", "snow"};
+const char* const kSeasonNames[4] = {"spring", "summer", "autumn", "winter"};
+// what a season does everywhere: the spells' odds (times), the grade (plus), the animals (times)
+struct Season {
+  std::array<float, kSpellKinds> odds;
+  float warmth = 0.f, saturation = 0.f;
+  float crickets = 1.f, birds = 1.f, frogs = 1.f;
+  Season() { odds.fill(1.f); }
+};
 struct ZoneWeather {
   bool outdoors = true;
   float rain = 0.f, mist = 0.f, snow = 0.f, heat = 0.f, dust = 0.f, sunny = 0.f, clouds = 0.f;
@@ -83,8 +96,16 @@ struct ZoneWeather {
   // added for a while in every four-minute cycle
   float harder_rain = 0.f, harder_mist = 0.f, harder_snow = 0.f, harder_dust = 0.f, harder_wet = 0.f;
   float harder_from = 0.f, harder_to = 0.f;
-  // spells of weather (period 0: none)
-  float shower_period = 0.f, shower_chance = 0.f, shower_thunder = 0.f;
+  // spells of weather (period 0: none), each a weather picked by these odds
+  float spell_period = 0.f;
+  std::array<float, kSpellKinds> spells{};
+  // the zone's own season odds, times the world's (1: as everywhere)
+  std::array<std::array<float, kSpellKinds>, 4> season_odds;
+  ZoneWeather() {
+    for (auto& s : season_odds) {
+      s.fill(1.f);
+    }
+  }
   float morning_mist = 0.f;
   bool game_dust = false;
   // the distance fog and the volumetric mist: a fixed amount, or spells (period > 0) that are
@@ -108,6 +129,7 @@ struct World {
   float lamps[3] = {1.f, 0.45f, 1.f};
   std::vector<WorldZone> zones;  // [0]: "other", for the levels in no zone
   std::vector<std::pair<std::string, int>> prefixes[3];
+  Season seasons[4];
 };
 World g_world;
 
@@ -164,6 +186,12 @@ void weather_menu(EnhancedPost::Settings& s, const char* id) {
     ImGui::EndCombo();
   }
   if (s.weather == 1) {
+    // the changing weather follows the season: the calendar's, or one picked here
+    ImGui::Indent();
+    ImGui::SetNextItemWidth(160);
+    ImGui::Combo(fmt::format("Season##{}", id).c_str(), &s.season,
+                 "By the calendar\0Spring\0Summer\0Autumn\0Winter\0");
+    ImGui::Unindent();
     return;
   }
   const char* names[9] = {"Rain", "Thunderstorm", "Fog", "Ground mist", "Snow",
@@ -265,11 +293,29 @@ void load_world() {
         }
         we.harder_from = wj.value("harder_from", 0.f);
         we.harder_to = wj.value("harder_to", 0.f);
-        if (wj.contains("showers")) {
+        if (wj.contains("spells")) {
+          const auto& sp = wj["spells"];
+          we.spell_period = sp.value("period", 480.f);
+          for (int k = 0; k < kSpellKinds; k++) {
+            we.spells[k] = sp.value(kSpellNames[k], 0.f);
+          }
+        } else if (wj.contains("showers")) {
+          // the older form: a chance of rain, some of it thunder, fair the rest
           const auto& sh = wj["showers"];
-          we.shower_period = sh.value("period", 240.f);
-          we.shower_chance = sh.value("chance", 1.f);
-          we.shower_thunder = sh.value("thunder", 0.f);
+          const float chance = sh.value("chance", 1.f), thunder = sh.value("thunder", 0.f);
+          we.spell_period = sh.value("period", 240.f);
+          we.spells[kFair] = 1.f - chance;
+          we.spells[kShower] = chance * (1.f - thunder);
+          we.spells[kThunder] = chance * thunder;
+        }
+        if (wj.contains("seasons")) {
+          for (int s = 0; s < 4; s++) {
+            if (wj["seasons"].contains(kSeasonNames[s])) {
+              for (int k = 0; k < kSpellKinds; k++) {
+                we.season_odds[s][k] = wj["seasons"][kSeasonNames[s]].value(kSpellNames[k], 1.f);
+              }
+            }
+          }
         }
         we.morning_mist = wj.value("morning_mist", 0.f);
         we.game_dust = wj.value("game_dust", false);
@@ -299,6 +345,23 @@ void load_world() {
         w.zones[0] = zone;
       } else {
         w.zones.push_back(zone);
+      }
+    }
+    if (j.contains("seasons")) {
+      for (int s = 0; s < 4; s++) {
+        if (!j["seasons"].contains(kSeasonNames[s])) {
+          continue;
+        }
+        const auto& sj = j["seasons"][kSeasonNames[s]];
+        Season& out = w.seasons[s];
+        for (int k = 0; k < kSpellKinds; k++) {
+          out.odds[k] = sj.value(kSpellNames[k], 1.f);
+        }
+        out.warmth = sj.value("warmth", 0.f);
+        out.saturation = sj.value("saturation", 0.f);
+        out.crickets = sj.value("crickets", 1.f);
+        out.birds = sj.value("birds", 1.f);
+        out.frogs = sj.value("frogs", 1.f);
       }
     }
     for (int g = 0; g < 3; g++) {
@@ -2179,6 +2242,22 @@ void EnhancedPost::update_scene() {
   want.warmth = s.area_grading ? mix(day.warmth, night.warmth) : 0.f;
   want.clouds = mix(day.clouds, night.clouds);
 
+  // the season: the computer's calendar (northern hemisphere) or the menu's pick
+  {
+    int pick = s.season - 1;
+    if (pick < 0) {
+      const std::time_t now = std::time(nullptr);
+      const int month = std::localtime(&now)->tm_mon;  // 0 = January
+      pick = month >= 2 && month <= 4 ? 0 : month >= 5 && month <= 7 ? 1 : month >= 8 && month <= 10 ? 2 : 3;
+    }
+    m_season = pick;
+  }
+  const Season& season = g_world.seasons[m_season];
+  if (s.area_grading && zone.weather.outdoors) {
+    want.warmth += season.warmth;
+    want.saturation += season.saturation;
+  }
+
   // the game's own sandstorm, while its process runs (desert-dust-storm.gc)
   auto& gd = g_enhanced_dust;
   const int frame = gd.now.load() + 1;
@@ -2262,37 +2341,83 @@ void EnhancedPost::update_scene() {
       }
       m_weather_state = rain > 0.3f ? 2 : snow > 0.f || mist > 0.5f ? 1 : dust > 0.f ? 5 : 0;
       float fair = 1.f;
-      if (w.shower_period > 0.f) {
-        // each spell its own (and a new one on every visit): a roll picks fair, a shower or a thunderstorm. A wet spell: clouds
-        // build, rain (the storm in the middle of it), the sun back out on the wet ground, drying
+      if (w.spell_period > 0.f) {
+        // each spell its own (and a new one on every visit): a roll picks its weather by the zone's
+        // odds times the season's. A wet spell: clouds build, rain (the storm in the middle of it),
+        // the sun back out on the wet ground, drying; the others rise and fall over the spell
         const double tt = m_time + phase0 + m_visit_offset;
-        const double period = std::max(30.0, (double)w.shower_period);
+        const double period = std::max(30.0, (double)w.spell_period);
         const float p = (float)(std::fmod(tt, period) / period);
         const uint32_t index = (uint32_t)(tt / period);
         const uint32_t spell = index * 2654435761u + 977u;
-        // the first spell is always fair: a game starts under a clear sky
         const float roll = (float)((spell >> 8) % 1000) / 1000.f;
+        // how strong this one is (a drizzle or a downpour, a haze or a storm)
+        const float strength = (float)(((spell * 2246822519u) >> 12) % 1000) / 1000.f;
         auto win = [&](float a, float b) {
           return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
         };
-        if (roll < w.shower_chance) {
-          const bool thunder = roll < w.shower_chance * w.shower_thunder;
-          // a drizzle to a downpour (the roll's place among the wet spells), all of it in a storm
-          const float strength = thunder ? 1.f : 0.3f + 0.6f * roll / std::max(w.shower_chance, 1e-3f);
-          rain = std::max(rain, win(0.333f, 0.667f) * strength);
-          storm = thunder ? win(0.458f, 0.625f) : 0.f;
-          clear = win(0.667f, 0.925f);
-          if (p > 0.333f && p < 0.925f) {
-            wet = 1.f;
+        std::array<float, kSpellKinds> odds;
+        float total = 0.f;
+        for (int k = 0; k < kSpellKinds; k++) {
+          odds[k] = std::max(0.f, w.spells[k] * season.odds[k] * w.season_odds[m_season][k]);
+          total += odds[k];
+        }
+        int kind = kFair;
+        float acc = 0.f;
+        for (int k = 0; k < kSpellKinds && total > 0.f; k++) {
+          acc += odds[k] / total;
+          if (roll < acc) {
+            kind = k;
+            break;
           }
-          want.clouds = std::max(want.clouds, 0.95f * win(0.25f, 0.7f));
-          fair = 1.f - win(0.25f, 0.7f);
-          m_weather_state = p < 0.25f ? 6 : p < 0.333f ? 1 : p < 0.667f ? (storm > 0.f ? 3 : 2)
-                          : p < 0.925f ? 4 : 6;
-        } else {
-          // fair weather clouds drift over now and then
-          want.clouds = std::max(want.clouds, 0.2f + 0.4f * roll * win(0.25f, 0.67f));
-          m_weather_state = 6;
+        }
+        m_spell = kind;
+        switch (kind) {
+          case kShower:
+          case kThunder: {
+            const bool thunder = kind == kThunder;
+            const float amount = thunder ? 1.f : 0.3f + 0.6f * strength;
+            rain = std::max(rain, win(0.333f, 0.667f) * amount);
+            storm = thunder ? win(0.458f, 0.625f) : 0.f;
+            clear = win(0.667f, 0.925f);
+            if (p > 0.333f && p < 0.925f) {
+              wet = 1.f;
+            }
+            want.clouds = std::max(want.clouds, 0.95f * win(0.25f, 0.7f));
+            fair = 1.f - win(0.25f, 0.7f);
+            m_weather_state = p < 0.25f ? 6 : p < 0.333f ? 1 : p < 0.667f ? (storm > 0.f ? 3 : 2)
+                            : p < 0.925f ? 4 : 6;
+            break;
+          }
+          case kOvercast:
+            want.clouds = std::max(want.clouds, 0.92f * win(0.1f, 0.9f));
+            fair = 1.f - win(0.1f, 0.9f);
+            m_weather_state = 1;
+            break;
+          case kFogSpell:
+            // a fog bank rolls in and lies there, the ground damp under it
+            mist = std::max(mist, (0.55f + 0.45f * strength) * win(0.15f, 0.85f));
+            want.clouds = std::max(want.clouds, 0.7f * win(0.15f, 0.85f));
+            wet = std::max(wet, 0.3f * win(0.15f, 0.85f));
+            fair = 1.f - win(0.15f, 0.85f);
+            m_weather_state = 1;
+            break;
+          case kSandstorm:
+            dust = std::max(dust, (0.6f + 0.6f * strength) * win(0.2f, 0.8f));
+            m_weather_state = p > 0.2f && p < 0.8f ? 5 : 6;
+            break;
+          case kSnowSpell:
+            snow = std::max(snow, (0.35f + 0.75f * strength) * win(0.2f, 0.85f));
+            mist = std::max(mist, 0.3f * win(0.2f, 0.85f));
+            want.clouds = std::max(want.clouds, 0.88f * win(0.15f, 0.9f));
+            fair = 1.f - win(0.15f, 0.9f);
+            m_weather_state = 1;
+            break;
+          default:
+            // fair weather clouds drift over now and then
+            want.clouds = std::max(want.clouds, 0.2f + 0.4f * strength * win(0.25f, 0.67f));
+            m_weather_state = 6;
+            break;
         }
       }
       sunny = std::max(sunny, w.sunny * fair * (1.f - m_night));
@@ -2393,16 +2518,20 @@ void EnhancedPost::update_scene() {
     const float r = std::clamp(m_rain, 0.f, 1.f);
     const float heavy = std::clamp((r - 0.45f) / 0.45f, 0.f, 1.f);
     float g[kLayers];
-    g[RainLight] = std::min(1.f, r * 1.6f) * (1.f - 0.5f * heavy);
-    g[RainHeavy] = std::max(heavy, m_storm * r);
+    // under a roof: the rain around muffled, drumming on the roof above instead
+    ease(m_cover, outdoors ? m_cover_now : 0.f, 1.f - std::exp(-dt / 0.6f));
+    const float roofed = 1.f - 0.65f * m_cover;
+    g[RainLight] = std::min(1.f, r * 1.6f) * (1.f - 0.5f * heavy) * roofed;
+    g[RainHeavy] = std::max(heavy, m_storm * r) * roofed;
+    g[RainRoof] = m_cover * std::min(1.f, r * 1.4f);
     g[Drips] = outdoors ? std::clamp(m_puddle * 1.5f - r * 3.f, 0.f, 1.f) : 0.f;
     g[WindNight] = std::max(a.wind, a.wind_night * m_night);
     g[WindStorm] = std::clamp(std::max(m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f), 0.f, 1.f);
     const float calm = (1.f - std::clamp(r * 3.f, 0.f, 1.f)) * (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
-    g[Crickets] = a.crickets * m_night * calm;
-    g[Birds] = a.birds * (1.f - m_night) * calm;
+    g[Crickets] = a.crickets * season.crickets * m_night * calm;
+    g[Birds] = a.birds * season.birds * (1.f - m_night) * calm;
     // frogs: loudest at night and when it's wet, quiet in a downpour
-    g[Frogs] = a.frogs * (0.25f + 0.75f * std::max(m_night, std::clamp(m_wet, 0.f, 1.f))) * (1.f - 0.6f * heavy);
+    g[Frogs] = a.frogs * season.frogs * (0.25f + 0.75f * std::max(m_night, std::clamp(m_wet, 0.f, 1.f))) * (1.f - 0.6f * heavy);
     g[Waves] = a.waves;
     g[City] = a.city * (1.f - 0.3f * m_night);
     for (float& v : g) {
@@ -3473,46 +3602,123 @@ void EnhancedPost::prepare(GLuint scene_tex,
   glBindVertexArray(0);
 }
 
+// the sky hidden above Jak: five rays from his head, straight up and tilted 25 degrees four ways,
+// through the levels' hierarchies (tfrag and tie: roofs, awnings, arches, trees), up to 40 m
+float EnhancedPost::trace_cover(const float pos[3]) const {
+  constexpr float kTilt = 0.4226f, kUp = 0.9063f;  // sin, cos of 25 degrees
+  const float dirs[5][3] = {{0, 1, 0}, {kTilt, kUp, 0}, {-kTilt, kUp, 0}, {0, kUp, kTilt}, {0, kUp, -kTilt}};
+  const float o[3] = {pos[0], pos[1] + 1.8f * 4096.f, pos[2]};
+  const float tmax = 40.f * 4096.f;
+  int hits = 0;
+  for (const auto& d : dirs) {
+    float inv[3];
+    for (int k = 0; k < 3; k++) {
+      inv[k] = 1.f / (std::abs(d[k]) < 1e-7f ? 1e-7f : d[k]);
+    }
+    bool hit = false;
+    for (const auto& [id, level] : m_rt_levels) {
+      const EnhancedRtLevel* rt = level.cpu.get();
+      if (!rt || rt->nodes.empty() || hit) {
+        continue;
+      }
+      u32 stack[64];
+      int sp = 0;
+      stack[sp++] = 0;
+      while (sp > 0 && !hit) {
+        const auto& n = rt->nodes[stack[--sp]];
+        const u32 ni = (u32)(&n - rt->nodes.data());
+        float tn = 0.f, tf = tmax;
+        for (int k = 0; k < 3; k++) {
+          float t0 = (n.min[k] - o[k]) * inv[k], t1 = (n.max[k] - o[k]) * inv[k];
+          tn = std::max(tn, std::min(t0, t1));
+          tf = std::min(tf, std::max(t0, t1));
+        }
+        if (tn > tf) {
+          continue;
+        }
+        if (n.b > 0) {
+          for (u32 i = n.a; i < n.a + n.b && !hit; i++) {
+            const auto& tri = rt->tris[i];
+            const float* e1 = tri.e1;
+            const float* e2 = tri.e2;
+            const float pv[3] = {d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2],
+                                 d[0] * e2[1] - d[1] * e2[0]};
+            const float det = e1[0] * pv[0] + e1[1] * pv[1] + e1[2] * pv[2];
+            if (std::abs(det) < 1e-4f) {
+              continue;
+            }
+            const float id = 1.f / det;
+            const float tv[3] = {o[0] - tri.v0[0], o[1] - tri.v0[1], o[2] - tri.v0[2]};
+            const float u = (tv[0] * pv[0] + tv[1] * pv[1] + tv[2] * pv[2]) * id;
+            if (u < 0.f || u > 1.f) {
+              continue;
+            }
+            const float qv[3] = {tv[1] * e1[2] - tv[2] * e1[1], tv[2] * e1[0] - tv[0] * e1[2],
+                                 tv[0] * e1[1] - tv[1] * e1[0]};
+            const float v = (d[0] * qv[0] + d[1] * qv[1] + d[2] * qv[2]) * id;
+            if (v < 0.f || u + v > 1.f) {
+              continue;
+            }
+            const float hit_t = (e2[0] * qv[0] + e2[1] * qv[1] + e2[2] * qv[2]) * id;
+            hit = hit_t > 0.f && hit_t < tmax;
+          }
+        } else if (sp < 62) {
+          stack[sp++] = n.a;     // the right child
+          stack[sp++] = ni + 1;  // the left child, next
+        }
+      }
+    }
+    hits += hit;
+  }
+  return hits / 5.f;
+}
+
 void EnhancedPost::update_rt(SharedRenderState* render_state) {
   m_rt_ready = false;
-  if ((m_settings.ray_traced <= 0 && !m_settings.rt_ao) || !render_state->loader) {
+  if (!render_state->loader) {
     return;
   }
+  // the hierarchies are taken from the loader whatever the settings (the roof over Jak is traced on
+  // the CPU); on the GPU only for the ray-traced reflections and occlusion
+  const bool on_gpu = m_settings.ray_traced > 0 || m_settings.rt_ao;
   auto levels = render_state->loader->get_in_use_levels();
   std::vector<u64> in_use;
   for (auto* lev : levels) {
     if (!m_rt_levels.count(lev->load_id)) {
-      // the hierarchy the loader built for it (once: then it lives on the GPU)
-      auto rt = enhanced_take_rt(lev->level->level_name);
-      RtLevelGpu gpu;
-      if (rt) {
-        const void* data[3] = {rt->nodes.data(), rt->tris.data(), rt->palettes.data()};
-        gpu.size[0] = rt->nodes.size() * sizeof(EnhancedRtLevel::Node);
-        gpu.size[1] = rt->tris.size() * sizeof(EnhancedRtLevel::Tri);
-        gpu.size[2] = std::max<size_t>(rt->palettes.size(), 1) * sizeof(u32);
-        u32 none = 0;
-        if (rt->palettes.empty()) {
-          data[2] = &none;
-        }
-        glGenBuffers(3, gpu.buf);
-        for (int i = 0; i < 3; i++) {
-          glBindBuffer(GL_COPY_READ_BUFFER, gpu.buf[i]);
-          glBufferData(GL_COPY_READ_BUFFER, gpu.size[i], data[i], GL_STATIC_DRAW);
-        }
-        glBindBuffer(GL_COPY_READ_BUFFER, 0);
-        if (rt->layer_count > 0) {
-          gpu.layers = rt->layer_count;
-          glGenTextures(1, &gpu.tex);
-          glBindTexture(GL_TEXTURE_2D_ARRAY, gpu.tex);
-          glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kRtLayerSize, kRtLayerSize, gpu.layers);
-          glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kRtLayerSize, kRtLayerSize, gpu.layers,
-                          GL_RGBA, GL_UNSIGNED_BYTE, rt->layers.data());
-          glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-        }
-      }
-      m_rt_levels[lev->load_id] = gpu;
+      // the hierarchy the loader built for it (once)
+      m_rt_levels[lev->load_id].cpu = enhanced_take_rt(lev->level->level_name);
     }
-    if (m_rt_levels[lev->load_id].buf[0] && in_use.size() < 16) {
+    auto& gpu = m_rt_levels[lev->load_id];
+    if (on_gpu && gpu.cpu && !gpu.buf[0]) {
+      const auto& rt = gpu.cpu;
+      const void* data[3] = {rt->nodes.data(), rt->tris.data(), rt->palettes.data()};
+      gpu.size[0] = rt->nodes.size() * sizeof(EnhancedRtLevel::Node);
+      gpu.size[1] = rt->tris.size() * sizeof(EnhancedRtLevel::Tri);
+      gpu.size[2] = std::max<size_t>(rt->palettes.size(), 1) * sizeof(u32);
+      u32 none = 0;
+      if (rt->palettes.empty()) {
+        data[2] = &none;
+      }
+      glGenBuffers(3, gpu.buf);
+      for (int i = 0; i < 3; i++) {
+        glBindBuffer(GL_COPY_READ_BUFFER, gpu.buf[i]);
+        glBufferData(GL_COPY_READ_BUFFER, gpu.size[i], data[i], GL_STATIC_DRAW);
+      }
+      glBindBuffer(GL_COPY_READ_BUFFER, 0);
+      if (rt->layer_count > 0) {
+        gpu.layers = rt->layer_count;
+        glGenTextures(1, &gpu.tex);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, gpu.tex);
+        glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_RGBA8, kRtLayerSize, kRtLayerSize, gpu.layers);
+        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, kRtLayerSize, kRtLayerSize, gpu.layers,
+                        GL_RGBA, GL_UNSIGNED_BYTE, rt->layers.data());
+        glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+      }
+      // the CPU keeps only the geometry
+      std::vector<u32>().swap(rt->palettes);
+      std::vector<u32>().swap(rt->layers);
+    }
+    if (gpu.buf[0] && in_use.size() < 16) {
       in_use.push_back(lev->load_id);
     }
   }
@@ -3534,7 +3740,22 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
       ++it;
     }
   }
-  if (in_use.empty()) {
+  // the roof over Jak, a few times a second
+  {
+    static int frame = 0;
+    if (++frame % 6 == 0 && g_enhanced_player.valid) {
+      const float cover = trace_cover(g_enhanced_player.pos);
+      // test switch: JAK_ENHANCED_COVER_LOG=1 logs each change
+      static const bool log = std::getenv("JAK_ENHANCED_COVER_LOG") != nullptr;
+      if (log && cover != m_cover_now) {
+        lg::info("[enhanced] roof over Jak {:.1f} at {:.0f} {:.0f} {:.0f} m", cover,
+                 g_enhanced_player.pos[0] / 4096.f, g_enhanced_player.pos[1] / 4096.f,
+                 g_enhanced_player.pos[2] / 4096.f);
+      }
+      m_cover_now = cover;
+    }
+  }
+  if (!on_gpu || in_use.empty()) {
     m_rt_count = 0;
     return;
   }
@@ -4093,6 +4314,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["ambience"] = s.ambience;
   j["weather"] = s.weather;
   j["weather_mix"] = s.weather_mix;
+  j["season"] = s.season;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
   j["fov"] = g_enhanced_menu.fov.load();
@@ -4160,6 +4382,8 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("weather", s.weather);
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
   get("weather_mix", s.weather_mix);
+  get("season", s.season);
+  s.season = std::clamp(s.season, 0, 4);
   get("vivid", s.vivid);
   get("population", m_population);
   {
@@ -4387,6 +4611,7 @@ void EnhancedPost::draw_debug_window() {
                 m_dust, m_focus / kMeter);
     ImGui::Text("wet %.2f, storm %.2f, mist %.2f, sun after rain %.2f, state %d, wind %.1f m/s",
                 m_wet, m_storm, m_mist, m_clear, m_weather_state, m_wind_speed);
+    ImGui::Text("season %s, spell %s, roof over Jak %.2f", kSeasonNames[m_season], kSpellNames[m_spell], m_cover);
     ImGui::Checkbox("Soft shadows", &m_settings.soft_shadows);
     ImGui::SliderFloat("Shadow softness (/m)", &m_settings.shadow_softness, 0.f, 0.08f, "%.3f");
     ImGui::Checkbox("Clouds", &m_settings.clouds);

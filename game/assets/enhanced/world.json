@@ -47,6 +47,20 @@
     ]
   },
 
+  // the seasons of the "Changing" weather: the computer's calendar (northern hemisphere) or the
+  // menu's pick. Each makes some spells likelier (times the zones' odds; 1 = as it is), shifts the
+  // grade outdoors (warmth, saturation: plus) and quiets or wakes the animals (times)
+  "seasons": {
+    "spring": {"shower": 1.3, "thunder": 0.8, "fog": 1.2, "snow": 0.15, "sandstorm": 0.9,
+               "saturation": 0.04, "birds": 1.2, "frogs": 1.2},
+    "summer": {"fair": 1.5, "overcast": 0.6, "shower": 0.5, "thunder": 1.6, "fog": 0.4, "sandstorm": 1.5, "snow": 0,
+               "warmth": 0.025, "saturation": 0.03, "crickets": 1.3},
+    "autumn": {"fair": 0.8, "overcast": 1.6, "shower": 1.4, "thunder": 0.6, "fog": 1.8, "snow": 0.4,
+               "warmth": 0.012, "saturation": -0.03, "crickets": 0.6, "birds": 0.7, "frogs": 0.6},
+    "winter": {"fair": 0.9, "overcast": 1.5, "shower": 0.6, "thunder": 0.15, "fog": 1.4, "sandstorm": 0.6, "snow": 6,
+               "warmth": -0.03, "saturation": -0.07, "crickets": 0.1, "birds": 0.4, "frogs": 0.1}
+  },
+
   // the zones. "day" and "night" are the grade (eased between at dusk and dawn):
   //   lift: added in the shadows (rgb), gain: times the highlights (rgb), saturation (times the
   //   setting), contrast and warmth (plus the setting), clouds: the sky cover (0..1)
@@ -58,9 +72,12 @@
   //   harder: added on top for a while in every four-minute cycle (between harder_from and
   //     harder_to seconds of it)
   //   wet: how wet the ground is (default: as wet as it rains)
-  //   showers: spells of weather, each "period" seconds long and each its own: with "chance" a
-  //     spell brings rain (clouds build, rain, the sun out on the wet ground, drying), with
-  //     "thunder" (of those) a thunderstorm; the rest are fair with clouds passing
+  //   spells: spells of weather, each "period" seconds long and each its own (a new roll on every
+  //     visit), picked by these odds (times the season's): fair (clouds passing), overcast, shower
+  //     (clouds build, rain, the sun out on the wet ground, drying), thunder (the same with a
+  //     thunderstorm), fog (a fog bank), sandstorm, snow
+  //   seasons: the zone's own season odds, times the world's: {"winter": {"snow": 3}, ...}
+  //   showers: the older form of spells: {"period", "chance" of rain, "thunder" (of those)}
   //   morning_mist: fog on early mornings (5 to 9)
   //   game_dust: the game's own sandstorms blow the dust up too
   //   fog: the distance fog and the volumetric mist. A number (fixed: 1 = full, 0 = none) or
@@ -80,7 +97,8 @@
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
-      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}},
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
+                  "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
     },
     // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
@@ -88,21 +106,24 @@
     "haven-industrial": {
       "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5},
       "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65},
-      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2}, "showers": {"period": 540, "chance": 0.4, "thunder": 0.4}},
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
+                  "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"city": 0.75}
     },
-    // desert: sun-baked by day, cold blue night
+    // desert: sun-baked by day, cold blue night; sandstorms come and go, the nights are clear
     "desert": {
       "day": {"lift": [0.004, 0.004, 0.008], "gain": [1.02, 1, 0.97], "saturation": 1.0, "contrast": 0.14, "warmth": 0.0, "clouds": 0.2},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25},
-      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "harder": {"dust": 0.5}, "harder_from": 120, "harder_to": 210, "game_dust": true},
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "game_dust": true,
+                  "spells": {"period": 360, "fair": 0.55, "overcast": 0.04, "sandstorm": 0.32, "shower": 0.02, "thunder": 0.02, "fog": 0.05}},
       "ambience": {"wind_night": 1.0, "wind": 0.15}
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
       "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "showers": {"period": 420, "chance": 0.5, "thunder": 0.4}, "morning_mist": 0.5},
+      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "morning_mist": 0.5,
+                  "spells": {"period": 420, "fair": 0.32, "overcast": 0.1, "shower": 0.28, "thunder": 0.14, "fog": 0.14, "snow": 0.02}},
       "ambience": {"crickets": 1.0, "wind_night": 0.2, "birds": 0.9, "frogs": 0.3}
     },
     // Metal Heads: sickly purple shadows
@@ -134,7 +155,8 @@
     "wilds": {
       "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
-      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25}, "showers": {"period": 480, "chance": 0.45, "thunder": 0.4}},
+      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25},
+                  "spells": {"period": 480, "fair": 0.4, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.1, "snow": 0.02}},
       "ambience": {"crickets": 0.6, "wind_night": 0.5, "wind": 0.15, "birds": 0.5}
     },
     // Jak 1's islands (Sandover, the beach, the hills): bright and warm, blue night. Ten-minute
@@ -143,14 +165,16 @@
     "islands": {
       "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
-      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "showers": {"period": 600, "chance": 0.4, "thunder": 0.4}, "sunny": 0.3},
+      "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "sunny": 0.3,
+                  "spells": {"period": 600, "fair": 0.55, "overcast": 0.05, "shower": 0.22, "thunder": 0.15, "fog": 0.03}},
       "ambience": {"crickets": 0.9, "birds": 0.8, "waves": 0.6, "frogs": 0.2}
     },
     // the jungle: deep greens, the rain comes often
     "jungle": {
       "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
-      "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "showers": {"period": 360, "chance": 0.6, "thunder": 0.4}, "sunny": 0.3, "morning_mist": 0.5},
+      "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "sunny": 0.3, "morning_mist": 0.5,
+                  "spells": {"period": 360, "fair": 0.3, "overcast": 0.05, "shower": 0.34, "thunder": 0.22, "fog": 0.09}},
       "ambience": {"crickets": 1.0, "birds": 1.0, "frogs": 0.5}
     },
     // Boggy Billy's swamp: it always rains, harder now and then, under a low fog
@@ -171,7 +195,9 @@
     "snow": {
       "day": {"lift": [0, 0.006, 0.02], "gain": [1, 1.02, 1.06], "saturation": 0.95, "contrast": 0.05, "warmth": -0.04, "clouds": 0.6},
       "night": {"lift": [0, 0.006, 0.035], "gain": [0.97, 0.99, 1.06], "saturation": 0.92, "contrast": 0.06, "warmth": -0.05, "clouds": 0.6},
-      "weather": {"snow": 0.55, "mist": 0.35, "clouds": 0.8, "harder": {"snow": 0.45, "mist": 0.25}, "harder_from": 90, "harder_to": 200},
+      "weather": {"snow": 0.45, "mist": 0.3, "clouds": 0.75, "harder": {"snow": 0.45, "mist": 0.25}, "harder_from": 90, "harder_to": 200,
+                  "spells": {"period": 420, "fair": 0.4, "snow": 0.1, "fog": 0.3},
+                  "seasons": {"summer": {"fair": 2.5}, "winter": {"fair": 0.4}}},
       "ambience": {"wind": 0.6, "wind_night": 0.4}
     }
   }

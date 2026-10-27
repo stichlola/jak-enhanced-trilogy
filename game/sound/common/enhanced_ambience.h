@@ -1,6 +1,6 @@
 #pragma once
 
-// Enhanced: ambient sound loops (rain, dripping, wind, crickets, birds, frogs, waves, a city) mixed
+// Enhanced: ambient sound loops (rain, rain on a roof, dripping, wind, crickets, birds, frogs, waves, a city) mixed
 // on top of the game's own sound. The renderer (EnhancedPost::update_scene) says how loud each
 // layer should be from the weather, the zone and the hour; the audio thread fades each one there
 // and mixes it in (Player::Tick). The loops are game/assets/enhanced/sounds/<name>.wav, 48 kHz
@@ -21,6 +21,7 @@ enum Layer {
   Frogs,
   Waves,
   City,
+  RainRoof,  // the rain drumming on the roof over Jak
   kLayers
 };
 

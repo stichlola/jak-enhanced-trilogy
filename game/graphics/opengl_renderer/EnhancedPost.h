@@ -1,10 +1,13 @@
 ﻿#pragma once
 
 #include <array>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
+
+struct EnhancedRtLevel;
 
 /*!
  * The game's projection, saved by the background renderers each frame (make_new_cam_mat), so post
@@ -201,6 +204,7 @@ class EnhancedPost {
     // the custom weather, mixed by hand: rain, thunderstorm, fog, ground mist, snow, dust, clouds,
     // the sun out after the rain, wet ground (< 0: as wet as it rains)
     std::array<float, 9> weather_mix = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.3f, 0.f, -1.f};
+    int season = 0;                // the changing weather's season: 0 by the calendar, 1-4 spring..winter
     float vivid = 0.f;             // vivid colors: saturated greens and blues, warm sun, deep sky
     float rain_strength = 1.0f;
     float dust_strength = 1.0f;
@@ -449,11 +453,16 @@ class EnhancedPost {
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes
   void update_rt(SharedRenderState* render_state);
+  // how much of the sky above Jak is hidden (0..1): a few rays up through the levels' hierarchies
+  float trace_cover(const float pos[3]) const;
   struct RtLevelGpu {
     GLuint buf[3] = {0, 0, 0};  // nodes, triangles, palettes
     u32 size[3] = {0, 0, 0};    // bytes
     GLuint tex = 0;             // its textures (2D array, one mip level)
     int layers = 0;
+    // the hierarchy on the CPU too, for the rays traced here (is Jak under a roof?); its colors
+    // and textures go once they're on the GPU
+    std::shared_ptr<EnhancedRtLevel> cpu;
   };
   std::unordered_map<u64, RtLevelGpu> m_rt_levels;  // by level load id
   std::vector<u64> m_rt_in_use;
@@ -508,6 +517,10 @@ class EnhancedPost {
   float m_wind_speed = 8.f;      // m/s
   double m_drift[2] = {0, 0};    // how far the wind has carried the dust (m, wrapped)
   int m_weather_state = 0;       // what the changing weather is doing now (for the debug text)
+  int m_season = 0;              // 0 spring .. 3 winter
+  float m_cover_now = 0.f;       // the sky hidden above Jak, as last traced (0..1)
+  float m_cover = 0.f;           // the same, eased: the rain on the roof over him
+  int m_spell = 0;               // the changing weather's current spell (SpellKind)
   float m_cine = 0.f;  // cutscene depth of field, eased in and out
   float m_movie = 0.f;  // a cutscene plays, eased: its close-ups get the game's own shading
   int m_zone = 0;

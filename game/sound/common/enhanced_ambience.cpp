@@ -12,7 +12,7 @@ namespace snd::ambience {
 namespace {
 
 const char* const kNames[kLayers] = {"rain_light", "rain_heavy", "drips", "wind_night", "wind_storm",
-                                     "crickets",   "birds",      "frogs", "waves",      "city"};
+                                     "crickets",   "birds",      "frogs", "waves",      "city", "rain_roof"};
 // seconds to fade a layer all the way in or out
 constexpr float kFade = 2.5f;
 // how loud the loops sit under the game's own sound

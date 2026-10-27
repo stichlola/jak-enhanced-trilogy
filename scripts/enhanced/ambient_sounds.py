@@ -25,7 +25,8 @@ RAW = ROOT / "local" / "ambience"
 # The loops come back at very different levels; each is brought to its own loudness (LUFS), the
 # mix between them (heavy rain over light, crickets well under the game)
 LOUDNESS = {"rain_light": -25, "rain_heavy": -19, "drips": -28, "wind_night": -26, "wind_storm": -20,
-            "crickets": -28, "birds": -29, "frogs": -28, "waves": -25, "city": -30}
+            "crickets": -28, "birds": -29, "frogs": -28, "waves": -25, "city": -30,
+            "rain_roof": -21}
 SOUNDS = {
     "rain_light": ("Gentle steady rain falling on grass, leaves and stone ground, soft constant "
                    "patter, calm ambience, no thunder, no music", 20),
@@ -45,6 +46,9 @@ SOUNDS = {
               "ambience, no music", 20),
     "waves": ("Gentle sea waves washing on a sandy beach, slow steady surf, calm ocean ambience, no "
               "seagulls, no music", 20),
+    "rain_roof": ("Rain heard from under a shelter: rain drumming on a metal roof and corrugated "
+                  "sheets just overhead, pattering on a canvas awning, a gutter trickling, close and "
+                  "hollow, steady, ambience, no thunder, no music", 20),
     "city": ("Distant hum of a big futuristic city: far away traffic drone, machinery, muffled "
              "crowd murmur, steady low ambience, no sirens, no music, no clear voices", 20),
 }
