@@ -1568,7 +1568,7 @@
         )
       )
     )
-  (when (and *enhanced-hour-wanted* *time-of-day*)
+  (when (and *enhanced-hour-wanted* *time-of-day* *target*)
     (+! *enhanced-boot-frames* 1)
     (when (= *enhanced-boot-frames* 60)
       (set! *enhanced-hour-wanted* #f)

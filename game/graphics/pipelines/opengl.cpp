@@ -333,20 +333,36 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
   // Enhanced: \ or F1 opens and closes the in-game Enhanced menu (F1 for keyboards where \ is
-  // hard to find or doesn't come through as itself)
-  const auto toggle_enhanced_menu = [&](const SDL_Event& event) {
+  // hard to find or doesn't come through as itself); on a pad Select and R3 together
+  const auto flip_enhanced_menu = [&]() {
+    g_enhanced_menu.open = !g_enhanced_menu.open;
+    // free the cursor to click the menu (the mouse camera locks it), lock it again after
+    if (m_input_manager->mouse_controls_camera()) {
+      SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
+    }
+    m_input_manager->hide_cursor(!g_enhanced_menu.open && m_input_manager->auto_hiding_cursor());
+  };
+  const auto toggle_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {
     if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
-      g_enhanced_menu.open = !g_enhanced_menu.open;
-      // free the cursor to click the menu (the mouse camera locks it), lock it again after
-      if (m_input_manager->mouse_controls_camera()) {
-        SDL_SetWindowRelativeMouseMode(m_window, !g_enhanced_menu.open);
-      }
-      m_input_manager->hide_cursor(!g_enhanced_menu.open && m_input_manager->auto_hiding_cursor());
+      flip_enhanced_menu();
     }
   };
   for (const auto key : {SDLK_BACKSLASH, SDLK_F1}) {
     m_input_manager->register_command(CommandBinding::Source::KEYBOARD,
                                       CommandBinding(key, toggle_enhanced_menu));
+  }
+  const auto pad_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {
+    SDL_Gamepad* pad = SDL_GetGamepadFromID(event.gbutton.which);
+    const auto other = event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK
+                           ? SDL_GAMEPAD_BUTTON_RIGHT_STICK
+                           : SDL_GAMEPAD_BUTTON_BACK;
+    if (pad && SDL_GetGamepadButton(pad, other)) {
+      flip_enhanced_menu();
+    }
+  };
+  for (const auto button : {SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_RIGHT_STICK}) {
+    m_input_manager->register_command(CommandBinding::Source::CONTROLLER,
+                                      CommandBinding((u32)button, pad_enhanced_menu));
   }
 
   // Trilogy prototype: F9 boots the next game (Jak 1 -> 2 -> 3 -> 1) in the same process
@@ -623,6 +639,12 @@ void GLDisplay::render() {
   {
     auto p = scoped_prof("sdl-input-monitor-poll-for-kb-mouse");
     ImGuiIO& io = ImGui::GetIO();
+    // Enhanced: the pad moves through the Enhanced menu while it's open (the game doesn't get it)
+    if (g_enhanced_menu.open) {
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    } else {
+      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+    }
     if (io.WantCaptureKeyboard) {
       m_input_manager->clear_keyboard_actions();
     } else {

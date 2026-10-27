@@ -436,6 +436,11 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 (define *enhanced-pose-wanted* (pc-enhanced-getenv "JAK_ENHANCED_POSE" *enhanced-pose-buf* 64))
 (define *enhanced-pose-frames* 0)
 
+;; Enhanced: JAK_ENHANCED_SCENE=<name> (test boots): play that cutscene once the game is up (its
+;; scenes' level must be loaded, e.g. wascity-... from Spargus), to look at the cutscene picture
+(define *enhanced-scene-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-scene-wanted* (pc-enhanced-getenv "JAK_ENHANCED_SCENE" *enhanced-scene-buf* 64))
+
 (defun enhanced-pose-number ()
   "The number after the pose's letter."
   (let ((n 0)
@@ -536,6 +541,10 @@ capture exactly."
     (when (and *enhanced-tp-wanted* *target* (= *enhanced-camlog-frames* 90))
       (set! *enhanced-tp-wanted* #f)
       (enhanced-teleport)
+      )
+    (when (and *enhanced-scene-wanted* *target* (= *enhanced-camlog-frames* 240))
+      (set! *enhanced-scene-wanted* #f)
+      (process-spawn scene-player :init scene-player-init *enhanced-scene-buf* #t #f :name "scene-player")
       )
     (when (and *enhanced-pose-wanted* *target* (>= *enhanced-camlog-frames* 150))
       (let ((kind (-> *enhanced-pose-buf* data 0))

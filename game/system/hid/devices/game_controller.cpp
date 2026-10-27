@@ -5,6 +5,7 @@
 #include "dualsense_effects.h"
 #include "game_controller.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/system/hid/sdl_util.h"
 
 #include "fmt/format.h"
@@ -123,10 +124,17 @@ int normalize_axes_value_drift_compensated(int sdl_val) {
   return normalize_axes_value(sdl_val);
 }
 
-void GameController::process_event(const SDL_Event& event,
+void GameController::process_event(const SDL_Event& sdl_event,
                                    const CommandBindingGroups& commands,
                                    std::shared_ptr<PadData> data,
                                    std::optional<InputBindAssignmentMeta>& bind_assignment) {
+  // Enhanced: while the Enhanced menu is open the pad drives the menu, not the game: the sticks
+  // and triggers read as let go, presses don't reach it (releases do: nothing stays held)
+  SDL_Event event = sdl_event;
+  const bool menu_has_pad = g_enhanced_menu.open;
+  if (menu_has_pad && event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+    event.gaxis.value = 0;
+  }
   if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && event.gaxis.which == m_sdl_instance_id) {
     // https://wiki.libsdl.org/SDL3/SDL_GamepadAxis
     if ((int)event.gaxis.axis <= SDL_GAMEPAD_AXIS_INVALID ||
@@ -214,8 +222,25 @@ void GameController::process_event(const SDL_Event& event,
       return;
     }
 
+    // Check for commands (first: a press that opens the Enhanced menu doesn't reach the game)
+    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
+        commands.controller_binds.find(event.gbutton.button) != commands.controller_binds.end()) {
+      for (const auto& command : commands.controller_binds.at(event.gbutton.button)) {
+        if (command.event_command) {
+          command.event_command(event);
+        } else if (command.command) {
+          command.command();
+        } else {
+          lg::warn("CommandBinding has no valid callback for controller bind");
+        }
+      }
+    }
+
     // Iterate the binds, and apply all of them
     for (const auto& bind : binds.buttons.at(event.gbutton.button)) {
+      if ((menu_has_pad || g_enhanced_menu.open) && event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+        break;
+      }
       // 1. pressed flag
       data->button_data.at(bind.pad_data_index) = event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
       // 2. potentially get the pressure value as well
@@ -235,19 +260,6 @@ void GameController::process_event(const SDL_Event& event,
       }
     }
 
-    // Check for commands
-    if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN &&
-        commands.controller_binds.find(event.gbutton.button) != commands.controller_binds.end()) {
-      for (const auto& command : commands.controller_binds.at(event.gbutton.button)) {
-        if (command.event_command) {
-          command.event_command(event);
-        } else if (command.command) {
-          command.command();
-        } else {
-          lg::warn("CommandBinding has no valid callback for controller bind");
-        }
-      }
-    }
   } else if (event.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && m_has_pressure_sensitive_buttons) {
     // handle changes in pressure on axii not mapped to the gamepad (ie. PS3 analog buttons)
     if (m_settings->enable_pressure_sensitivity &&

@@ -377,6 +377,7 @@ class EnhancedPost {
     double time;
   };
   std::vector<Step> m_steps;
+  std::vector<Step> m_bounces;  // raindrops bouncing off the ground around Jak (strength 0)
   int m_last_player_state = 0;
   // dust kicked up behind a vehicle or the board in the desert, spray where they cross water
   struct Puff {
@@ -483,6 +484,7 @@ class EnhancedPost {
   float m_rain = 0.f;  // 0..1
   float m_dust = 0.f;
   float m_wet = 0.f;    // the ground: soaks fast in the rain, dries slowly after
+  float m_puddle = 0.f; // the puddles' water: fills slower, outlasts the wet ground by minutes
   float m_storm = 0.f;  // thunderstorm: lightning, wind
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam

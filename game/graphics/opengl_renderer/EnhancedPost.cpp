@@ -325,6 +325,7 @@ struct ManualLight {
   float color[3] = {1.f, 0.7f, 0.4f};
   bool flicker = false;
   bool night = true;
+  bool bulb = true;  // drawn as a point of light (off: the light alone, where the scene has its lamp)
 };
 std::vector<ManualLight> g_manual_lights[3];
 
@@ -359,6 +360,7 @@ void load_manual_lights() {
         l.radius = e.value("radius", 8.f) * 4096.f;
         l.flicker = e.value("flicker", false);
         l.night = e.value("night", true);
+        l.bulb = e.value("bulb", true);
         g_manual_lights[g].push_back(l);
       }
     }
@@ -380,7 +382,8 @@ void save_manual_lights() {
                      {"radius", r(l.radius / 4096.f)},
                      {"color", {r(l.color[0]), r(l.color[1]), r(l.color[2])}},
                      {"flicker", l.flicker},
-                     {"night", l.night}});
+                     {"night", l.night},
+                     {"bulb", l.bulb}});
     }
     if (!arr.empty()) {
       j[games[g]] = arr;
@@ -462,6 +465,10 @@ EnhancedPost::EnhancedPost() {
     }
   } catch (std::exception& e) {
     lg::error("[enhanced] could not load the saved settings: {}", e.what());
+  }
+  if (const char* preset = std::getenv("JAK_ENHANCED_PRESET")) {
+    // test boots: 0 Classic, 1 Medium, 2 Maximum, 3 Performance
+    apply_preset(std::clamp(std::atoi(preset), 0, 3));
   }
   if (const char* pop = std::getenv("JAK_ENHANCED_POPULATION")) {
     // the game reads the same variable at boot
@@ -1280,6 +1287,16 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float reach = kind == EnhancedFires::CANDLE ? 4.f : (kind == EnhancedFires::FIRE ? 13.f : 11.f);
       c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f);
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // a placed fire close by also gets the embers and hot air (a torch's flame is often too
+      // small a glow to be told a fire by its light)
+      if (kind == EnhancedFires::FIRE && dist < 45.f * kMeter && c.pos[2] > -1.f * kMeter) {
+        Fire v;
+        std::memcpy(v.pos, c.pos, sizeof(float) * 3);
+        v.pos[3] = 0.45f * kMeter;
+        v.dist = dist;
+        v.seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
+        fires.push_back(v);
+      }
       bool lit_already = false;
       for (size_t j = 0; j < glow_lights && !lit_already; j++) {
         float d2 = 0.f;
@@ -1444,7 +1461,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.pos[3] = std::min(ml.radius, 40.f * kMeter);
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // it has no bulb of its own in the game: its beacon is the lamp, near or far
-      if (c.pos[2] > 0.f && dist < 2500.f * kMeter) {
+      if (ml.bulb && c.pos[2] > 0.f && dist < 2500.f * kMeter) {
         float peak = std::max(ml.color[0], std::max(ml.color[1], ml.color[2]));
         if (peak > 0.f) {
           Beacon b;
@@ -1520,7 +1537,22 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       v.dist = std::sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1] + v.pos[2] * v.pos[2]);
       v.seed = std::fmod(std::abs(f.pos[0] * 0.013f + f.pos[2] * 0.007f), 6.2832f);
       if (v.dist < 45.f * kMeter && v.pos[2] > -f.size) {
-        fires.push_back(v);
+        // (the glow of a placed fire: that one, sized by its glow)
+        bool same = false;
+        for (auto& o : fires) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            d2 += (o.pos[k] - v.pos[k]) * (o.pos[k] - v.pos[k]);
+          }
+          if (d2 < 2.f * kMeter * 2.f * kMeter) {
+            o = v;
+            same = true;
+            break;
+          }
+        }
+        if (!same) {
+          fires.push_back(v);
+        }
       }
     }
     std::sort(fires.begin(), fires.end(), [](const Fire& a, const Fire& b) { return a.dist < b.dist; });
@@ -1670,7 +1702,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1f(glGetUniformLocation(id, "prints_strength"), m_settings.prints);
 
       // splashes: the steps of the last second (the shader checks for a puddle under them)
-      constexpr int kSplashes = 8;
+      constexpr int kSplashes = 16;
       static bool test_splash = std::getenv("JAK_ENHANCED_SPLASH_TEST") != nullptr;
       static double test_splash_t = 0;
       if (test_splash && pl.valid && m_time - test_splash_t > 0.15) {
@@ -1687,18 +1719,37 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         n++;
       }
       while (!m_steps.empty() &&
-             (m_time - m_steps.front().time > 1.2 || m_steps.size() > (size_t)kSplashes)) {
+             (m_time - m_steps.front().time > 1.2 || m_steps.size() > (size_t)kSplashes / 2)) {
         m_steps.erase(m_steps.begin());
+      }
+      // in the rain, drops bounce off the ground around Jak (2-6 m, on his level ground): a few
+      // droplets each, hopping a few centimeters
+      if (m_rain > 0.1f && pl.valid && (pl.state == 1 || pl.state == 3)) {
+        static double bounce_t = 0;
+        const double every = 0.11 / m_rain;
+        if (m_time - bounce_t > every) {
+          bounce_t = m_time;
+          const float a = (float)(std::rand() % 10000) / 10000.f * 6.2832f;
+          const float r = (2.f + (float)(std::rand() % 1000) / 250.f) * kMeter;
+          m_bounces.push_back({{pl.pos[0] + std::cos(a) * r, pl.pos[1], pl.pos[2] + std::sin(a) * r},
+                               0.f, m_time});
+        }
+      }
+      while (!m_bounces.empty() &&
+             (m_time - m_bounces.front().time > 0.45 || m_bounces.size() > (size_t)kSplashes / 2)) {
+        m_bounces.erase(m_bounces.begin());
       }
       float splash[kSplashes * 4] = {};
       int splash_count = 0;
-      for (const auto& st : m_steps) {
+      for (const auto* list : {&m_steps, &m_bounces})
+      for (const auto& st : *list) {
         std::memcpy(splash + splash_count * 4, st.pos, sizeof(float) * 3);
         // age, with the strength in the integer part above 10 s: 1 step, 2 landing
         splash[splash_count * 4 + 3] = (float)(m_time - st.time) + 10.f * st.strength;
         splash_count++;
       }
-      glUniform1i(glGetUniformLocation(id, "splash_count"), m_wet > 0.05f ? splash_count : 0);
+      glUniform1i(glGetUniformLocation(id, "splash_count"),
+                  std::max(m_wet, m_puddle) > 0.05f ? splash_count : 0);
       glUniform4fv(glGetUniformLocation(id, "splash"), kSplashes, splash);
 
       // dust behind a vehicle or the board crossing the desert (two plumes, off the back wheels),
@@ -2295,6 +2346,8 @@ void EnhancedPost::update_scene() {
   ease(m_heat, heat, k_grade);
   // the ground soaks in a few seconds and takes a minute and a half to dry
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
+  // the puddles fill over a minute of rain and dry from their rims in, for minutes after
+  ease(m_puddle, wet, 1.f - std::exp(-dt / (wet > m_puddle ? 20.f : 220.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
 
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
@@ -3624,6 +3677,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "city_glow"), m_city ? m_night * on : 0.f);
   glUniform4f(glGetUniformLocation(id, "weather"), m_rain * on, m_dust * on,
               (float)std::fmod(m_time, 1000.0), m_wet * on);
+  glUniform1f(glGetUniformLocation(id, "puddle_level"), m_puddle * on);
   glUniform4f(glGetUniformLocation(id, "weather2"), m_storm * on, m_mist * on, m_clear * on,
               m_flash * on);
   {
@@ -3648,20 +3702,28 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
 void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowBgAlpha(0.85f);
-  // no close button: \ or F1 closes it (and gives the mouse back to the camera)
-  if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\ or F1 closes )", nullptr,
+  // (focused as it opens, so a pad can move through it right away)
+  static int drawn_frame = -10;
+  if (ImGui::GetFrameCount() - drawn_frame > 1) {
+    ImGui::SetNextWindowFocus();
+  }
+  drawn_frame = ImGui::GetFrameCount();
+  // no close button: \ or F1 closes it (and gives the mouse back to the camera); Select + R3 on a pad
+  if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\, F1 or Select+R3 closes )", nullptr,
                     ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;
   }
   auto& s = m_settings;
   if (ImGui::CollapsingHeader("Graphics", ImGuiTreeNodeFlags_DefaultOpen)) {
-    static const char* presets[] = {"Classic", "Medium", "Maximum"};
+    // (in the menu's order: Performance sits between Classic and Medium)
+    static const char* presets[] = {"Classic", "Performance", "Medium", "Maximum"};
+    static const int preset_ids[] = {0, 3, 1, 2};
     ImGui::TextUnformatted("Preset:");
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 4; i++) {
       ImGui::SameLine();
-      if (ImGui::Button(presets[i], ImVec2(120, 0))) {
-        apply_preset(i);
+      if (ImGui::Button(presets[i], ImVec2(110, 0))) {
+        apply_preset(preset_ids[i]);
       }
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
@@ -4023,8 +4085,27 @@ bool all_on(int preset) {
 }  // namespace
 
 // Classico: the game as it was (the enhanced pass off), Medio: the costly passes off (mist, indirect
-// light, depth of field, the lights' shadows...), Massimo: everything on
+// light, depth of field, the lights' shadows...), Massimo: everything on. Performance (3): Medium
+// without the passes that cost the most on a weak graphics card (the sun's shadow map, the
+// occlusion, the traced reflections, the far view, the extra plants), the look kept (grade, lights,
+// weather, nights)
 void EnhancedPost::apply_preset(int preset) {
+  const bool perf = preset == 3;
+  if (perf) {
+    apply_preset(1);
+    auto& s = m_settings;
+    s.shadow_map = false;
+    s.ssao = false;
+    s.sun_shadows = false;
+    s.water_reflections = false;
+    s.far_view = false;
+    s.light_spill = 0.f;
+    s.lit_smoke = 0.f;
+    s.cloud_shadows = false;
+    s.relief = 0.f;
+    g_enhanced_vegetation = 0;
+    return;
+  }
   auto& s = m_settings;
   const Settings d;
   s.enabled = preset > 0;

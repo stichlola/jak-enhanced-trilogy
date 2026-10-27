@@ -1744,6 +1744,13 @@
     (until #f
       (when (-> self enable)
         (spawn (-> self part) (-> self root trans))
+        ;; Enhanced: fires and lamps near the camera light their surroundings (the renderer tells
+        ;; them by their group's name)
+        (when (and (nonzero? (-> self mode))
+                   (< (vector-vector-distance (-> self root trans) (math-camera-pos)) (meters 400))
+                   )
+          (pc-enhanced-fire (the-as pointer (-> self root trans)) (-> self mode 0 name))
+          )
         (if (nonzero? (-> self sound))
             (update! (-> self sound))
             )

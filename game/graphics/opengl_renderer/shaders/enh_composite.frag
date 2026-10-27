@@ -28,7 +28,7 @@ uniform int print_count;        // footprints and ruts: world xyz (game units), 
 uniform vec4 prints[48];
 uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
 uniform int splash_count;       // Jak's last steps and landings: world xyz (game units),
-uniform vec4 splash[8];         // w: age (s) + 10 * strength (1 step, 2 landing)
+uniform vec4 splash[16];         // w: age (s) + 10 * strength (1 step, 2 landing)
 uniform float prints_strength;
 uniform int puff_count;         // dust behind a vehicle or the board, spray off the water:
 uniform vec4 puff[32];          // world xyz (game units), age (s)
@@ -125,6 +125,7 @@ uniform vec4 beacon_pos[24];
 uniform vec4 beacon_color[24];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
+uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
 uniform float sheet;            // sheet lightning: the whole sky lit from inside the clouds (0..1)
@@ -1063,6 +1064,87 @@ float snow_grid(vec3 o, vec3 d, float near, float far, float cell, float px, flo
   return sum;
 }
 
+// dust motes in the headlights' beams: specks hanging in the air in columns (as the snowflakes),
+// drifting slowly, each lit only while it's inside the cone of the nearest vehicle's lamps,
+// glinting as it tumbles. Returns how much lit mote covers the pixel
+float mote_grid(vec3 o, vec3 d, float near, float far, float cell, float px, float seed) {
+  float t_m = weather.z;
+  vec2 dh = d.xz;
+  float hl = length(dh);
+  if (hl < 1e-4) {
+    return 0.0;
+  }
+  mat3 to_view = transpose(view_to_world);
+  vec2 start = o.xz + dh * near;
+  vec2 c = floor(start / cell);
+  vec2 stp = sign(dh);
+  vec2 inv = 1.0 / max(abs(dh), vec2(1e-5));
+  vec2 next = ((c + max(stp, 0.0)) * cell - o.xz) * stp * inv;
+  float sum = 0.0;
+  float t = near;
+  for (int i = 0; i < 24; i++) {
+    if (t > far) {
+      break;
+    }
+    float h = hash1(c + seed);
+    if (h < 0.7) {
+      vec2 drift = 0.3 * cell * vec2(sin(t_m * 0.21 + h * 40.0), cos(t_m * 0.17 + h * 23.0)) +
+                   dust_wind.xy * 0.15 * cell * sin(t_m * 0.3 + h * 9.0);
+      vec2 col = (c + 0.2 + 0.6 * vec2(fract(h * 13.7), fract(h * 71.3))) * cell + drift;
+      float tc = dot(col - o.xz, dh) / (hl * hl);
+      if (tc > near && tc < far) {
+        float miss = length(o.xz + dh * tc - col);
+        float r = max(0.01, tc * px * 1.2);
+        if (miss < r) {
+          // a mote every 0.3 m up the column, bobbing a few centimeters
+          float y = o.y + d.y * tc;
+          float ph = (y + 0.05 * sin(t_m * 0.8 + h * 31.0)) / 0.3 + fract(h * 37.1);
+          float dy = (fract(ph) - 0.5) * 0.3;
+          float dist = length(vec2(miss, dy));
+          float mote = 1.0 - smoothstep(r * 0.4, r, dist);
+          // (only some places up the column hold a mote: no lines of them)
+          if (hash1(c * 1.37 + vec2(floor(ph), seed)) > 0.45) {
+            mote = 0.0;
+          }
+          if (mote > 0.0) {
+            vec3 wp = vec3(col.x, y - dy, col.y);
+            vec3 vp = to_view * (wp * 4096.0 - cam_pos);
+            float lit = 0.0;
+            for (int s = 0; s < min(spot_count, 2); s++) {
+              vec3 q = vp - spot_pos[s].xyz;
+              float dq = length(q);
+              float dm = dq / 4096.0;
+              lit = max(lit, smoothstep(0.88, 0.97, dot(q / max(dq, 1.0), spot_dir[s].xyz)) * spot_pos[s].w /
+                                 (1.0 + dm * dm / 40.0) * smoothstep(0.4, 1.5, dm));
+            }
+            float glint = 0.55 + 0.45 * sin(t_m * (2.0 + 3.0 * fract(h * 5.3)) + floor(ph) * 7.1 + h * 50.0);
+            // specks smaller than a pixel are faint
+            sum += mote * lit * glint * min(1.0, (0.01 / r) * (0.01 / r) * 4.0);
+          }
+        }
+      }
+    }
+    if (next.x < next.y) {
+      t = next.x;
+      next.x += cell * inv.x;
+      c.x += stp.x;
+    } else {
+      t = next.y;
+      next.y += cell * inv.y;
+      c.y += stp.y;
+    }
+  }
+  return sum;
+}
+
+float beam_motes(vec3 ray_view, float scene_z, float px) {
+  vec3 d = world_dir(ray_view);
+  vec3 o = cam_pos / 4096.0;
+  float far = scene_z > 0.0 ? scene_z / 4096.0 / max(ray_view.z, 1e-3) : 1e4;
+  return mote_grid(o, d, 0.8, min(far, 8.0), 0.35, px, 11.0) +
+         mote_grid(o, d, 8.0, min(far, 22.0), 0.8, px, 37.0);
+}
+
 float snow_flakes(vec3 ray_view, float scene_z, float px) {
   vec3 d = world_dir(ray_view);
   vec3 o = cam_pos / 4096.0;
@@ -1077,8 +1159,8 @@ float snow_flakes(vec3 ray_view, float scene_z, float px) {
 // how much of a puddle is at a world point (m), as the wet ground draws them (flat ground)
 float puddle_at(vec2 xz) {
   float pd = gnoise(xz * 0.22) + 0.45 * gnoise(xz * 0.7 + 7.1) + 0.12 * gnoise(xz * 3.1 + 2.3);
-  float spread = 0.22 * weather2.x;
-  return smoothstep(-0.12 - spread, 0.02 - spread, pd) * weather.w;
+  float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
+  return smoothstep(-0.12 - spread, 0.02 - spread, pd) * max(weather.w, puddle_level);
 }
 
 // rings on the puddles where Jak stepped: spreading 0.8 m/s for a second (slope, xz)
@@ -1114,7 +1196,9 @@ float step_drops(vec2 uv, float scene_z) {
       continue;
     }
     vec3 foot = splash[i].xyz / 4096.0;  // m
-    float wet_here = puddle_at(foot.xz);
+    // (a raindrop's bounce, strength 0: anywhere in the rain)
+    bool rain_drop = strength < 0.5;
+    float wet_here = rain_drop ? 1.0 : puddle_at(foot.xz);
     if (wet_here < 0.2) {
       continue;
     }
@@ -1128,14 +1212,14 @@ float step_drops(vec2 uv, float scene_z) {
     if (abs(uv.y - cuv.y) > reach || abs(uv.x - cuv.x) > reach * abs(proj.z / proj.w)) {
       continue;
     }
-    int n = strength > 1.5 ? 20 : 10;
+    int n = rain_drop ? 3 : (strength > 1.5 ? 20 : 10);
     for (int j = 0; j < n; j++) {
       float h1 = hash1(vec2(float(j), splash[i].x + 0.37));
       float h2 = hash1(vec2(splash[i].z, float(j) * 1.7));
       float h3 = hash1(vec2(float(j) * 3.1, splash[i].y));
       float ang = (float(j) + h1) * 6.2832 / float(n);
-      float speed = (0.5 + 0.9 * h2) * (0.7 + 0.3 * strength);
-      float up = (1.4 + 1.2 * h3) * (0.8 + 0.2 * strength);
+      float speed = rain_drop ? 0.15 + 0.3 * h2 : (0.5 + 0.9 * h2) * (0.7 + 0.3 * strength);
+      float up = rain_drop ? 0.6 + 0.7 * h3 : (1.4 + 1.2 * h3) * (0.8 + 0.2 * strength);
       float t = age;
       vec3 wp = foot + vec3(cos(ang) * speed * t, up * t - 4.9 * t * t, sin(ang) * speed * t);
       if (wp.y < foot.y - 0.02) {
@@ -1148,7 +1232,8 @@ float step_drops(vec2 uv, float scene_z) {
       vec2 duv = 0.5 + 0.5 * vec2(v.x * proj.z, v.y * proj.w) / v.z;
       vec2 dd = (uv - duv) / texel;
       // a drop of ~2 cm, at least a pixel and a bit, a little stretched along its fall
-      float rad = max(1.3, 0.018 * 4096.0 * abs(proj.w) * 0.5 / v.z / texel.y);
+      float rad = max(rain_drop ? 1.0 : 1.3,
+                      (rain_drop ? 0.01 : 0.018) * 4096.0 * abs(proj.w) * 0.5 / v.z / texel.y);
       float k = 1.0 - smoothstep(rad * 0.5, rad, length(vec2(dd.x, dd.y * 0.6)));
       sum += k * (1.0 - smoothstep(0.3, 0.55, age)) * min(1.0, wet_here * 2.0);
     }
@@ -1773,11 +1858,13 @@ void main() {
   // rain: everything darkens a little as it soaks, level ground more (it gets the puddles and
   // reflections further down)
   float wet = 0.0;
+  float wet_flat = 0.0;  // level ground, where puddles stay after the rest has dried
   vec3 wet_n = vec3(0.0);
-  if (weather.w > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
+  if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
     wet_n = surface_normal(tex_coord, p);
-    wet = weather.w * smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
-          (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
+    wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
+               (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
+    wet = weather.w * wet_flat;
     c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
   }
 
@@ -2031,14 +2118,20 @@ void main() {
 
   // wet ground: puddles in the dips of a world-space noise, raindrop rings in them, and the
   // surroundings reflected (strongest in the puddles and at grazing angles: the neon on a wet street)
-  if (wet > 0.01) {
+  if (wet > 0.01 || wet_flat * puddle_level > 0.01) {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
-    // wide puddles: low-frequency dips with a ragged rim
+    // wide puddles: low-frequency dips with a ragged rim. A thunderstorm floods them wider; as they
+    // dry they draw back into the deepest dips, still water while the street around has dried
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
-    float spread = 0.22 * weather2.x;  // a thunderstorm floods them wider
+    float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
-                   (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z));
-    c *= 1.0 - 0.25 * puddle * wet;
+                   (1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, z)) * step(0.001, puddle_level);
+    float soaked = wet;
+    float water = min(puddle_level * 3.0, 1.0);
+    wet = max(wet, puddle * wet_flat * water);
+    // (a damp dark rim around a drying puddle)
+    float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle);
+    c *= 1.0 - 0.25 * puddle * wet - 0.3 * max(wet - soaked, 0.0) - 0.15 * max(rim - soaked, 0.0);
     vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
     // outside the puddles the wet ground is rough: a fine noise breaks its reflection up
     vec2 rough = vec2(gnoise(ww.xz * 9.0), gnoise(ww.xz * 9.0 + 5.3)) * (1.0 - puddle) *
@@ -2249,22 +2342,30 @@ void main() {
     if (dot(rel, rel) > dot(fire_axis[i], fire_axis[i]) * 36.0) {
       continue;
     }
-    for (int j = 0; j < 18; j++) {
+    for (int j = 0; j < 24; j++) {
       float s = fire_seed[i] * 17.0 + float(j) * 7.31;
       float h1 = fract(sin(s * 12.9898) * 43758.5453);
       float h2 = fract(sin(s * 78.233) * 43758.5453);
       float h3 = fract(sin(s * 37.719) * 43758.5453);
       float h4 = fract(sin(s * 93.989) * 43758.5453);
-      float life = 1.4 + h1 * 1.6;  // seconds
+      // the last six: the pops, a spark the wood spits out fast now and then
+      bool pop = j >= 18;
+      float life = pop ? 0.5 + h1 * 0.4 : 1.4 + h1 * 1.6;  // seconds
       float phase = fract(fire.z / life + h2);
       // a new ember each cycle starts somewhere else in the flame
       float cycle = floor(fire.z / life + h2);
       float k1 = fract(sin((s + cycle) * 41.17) * 43758.5453) - 0.5;
       float k2 = fract(sin((s + cycle) * 19.31) * 43758.5453) - 0.5;
-      float rise = phase * fs * (2.0 + 3.0 * h3);
+      // (a pop only some cycles, flying out sideways too and slowing as it climbs)
+      if (pop && fract(sin((s + cycle) * 7.77) * 43758.5453) > 0.35) {
+        continue;
+      }
+      float rise = pop ? (1.0 - (1.0 - phase) * (1.0 - phase)) * fs * (4.0 + 3.0 * h3)
+                       : phase * fs * (2.0 + 3.0 * h3);
       float sway = sin(fire.z * (1.5 + h4 * 2.0) + h1 * 6.283) * fs * 0.3 * phase;
-      vec3 ep = fp + up_view * (rise + fs * 0.2) + right_view * (k1 * fs * 0.9 + sway) +
-                fwd_view * (k2 * fs * 0.9);
+      float out_k = pop ? 1.0 + 3.0 * phase : 1.0;
+      vec3 ep = fp + up_view * (rise + fs * 0.2) + right_view * (k1 * fs * 0.9 * out_k + sway) +
+                fwd_view * (k2 * fs * 0.9 * out_k);
       if (ep.z < 0.3 * 4096.0 || (z > 0.0 && ep.z > z)) {
         continue;
       }
@@ -2278,7 +2379,10 @@ void main() {
       float fade = (1.0 - phase) * smoothstep(0.0, 0.08, phase);
       float flick = 0.75 + 0.25 * sin(fire.z * (20.0 + h3 * 15.0) + h4 * 50.0);
       vec3 hot = mix(vec3(1.0, 0.32, 0.04), vec3(1.0, 0.7, 0.25), h4);
-      c += hot * (glow * fade * flick * fire.y * 2.4);
+      if (pop) {
+        hot = mix(vec3(1.0, 0.85, 0.5), hot, phase);  // white-hot as it leaves the flame
+      }
+      c += hot * (glow * fade * flick * fire.y * (pop ? 3.2 : 2.4));
     }
   }
 
@@ -2386,6 +2490,11 @@ void main() {
       }
     }
     c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.03;
+    // dust hanging in the beams: always a little, a lot in the desert's dust, some in the rain
+    if (spot_pos[0].w > 0.0) {
+      float motes = beam_motes(ray, z, pixel_rad);
+      c += vec3(1.0, 0.93, 0.8) * min(motes, 1.5) * (0.5 + 2.0 * weather.y + 0.4 * weather.x) * 2.6;
+    }
   }
 
   // halos: in rain, fog or dust the air around each light glows (scattering), less where the

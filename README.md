@@ -39,8 +39,9 @@ The Drive packs are the ones made for this project.
 secrets) to try every feature at once. A new game starts as the original; delete or overwrite the
 slot when you like (the launcher only fills it while it's empty).
 
-> **Tip:** in the game, press **F1** (or **`\`**) for the **Enhanced menu**: graphics
-> presets, every effect, weather, time of day. **F9** switches to the next game of the trilogy.
+> **Tip:** in the game, press **F1** (or **`\`**, or **Select + R3** on a pad) for the **Enhanced
+> menu**: graphics presets, every effect, weather, time of day. **F9** switches to the next game of
+> the trilogy.
 
 ### Developers: from the source code
 
@@ -116,9 +117,10 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Lens flare**: looking toward the sun, ghosts and a streak in the lens (menu switch).
 - **Night sky**: twinkling stars, a faint milky way, the moon and its halo; Haven and Spargus glow
   warm on the low sky.
-- **Headlights** (Jak 3): vehicles light the road ahead with real beams out to 100 m, visible in
-  the night air; seen from the front the lamps glare.
-- **Torches and fires light their surroundings** (Jak 3): every torch, brazier, barrel fire and
+- **Headlights** (Jak 2 and 3): vehicles light the road ahead with real beams out to 100 m,
+  visible in the night air, dust specks drifting in them (thick in a sandstorm); seen from the
+  front the lamps glare.
+- **Torches and fires light their surroundings** (all three games): every torch, brazier, barrel fire and
   gas lamp the levels place is a real light, flickering, its shadows trembling with the flame;
   Spargus's gate torches light the gate from across the desert.
 - **Jak's lantern** (Jak 3): a Wastelander's lantern bulb (Damas's people cross the sands by night
@@ -133,7 +135,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
   district is no longer flooded in red at night, and its own grade is a little cooler.
 - **Daylight**: cooler, deeper shadows and a fuller sunlit side; bright sand and walls keep their
   color; a partial white balance takes off the strongest color casts.
-- **Fires** flicker, the air above them shimmers, and embers rise from them.
+- **Fires** flicker, the air above them shimmers, embers rise from them and now and then the wood
+  spits out a spark.
 - **Explosions**: a flash of light, a shockwave that bends the picture, sparks flying out on their
   arcs and hot air shimmering over the blast. Smoke and dust are lit by the lights near them.
 - **Sky**: volumetric clouds lit by the sun (bright edges toward it, shaded undersides), a deep
@@ -171,7 +174,8 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - **Fixed where the game wants it**: it always rains in Boggy Billy's swamp, the fog never lifts on
   Misty Island, it always snows on Snowy Mountain, the air shimmers over the lava.
 - **Rain** falls in the world with splashes on the ground; wet streets reflect the windows and
-  signs, puddles fill and dry, Jak's steps splash in them, lamps get halos in the wet air,
+  signs, puddles fill and dry (for minutes after the street, drawing back into the dips), drops
+  bounce off the ground around Jak, his steps splash in them, lamps get halos in the wet air,
   characters get wet and glossy. After the rain the sun comes back out (light shafts, steam, a
   rainbow).
 - **Thunderstorms**: lightning bolts with the game's own thunder, sheet lightning inside the clouds.
@@ -196,8 +200,9 @@ the trilogy's roadmap is in [TRILOGIA.md](TRILOGIA.md) (Italian).
 - Jak 2: twice the ammo; every gun, upgrade, the jetboard and Dark Jak's powers from the start (the
   security passes stay with the story).
 
-### In-game menu (press F1 or `\`)
-- **Graphics**: three presets (Classic: the game as it was; Medium: the costly effects off; Maximum:
+### In-game menu (press F1 or `\`; on a pad Select + R3, then move with the pad)
+- **Graphics**: four presets (Classic: the game as it was; Performance: the look, without the
+  effects that cost the most, for weaker graphics cards; Medium: the costly effects off; Maximum:
   everything) and a switch for every effect. Also vegetation density, lamp strength, vivid colors,
   the weather and the water effects.
 - **City**: population (Low / Normal / High / Extreme) and the minimap (shown by default).
