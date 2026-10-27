@@ -1,6 +1,6 @@
 """Jak Enhanced Trilogy: the release ZIP for players (nothing to build or install).
 
-    python scripts/enhanced/make_release.py [--bin out/build/Release-static/bin] [--version v1.0]
+    python scripts/enhanced/make_release.py [--bin out/build/Release-static/bin] [--version v1.0] [--installer]
 
 Lays out what OpenGOAL's own releases have (.github/scripts/releases/extract_build_windows.sh):
 gk.exe, goalc.exe and extractor.exe (the statically linked build: no runtime DLLs), and next to them
@@ -12,6 +12,7 @@ the game's own, settings) can slip into it.
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,7 @@ def main():
     parser.add_argument("--bin", type=Path, default=ROOT / "out/build/Release-static/bin")
     parser.add_argument("--version", default="")
     parser.add_argument("--out", type=Path, default=ROOT / "out/release")
+    parser.add_argument("--installer", action="store_true", help="also the setup .exe (Inno Setup 6)")
     args = parser.parse_args()
 
     dest = args.out / NAME
@@ -89,6 +91,16 @@ def main():
         for f in sorted(dest.rglob("*")):
             z.write(f, Path(NAME) / f.relative_to(dest))
     print(f"{count} data files; {zip_path} ({zip_path.stat().st_size / 1e6:.0f} MB)")
+
+    if args.installer:
+        # Setup-Jak-Enhanced-Trilogy-<version>.exe from the same folder (installer.iss)
+        iscc = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Inno Setup 6/ISCC.exe"
+        if not iscc.exists():
+            iscc = Path(os.environ.get("ProgramFiles(x86)", "")) / "Inno Setup 6/ISCC.exe"
+        subprocess.run([str(iscc), "/Q", f"/DMyVersion={args.version or 'dev'}", f"/DSrc={dest}",
+                        f"/O{args.out}", str(ROOT / "scripts/enhanced/installer.iss")], check=True)
+        for exe in args.out.glob("Setup-*.exe"):
+            print(f"{exe} ({exe.stat().st_size / 1e6:.0f} MB)")
 
 
 if __name__ == "__main__":

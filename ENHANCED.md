@@ -195,6 +195,23 @@ Next, the small ones first (the big ones below wait until these are done):
   through (the desert's sandstorms and clear nights, Haven's rain, the forest's fog...) instead of one
   pool for every open area; then seasons that shift those sets (wetter, colder, drier) over time.
 
+New art made with Tripo (`scripts/enhanced/minimap_icons.py` is the model: references from the game
+only as a guide, the result drawn new, so it goes in git; ask before spending credits):
+
+- Icons: the pause map's icons (Jak 3 `bigmap`, Jak II `map`), Jak 1's HUD counters, Enhanced-menu
+  icons (weather, time of day, presets), an app/installer icon (`SetupIconFile`, gk.exe resource).
+- Images: the installer's wizard pictures (`WizardImageFile` 164x314, `WizardSmallImageFile`), launcher
+  and game-picker covers, a README banner.
+- Painted maps: the Jak 3 `WOMAP.STR` world map and Jak II's big map redrawn whole (served through
+  `enhanced_hd_screen_texture` or a replacement of the 256x416 windows), the minimap frame/ring.
+- Tileable PBR materials: Tripo makes the color image (seamless prompt, then a wrap-pad check), normal,
+  height and roughness are derived locally (Sobel on a height from luminance + a roughness curve), into
+  `game/assets/enhanced/materials/`: puddle and rain-ripple normals, wet asphalt, snow, sand ripples,
+  mud for footprints and tire ruts, close-up detail maps for rock, grass and sand.
+- Later, models (Tripo's text/image to 3D with PBR, under a face budget): grass clumps, flowers,
+  bushes, city clutter for the vegetation and population, new passers-by. Needs a path for custom
+  meshes in jak2/jak3 (custom actors from glb, as Jak 1's custom levels do).
+
 The big ones (after the above):
 
 - The bridge levels and the continuous trilogy (TRILOGIA.md, phase 4); one menu and save, Daxter and

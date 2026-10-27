@@ -9,15 +9,20 @@ this repository.
 
 ## Install (players)
 
-1. Download **`Jak-Enhanced-Trilogy-<version>.zip`** from the
-   [Releases page](https://github.com/stichlola/jak-enhanced-trilogy/releases/latest) and unzip it.
-2. Put your disc images (PAL, NTSC or NTSC-J; one, two or all three games) in the **`ISO`** folder.
-3. Double-click **`Jak Enhanced Trilogy.bat`**.
+1. Download **`Setup-Jak-Enhanced-Trilogy-<version>.exe`** from the
+   [Releases page](https://github.com/stichlola/jak-enhanced-trilogy/releases/latest) and run it.
+2. Pick where to install, your disc images (PAL, NTSC or NTSC-J; one, two or all three games) and
+   whether to make the **HD textures** for each game.
+3. Play from the desktop or Start menu shortcut.
 
-The first start of each game extracts your disc (20-40 minutes, once), then asks whether to make the
-**HD textures**: every texture redrawn 4x by an AI on your graphics card, from your own disc (about
-30 minutes for Jak 1, 1-2 hours for Jak II or Jak 3; optional, the game works the same without
-them). To update, unzip a new release over the old folder. About 30 GB free a game.
+The first start of each game extracts your disc (20-40 minutes, once). The HD textures are every
+texture redrawn 4x by an AI on your graphics card, from your own disc: about 30 minutes for Jak 1,
+1-2 hours for Jak II or Jak 3, 1-4 GB; optional, the game works the same without them (skipped
+ones are asked again at the next start). About 30 GB free a game. To update, run the new setup
+over the old install: extracted discs and saves stay.
+
+No installer? The release also has a ZIP: unzip it, put your .iso files in `ISO`, double-click
+`Jak Enhanced Trilogy.bat`.
 
 ## Install (developers)
 
@@ -34,6 +39,25 @@ Where things are: graphics in `game/graphics/opengl_renderer/EnhancedPost.cpp` a
 `Enhanced`; zones, grades, weather and ambient sounds in `game/assets/enhanced/world.json`.
 Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 [CONTRIBUTING](.github/CONTRIBUTING.md) (no game data, everything can be switched off).
+
+## To do
+
+- **Pause map**: the big map restyled like the minimap's district maps; a modern minimap frame.
+- **Photo mode**: game held still, free camera, filters, no HUD.
+- **Weather by zone and season**: each zone its own weathers (desert sandstorms, Haven rain, forest
+  fog), seasons shifting them.
+- **Rain under cover**: rain on roofs and metal when Jak is sheltered.
+- **New art made with Tripo** (original, so it lives in this repository):
+  - icons: the pause map's icons, Jak 1 and Enhanced-menu icons (weather, time of day, presets), an
+    app and installer icon;
+  - images: installer and launcher art, a README banner, the game picker's covers;
+  - painted maps: the Jak 3 and Jak II pause maps redrawn, the minimap frame;
+  - tileable PBR materials (color, normal, height, roughness): puddle and rain ripples, wet asphalt,
+    snow, sand ripples, mud for footprints and tire ruts, close-up detail for rock, grass and sand;
+  - later, models: grass clumps, flowers, bushes and city clutter for the denser vegetation and
+    cities, new passers-by.
+- Later: the continuous trilogy (bridge levels, one save), life in the Jak II plaza, Linux / Steam
+  Deck, hardware ray tracing. Details in [ENHANCED.md](ENHANCED.md).
 
 ## Controls
 

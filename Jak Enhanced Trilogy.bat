@@ -36,7 +36,9 @@ rem in its first megabytes (the discs also list other games' serials)
 set "JAK1_ISO="
 set "JAK2_ISO="
 set "JAK3_ISO="
-for %%F in ("%ROOT%\ISO\*.iso") do (
+rem the .iso files in the ISO folder, and the ones picked in the installer (ISO\iso-paths.txt, a path a line)
+if not exist "%ROOT%\ISO\iso-paths.txt" type nul > "%ROOT%\ISO\iso-paths.txt"
+for /f "usebackq delims=" %%F in (`dir /b /s "%ROOT%\ISO\*.iso" 2^>nul ^& type "%ROOT%\ISO\iso-paths.txt"`) do if exist "%%~fF" (
   set "GAME="
   for /f %%G in ('powershell -NoProfile -Command "$s=[IO.File]::OpenRead('%%~fF'); $b=New-Object byte[] 8MB; $n=$s.Read($b,0,$b.Length); $s.Close(); $t=[Text.Encoding]::ASCII.GetString($b,0,$n); if ($t -match 'cdrom0:\\(\w{4}_\d{3}\.\d{2})') { $id=$Matches[1]; if ($id -match 'SCUS_971\.24|SCES_503\.61|SCPS_150\.21') {'jak1'} elseif ($id -match 'SCUS_972\.65|SCES_516\.08|SCPS_150\.57') {'jak2'} elseif ($id -match 'SCUS_973\.30|SCES_524\.60|SCPS_150\.93') {'jak3'} }"') do set "GAME=%%G"
   if "!GAME!"=="jak1" if not defined JAK1_ISO set "JAK1_ISO=%%~fF" & echo Found Jak and Daxter: The Precursor Legacy: %%~nxF
@@ -80,15 +82,20 @@ if defined NEED_EXTRACT (
 )
 
 rem The optional HD textures, made here from the player's own disc (scripts\enhanced\hd_setup.py,
-rem Python installed with winget when missing): asked once per game
+rem Python installed with winget when missing): asked once per game, unless the installer already
+rem asked (hd-textures-jakN.txt in data\: y or n)
 for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" if not exist "%PROJ%\out\jak%%G\hd-textures.asked" (
-  echo.
-  echo HD textures for Jak %%G: every texture of the game redrawn 4x by an AI ^(Real-ESRGAN^) on your
-  echo graphics card, from your own disc. It takes a while: about 30 minutes for Jak 1, 1-2 hours for
-  echo Jak II or Jak 3 ^(depends on the graphics card^), and 1-4 GB more on disk. The game works the
-  echo same without them. To be asked again, delete out\jak%%G\hd-textures.asked.
-  set "HD=n"
-  set /p "HD=Make the HD textures for Jak %%G now? (y/N): "
+  set "HD="
+  if exist "%PROJ%\hd-textures-jak%%G.txt" set /p HD=<"%PROJ%\hd-textures-jak%%G.txt"
+  if not defined HD (
+    echo.
+    echo HD textures for Jak %%G: every texture of the game redrawn 4x by an AI ^(Real-ESRGAN^) on your
+    echo graphics card, from your own disc. It takes a while: about 30 minutes for Jak 1, 1-2 hours for
+    echo Jak II or Jak 3 ^(depends on the graphics card^), and 1-4 GB more on disk. The game works the
+    echo same without them. To be asked again, delete out\jak%%G\hd-textures.asked.
+    set "HD=n"
+    set /p "HD=Make the HD textures for Jak %%G now? (y/N): "
+  )
   echo asked> "%PROJ%\out\jak%%G\hd-textures.asked"
   if /i "!HD!"=="y" (
     where py >nul 2>nul || winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
