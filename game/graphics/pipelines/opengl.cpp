@@ -311,6 +311,72 @@ static std::shared_ptr<GfxDisplay> gl_make_display(int width,
   return std::static_pointer_cast<GfxDisplay>(display);
 }
 
+namespace {
+// Enhanced: the in-game Enhanced menu in or out
+void enhanced_flip_menu() {
+  if (g_enhanced_menu.start_menu) {
+    return;
+  }
+  g_enhanced_menu.open = !g_enhanced_menu.open;
+  if (g_enhanced_menu.open) {
+    g_enhanced_menu.opens++;
+  }
+}
+
+// Enhanced: the keyboard shortcuts, read from the menu's Controls every press (so a change there
+// works at once): 0 the menu, 1 photo mode (F2 takes the picture: OpenGOAL's screenshot), 2 the nap
+// window (request 12; a pad's Select opens it in the game itself), 3 the next game of the trilogy
+// (Jak 1 -> 2 -> 3 -> 1, in the same process). While the menu waits for a new key, the press is it
+void enhanced_shortcuts(const SDL_Event& event) {
+  if (event.type != SDL_EVENT_KEY_DOWN || event.key.repeat != 0) {
+    return;
+  }
+  const u32 key = (u32)event.key.key;
+  const int listening = g_enhanced_menu.listening;
+  if (listening >= 0 && listening < EnhancedMenu::kShortcuts) {
+    if (key != SDLK_ESCAPE) {
+      g_enhanced_menu.keys[listening] = key;
+    }
+    g_enhanced_menu.listening = -1;
+    return;
+  }
+  // (the start menu reads its own keys)
+  if (ImGui::GetIO().WantTextInput || g_enhanced_menu.start_menu) {
+    return;
+  }
+  int which = -1;
+  for (int i = 0; i < EnhancedMenu::kShortcuts; i++) {
+    if (g_enhanced_menu.keys[i] == key) {
+      which = i;
+    }
+  }
+  switch (which) {
+    case 0:
+      enhanced_flip_menu();
+      break;
+    case 1:
+      g_enhanced_menu.photo = !g_enhanced_menu.photo;
+      g_enhanced_menu.open = false;
+      break;
+    case 2:
+      if (!g_enhanced_menu.open) {
+        g_enhanced_menu.ask(12, "");
+      }
+      break;
+    case 3:
+      if (MasterExit == RuntimeExitStatus::RUNNING) {
+        const int v = (int)g_game_version;
+        g_switch_game_to = (GameVersion)(v >= (int)GameVersion::Jak3 ? 1 : v + 1);
+        g_enhanced_switch_restore = true;
+        MasterExit = RuntimeExitStatus::SWITCH_GAME;
+      }
+      break;
+    default:
+      break;
+  }
+}
+}  // namespace
+
 GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
     : m_window(window),
       m_gl_context(gl_context),
@@ -332,66 +398,28 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
   m_input_manager->register_command(
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
-  // Enhanced: \ or F1 opens and closes the in-game Enhanced menu (F1 for keyboards where \ is
-  // hard to find or doesn't come through as itself); on a pad Select and R3 together. N opens the
-  // nap window (request 12; a pad's Select opens it in the game itself)
-  const auto flip_enhanced_menu = [&]() {
-    g_enhanced_menu.open = !g_enhanced_menu.open;
-    if (g_enhanced_menu.open) {
-      g_enhanced_menu.opens++;
-    }
-  };
+  // Enhanced: \ opens and closes the in-game Enhanced menu, and so does its shortcut (F1 unless
+  // changed in the menu's Controls, see enhanced_shortcuts); on a pad Select and R3 together
   m_input_manager->register_command(
-      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_N, [&](const SDL_Event& event) {
-        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
-            !ImGui::GetIO().WantTextInput && !g_enhanced_menu.open) {
-          g_enhanced_menu.ask(12, "");
+      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_BACKSLASH, [](const SDL_Event& event) {
+        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
+          enhanced_flip_menu();
         }
       }));
-  const auto toggle_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {
-    if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
-      flip_enhanced_menu();
-    }
-  };
-  for (const auto key : {SDLK_BACKSLASH, SDLK_F1}) {
-    m_input_manager->register_command(CommandBinding::Source::KEYBOARD,
-                                      CommandBinding(key, toggle_enhanced_menu));
-  }
-  const auto pad_enhanced_menu = [flip_enhanced_menu](const SDL_Event& event) {
+  const auto pad_enhanced_menu = [](const SDL_Event& event) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(event.gbutton.which);
     const auto other = event.gbutton.button == SDL_GAMEPAD_BUTTON_BACK
                            ? SDL_GAMEPAD_BUTTON_RIGHT_STICK
                            : SDL_GAMEPAD_BUTTON_BACK;
     if (pad && SDL_GetGamepadButton(pad, other)) {
-      flip_enhanced_menu();
+      enhanced_flip_menu();
     }
   };
   for (const auto button : {SDL_GAMEPAD_BUTTON_BACK, SDL_GAMEPAD_BUTTON_RIGHT_STICK}) {
     m_input_manager->register_command(CommandBinding::Source::CONTROLLER,
                                       CommandBinding((u32)button, pad_enhanced_menu));
   }
-
-  // Enhanced: F3 in and out of photo mode (F2 takes the picture: OpenGOAL's screenshot)
-  m_input_manager->register_command(
-      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_F3, [&](const SDL_Event& event) {
-        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
-            !ImGui::GetIO().WantTextInput) {
-          g_enhanced_menu.photo = !g_enhanced_menu.photo;
-          g_enhanced_menu.open = false;
-        }
-      }));
-
-  // Trilogy prototype: F9 boots the next game (Jak 1 -> 2 -> 3 -> 1) in the same process
-  m_input_manager->register_command(
-      CommandBinding::Source::KEYBOARD, CommandBinding(SDLK_F9, [&](const SDL_Event& event) {
-        if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0 &&
-            MasterExit == RuntimeExitStatus::RUNNING) {
-          const int v = (int)g_game_version;
-          g_switch_game_to = (GameVersion)(v >= (int)GameVersion::Jak3 ? 1 : v + 1);
-          g_enhanced_switch_restore = true;
-          MasterExit = RuntimeExitStatus::SWITCH_GAME;
-        }
-      }));
+  // (photo mode, the nap and the next game: their keys are the menu's, see enhanced_shortcuts)
 
   const auto& bind = Gfx::g_debug_settings.toggle_fullscreen_key;
 
@@ -637,6 +665,7 @@ void GLDisplay::process_sdl_events() {
         ImGui_ImplSDL3_ProcessEvent(&evt);
       }
     }
+    enhanced_shortcuts(evt);
     {
       auto p = scoped_prof("sdl-input-monitor-process-event");
       m_input_manager->process_sdl_event(evt);
@@ -672,7 +701,7 @@ void GLDisplay::render() {
       }
       m_input_manager->hide_cursor(!menu_up && m_input_manager->auto_hiding_cursor());
     }
-    if (io.WantCaptureKeyboard) {
+    if (io.WantCaptureKeyboard || g_enhanced_menu.start_menu) {
       m_input_manager->clear_keyboard_actions();
     } else {
       m_input_manager->poll_keyboard_data();

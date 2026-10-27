@@ -275,6 +275,9 @@ class EnhancedPost {
   void draw_menu();
   // photo mode's controls, a few seconds after it comes on
   void draw_photo_hint();
+  // the trilogy's start menu (JAK_ENHANCED_START_MENU): the three games as cards, play or
+  // continue
+  void draw_start_menu();
 
  private:
   static constexpr int kLevels = 6;
@@ -307,6 +310,12 @@ class EnhancedPost {
   int m_w = 0;
   int m_h = 0;
   GLuint m_black_tex = 0;
+  // the start menu's portraits, the games set up, the one picked
+  GLuint m_start_tex[3] = {0, 0, 0};
+  bool m_start_ready[3] = {false, false, false};
+  bool m_start_loaded = false;
+  int m_start_pick = 0;
+  double m_start_opened_at = 0.0;
   GLuint m_no_shadow_tex = 0;
   GLuint m_white_tex = 0;
 

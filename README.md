@@ -61,7 +61,8 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 |---|---|---|
 | Enhanced menu | **F1** or **`\`** | **Select + R3** (Xbox: View + RS) |
 | Nap: the hours go by while the world around runs fast | **N** | **Select** (Xbox: View) |
-| Next game of the trilogy | **F9** | |
+| Start menu (opens with the game played last, when more than one is set up): pick a game | **Left / Right**, **Enter**; **C** continues from its newest save | **D-pad**, **A**; **Y** continues |
+| Next game of the trilogy | **F9** (rebind it in the menu's Controls) | |
 | Something wrong? | `Report a problem.bat`: logs, graphics card and settings in a ZIP on your Desktop | |
 | Photo mode | **F3** (F2 takes the picture) | |
 

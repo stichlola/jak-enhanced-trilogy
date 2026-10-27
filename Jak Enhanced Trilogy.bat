@@ -1,7 +1,7 @@
 @echo off
 rem Jak Enhanced Trilogy: put your own disc images (.iso) in the ISO folder, then double-click this
-rem file. The first time it extracts your discs (20-40 minutes a game); after that it just asks
-rem which game to play.
+rem file. The first time it extracts your discs (20-40 minutes a game); after that it starts the game
+rem played last, on the trilogy's start menu to pick another.
 rem In the release ZIP the programs are already built (gk.exe, extractor.exe next to this file, their
 rem data in data\). In a copy of the source code it builds them first (Visual Studio, CMake: an hour).
 setlocal EnableDelayedExpansion
@@ -132,7 +132,8 @@ if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\
   )
 )
 
-rem Pick the game (straight in when only one is ready)
+rem Which game boots: the one played last (the game writes it), else the first ready. With more than
+rem one ready, the game opens on the trilogy's start menu (JAK_ENHANCED_START_MENU) to pick another
 set "COUNT=0"
 for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
   set /a COUNT+=1
@@ -144,18 +145,11 @@ if %COUNT%==0 (
   exit /b 1
 )
 set "PICK=%READY1%"
-if %COUNT% gtr 1 (
-  echo.
-  for /l %%N in (1,1,%COUNT%) do (
-    set "G=!READY%%N!"
-    if "!G!"=="1" echo   %%N  Jak and Daxter: The Precursor Legacy
-    if "!G!"=="2" echo   %%N  Jak II
-    if "!G!"=="3" echo   %%N  Jak 3
-  )
-  set "CHOICE=1"
-  set /p "CHOICE=Which game? (1-%COUNT%, Enter = 1): "
-  for /l %%N in (1,1,%COUNT%) do if "!CHOICE!"=="%%N" set "PICK=!READY%%N!"
-)
+set "LAST="
+if exist "%APPDATA%\OpenGOAL\enhanced-last-game.txt" set /p LAST=<"%APPDATA%\OpenGOAL\enhanced-last-game.txt"
+for %%G in (1 2 3) do if "!LAST!"=="%%G" if exist "%PROJ%\out\jak%%G\iso" set "PICK=%%G"
+set "JAK_ENHANCED_START_MENU="
+if %COUNT% gtr 1 set "JAK_ENHANCED_START_MENU=1"
 echo.
 echo Starting Jak %PICK%.
 echo   \  (the key left of 1)  opens the Enhanced menu: graphics, weather, time of day...

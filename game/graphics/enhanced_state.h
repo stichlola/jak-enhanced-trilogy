@@ -133,7 +133,11 @@ extern EnhancedTimeOfDay g_enhanced_tod;
 
 struct EnhancedMenu {
   bool open = false;
-  bool any_open() const { return open; }
+  // the trilogy's start menu (the launcher asks for it, JAK_ENHANCED_START_MENU): the three games,
+  // shown once as the program starts. It takes the pad like the menu
+  std::atomic<bool> start_menu = false;
+  bool start_menu_shown = false;
+  bool any_open() const { return open || start_menu; }
   // how many times the menu opened (pc-enhanced-menu-state: the game's Select opens the nap
   // window on release, unless Select + R3 opened this menu meanwhile)
   std::atomic<int> opens = 0;
@@ -149,6 +153,15 @@ struct EnhancedMenu {
   std::atomic<bool> photo = false;
   std::atomic<bool> photo_active = false;
   std::atomic<double> photo_entered_at = 0.0;
+  // the Enhanced shortcuts on the keyboard, SDL keycodes (the menu's Controls, saved in
+  // enhanced-settings.json): the menu (\ always works too), photo mode, the nap, the next game.
+  // listening: the shortcut the next key press sets (-1 none)
+  static constexpr int kShortcuts = 4;
+  static constexpr u32 kDefaultKeys[kShortcuts] = {0x4000003au /* F1 */, 0x4000003cu /* F3 */,
+                                                   'n', 0x40000042u /* F9 */};
+  std::atomic<u32> keys[kShortcuts] = {kDefaultKeys[0], kDefaultKeys[1], kDefaultKeys[2],
+                                       kDefaultKeys[3]};
+  std::atomic<int> listening = -1;
   std::mutex mutex;
   int request = 0;
   std::string arg;

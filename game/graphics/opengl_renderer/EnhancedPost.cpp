@@ -20,6 +20,7 @@
 #include "game/graphics/opengl_renderer/loader/common.h"
 
 #include "game/graphics/pipelines/opengl.h"
+#include "game/kernel/common/kboot.h"
 #include "game/runtime.h"
 #include "game/sound/common/enhanced_ambience.h"
 
@@ -570,6 +571,21 @@ EnhancedPost::EnhancedPost() {
   } catch (std::exception& e) {
     lg::error("[enhanced] could not load the saved settings: {}", e.what());
   }
+  // the trilogy's start menu, once as the program starts (a game switch doesn't show it again)
+  if (std::getenv("JAK_ENHANCED_START_MENU") && !g_enhanced_menu.start_menu_shown) {
+    g_enhanced_menu.start_menu_shown = true;
+    g_enhanced_menu.start_menu = true;
+  }
+  // the game played last, for the launcher to boot it next time
+  try {
+    // (OpenGOAL's own folder, the parent of the games' ones: %APPDATA%\OpenGOAL)
+    auto dir = file_util::get_user_settings_dir(g_game_version).parent_path().parent_path();
+    file_util::create_dir_if_needed(dir);
+    file_util::write_text_file(dir / "enhanced-last-game.txt",
+                               std::to_string((int)g_game_version));
+  } catch (std::exception& e) {
+    lg::error("[enhanced] could not write the last game: {}", e.what());
+  }
   if (const char* preset = std::getenv("JAK_ENHANCED_PRESET")) {
     // test boots: 0 Classic, 1 Medium, 2 Maximum, 3 Performance
     apply_preset(std::clamp(std::atoi(preset), 0, 3));
@@ -754,6 +770,12 @@ EnhancedPost::EnhancedPost() {
 EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
+  for (auto& t : m_start_tex) {
+    if (t) {
+      glDeleteTextures(1, &t);
+      t = 0;
+    }
+  }
   // the casters are global and outlive the renderer (a game switch boots the next game in the
   // same process): their buffer copies go with it, or the next game's Merc2 copies into dead names
   for (auto& c : g_enhanced_casters.mod_copies) {
@@ -4023,6 +4045,175 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   return shader;
 }
 
+void EnhancedPost::draw_start_menu() {
+  if (!g_enhanced_menu.start_menu) {
+    return;
+  }
+  static const char* const kTitles[3] = {"Jak and Daxter", "Jak II", "Jak 3"};
+  static const char* const kSubtitles[3] = {"The Precursor Legacy", "", ""};
+  const int current = std::clamp((int)g_game_version - 1, 0, 2);
+  if (!m_start_loaded) {
+    // the portraits (the old game wheel's), and which games are set up (their disc extracted)
+    m_start_loaded = true;
+    m_start_opened_at = ImGui::GetTime();
+    const auto proj = file_util::get_jak_project_dir();
+    for (int i = 0; i < 3; i++) {
+      m_start_ready[i] =
+          i == current || fs::exists(proj / "out" / fmt::format("jak{}", i + 1) / "iso");
+      const auto path = proj / "game/assets/enhanced/wheel" / fmt::format("jak{}.png", i + 1);
+      int w = 0, h = 0, n = 0;
+      unsigned char* px = stbi_load(path.string().c_str(), &w, &h, &n, 4);
+      if (!px) {
+        continue;
+      }
+      glGenTextures(1, &m_start_tex[i]);
+      glBindTexture(GL_TEXTURE_2D, m_start_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      stbi_image_free(px);
+    }
+    m_start_pick = current;
+  }
+
+  // what the player picked: the game running now just closes the menu, another one (or the one
+  // running, from its newest save) boots in this same process
+  auto choose = [&](int game, bool from_save) {
+    if (!m_start_ready[game]) {
+      return;
+    }
+    g_enhanced_menu.start_menu = false;
+    if (game == current && !from_save) {
+      return;
+    }
+    if (MasterExit == RuntimeExitStatus::RUNNING) {
+      g_switch_game_to = (GameVersion)(game + 1);
+      g_enhanced_switch_restore = from_save;
+      MasterExit = RuntimeExitStatus::SWITCH_GAME;
+    }
+  };
+  auto pressed = [](std::initializer_list<ImGuiKey> keys) {
+    for (auto k : keys) {
+      if (ImGui::IsKeyPressed(k, true)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  int dir = 0;
+  if (pressed({ImGuiKey_LeftArrow, ImGuiKey_A, ImGuiKey_GamepadDpadLeft,
+               ImGuiKey_GamepadLStickLeft})) {
+    dir = -1;
+  } else if (pressed({ImGuiKey_RightArrow, ImGuiKey_D, ImGuiKey_GamepadDpadRight,
+                      ImGuiKey_GamepadLStickRight})) {
+    dir = 1;
+  }
+  for (int pick = m_start_pick + dir; dir && pick >= 0 && pick <= 2; pick += dir) {
+    // past the games not set up
+    if (m_start_ready[pick]) {
+      m_start_pick = pick;
+      break;
+    }
+  }
+
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const float fade = std::min(1.f, (float)(ImGui::GetTime() - m_start_opened_at) * 2.5f);
+  auto col = [&](float r, float g, float b, float a) {
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a * fade));
+  };
+  ImGui::SetNextWindowPos(ImVec2(0, 0));
+  ImGui::SetNextWindowSize(size);
+  ImGui::SetNextWindowBgAlpha(0.f);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+  ImGui::Begin("##start-menu", nullptr,
+               ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                   ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                   ImGuiWindowFlags_NoScrollWithMouse);
+  ImGui::PopStyleVar();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImFont* font = ImGui::GetFont();
+  const float unit = size.y / 1080.f;
+  auto text_centered = [&](float px, float x, float y, ImU32 c, const char* text) {
+    const ImVec2 ts = font->CalcTextSizeA(px, FLT_MAX, 0.f, text);
+    dl->AddText(font, px, ImVec2(x - ts.x * 0.5f, y), c, text);
+  };
+  // the game booting behind, darkened: deep blue at the top to black
+  dl->AddRectFilledMultiColor(ImVec2(0, 0), size, col(0.03f, 0.05f, 0.10f, 0.93f),
+                              col(0.03f, 0.05f, 0.10f, 0.93f), col(0.f, 0.f, 0.f, 0.97f),
+                              col(0.f, 0.f, 0.f, 0.97f));
+  text_centered(78.f * unit, size.x * 0.5f, size.y * 0.08f, col(0.96f, 0.82f, 0.38f, 1.f),
+                "Jak Enhanced Trilogy");
+  text_centered(26.f * unit, size.x * 0.5f, size.y * 0.08f + 92.f * unit,
+                col(0.75f, 0.78f, 0.85f, 1.f), "Choose a game");
+
+  // the three cards, the one picked larger, lit and framed in gold
+  const float gap = size.x * 0.035f;
+  const float card = std::min(size.y * 0.42f, (size.x * 0.9f - 2.f * gap) / 3.f);
+  const float x0 = size.x * 0.5f - (3.f * card + 2.f * gap) * 0.5f;
+  const float y0 = size.y * 0.27f;
+  const ImGuiIO& io = ImGui::GetIO();
+  int clicked = -1;
+  for (int i = 0; i < 3; i++) {
+    const bool picked = i == m_start_pick;
+    const float grow = picked ? card * 0.05f : 0.f;
+    const ImVec2 a(x0 + i * (card + gap) - grow, y0 - grow);
+    const ImVec2 b(a.x + card + 2.f * grow, a.y + card + 2.f * grow);
+    // the mouse picks too, a click plays
+    if (m_start_ready[i] && io.MousePos.x >= a.x && io.MousePos.x < b.x &&
+        io.MousePos.y >= a.y && io.MousePos.y < b.y) {
+      if (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f) {
+        m_start_pick = i;
+      }
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        clicked = i;
+      }
+    }
+    const float lit = !m_start_ready[i] ? 0.22f : picked ? 1.f : 0.5f;
+    if (picked) {
+      dl->AddRectFilled(ImVec2(a.x - 14.f * unit, a.y - 14.f * unit),
+                        ImVec2(b.x + 14.f * unit, b.y + 14.f * unit),
+                        col(0.96f, 0.72f, 0.2f, 0.18f), 18.f * unit);
+    }
+    if (m_start_tex[i]) {
+      dl->AddImageRounded((ImTextureID)(intptr_t)m_start_tex[i], a, b, ImVec2(0, 0), ImVec2(1, 1),
+                          col(lit, lit, lit, 1.f), 10.f * unit);
+    } else {
+      dl->AddRectFilled(a, b, col(0.15f * lit, 0.18f * lit, 0.25f * lit, 1.f), 10.f * unit);
+    }
+    dl->AddRect(a, b, picked ? col(0.98f, 0.8f, 0.32f, 1.f) : col(0.45f, 0.48f, 0.55f, 0.6f),
+                10.f * unit, 0, picked ? 4.f * unit : 1.5f * unit);
+    const float cx = (a.x + b.x) * 0.5f;
+    const float shade = picked ? 1.f : 0.62f;
+    text_centered(40.f * unit, cx, b.y + 22.f * unit, col(shade, shade, shade, 1.f), kTitles[i]);
+    if (kSubtitles[i][0]) {
+      text_centered(22.f * unit, cx, b.y + 68.f * unit,
+                    col(0.7f * shade, 0.72f * shade, 0.78f * shade, 1.f), kSubtitles[i]);
+    }
+    if (!m_start_ready[i]) {
+      text_centered(24.f * unit, cx, (a.y + b.y) * 0.5f - 12.f * unit,
+                    col(0.9f, 0.9f, 0.9f, 0.9f), "Not set up: its disc goes in the ISO folder");
+    }
+  }
+  text_centered(24.f * unit, size.x * 0.5f, size.y - 70.f * unit, col(0.7f, 0.73f, 0.8f, 1.f),
+                "Left / Right: choose      Enter or A: play      C or Y: continue from the last "
+                "save      Esc or B: close");
+  ImGui::End();
+
+  if (clicked >= 0) {
+    choose(clicked, false);
+  } else if (pressed({ImGuiKey_Enter, ImGuiKey_KeypadEnter, ImGuiKey_Space,
+                      ImGuiKey_GamepadFaceDown})) {
+    choose(m_start_pick, false);
+  } else if (pressed({ImGuiKey_C, ImGuiKey_GamepadFaceUp})) {
+    choose(m_start_pick, true);
+  } else if (pressed({ImGuiKey_Escape, ImGuiKey_GamepadFaceRight})) {
+    g_enhanced_menu.start_menu = false;
+  }
+}
+
 void EnhancedPost::draw_photo_hint() {
   if (!g_enhanced_menu.photo_active) {
     return;
@@ -4315,6 +4506,30 @@ void EnhancedPost::draw_menu() {
       g_enhanced_menu.ask(4, frozen ? "0" : "1");
     }
   }
+  if (ImGui::CollapsingHeader("Controls")) {
+    // the Enhanced shortcuts on the keyboard (the game's own buttons are in its Options menu)
+    static const char* names[EnhancedMenu::kShortcuts] = {"This menu (\\ too)", "Photo mode",
+                                                          "Nap", "Next game of the trilogy"};
+    const int listening = g_enhanced_menu.listening;
+    for (int i = 0; i < EnhancedMenu::kShortcuts; i++) {
+      ImGui::PushID(i);
+      ImGui::TextUnformatted(names[i]);
+      ImGui::SameLine(260);
+      const std::string label =
+          listening == i ? std::string("press a key (Esc: keep)")
+                         : std::string(SDL_GetKeyName((SDL_Keycode)g_enhanced_menu.keys[i].load()));
+      if (ImGui::Button(label.c_str(), ImVec2(200, 0))) {
+        g_enhanced_menu.listening = i;
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Default")) {
+        g_enhanced_menu.keys[i] = EnhancedMenu::kDefaultKeys[i];
+      }
+      ImGui::PopID();
+    }
+    ImGui::TextDisabled("Pad: Select opens the nap window, Select + R3 this menu.");
+    ImGui::TextDisabled("The game's own buttons: its Options menu.");
+  }
   if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Place {
       const char* name;
@@ -4409,6 +4624,11 @@ std::string EnhancedPost::menu_settings_json() const {
   j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
+  auto keys = nlohmann::json::array();
+  for (const auto& k : g_enhanced_menu.keys) {
+    keys.push_back(k.load());
+  }
+  j["shortcut_keys"] = keys;
   return j.dump(2);
 }
 
@@ -4491,6 +4711,11 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   int map_size = g_enhanced_menu.minimap_size;
   get("minimap_size", map_size);
   g_enhanced_menu.minimap_size = map_size;
+  std::vector<u32> keys;
+  get("shortcut_keys", keys);
+  for (size_t i = 0; i < keys.size() && i < (size_t)EnhancedMenu::kShortcuts; i++) {
+    g_enhanced_menu.keys[i] = keys[i];
+  }
 }
 
 namespace {

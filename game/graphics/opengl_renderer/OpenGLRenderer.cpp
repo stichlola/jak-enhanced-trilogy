@@ -1122,7 +1122,9 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     m_render_state.loader->draw_debug_window();
   }
 
-  if (g_enhanced_menu.open && m_enhanced_post) {
+  if (g_enhanced_menu.start_menu && m_enhanced_post) {
+    m_enhanced_post->draw_start_menu();
+  } else if (g_enhanced_menu.open && m_enhanced_post) {
     m_enhanced_post->draw_menu();
   } else if (m_enhanced_post) {
     m_enhanced_post->draw_photo_hint();
