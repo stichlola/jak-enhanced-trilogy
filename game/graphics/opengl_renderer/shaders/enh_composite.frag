@@ -110,6 +110,8 @@ uniform sampler2D tex_T13;      // the sun shadow map as plain depths (soft shad
 uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per meter, soft (1) or not
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
+uniform vec2 night_dark;        // dark nights: how dark (0..1), the lights' gain
+uniform vec4 player_view;       // Jak (view space, game units), w: valid
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
@@ -1780,6 +1782,36 @@ void main() {
     }
   }
 
+  // dark nights: where no light reaches the world goes dark (the moon's blue left in it); what
+  // shines by itself (windows, fires, lamps: the brightest pixels) stays. The lights below then
+  // light the surfaces in their own colors.
+  // Around Jak a little is spared (he stays readable, as if the eyes were on him), and the eyes
+  // adapt: a dark view is brought up some (from a few points of the scene), a view with lights in
+  // it isn't, so they keep their contrast.
+  vec3 albedo = c;
+  float exposure = 1.0;
+  if (night_dark.x > 0.0) {
+    float dk = night_dark.x;
+    if (player_view.w > 0.0 && z > 0.0) {
+      float pd = length(p - player_view.xyz) / 4096.0;
+      dk *= 1.0 - 0.25 * (1.0 - smoothstep(0.5, 8.0, pd));
+    }
+    float l = luma(c);
+    float keep = smoothstep(0.4, 0.85, l);
+    vec3 moon = vec3(l) * vec3(0.7, 0.82, 1.1);
+    vec3 darkened = mix(c, moon, 0.45 * dk) * (1.0 - 0.9 * dk);
+    c = mix(darkened, c, keep);
+    float seen = 0.0;
+    for (int j = 0; j < 4; j++) {
+      for (int i = 0; i < 5; i++) {
+        float sl = luma(texture(tex_T0, vec2((float(i) + 0.5) / 5.0, (float(j) + 0.5) / 4.0)).rgb);
+        seen += mix(sl * (1.0 - 0.9 * night_dark.x), sl, smoothstep(0.4, 0.85, sl));
+      }
+    }
+    seen /= 20.0;
+    exposure = clamp(0.05 / max(seen, 1e-3), 1.0, 1.0 + 1.2 * night_dark.x);
+  }
+
   // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
   // own color (the scene's color stands in for its albedo), with a smooth falloff to its radius
   if (light_count > 0 && z > 0.0 && wsurf == 0.0) {
@@ -1810,15 +1842,21 @@ void main() {
         }
       }
     }
-    c += (c + 0.12) * added * ao;
-    c += glints * wet * 1.6;
+    if (night_dark.x > 0.0) {
+      // at night the light shows the surface's own color, brighter
+      c += (albedo + 0.12) * added * ao * night_dark.y;
+    } else {
+      c += (c + 0.12) * added * ao;
+    }
+    c += glints * wet * 1.6 * (1.0 + night_dark.x);
   }
 
   // indirect light: what the surroundings send, tinted by this surface's own color
   if (gi_strength > 0.0 && wsurf == 0.0) {
     vec3 gi = texture(tex_T7, tex_coord).rgb;
-    c += gi * gi_strength * (0.35 + c) * ao;
+    c += gi * gi_strength * (0.35 + c) * ao * (1.0 - 0.8 * night_dark.x);
   }
+  c *= exposure;
 
   // materials (from the texture names, in the normals' alpha): metal reflects its surroundings
   // tinted by its own color with a broad highlight; glass, marble and tiles reflect them untinted
@@ -1989,7 +2027,9 @@ void main() {
   }
   // the night sky: stars, the moon, a city's glow (over the game's sky)
   if (clouds.w > 0.01 && z == 0.0 && wsurf == 0.0) {
-    c += night_sky(ray, c, pixel_rad);
+    vec3 base = c;
+    c *= 1.0 - 0.75 * night_dark.x;
+    c += night_sky(ray, base, pixel_rad);
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
@@ -2003,12 +2043,14 @@ void main() {
     float amount = 1.0 - exp(-z * fog.x);
     amount *= clamp(exp(-height * fog.y), 0.0, 1.0);
     vec3 fc = mix(fog_color, vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15), 0.55 * weather.x);
+    fc *= 1.0 - 0.85 * night_dark.x;
     fc += vec3(1.0, 0.55, 0.25) * city_glow * 0.06 * clamp(exp(-height * fog.y), 0.0, 1.0);
     c = mix(c, fc, amount * fog.z);
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
     vec3 grey = vec3(luma(fog_color)) * vec3(0.82, 0.94, 1.15);  // the fog's brightness, cold, not its tint
+    grey *= 1.0 - 0.85 * night_dark.x;
     c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.007 + 0.006 * weather2.x))) * (0.22 + 0.12 * weather2.x) * weather.x);
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
@@ -2019,7 +2061,7 @@ void main() {
     vec3 fc = mix(fog_color, vec3(luma(fog_color)), 0.3) * 0.85 + vec3(0.06, 0.07, 0.08);
     // brighter looking toward the sun
     fc += vec3(1.0, 0.9, 0.75) * pow(max(dot(ray, sky_sun.xyz), 0.0), 6.0) * 0.35 * daylight;
-    c = mix(c, fc, ground_fog(ray, dist, low_fog) * 0.9);
+    c = mix(c, fc * (1.0 - 0.85 * night_dark.x), ground_fog(ray, dist, low_fog) * 0.9);
   }
   // dust: the game's sandstorm (its intensity and its wind), as a volume in the world: rolling
   // clouds of sand carried by the wind, streamers low over the ground close by; lit by the sun,
@@ -2031,7 +2073,7 @@ void main() {
     sand *= 1.0 + pow(max(dot(ray, sky_sun.xyz), 0.0), 4.0) * 0.6 * daylight;
     float dist = z > 0.0 ? length(p) / 4096.0 : 3000.0;
     float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832);
-    c = mix(c, sand, cover * 0.94);
+    c = mix(c, sand * (1.0 - 0.8 * night_dark.x), cover * 0.94);
   }
   if (puff_count > 0) {
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.12;
@@ -2065,7 +2107,7 @@ void main() {
     vec4 v = sum / wsum;
     // under rain the mist is grey, whatever the area's fog tint
     v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.82, 0.94, 1.15), weather.x * 0.6);
-    c = c * v.a + v.rgb;
+    c = c * v.a + v.rgb * (1.0 - 0.85 * night_dark.x);
   }
 
   // embers rising from the fires: small sparks drifting up and fading, hidden behind the scene
@@ -2214,7 +2256,8 @@ void main() {
       float lr = light_pos[i].w;
       float tc = dot(lp, ray);
       float h = sqrt(max(dot(lp, lp) - tc * tc, 1.0));
-      if (h > lr * 1.5) {
+      // (lamps, not the big area lights: those would fill the whole view)
+      if (h > lr * 1.5 || lr > 20.0 * 4096.0) {
         continue;
       }
       float t1 = min(scene_dist, tc + lr * 3.0);
@@ -2227,7 +2270,7 @@ void main() {
       shine += light_color[i].rgb * inte * (1.0 - smoothstep(lr * 0.5, lr * 1.5, h)) *
                smoothstep(2.0 * 4096.0, 6.0 * 4096.0, length(lp));
     }
-    c += shine * min(air, 1.5) * 0.02;
+    c += shine * min(air, 1.0) * 0.012;
     for (int i = 0; i < min(light_count, 16); i++) {
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);

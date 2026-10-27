@@ -1481,6 +1481,25 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
     glUniform3f(glGetUniformLocation(id, "fire"), m_settings.fire_haze, m_settings.fire_embers,
                 (float)std::fmod(m_time, 1000.0));
+    // dark nights: how dark (the desert darkest, a city least), and the lights reach further and
+    // shine stronger into it
+    const float dark = night_darkness();
+    glUniform2f(glGetUniformLocation(id, "night_dark"), dark, 1.f + 1.6f * dark);
+    {
+      // Jak in view space: the dark spares a little around him (he stays readable)
+      const auto& pl = g_enhanced_player;
+      float v[3] = {0.f, 0.f, 0.f};
+      for (int col = 0; col < 3; col++) {
+        for (int row = 0; row < 3; row++) {
+          v[col] += (pl.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      glUniform4f(glGetUniformLocation(id, "player_view"), v[0], v[1] + 1.f * kMeter, v[2],
+                  pl.valid && cam.valid ? 1.f : 0.f);
+    }
+    for (int i = 0; i < n; i++) {
+      pos[i * 4 + 3] *= 1.f + 0.6f * dark;
+    }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
@@ -1537,6 +1556,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
 // once a frame: the area Jak is in and the hour pick the grade and the weather, eased in over a
 // few seconds so a level change or nightfall doesn't snap
+float EnhancedPost::night_darkness() const {
+  if (m_settings.dark_nights <= 0.f || !m_ssao_ready) {
+    return 0.f;
+  }
+  const float zone = m_city ? 0.55f : (m_pond ? 0.9f : 0.75f);
+  return m_night * zone * m_settings.dark_nights;
+}
+
 void EnhancedPost::update_scene() {
   std::string level;
   float hour = 12.f;
@@ -3193,6 +3220,10 @@ void EnhancedPost::draw_menu() {
     if (check("Footprints in the sand", &prints)) {
       s.prints = prints ? 1.f : 0.f;
     }
+    bool dark = s.dark_nights > 0.f;
+    if (check("Dark nights", &dark)) {
+      s.dark_nights = dark ? 1.f : 0.f;
+    }
     bool smoke = s.lit_smoke > 0.f;
     if (check("Lit smoke", &smoke)) {
       s.lit_smoke = smoke ? 0.8f : 0.f;
@@ -3343,6 +3374,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["light_shadow"] = s.light_shadow;
   j["geometry_normals"] = s.geometry_normals;
   j["prints"] = s.prints;
+  j["dark_nights"] = s.dark_nights;
   j["lit_smoke"] = s.lit_smoke;
   j["far_view"] = s.far_view;
   j["materials"] = s.materials;
@@ -3396,6 +3428,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("light_shadow", s.light_shadow);
   get("geometry_normals", s.geometry_normals);
   get("prints", s.prints);
+  get("dark_nights", s.dark_nights);
   get("lit_smoke", s.lit_smoke);
   get("far_view", s.far_view);
   get("materials", s.materials);
@@ -3450,6 +3483,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.fire = d.fire;
   s.geometry_normals = d.geometry_normals;
   s.prints = d.prints;
+  s.dark_nights = d.dark_nights;
   s.lit_smoke = d.lit_smoke;
   s.far_view = d.far_view;
   s.materials = d.materials;

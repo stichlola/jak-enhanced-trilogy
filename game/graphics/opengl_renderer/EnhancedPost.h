@@ -149,6 +149,7 @@ class EnhancedPost {
     float blast = 1.0f;     // explosions: flash and shockwave (0 = the game's alone)
     float wake = 1.0f;      // rings on the water where Jak swims or rides
     float prints = 1.0f;    // footprints and ruts in the sand
+    float dark_nights = 1.0f;  // nights dark where no light reaches (0 = the game's own)
     float lit_smoke = 0.8f; // the dynamic lights brighten and tint the smoke and dust near them
     bool far_view = true;   // no occlusion culling from the game's precomputed visibility
     float relief = 1.0f;    // the textures' shading read as small bumps under the sun
@@ -502,6 +503,7 @@ class EnhancedPost {
   int m_zone = 0;
   bool m_pond = false;  // the water here is a pond (Jak 3's desert oases)
   float m_night = 0.f;
+  float night_darkness() const;
   bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)
