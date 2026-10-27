@@ -103,6 +103,22 @@ PROMPTS = {
         "A character portrait for a game select menu, from the waist up: Jak with long green hair, "
         "goggles, brown desert armor and a red scarf over his mouth, holding his gun, in a desert at sunset, orange "
         "sky, sand dunes, rusted wrecks. No text, letters, logo or watermark."),
+    # the start menu's portraits, from the player's pictures of the games' covers (local/cover_art/
+    # menuN_ref.png): the same pose and framing, remade, the covers' logos and lettering left out
+    "menu1": STYLE_3D + (
+        "Young Jak standing, spiky blond-green hair, goggles, blue tunic, arms crossed, with Daxter, an "
+        "orange otter-weasel with goggles, standing on his shoulder, in a lush jungle with stone ruins. "
+        "Remove every logo, title, letter, rating box and company mark: paint the background where they "
+        "were. No text, letters, logo or watermark."),
+    "menu2": STYLE_3D + (
+        "Jak with long spiky green-blond hair, goggles, dark blue armor and a red scarf, holding a big "
+        "gun, with Daxter clinging to his shoulder, over a deep blue painted wall. Remove every logo, "
+        "title, letter and company mark: paint the background where they were. No text, letters, logo "
+        "or watermark."),
+    "menu3": STYLE_3D + (
+        "Jak with green hair, goggles, brown desert armor and a scarf, holding a long gun, Daxter on his "
+        "shoulder, in a desert at sunset with buggies racing behind. Remove every logo, title, letter "
+        "and company mark: paint the background where they were. No text, letters, logo or watermark."),
     "icon": STYLE + (
         "An app icon: Jak's head, long green hair, brown goggles with a red lens, pointed ears, red "
         "scarf, with Daxter (orange otter-weasel with goggles) on his shoulder, bold readable shapes, "
