@@ -33,6 +33,12 @@ struct EnhancedPlayer {
 };
 extern EnhancedPlayer g_enhanced_player;
 
+// The jetboard's throttle: the controller's left trigger as pressed (0..1, read straight from the
+// pad: the game only gets L2 as a button), and the boost the game made of it (0..1, eased), set by
+// pc-enhanced-board-boost: the speed effects
+extern std::atomic<float> g_enhanced_l2_trigger;
+extern std::atomic<float> g_enhanced_board_boost;
+
 // OpenGOAL's debug toolbar (ImGui's menu bar at the top) only in a debug start (-debug): a player's
 // game never shows it, whatever debug-settings.json says (set by main from the arguments)
 extern bool g_enhanced_debug_toolbar;

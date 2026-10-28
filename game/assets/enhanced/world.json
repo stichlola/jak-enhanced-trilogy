@@ -63,7 +63,8 @@
 
   // the zones. "day" and "night" are the grade (eased between at dusk and dawn):
   //   lift: added in the shadows (rgb), gain: times the highlights (rgb), saturation (times the
-  //   setting), contrast and warmth (plus the setting), clouds: the sky cover (0..1)
+  //   setting), contrast and warmth (plus the setting), clouds: the sky cover (0..1), golden: the
+  //   late afternoon's amber look (0..1), sun_yaw: the sun's path turned around the up axis (degrees)
   // "weather" is what the "Changing" weather does there (all optional):
   //   outdoors: false = no weather at all (caves, interiors)
   //   rain, mist, snow, heat (hot air over lava), dust, sunny (the zone's own touch of vivid
@@ -112,7 +113,7 @@
     },
     // desert: sun-baked by day, cold blue night; sandstorms come and go, the nights are clear
     "desert": {
-      "day": {"lift": [0.004, 0.0, -0.006], "gain": [1.03, 1.0, 0.95], "saturation": 1.05, "contrast": 0.24, "warmth": 0.02, "clouds": 0.2, "sand": 0.85, "sun_haze": 0.8, "rock_detail": 0.75},
+      "day": {"lift": [0.004, 0.0, -0.006], "gain": [1.03, 1.0, 0.95], "saturation": 1.05, "contrast": 0.24, "warmth": 0.02, "clouds": 0.2, "sand": 0.85, "sun_haze": 0.8, "rock_detail": 0.75, "golden": 1.0, "sun_yaw": 125},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25, "sand": 0.4, "rock_detail": 0.5},
       "weather": {"fog": {"period": 480, "clear": 0.0, "light": 0.85, "light_amount": 0.3}, "game_dust": true,
                   "spells": {"period": 360, "fair": 0.55, "overcast": 0.04, "sandstorm": 0.32, "shower": 0.02, "thunder": 0.02, "fog": 0.05}},

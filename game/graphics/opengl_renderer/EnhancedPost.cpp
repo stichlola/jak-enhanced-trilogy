@@ -32,6 +32,8 @@
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
+std::atomic<float> g_enhanced_l2_trigger{0.f};
+std::atomic<float> g_enhanced_board_boost{0.f};
 bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
@@ -104,6 +106,7 @@ namespace {
 // the game runs whenever it's saved (see the file for what each value does)
 struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
+  float golden = 0.f, sun_yaw = 0.f;
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -309,6 +312,9 @@ void load_world() {
       out.sand = l.value("sand", 0.f);
       out.sun_haze = l.value("sun_haze", 0.f);
       out.rock_detail = l.value("rock_detail", 0.f);
+      // (as the day's unless the night says otherwise)
+      out.golden = l.value("golden", out.golden);
+      out.sun_yaw = l.value("sun_yaw", out.sun_yaw);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -624,13 +630,14 @@ constexpr float kScissorHeightScale = (512.f / 416.f) * 0.5f;
 // GOAL distance units per meter
 constexpr float kMeter = 4096.f;
 
-// the key light in world space; test switch: JAK_ENHANCED_SUN_YAW=<degrees> turns it around the
-// world's up axis
+// the area's turn of the sun's path ("sun_yaw" in world.json, degrees), eased (update_scene)
+float g_sun_yaw = 0.f;
+
+// the key light in world space, turned around the world's up axis by the area's sun_yaw; test
+// switch: JAK_ENHANCED_SUN_YAW=<degrees> instead
 void sun_world(float out[3]) {
-  static const float yaw = [] {
-    const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
-    return env ? (float)std::atof(env) * 3.14159265f / 180.f : 0.f;
-  }();
+  static const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
+  const float yaw = (env ? (float)std::atof(env) : g_sun_yaw) * 3.14159265f / 180.f;
   const float* d = g_enhanced_sun.dir;
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
@@ -2190,7 +2197,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           // wet ground (rain, puddles): the wheels throw spray, not dust
           add_puff(back, side, board ? 0.1f : 1.3f, std::min(0.4f + sp * 0.03f, 1.6f), 1, 0.8f);
         } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
-          add_puff(back, side, board ? 0.1f : 1.4f, std::min(0.6f + sp * 0.05f, 2.4f), 0, 2.2f);
+          // (the board under its L2 boost: a bigger plume, hanging longer)
+          const float b = board ? g_enhanced_board_boost.load() : 0.f;
+          add_puff(back, side, board ? 0.1f : 1.4f, std::min(0.6f + sp * 0.05f, 2.4f) * (1.f + 0.8f * b), 0,
+                   2.2f * (1.f + 0.5f * b));
         }
         m_puff_left = !m_puff_left;
         m_puff_time = m_time;
@@ -2533,7 +2543,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
     glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
   }
-  glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy, strength, 0.02f);
+  // (the board's L2 boost: a stronger, longer blur)
+  const float boost = have_scene && g_enhanced_player.valid ? g_enhanced_board_boost.load() : 0.f;
+  glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy,
+              strength * (1.f + 1.5f * boost), 0.02f * (1.f + boost));
   glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
 
   // the clouds first, at a quarter of the pixels (the composite then reads them)
@@ -2823,6 +2836,8 @@ void EnhancedPost::update_scene() {
   want.sand = s.area_grading ? mix(day.sand, night.sand) : 0.f;
   want.sun_haze = s.area_grading ? mix(day.sun_haze, night.sun_haze) : 0.f;
   want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
+  want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
+  want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -3094,6 +3109,9 @@ void EnhancedPost::update_scene() {
   ease(m_grade.sand, want.sand, k_grade);
   ease(m_grade.sun_haze, want.sun_haze, k_grade);
   ease(m_grade.rock_detail, want.rock_detail, k_grade);
+  ease(m_grade.golden, want.golden, k_grade);
+  ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
+  g_sun_yaw = m_grade.sun_yaw;
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
@@ -4699,11 +4717,15 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
   {
-    // the hours around noon (11-13, eased in from 9:30 and out by 14:30)
+    // the bright hours (10-14.5, eased in from 7:30 and out by 17): never brighter in the morning
+    // or the afternoon than at noon
     const float hr = m_last_hour < 0.f ? 12.f : m_last_hour;
-    const float noon = std::clamp((hr - 9.5f) / 1.5f, 0.f, 1.f) *
-                       (1.f - std::clamp((hr - 13.f) / 1.5f, 0.f, 1.f));
+    auto ease = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
+    const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f));
     glUniform1f(glGetUniformLocation(id, "noon"), noon);
+    // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
+    const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
+    glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
   }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
   // the rock picture (custom_assets/<game>/scenery/rock_detail.png), loaded on first use

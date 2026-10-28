@@ -523,7 +523,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 
 (define-extern enhanced-update-pushers (function none))
 
-(define *enhanced-player-vec* (new 'static 'vector))
+(define *enhanced-player-vec* (new 'static 'inline-array vector 2))
 (define *enhanced-lamp-hold* 0.0)
 (define *enhanced-lamp-toggles* 0)
 (define-extern *enhanced-pusher-count* int)
@@ -2319,12 +2319,38 @@ capture exactly."
       (set! *enhanced-lamp-toggles* (logand (+ *enhanced-lamp-toggles* 1) 63))
       )
     )
+  ;; Enhanced: the jetboard's throttle (board-h.gc): the pad's left trigger as pressed, or L2 held
+  ;; (a keyboard); built up on the ground, kept through a jump, gone off the board
+  (when *target*
+    ;; (the trigger comes back from pc-enhanced-set-player, in the second vector: last frame's)
+    (let ((v (-> *enhanced-player-vec* 1)))
+      (set! (-> v x) *enhanced-board-boost*)
+      (let ((throttle (if (< 0.02 (-> v y))
+                          (-> v y)
+                          (if (cpad-hold? 0 l2) 1.0 0.0)
+                          )
+                      )
+            )
+        (cond
+          ((not (focus-test? *target* board))
+           (set! *enhanced-board-boost* 0.0)
+           )
+          ((not (time-elapsed? (-> *target* control last-time-on-surface) (seconds 0.15)))
+           (seek! *enhanced-board-boost*
+                  throttle
+                  (* (if (< *enhanced-board-boost* throttle) 1.4 0.8) (seconds-per-frame))
+                  )
+           )
+          )
+        )
+      )
+    )
   ;; Enhanced: grass bends away from Jak
   (when *target*
     ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts), 3 on foot,
     ;; 4 on the board, 5 driving or boarding over water (spray and a wake), 6 on the board in the air
     ;; (a jump: no dust), 7 driving in the air (the vehicle's physics counts its frames off the ground)
-    (let ((v *enhanced-player-vec*))
+    (let ((v (-> *enhanced-player-vec* 0)))
       (vector-copy! v (-> *target* control trans))
       (set! (-> v w) (cond
                        ((and (focus-test? *target* pilot board) (enhanced-over-water? v)) 5.0)

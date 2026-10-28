@@ -1,5 +1,6 @@
 #include "game_controller.h"
 
+#include <algorithm>
 #include <optional>
 
 #include "dualsense_effects.h"
@@ -143,6 +144,11 @@ void GameController::process_event(const SDL_Event& sdl_event,
     }
 
     auto& binds = m_settings->controller_binds.at(m_guid);
+
+    // Enhanced: the left trigger as pressed, for the jetboard's throttle (whatever it's bound to)
+    if (event.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER) {
+      g_enhanced_l2_trigger = std::clamp((event.gaxis.value - 1638) / (32767.f - 1638.f), 0.f, 1.f);
+    }
 
     // Handle analog stick binds
     if (event.gaxis.axis >= SDL_GAMEPAD_AXIS_LEFTX && event.gaxis.axis <= SDL_GAMEPAD_AXIS_RIGHTY &&

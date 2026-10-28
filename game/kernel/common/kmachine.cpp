@@ -1109,6 +1109,13 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   // w: the state, plus 8 x the count of lantern switches (holding triangle), mod 64
   g_enhanced_player.state = (int)v[3] & 7;
   g_enhanced_player.lamp_toggles = (int)v[3] >> 3;
+  // jak 3: the jetboard's throttle (a second vector after it): in v[4] the boost the game made of
+  // it (0..1), for the speed effects; out v[5] the pad's left trigger as pressed (0..1). Its own
+  // kernel function would be simpler, but one more C function symbol crashes jak3 on boot
+  if (g_game_version == GameVersion::Jak3) {
+    g_enhanced_board_boost = v[4];
+    v[5] = g_enhanced_l2_trigger;
+  }
   g_enhanced_player.valid = true;
 }
 

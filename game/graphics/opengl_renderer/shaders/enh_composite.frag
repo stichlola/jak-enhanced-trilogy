@@ -78,6 +78,7 @@ uniform float saturation;
 uniform float contrast;
 uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
+uniform float golden;           // the late afternoon's amber look (0..1, the area's times the hour)
 uniform float noon;             // the hours around noon (0..1)
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
@@ -3156,8 +3157,9 @@ void main() {
       if (w > 0.0) {
         // (a pale, dusty beige: less saturated than the game's olive (no lighter: noon burned out); never
         // past a sand's saturation: the yellower patches went bright orange, in blotches and bands)
-        float h2 = mix(hue, 0.095, w);
-        float s2 = mix(sat, min(sat, 0.3), w);
+        // (in the late afternoon: amber, and as rich as the low sun makes it)
+        float h2 = mix(hue, mix(0.095, 0.075, golden), w);
+        float s2 = mix(sat, mix(min(sat, 0.3), clamp(sat * 1.25, 0.4, 0.5), golden), w);
         vec3 k = clamp(abs(mod(h2 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
         c = mx * mix(vec3(1.0), k, s2);
       }
@@ -3243,6 +3245,18 @@ void main() {
     c *= 1.0 - 0.49 * high;
     // (and the color the glare washed out of it back: sand, not chalk)
     c = max(mix(vec3(luma(c)), c, 1.0 + 0.2 * high), 0.0);
+  }
+  // the late afternoon: amber and deep, the lit parts richer, the shade darker
+  if (golden > 0.0 && z > 0.0) {
+    float lg = luma(c);
+    c = max(mix(vec3(lg), c, 1.0 - 0.15 * golden), 0.0);
+    // (the sand stopped down; the mountains lifted, the low sun lights them face on. By the
+    // normals' tag lengths, tfrag3.frag / hfrag.frag)
+    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float rock_expo = mix(1.0, 1.25, smoothstep(15.0, 60.0, length(p) / 4096.0));
+    float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
+    c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
+    c *= 1.0 - 0.4 * golden * (1.0 - smoothstep(0.2, 0.55, lg));
   }
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);

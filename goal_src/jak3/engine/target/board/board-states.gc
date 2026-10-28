@@ -761,7 +761,8 @@
         (cond
           ((>= (-> self board turn-anim-duck) 0.0)
            (let ((a0-31 (-> self skel root-channel 3)))
-             (let ((f0-14 (-> self board turn-anim-duck)))
+             ;; Enhanced: leaning into the L2 boost (board-h.gc)
+             (let ((f0-14 (fmax (-> self board turn-anim-duck) (* 0.45 *enhanced-board-boost*))))
                (set! (-> a0-31 frame-interp 1) f0-14)
                (set! (-> a0-31 frame-interp 0) f0-14)
                )

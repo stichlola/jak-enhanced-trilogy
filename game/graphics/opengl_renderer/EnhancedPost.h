@@ -539,6 +539,8 @@ class EnhancedPost {
     float sand = 0.f;                 // olive and dull greens pushed toward golden sand (0..1)
     float sun_haze = 0.f;             // warm haze lit by the sun over the distance (0..1)
     float rock_detail = 0.f;          // the rock picture over rock and cliffs (0..1)
+    float golden = 0.f;               // the late afternoon's amber look (0..1)
+    float sun_yaw = 0.f;              // the sun's path turned around the up axis (degrees)
   };
   void update_scene();
   Grade m_grade;

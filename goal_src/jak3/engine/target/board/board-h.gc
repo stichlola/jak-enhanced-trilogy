@@ -9,6 +9,11 @@
 ;; settings would leave it out. #f = vanilla.
 (define *enhanced-board-always* #t)
 
+;; Enhanced: the jetboard's throttle. L2 on the ground (as hard as it's pressed, on a pad's trigger)
+;; builds a boost, let go it fades and the board slows; held through a jump. Faster board, Jak
+;; leaning into it, speed effects in the renderer (logic-target.gc, target-board.gc, board-states.gc)
+(define *enhanced-board-boost* 0.0)
+
 ;; +++board-tricks
 (defenum board-tricks
   :type uint32
