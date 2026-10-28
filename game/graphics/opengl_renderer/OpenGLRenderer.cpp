@@ -1147,6 +1147,9 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
                m_enhanced_post && m_enhanced_post->active() ? "on" : "off",
                g_enhanced_player.pos[0] / 4096.f, g_enhanced_player.pos[1] / 4096.f,
                g_enhanced_player.pos[2] / 4096.f, g_enhanced_scene.level);
+      if (settings.gpu_sync && std::getenv("JAK_ENHANCED_PROFILE")) {
+        lg::info("[enhanced] profile of this frame:\n{}", m_profiler.to_string());
+      }
       window_start = clock::now();
       frames = 0;
       render_ms = 0;

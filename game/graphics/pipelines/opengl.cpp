@@ -601,7 +601,9 @@ void render_game_frame(int game_width,
     options.save_screenshot = false;
     options.quick_screenshot = false;
     options.internal_res_screenshot = false;
-    options.gpu_sync = g_gfx_data->debug_gui.should_gl_finish();
+    // (JAK_ENHANCED_PROFILE=1: each renderer waits for the GPU, so the log's profile is GPU time)
+    static const bool profile_env = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
+    options.gpu_sync = g_gfx_data->debug_gui.should_gl_finish() || profile_env;
 
     if (take_screenshot) {
       options.save_screenshot = true;

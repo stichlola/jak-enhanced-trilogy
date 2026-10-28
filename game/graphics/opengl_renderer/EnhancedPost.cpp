@@ -48,6 +48,22 @@ EnhancedHeadlights g_enhanced_headlights;
 EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
 EnhancedBigmap g_enhanced_bigmap;
+
+// JAK_ENHANCED_PROFILE=1: each pass waits for the GPU before and after, so the log's profile shows
+// what each one costs on the graphics card
+static bool enh_profiling() {
+  static const bool on = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
+  return on;
+}
+#define ENH_TIMED(name, ...)                        \
+  if (enh_profiling()) {                            \
+    glFinish();                                     \
+    auto timed_node = prof.make_scoped_child(name); \
+    __VA_ARGS__;                                    \
+    glFinish();                                     \
+  } else {                                          \
+    __VA_ARGS__;                                    \
+  }
 EnhancedTimeOfDay g_enhanced_tod;
 EnhancedNormals g_enhanced_normals;
 
@@ -1149,7 +1165,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform2f(glGetUniformLocation(rid, "keep"), m_settings.taa_history,
                 m_settings.taa_history_fast);
     glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    ENH_TIMED("enh-taa", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
     prof.add_draw_call();
     scene_tex = m_taa_tex[cur];
     m_taa_cur = 1 - cur;
@@ -2262,7 +2278,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy, strength, 0.02f);
   glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
 
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   prof.add_draw_call();
   glBindSampler(13, 0);
 
@@ -3649,20 +3665,20 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_vol_ready = false;
   m_shadow_ready = false;
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
-    do_shadow_map(render_state, prof);
+    ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }
   // the levels' ray tracing hierarchies (occlusion, reflections)
-  update_rt(render_state);
+  ENH_TIMED("enh-rt-update", update_rt(render_state));
   if (m_settings.ssao) {
-    do_ssao(scene_fbo, w, h, screen_vao, render_state, prof);
+    ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
     if (m_settings.volume && m_ssao_ready && m_fog > 0.01f) {
-      do_volume(render_state, screen_vao, prof);
+      ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
     if (m_settings.gi && m_ssao_ready) {
-      do_gi(scene_tex, screen_vao, render_state, prof);
+      ENH_TIMED("enh-gi", do_gi(scene_tex, screen_vao, render_state, prof));
     }
     if (m_settings.shafts && m_ssao_ready && g_enhanced_sun.valid) {
-      do_shafts(scene_tex, screen_vao, render_state, prof);
+      ENH_TIMED("enh-shafts", do_shafts(scene_tex, screen_vao, render_state, prof));
     }
   }
   // set again by the next frame's background draws
@@ -4409,6 +4425,24 @@ void EnhancedPost::draw_menu() {
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Napping within 3 m of a marked bed, Jak sleeps on it (%d in this game)",
                           (int)beds.size());
+      }
+    }
+    // "Report a problem.bat" next to the launcher: data\ in the release, the project in the source
+    {
+      const auto proj = file_util::get_jak_project_dir();
+      fs::path bat = proj.parent_path() / "Report a problem.bat";
+      if (!fs::exists(bat)) {
+        bat = proj / "Report a problem.bat";
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Report a problem") && fs::exists(bat)) {
+        std::system(fmt::format("start \"\" \"{}\"", bat.string()).c_str());
+        g_enhanced_menu.open = false;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Collects your logs, PC details and settings in a ZIP and asks whether to send it\n"
+            "(a window opens over the game: Alt+Tab if you don't see it)");
       }
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
