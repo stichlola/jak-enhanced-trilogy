@@ -532,6 +532,8 @@ class EnhancedPost {
     float contrast = 0.f;             // plus the setting
     float warmth = 0.f;
     float clouds = 0.45f;             // sky cover, 0..1
+    float sand = 0.f;                 // olive and dull greens pushed toward golden sand (0..1)
+    float sun_haze = 0.f;             // warm haze lit by the sun over the distance (0..1)
   };
   void update_scene();
   Grade m_grade;

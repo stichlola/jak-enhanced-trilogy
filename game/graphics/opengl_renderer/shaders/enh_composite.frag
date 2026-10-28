@@ -77,6 +77,8 @@ uniform float shafts_strength;
 uniform float saturation;
 uniform float contrast;
 uniform float warmth;
+uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
+uniform float sand;             // the area's olive and dull greens pushed toward golden sand (0..1)
 uniform float vignette;
 
 uniform vec3 up_view;   // world up in view space
@@ -960,6 +962,13 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   float phase = 0.6 + 1.6 * pow(max(cosang, 0.0), 6.0) + 0.25 * pow(max(-cosang, 0.0), 2.0);
   vec3 under = mix(sky * 0.55, vec3(luma(sky)) * 0.5, 0.3) * (1.0 - 0.45 * weather.x - 0.3 * weather2.x);
   vec3 top = sky * 0.9 + 0.08;
+  // a warm hazy area (the desert): sunset clouds, gold where the sun lights them, dusty mauve
+  // undersides and peach tops
+  if (sun_haze > 0.0) {
+    sc *= mix(vec3(1.0), vec3(1.2, 0.86, 0.52), sun_haze * 0.75);
+    under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25), sun_haze * 0.55);
+    top = mix(top, vec3(0.95, 0.72, 0.55), sun_haze * 0.35);
+  }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
   // more steps toward the horizon, where the ray crosses kilometers of slab: long steps there
@@ -1289,7 +1298,7 @@ vec2 step_ripples(vec2 xz) {
     float age = splash[i].w - 10.0 * strength;
     vec2 rel = xz - splash[i].xz / 4096.0;
     float d = length(rel);
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < 4; k++) {
       float a = age - float(k) * 0.12;
       if (a <= 0.0) {
         continue;
@@ -2337,7 +2346,7 @@ void main() {
     // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
     if (weather.x > 0.0 && z < 15.0 * 4096.0) {
       float spl = 0.0;
-      for (int k = 0; k < 2; k++) {
+      for (int k = 0; k < 4; k++) {
         float cs = k == 0 ? 0.3 : 0.45;
         vec2 cell = floor(ww.xz / cs + float(k) * 0.5);
         float h = hash1(cell + float(k) * 13.0);
@@ -2451,6 +2460,18 @@ void main() {
     fc *= 1.0 - 0.85 * night_dark.x;
     fc += vec3(1.0, 0.55, 0.25) * city_glow * 0.06 * clamp(exp(-height * fog.y), 0.0, 1.0);
     c = mix(c, fc, amount * fog.z);
+  }
+  // the desert's air: a warm haze lit by the sun, thicker with distance, glowing toward the sun;
+  // over the low sky too (the horizon goes golden), not up high
+  if (sun_haze > 0.0 && wsurf == 0.0) {
+    float dist = z > 0.0 ? length(p) / 4096.0 : 5000.0;
+    float up = max(world_dir(ray).y, 0.0);
+    float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+    float toward = max(dot(ray, sky_sun.xyz), 0.0);
+    vec3 hc = mix(fog_color, sun_color() * vec3(1.0, 0.76, 0.48), 0.85);
+    hc *= 0.9 + 0.5 * toward * toward + 0.6 * pow(toward, 12.0);
+    float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
+    c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75, 0.0, 1.0));
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -2975,6 +2996,66 @@ void main() {
     avg = max(avg / 20.0, vec3(1e-3));
     vec3 wb = clamp(vec3(luma(avg)) / avg, vec3(0.8), vec3(1.25));
     c *= mix(vec3(1.0), wb, 0.35 * (1.0 - clouds.w));
+  }
+
+  // the desert's sand: the game paints it olive, and lit at dusk it goes green. Its yellow-greens
+  // (and the dull dark greens of its pebbles) turned toward warm gold; the sky and the strong
+  // greens of plants kept
+  if (sand > 0.0 && z > 0.0) {
+    float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+    float ch = mx - mn;
+    if (ch > 1e-4) {
+      // hue (0..1), as hsv
+      float hue = mx == c.r ? mod((c.g - c.b) / ch, 6.0) : mx == c.g ? (c.b - c.r) / ch + 2.0 : (c.r - c.g) / ch + 4.0;
+      hue /= 6.0;
+      float sat = ch / mx;
+      // olive and yellow-green fully; the dull greens of the pebbles less (strong greens stay)
+      float w = smoothstep(0.07, 0.12, hue) * (1.0 - smoothstep(0.24, 0.30, hue));
+      w = max(w, smoothstep(0.2, 0.26, hue) * (1.0 - smoothstep(0.42, 0.5, hue)) * (1.0 - smoothstep(0.35, 0.6, sat)) * 0.8);
+      w *= smoothstep(0.03, 0.12, sat) * sand;
+      if (w > 0.0) {
+        // (a pale, dusty beige: less saturated and a little lighter than the game's olive)
+        float h2 = mix(hue, 0.088, w);
+        float s2 = sat * (1.0 - 0.2 * w);
+        vec3 k = clamp(abs(mod(h2 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+        c = mx * (1.0 + 0.1 * w) * mix(vec3(1.0), k, s2);
+        // on the dunes (the hfrag terrain, marked in the normals' alpha): the wind's ripples, made
+        // up in the world (the game's sand is a blur up close), shaded by the sun across them. Two
+        // sizes, each faded only as it gets too small for the pixels: no edge that follows Jak
+        // (sand's normals are written 0.9 long: tfrag3.frag)
+        float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+        float dune = step(0.85, nl) * step(nl, 0.95);
+        float level = dot(surf_n, up_view);
+        float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
+        float rip = dune * w / sand * smoothstep(0.4, 0.75, level);
+        if (rip > 0.0) {
+          vec2 xz = cam_pos.xz / 4096.0 + world_dir(p).xz / 4096.0;
+          vec2 across = vec2(0.82, 0.57);  // the crests run across the wind
+          vec2 sun_xz = world_dir(sky_sun.xyz).xz;
+          float facing = dot(across, sun_xz) / max(length(sun_xz), 1e-3);
+          float warp = gnoise(xz * 0.35) * 2.2 + gnoise(xz * 1.3) * 0.6;
+          // in patches: sharp in some places, smoothed out in others
+          float patches = 0.35 + 0.65 * smoothstep(-0.25, 0.35, gnoise(xz * 0.11 + 3.7));
+          float shade = 0.0;
+          // (wavelength m, strength): visible while a wave spans 3+ pixels; the bigger ones carry
+          // the ripples far out, so the small ones fading never shows as an edge
+          const vec2 octave[4] = vec2[](vec2(0.24, 1.0), vec2(1.1, 0.7), vec2(3.6, 0.55), vec2(11.0, 0.4));
+          for (int k = 0; k < 4; k++) {
+            float wl = octave[k].x;
+            float vis = 1.0 - smoothstep(wl / 8.0, wl / 2.5, foot);
+            if (vis > 0.0) {
+              float phase = dot(xz, across) * 6.2832 / wl + warp * 6.2832 * (k == 0 ? 1.0 : 0.45 / float(k)) + float(k) * 1.7;
+              float crest = sin(phase) + 0.35 * sin(2.0 * phase);
+              float slope = cos(phase) + 0.7 * cos(2.0 * phase);
+              shade += vis * octave[k].y * (0.08 * slope * facing + 0.025 * crest);
+            }
+          }
+          float grain = gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4;
+          float fine = 1.0 - smoothstep(0.006, 0.015, foot);
+          c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
+        }
+      }
+    }
   }
 
   // grading: the area's tint (shadows lifted toward one color, highlights toward another), then

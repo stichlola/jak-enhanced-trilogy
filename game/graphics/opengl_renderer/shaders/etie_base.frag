@@ -19,7 +19,7 @@ uniform int gfx_hack_no_tex;
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
-uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy (see EnhancedMaterials.h)
+uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand (see EnhancedMaterials.h)
 
 vec4 enh_pack_normal(vec3 n) {
   vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
@@ -40,9 +40,10 @@ vec4 enh_pack_normal(vec3 n) {
   } else {
     return vec4(0.0);
   }
-  // the material in the 2-bit alpha: 1 plain, 2/3 metal, 1/3 glossy (0: no normal)
+  // the material in the 2-bit alpha: 1 plain, 2/3 metal, 1/3 glossy (0: no normal); sand (plain)
+  // as a normal 0.9 long (the composite draws the wind's ripples on it)
   float a = enh_material == 1 ? 2.0 / 3.0 : (enh_material == 2 ? 1.0 / 3.0 : 1.0);
-  return vec4(n * 0.5 + 0.5, a);
+  return vec4(n * (enh_material == 3 ? 0.9 : 1.0) * 0.5 + 0.5, a);
 }
 
 void main() {

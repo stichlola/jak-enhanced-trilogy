@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 #include <mutex>
 #include <unordered_map>
 
@@ -61,6 +62,7 @@ struct Mesh {
   Vec3 avg;      // its texture's average color (opaque texels), 0..1
   float foot_y = 0;  // where it meets the ground: the bottom of its middle, not of drooping tips
   u64 tex_key = 0;   // the texture's content (models sharing it share one GL texture)
+  bool cutout = false;  // its texture has holes (blades, leaves): swayed by the wind, pushed aside
   int far_lod = -1;      // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
   // its impostor (<file>_imp.png): pictures of it from kImpGrid^2 directions, drawn past them all
   int imp_w = 0, imp_h = 0;
@@ -106,6 +108,8 @@ struct Library {
   std::mutex mutex;
   bool loaded_config = false;
   std::unordered_map<std::string, std::vector<int>> protos;  // proto name -> meshes
+  // protos whose models get their own colors: the average they're brought to (rgb)
+  std::unordered_map<std::string, std::array<float, 3>> own_colors;
   std::vector<Mesh> meshes;
   std::unordered_map<u64, GLuint> textures;  // by the texture's content
   GLuint instance_vbo = 0;
@@ -208,6 +212,9 @@ bool load_mesh(Mesh& mesh) {
     }
     mesh.tex_key = h;
   }
+  for (size_t p = 3; p < mesh.rgba.size() && !mesh.cutout; p += 4) {
+    mesh.cutout = mesh.rgba[p] < 128;
+  }
   {
     double sum[3] = {0, 0, 0}, n = 0;
     for (size_t p = 0; p < mesh.rgba.size(); p += 4) {
@@ -261,6 +268,12 @@ void load_config(Library& lib) {
     auto j = parse_commented_json(file_util::read_text_file(path), path.string());
     std::unordered_map<std::string, int> by_file;
     for (auto& [proto, files] : j.items()) {
+      if (proto == "own_colors") {
+        for (const auto& [p, rgb] : files.items()) {
+          lib.own_colors[p] = {rgb[0].get<float>(), rgb[1].get<float>(), rgb[2].get<float>()};
+        }
+        continue;
+      }
       for (const auto& f : files) {
         auto file = f.get<std::string>();
         auto it = by_file.find(file);
@@ -322,13 +335,18 @@ void load_config(Library& lib) {
   }
 }
 
-// the models listed for a proto: by its name without the ".mb" the levels give it
-const std::vector<int>* models_for(const Library& lib, const std::string& proto) {
+// a proto's name without the ".mb" the levels give it
+std::string proto_key(const std::string& proto) {
   std::string name = proto;
   if (name.size() > 3 && name.compare(name.size() - 3, 3, ".mb") == 0) {
     name.resize(name.size() - 3);
   }
-  auto it = lib.protos.find(name);
+  return name;
+}
+
+// the models listed for a proto
+const std::vector<int>* models_for(const Library& lib, const std::string& proto) {
+  auto it = lib.protos.find(proto_key(proto));
   return it == lib.protos.end() ? nullptr : &it->second;
 }
 
@@ -482,7 +500,8 @@ void prepare_tree(tfrag3::ShrubTree& tree,
       b.mesh = m;
       const auto& draw = tree.static_draws[first_draw_of_proto.at(proto)];
       b.mode = draw.mode;
-      b.foliage = draw.mode.get_at_enable();
+      // (a solid model, a stone, stays put even standing in for an alpha-tested proto)
+      b.foliage = draw.mode.get_at_enable() && mesh.cutout;
       // the proto's own vertex color (baked light), averaged
       const auto& grp = groups[g];
       float sum[3] = {0, 0, 0};
@@ -494,8 +513,14 @@ void prepare_tree(tfrag3::ShrubTree& tree,
       for (int c = 0; c < 3; c++) {
         b.base_rgb[c] = sum[c] / std::max(1u, grp.end_vert - grp.start_vert) / 255.f;
       }
-      // the model's colors toward the proto's texture (a straw-pale grass stays straw-pale)
-      if (draw.tree_tex_id < textures.size()) {
+      // the model's colors toward the proto's texture (a straw-pale grass stays straw-pale),
+      // unless it keeps its own (stones: the game's are dull grey-green)
+      auto own = lib.own_colors.find(proto_key(tree.proto_names[proto]));
+      if (own != lib.own_colors.end()) {
+        for (int c = 0; c < 3; c++) {
+          b.tint[c] = std::clamp(own->second[c] / std::max(mesh.avg[c], 0.02f), 0.2f, 2.5f);
+        }
+      } else if (draw.tree_tex_id < textures.size()) {
         Vec3 want = texture_average(textures[draw.tree_tex_id]);
         for (int c = 0; c < 3; c++) {
           b.tint[c] = std::clamp(want[c] / std::max(mesh.avg[c], 0.02f), 0.4f, 2.5f);
@@ -806,6 +831,22 @@ void make_imp_gl(Mesh& mesh, Library& lib) {
 void enhanced_prepare_scenery(tfrag3::Level& level, const std::string& name) {
   if (level.shrub_trees.empty()) {
     return;
+  }
+  // JAK_ENHANCED_SCENERY_LIST: the level's shrub protos and how many draws use each (to pick
+  // which to replace in scenery.json)
+  static const bool list = std::getenv("JAK_ENHANCED_SCENERY_LIST") != nullptr;
+  if (list) {
+    std::map<std::string, int> uses;
+    for (const auto& tree : level.shrub_trees) {
+      for (const auto& draw : tree.static_draws) {
+        if (draw.proto_idx < tree.proto_names.size()) {
+          uses[tree.proto_names[draw.proto_idx]]++;
+        }
+      }
+    }
+    for (const auto& [proto, n] : uses) {
+      lg::info("[enhanced] scenery list: {}: {} ({} draws)", name, proto, n);
+    }
   }
   auto& lib = library();
   std::lock_guard<std::mutex> lock(lib.mutex);

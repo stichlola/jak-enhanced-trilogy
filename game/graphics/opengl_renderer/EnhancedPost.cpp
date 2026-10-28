@@ -102,7 +102,7 @@ namespace {
 // The world's look and weather for the three games: game/assets/enhanced/world.json, reloaded while
 // the game runs whenever it's saved (see the file for what each value does)
 struct ZoneLook {
-  float lift[3], gain[3], saturation, contrast, warmth, clouds;
+  float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze;
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -277,7 +277,7 @@ WorldZone neutral_zone() {
   WorldZone z;
   z.name = "other";
   for (auto& l : z.look) {
-    l = {{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f};
+    l = {{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f, 0.f, 0.f};
   }
   return z;
 }
@@ -305,6 +305,8 @@ void load_world() {
       out.contrast = l.value("contrast", 0.f);
       out.warmth = l.value("warmth", 0.f);
       out.clouds = l.value("clouds", 0.4f);
+      out.sand = l.value("sand", 0.f);
+      out.sun_haze = l.value("sun_haze", 0.f);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -2645,6 +2647,8 @@ void EnhancedPost::update_scene() {
   want.contrast = s.area_grading ? mix(day.contrast, night.contrast) : 0.f;
   want.warmth = s.area_grading ? mix(day.warmth, night.warmth) : 0.f;
   want.clouds = mix(day.clouds, night.clouds);
+  want.sand = s.area_grading ? mix(day.sand, night.sand) : 0.f;
+  want.sun_haze = s.area_grading ? mix(day.sun_haze, night.sun_haze) : 0.f;
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -2913,6 +2917,8 @@ void EnhancedPost::update_scene() {
   ease(m_grade.saturation, want.saturation, k_grade);
   ease(m_grade.contrast, want.contrast, k_grade);
   ease(m_grade.warmth, want.warmth, k_grade);
+  ease(m_grade.sand, want.sand, k_grade);
+  ease(m_grade.sun_haze, want.sun_haze, k_grade);
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
@@ -4488,6 +4494,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "saturation"), m_settings.saturation * m_grade.saturation);
   glUniform1f(glGetUniformLocation(id, "contrast"), m_settings.contrast + m_grade.contrast);
   glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
+  glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
+  glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
   glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   glUniform3fv(glGetUniformLocation(id, "grade_gain"), 1, m_grade.gain);
   // soft shadows: the shadow map again, read as plain depths for the blocker search

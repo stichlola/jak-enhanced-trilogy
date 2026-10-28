@@ -16,7 +16,8 @@ vec4 enh_pack_normal(vec3 n) {
     // (blended, not switched: a hard switch drew the lights' highlights as sharp patches)
     n = normalize(mix(f, n * sign(d), smoothstep(0.6, 0.85, abs(d))));
   }
-  return vec4(n * 0.5 + 0.5, 1.0);
+  // (0.9 long: sand, so the composite draws the wind's ripples on the dunes; see tfrag3.frag)
+  return vec4(n * 0.9 * 0.5 + 0.5, 1.0);
 }
 
 in vec4 fragment_color;
@@ -35,7 +36,7 @@ uniform int gfx_hack_no_tex;
 
 
 void main() {
-  enh_normal_out = enh_pack_normal(enh_normal);
+  vec3 n = enh_normal;
   if (gfx_hack_no_tex == 0) {
     vec4 T0 = texture(tex_T0, tex_coord);
     if (enhanced_sand != 0) {
@@ -50,6 +51,7 @@ void main() {
   } else {
     color = fragment_color;
   }
+  enh_normal_out = enh_pack_normal(n);
 
    color.rgb = mix(color.rgb, fog_color.rgb, clamp(fogginess * fog_color.a, 0, 1));
 }
