@@ -1286,7 +1286,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
               render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
   m_time += 1.0 / 60.0;
-  glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength : 0.f,
+  // (the heat shimmer only where it's hot, Jak 3's desert by day: elsewhere it only blurred and
+  // shimmered the distance; lava has its own)
+  const float hot = m_pond ? (1.f - m_night) * (1.f - std::min(1.f, m_rain * 2.f)) : 0.f;
+  glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength * hot : 0.f,
               120.f * kMeter, 400.f * kMeter, (float)m_time);
   glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa && !taa);
 
