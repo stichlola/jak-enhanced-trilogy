@@ -130,6 +130,8 @@ uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after t
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
 uniform float sheet;            // sheet lightning: the whole sky lit from inside the clouds (0..1)
 uniform vec2 snow_heat;          // snowfall, hot air over lava (0..1)
+uniform vec4 strike;            // a bolt to the ground: its foot's elevation (sine), the cloud base's, its distance (game units), on
+uniform vec4 sky_kind;          // the evening's sky: stars shown (0..1), the moon's lit part, red eclipse, red sunset now
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform float close_up;          // cutscenes: nearer than this (game units) no sun shadow map (0 = off)
@@ -358,7 +360,7 @@ vec3 night_dim(vec3 col) {
     return col;
   }
   float l = luma(col);
-  vec3 moon = vec3(l) * vec3(0.7, 0.82, 1.1);
+  vec3 moon = vec3(l) * mix(vec3(0.7, 0.82, 1.1), vec3(1.1, 0.55, 0.45), sky_kind.z);
   vec3 darkened = mix(col, moon, 0.45 * night_dark.x) * (1.0 - 0.9 * night_dark.x);
   return mix(darkened, col, smoothstep(0.4, 0.85, l));
 }
@@ -693,27 +695,32 @@ float bolt_jag(float u, float seed) {
 
 float lightning_bolt(vec3 ray_view, float px) {
   // the cloud base where it comes out (sine of the elevation): lower for a farther bolt
-  float top = 0.14 + 0.16 * fract(bolt.y * 0.37);
+  // (a strike: from the cloud base above it down to its foot on the ground; the nearer, the bigger
+  // it all is on screen: s scales the channel's sideways angles)
+  bool ground = strike.w > 0.0;
+  float top = ground ? strike.y : 0.14 + 0.16 * fract(bolt.y * 0.37);
+  float bottom = ground ? strike.x : 0.0;
+  float s = ground ? clamp(200.0 * 4096.0 / strike.z, 0.5, 10.0) : 1.0;
   float a = bolt.z;
   if (bolt.w <= 0.0 || a > 0.42) {
     return 0.0;
   }
   vec3 wd = world_dir(ray_view);
   float el = wd.y;
-  if (el < -0.01 || el > top) {
+  if (el < bottom - 0.01 || el > top) {
     return 0.0;
   }
-  float da = mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159;
+  float da = (mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159) / s;
   if (abs(da) > 0.5) {
     return 0.0;
   }
-  float u = (top - el) / top;
+  float u = (top - el) / max(top - bottom, 1e-4);
   // the leader's tip
   float lead = clamp(a / 0.09, 0.0, 1.0);
   if (u > lead) {
     return 0.0;
   }
-  float w = max(px * 1.3, 0.0012);
+  float w = max(px * 1.3 / s, 0.0012);
   float x = da - bolt_jag(u, bolt.y);
   float core = exp(-x * x / (w * w));
   float glow = exp(-x * x / 0.0012) * 0.3 + exp(-x * x / 0.015) * 0.08;
@@ -794,7 +801,7 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
     float bd = dot(wd, band_n);
     float band = exp(-bd * bd / 0.035) * (0.4 + 0.9 * vnoise3(wd * 7.0) * vnoise3(wd * 19.0 + 3.0));
     float city_dim = 1.0 - 0.75 * city_glow;
-    add += vec3(0.55, 0.6, 0.78) * band * 0.045 * city_dim;
+    add += vec3(0.55, 0.6, 0.78) * band * 0.045 * city_dim * sky_kind.x * sky_kind.x;
     for (int layer = 0; layer < 2; layer++) {
       float cells = layer == 0 ? 70.0 : 220.0;
       vec2 g = (f * 0.5 + 0.5) * cells;
@@ -803,7 +810,8 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
       float h = ihash3(key);
       // (more of the faint ones along the milky way)
       float thr = layer == 0 ? 0.9 : 0.78 - 0.25 * band;
-      if (h > thr) {
+      // (a hazy or moonlit night shows only some of them: the brightest stay)
+      if (h > thr && h > mix(1.0, thr, sky_kind.x)) {
         vec2 sp = vec2(ihash3(key + 11.0), ihash3(key + 23.0)) * 0.7 + 0.15;
         float ang = length(g - cid - sp) / cells * 1.5708;
         float size = px * (layer == 0 ? 1.1 : 0.75);
@@ -830,9 +838,18 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
     float seas = smoothstep(0.45, 0.7, vnoise3(vec3(mq * 2.2, 1.7)) * 0.7 + vnoise3(vec3(mq * 5.0, 4.1)) * 0.3);
     float limb = sqrt(max(1.0 - dot(mq, mq), 0.0));
     vec3 moon = vec3(0.98, 0.96, 0.88) * (1.0 - 0.3 * seas) * (0.75 + 0.25 * limb) * 1.25;
-    float halo = pow(md, 900.0) * 0.25 + pow(md, 60.0) * 0.06;
+    // its phase: lit right of the terminator (an ellipse across the disk), the rest by earthshine
+    float term = (1.0 - 2.0 * sky_kind.y) * sqrt(max(1.0 - mq.y * mq.y, 0.0));
+    moon *= mix(0.04, 1.0, smoothstep(term - 0.08, term + 0.08, -mq.x));
+    // a full moon: brighter and a wider halo; the eclipse: Earth's shadow, a dim copper red
+    float full = step(0.99, sky_kind.y) * (1.0 - sky_kind.z);
+    moon *= 1.0 + 0.25 * full;
+    vec3 blood = vec3(0.62, 0.17, 0.07) * (0.55 + 0.45 * limb) * (1.0 - 0.35 * seas) *
+                 (0.7 + 0.3 * smoothstep(-1.0, 1.0, mq.x + mq.y));
+    moon = mix(moon, blood, sky_kind.z);
+    float halo = (pow(md, 900.0) * 0.25 + pow(md, 60.0) * 0.06) * (1.0 + 0.8 * full) * (1.0 - 0.6 * sky_kind.z);
     add = mix(add, moon, disk * mclear * smoothstep(0.0, 0.05, up));
-    add += vec3(0.6, 0.68, 0.85) * halo * (0.4 + 0.6 * mclear);
+    add += mix(vec3(0.6, 0.68, 0.85), vec3(0.7, 0.25, 0.15), sky_kind.z) * halo * (0.4 + 0.6 * mclear);
   }
   // a city's lights on the low sky
   add += vec3(1.0, 0.55, 0.25) * city_glow * 0.06 * (1.0 - smoothstep(-0.05, 0.4, up));
@@ -842,6 +859,8 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
 // the sun's color by its height, the moon's at night
 vec3 sun_color() {
   vec3 col = mix(vec3(1.0, 0.5, 0.28), vec3(1.0, 0.96, 0.9), smoothstep(0.05, 0.35, sky_sun.w));
+  // the red sunset: the low sun through a thick sky, deep orange-red and strong
+  col = mix(col, vec3(1.25, 0.36, 0.1), sky_kind.w * (1.0 - smoothstep(0.1, 0.45, sky_sun.w)));
   return mix(col, vec3(0.13, 0.15, 0.22), clouds.w);
 }
 
@@ -858,6 +877,18 @@ vec3 sky_color(vec3 dv) {
   col = mix(col, vec3(luma(hor)) * vec3(0.9, 0.94, 1.0) * (1.0 - 0.35 * weather2.x), over);
   float sd = max(dot(dv, sky_sun.xyz), 0.0);
   vec3 sc = sun_color();
+  // sunsets: a warm band along the horizon, wider and brighter toward the sun; the red one burns
+  // orange-red low down under a mauve sky (the sun's half of the sky the most)
+  {
+    float low = 1.0 - smoothstep(0.1, 0.45, sky_sun.w);
+    float toward = 0.5 + 0.5 * dot(normalize(vec2(wd.x, wd.z) + 1e-4),
+                                   normalize(world_dir(sky_sun.xyz).xz + 1e-4));
+    float band = exp(-up * (6.0 - 3.0 * toward)) * (0.35 + 0.65 * toward * toward);
+    vec3 warm = mix(vec3(1.0, 0.62, 0.32), vec3(1.0, 0.3, 0.1), sky_kind.w);
+    vec3 above = mix(col, vec3(0.42, 0.24, 0.36), 0.75 * sky_kind.w * (1.0 - band));
+    col = mix(col, above, low);
+    col = mix(col, warm * (0.8 + 0.5 * sky_kind.w), band * low * (0.35 + 0.55 * sky_kind.w) * (1.0 - over * 0.6));
+  }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
   return col;
@@ -1977,7 +2008,7 @@ void main() {
     }
     float l = luma(c);
     float keep = smoothstep(0.4, 0.85, l);
-    vec3 moon = vec3(l) * vec3(0.7, 0.82, 1.1);
+    vec3 moon = vec3(l) * mix(vec3(0.7, 0.82, 1.1), vec3(1.1, 0.55, 0.45), sky_kind.z);
     vec3 darkened = mix(c, moon, 0.45 * dk) * (1.0 - 0.9 * dk);
     c = mix(darkened, c, keep);
     float seen = 0.0;
@@ -2248,7 +2279,7 @@ void main() {
       c = mix(c, sky, clouds.x * (1.0 - clouds.w));
       vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
-      if (bolt.w > 0.0) {
+      if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? lightning_bolt(ray, pixel_rad) : 0.0;
       }
     }
@@ -2258,6 +2289,10 @@ void main() {
     if (sky_k > 0.5) {
       z = 0.0;  // the weather below treats it as sky
     }
+  }
+  // a bolt striking the ground: over the sky and whatever is behind it
+  if (strike.w > 0.0 && bolt.w > 0.0 && wsurf == 0.0 && (z == 0.0 || z > strike.z * 0.97)) {
+    bolt_light = max(bolt_light, lightning_bolt(ray, pixel_rad));
   }
   // the night sky: stars, the moon, a city's glow (over the game's sky)
   if (clouds.w > 0.01 && z == 0.0 && wsurf == 0.0) {

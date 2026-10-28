@@ -531,6 +531,11 @@ class EnhancedPost {
   float m_sheet_strength = 0.f;
   double m_next_sheet = 0;
   double m_thunder_at = -1;  // when the last bolt's thunder arrives (s)
+  // lightning striking the ground (g_enhanced_strike): when the next is asked for, and the one
+  // being drawn (world, game units; m_strike_age < 0: none)
+  double m_next_strike = 0;
+  float m_strike_pos[3] = {};
+  float m_strike_age = -1.f;
   int m_thunder_kind = 0;
   float m_wind[2] = {0.f, 1.f};  // the dust's wind direction (world xz)
   float m_wind_speed = 8.f;      // m/s
@@ -545,6 +550,18 @@ class EnhancedPost {
   int m_zone = 0;
   bool m_pond = false;  // the water here is a pond (Jak 3's desert oases)
   float m_night = 0.f;
+  // each evening picks its sky (pick_evening): the sunset (red: rare, deep and warm) and the night
+  // that follows (SkyNight). m_dusk: the sun going down (0..1), m_red_dusk: the red sunset's
+  // strength now (eased); m_sky_force_*: the menu's pick for testing (-1: the evening's own)
+  enum SkyNight { kStarry, kFewStars, kFullMoon, kNearlyFull, kRedEclipse, kSkyNights };
+  int m_night_kind = kStarry;
+  bool m_red_sunset = false;
+  float m_dusk = 0.f;
+  float m_red_dusk = 0.f;
+  float m_last_hour = -1.f;
+  int m_sky_force_night = -1;
+  int m_sky_force_red = -1;
+  void pick_evening();
   float night_darkness() const;
   // the vehicles' headlights (world): position, strength; direction. Kept until the game sends
   // the next frame's

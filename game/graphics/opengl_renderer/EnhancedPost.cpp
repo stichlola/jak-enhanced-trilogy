@@ -45,6 +45,7 @@ EnhancedCasters g_enhanced_casters;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
 EnhancedExplosions g_enhanced_explosions;
+EnhancedStrike g_enhanced_strike;
 EnhancedHeadlights g_enhanced_headlights;
 EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
@@ -2402,7 +2403,34 @@ float EnhancedPost::night_darkness() const {
     return 0.f;
   }
   const float zone = m_city ? 0.68f : (m_pond ? 0.9f : 0.78f);
-  return m_night * zone * m_settings.dark_nights;
+  // the moon lights a full-moon night; an eclipse or a hazy night is darker
+  static const float kMoonlight[kSkyNights] = {1.f, 1.05f, 0.72f, 0.82f, 1.1f};
+  return std::min(1.f, m_night * zone * m_settings.dark_nights * kMoonlight[m_night_kind]);
+}
+
+// The evening's sky, picked once a game day as the afternoon ends (and on the first frame): a red
+// sunset one evening in four or so, and the night: starry, hazy with few stars, a full moon, a
+// nearly full one, now and then a red eclipse. JAK_ENHANCED_NIGHT=0..4 and JAK_ENHANCED_RED_SUNSET=0/1
+// (or the menu's Time of day) force them
+void EnhancedPost::pick_evening() {
+  static std::mt19937 rng{std::random_device{}()};
+  std::uniform_real_distribution<float> u(0.f, 1.f);
+  static const float kWeights[kSkyNights] = {0.3f, 0.2f, 0.2f, 0.22f, 0.08f};
+  float r = u(rng);
+  m_night_kind = kStarry;
+  for (int i = 0; i < kSkyNights; i++) {
+    if (r < kWeights[i]) {
+      m_night_kind = i;
+      break;
+    }
+    r -= kWeights[i];
+  }
+  m_red_sunset = u(rng) < 0.25f;
+  // (the menu's pick lasts one evening)
+  m_sky_force_night = -1;
+  m_sky_force_red = -1;
+  lg::info("[enhanced] this evening: {} sunset, night {}", m_red_sunset ? "red" : "normal",
+           m_night_kind);
 }
 
 void EnhancedPost::update_scene() {
@@ -2458,6 +2486,32 @@ void EnhancedPost::update_scene() {
   auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
   m_night = std::max(ramp(19.f, 21.f, hour), 1.f - ramp(5.f, 7.f, hour));
   g_enhanced_play_weather.night = m_night;
+  // a new evening's sky as the afternoon passes 16:00 (or the clock is set past it)
+  if (m_last_hour < 0.f || (m_last_hour < 16.f && hour >= 16.f) ||
+      (hour < m_last_hour - 0.5f && hour >= 16.f)) {
+    pick_evening();
+  }
+  m_last_hour = hour;
+  {
+    static const char* force_night = std::getenv("JAK_ENHANCED_NIGHT");
+    static const char* force_red = std::getenv("JAK_ENHANCED_RED_SUNSET");
+    if (force_night && m_sky_force_night < 0) {
+      m_sky_force_night = std::clamp(std::atoi(force_night), 0, kSkyNights - 1);
+    }
+    if (force_red && m_sky_force_red < 0) {
+      m_sky_force_red = std::atoi(force_red) != 0;
+    }
+  }
+  if (m_sky_force_night >= 0) {
+    m_night_kind = m_sky_force_night;
+  }
+  if (m_sky_force_red >= 0) {
+    m_red_sunset = m_sky_force_red != 0;
+  }
+  // the sun going down (and, softer, coming up)
+  m_dusk = std::max(ramp(16.5f, 18.5f, hour) * (1.f - ramp(19.6f, 20.8f, hour)),
+                    0.5f * ramp(5.f, 6.f, hour) * (1.f - ramp(6.6f, 7.6f, hour)));
+  m_red_dusk = m_red_sunset && hour > 12.f ? m_dusk : 0.f;
 
   const auto& s = m_settings;
   const ZoneLook& day = (s.area_grading ? zone : g_world.zones[0]).look[0];
@@ -2487,6 +2541,13 @@ void EnhancedPost::update_scene() {
   if (s.area_grading && zone.weather.outdoors) {
     want.warmth += season.warmth;
     want.saturation += season.saturation;
+    // sunsets: warmer and richer; the red one deep red, the blue gone from the light
+    want.warmth += m_dusk * 0.12f + m_red_dusk * 0.4f;
+    want.saturation += m_dusk * 0.12f + m_red_dusk * 0.3f;
+    want.contrast += m_red_dusk * 0.06f;
+    want.gain[0] += m_red_dusk * 0.14f;
+    want.gain[1] -= m_red_dusk * 0.04f;
+    want.gain[2] -= m_red_dusk * 0.2f;
   }
   if (g_enhanced_menu.photo_active) {
     const auto& pf = kPhotoFilters[std::clamp(s.photo_filter, 0, kPhotoFilterCount - 1)];
@@ -2811,7 +2872,7 @@ void EnhancedPost::update_scene() {
   if (m_next_bolt == 0) {
     m_next_bolt = m_time + 3.0;
   }
-  if (m_storm > 0.3f && m_time >= m_next_bolt) {
+  if (m_storm > 0.3f && m_time >= m_next_bolt && m_strike_age < 0.f) {
     auto rnd = [] { return (float)(std::rand() % 10000) / 10000.f; };
     m_bolt[0] = rnd() * 6.2832f;
     m_bolt[1] = rnd() * 100.f;
@@ -2827,6 +2888,69 @@ void EnhancedPost::update_scene() {
     m_thunder_at = -1;
     int deg = (int)(m_bolt[0] * 57.2958f) % 360;
     g_enhanced_thunder = m_thunder_kind * 1000 + deg;
+  }
+  // lightning that strikes the ground, now and then in a strong storm: mostly far from Jak
+  // (60-250 m), sometimes nearer (25-60), rarely close (6-20). The game finds the ground and sets
+  // off a blast there (pc-enhanced-strike); when it says where, the bolt comes down to that spot
+  if (m_next_strike == 0) {
+    m_next_strike = m_time + 8.0;
+  }
+  if (m_storm > 0.5f && m_time >= m_next_strike && g_enhanced_player.valid) {
+    static std::mt19937 rng{std::random_device{}()};
+    std::uniform_real_distribution<float> u(0.f, 1.f);
+    m_next_strike = m_time + (6.0 + 16.0 * u(rng)) / m_storm;
+    const float r = u(rng);
+    float dist = r < 0.04f ? 6.f + 14.f * u(rng) : r < 0.2f ? 25.f + 35.f * u(rng) : 60.f + 190.f * u(rng);
+    float ang = u(rng) * 6.2832f;
+    // test: every few seconds straight ahead of the camera, JAK_ENHANCED_STRIKE_TEST=<meters> away
+    static const char* strike_test = std::getenv("JAK_ENHANCED_STRIKE_TEST");
+    if (strike_test) {
+      dist = (float)std::atof(strike_test);
+      ang = std::atan2(m_prev_camera.rot[0][2], m_prev_camera.rot[2][2]);
+      m_next_strike = m_time + 4.0;
+    }
+    std::lock_guard<std::mutex> lock(g_enhanced_strike.mutex);
+    g_enhanced_strike.at[0] = g_enhanced_player.pos[0] + std::sin(ang) * dist * kMeter;
+    g_enhanced_strike.at[1] = g_enhanced_player.pos[1];
+    g_enhanced_strike.at[2] = g_enhanced_player.pos[2] + std::cos(ang) * dist * kMeter;
+    g_enhanced_strike.at[3] = 7.f * kMeter;
+    g_enhanced_strike.asked = true;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_strike.mutex);
+    if (g_enhanced_strike.hit) {
+      g_enhanced_strike.hit = false;
+      for (int i = 0; i < 3; i++) {
+        m_strike_pos[i] = g_enhanced_strike.hit_pos[i];
+      }
+      m_strike_age = 0.f;
+      if (std::getenv("JAK_ENHANCED_STRIKE_TEST")) {
+        lg::info("[strike] hit {:.1f} {:.1f} {:.1f} jak {:.1f} {:.1f} {:.1f} cam {:.1f} {:.1f} {:.1f} (m)",
+                 m_strike_pos[0] / kMeter, m_strike_pos[1] / kMeter, m_strike_pos[2] / kMeter,
+                 g_enhanced_player.pos[0] / kMeter, g_enhanced_player.pos[1] / kMeter,
+                 g_enhanced_player.pos[2] / kMeter, m_prev_camera.trans[0] / kMeter,
+                 m_prev_camera.trans[1] / kMeter, m_prev_camera.trans[2] / kMeter);
+      }
+      // the bolt (drawn to the ground: see the "strike" uniform), at its brightest
+      const float dx = m_strike_pos[0] - m_prev_camera.trans[0];
+      const float dz = m_strike_pos[2] - m_prev_camera.trans[2];
+      m_bolt[0] = std::atan2(dx, dz);
+      m_bolt[1] = (float)(std::rand() % 10000) / 100.f;
+      m_bolt[2] = 0.f;
+      m_bolt[3] = 1.f;
+      // the thunder: a crack right away when it's close, later the farther it is
+      const float meters = std::sqrt(dx * dx + dz * dz) / kMeter;
+      m_thunder_at = m_time + meters / 343.f;
+      m_thunder_kind = meters < 40.f ? 1 : 1 + std::rand() % 3;
+      m_next_bolt = std::max(m_next_bolt, m_time + 1.0);
+    }
+  }
+  static const bool strike_hold = std::getenv("JAK_ENHANCED_STRIKE_TEST") && std::getenv("JAK_ENHANCED_BOLT_TEST");
+  if (m_strike_age >= 0.f && !strike_hold) {
+    m_strike_age += dt;
+    if (m_strike_age > 0.6f) {
+      m_strike_age = -1.f;
+    }
   }
   m_bolt[2] += dt;
   // sheet lightning: every few seconds the whole sky flickers from inside the clouds, two or three
@@ -2855,8 +2979,10 @@ void EnhancedPost::update_scene() {
   // test: a bolt held at its brightest (screenshots)
   static const bool bolt_test = std::getenv("JAK_ENHANCED_BOLT_TEST") != nullptr;
   if (bolt_test && m_storm > 0.3f) {
-    // straight ahead, at the age JAK_ENHANCED_BOLT_TEST says (s)
-    m_bolt[0] = std::atan2(m_prev_camera.rot[0][2], m_prev_camera.rot[2][2]) + 0.25f;
+    // straight ahead, at the age JAK_ENHANCED_BOLT_TEST says (s; a strike's own place, if there's one)
+    if (m_strike_age < 0.f) {
+      m_bolt[0] = std::atan2(m_prev_camera.rot[0][2], m_prev_camera.rot[2][2]) + 0.25f;
+    }
     m_bolt[1] = 7.f;
     m_bolt[2] = (float)std::atof(std::getenv("JAK_ENHANCED_BOLT_TEST"));
     m_bolt[3] = 1.f;
@@ -4195,6 +4321,20 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
       }
       up = 0.34f;
     }
+    // test: the sun (or moon) straight ahead, JAK_ENHANCED_SKY_TEST=<sine of its height> (sunsets,
+    // the moon's phases)
+    static const char* sky_test = std::getenv("JAK_ENHANCED_SKY_TEST");
+    if (sky_test) {
+      up = (float)std::atof(sky_test);
+      const float flat = std::sqrt(std::max(0.f, 1.f - up * up));
+      // (the camera's heading in the world, level, raised by up; then into view space)
+      const auto& r = m_prev_camera.rot;
+      const float hl = std::max(1e-4f, std::sqrt(r[0][2] * r[0][2] + r[2][2] * r[2][2]));
+      const float w[3] = {r[0][2] / hl * flat, up, r[2][2] / hl * flat};
+      for (int col = 0; col < 3; col++) {
+        sv[col] = w[0] * r[0][col] + w[1] * r[1][col] + w[2] * r[2][col];
+      }
+    }
     glUniform4f(glGetUniformLocation(id, "sky_sun"), sv[0], sv[1], sv[2], up);
   }
   // (no sky, clouds or weather without a 3D scene: loading screens, menus)
@@ -4213,11 +4353,35 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform4f(glGetUniformLocation(id, "dust_wind"), m_wind[0] / wl, m_wind[1] / wl,
                 (float)m_drift[0], (float)m_drift[1]);
   }
+  {
+    // the evening's sky: how many of the stars show, the moon's lit part, the eclipse, the red sunset
+    static const float kStars[kSkyNights] = {1.f, 0.18f, 0.4f, 0.55f, 1.f};
+    static const float kLit[kSkyNights] = {1.f, 1.f, 1.f, 0.82f, 1.f};
+    glUniform4f(glGetUniformLocation(id, "sky_kind"), kStars[m_night_kind], kLit[m_night_kind],
+                m_night_kind == kRedEclipse ? 1.f : 0.f, m_red_dusk * on);
+  }
   glUniform1f(glGetUniformLocation(id, "sunny"), m_sunny * on);
   glUniform1f(glGetUniformLocation(id, "sheet"), m_sheet * on);
   glUniform2f(glGetUniformLocation(id, "snow_heat"), m_snow * on, m_heat * on);
   glUniform4f(glGetUniformLocation(id, "bolt"), m_bolt[0], m_bolt[1], m_bolt[2],
               m_bolt[3] * m_storm * on);
+  {
+    // a bolt to the ground: the sines of the elevation of its foot and of the cloud base 600 m
+    // above, its distance (game units)
+    float st[4] = {0.f, 0.f, 0.f, 0.f};
+    if (m_strike_age >= 0.f && m_prev_camera.valid) {
+      const float dx = m_strike_pos[0] - m_prev_camera.trans[0];
+      const float dy = m_strike_pos[1] - m_prev_camera.trans[1];
+      const float dz = m_strike_pos[2] - m_prev_camera.trans[2];
+      const float flat = std::max(std::sqrt(dx * dx + dz * dz), kMeter);
+      const float top = dy + 600.f * kMeter;
+      st[0] = dy / std::sqrt(flat * flat + dy * dy);
+      st[1] = top / std::sqrt(flat * flat + top * top);
+      st[2] = std::sqrt(flat * flat + dy * dy);
+      st[3] = 1.f;
+    }
+    glUniform4f(glGetUniformLocation(id, "strike"), st[0], st[1], st[2], st[3] * on);
+  }
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
@@ -4531,22 +4695,23 @@ void EnhancedPost::draw_menu() {
                           (int)beds.size());
       }
     }
-    // "Report a problem.bat" next to the launcher: data\ in the release, the project in the source
+    // the report window (scripts\enhanced\report.ps1, also opened by the launcher after a crash),
+    // read as text like update.ps1 so the execution policy doesn't matter
     if (!enhanced_light()) {
       const auto proj = file_util::get_jak_project_dir();
-      fs::path bat = proj.parent_path() / "Report a problem.bat";
-      if (!fs::exists(bat)) {
-        bat = proj / "Report a problem.bat";
-      }
+      const fs::path ps1 = proj / "scripts" / "enhanced" / "report.ps1";
       ImGui::SameLine();
-      if (ImGui::Button("Report a problem") && fs::exists(bat)) {
-        std::system(fmt::format("start \"\" \"{}\"", bat.string()).c_str());
+      if (ImGui::Button("Send feedback") && fs::exists(ps1)) {
+        std::system(fmt::format("start \"\" powershell -NoProfile -WindowStyle Hidden -Command \"& "
+                                "([scriptblock]::Create([IO.File]::ReadAllText('{}'))) -Proj '{}'\"",
+                                ps1.string(), proj.string())
+                        .c_str());
         g_enhanced_menu.open = false;
       }
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Collects your logs, PC details and settings in a ZIP and asks whether to send it\n"
-            "(a window opens over the game: Alt+Tab if you don't see it)");
+            "A problem, an idea? Write it and send it with one click: your newest logs, PC details\n"
+            "and settings go with it (a window opens over the game: Alt+Tab if you don't see it)");
       }
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
@@ -4785,6 +4950,23 @@ void EnhancedPost::draw_menu() {
     static bool frozen = false;
     if (ImGui::Checkbox("Freeze time", &frozen)) {
       g_enhanced_menu.ask(4, frozen ? "0" : "1");
+    }
+    // this evening's sky (each evening picks its own: this sets it by hand)
+    static const char* nights[] = {"Starry", "Few stars", "Full moon", "Nearly full moon",
+                                   "Red eclipse"};
+    ImGui::SetNextItemWidth(200);
+    if (ImGui::BeginCombo("Tonight", nights[m_night_kind])) {
+      for (int i = 0; i < kSkyNights; i++) {
+        if (ImGui::Selectable(nights[i], m_night_kind == i)) {
+          m_sky_force_night = i;
+        }
+      }
+      ImGui::EndCombo();
+    }
+    ImGui::SameLine();
+    bool red = m_red_sunset;
+    if (ImGui::Checkbox("Red sunset", &red)) {
+      m_sky_force_red = red ? 1 : 0;
     }
   }
   if (ImGui::CollapsingHeader("Controls")) {

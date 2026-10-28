@@ -224,6 +224,19 @@ struct EnhancedExplosions {
 };
 extern EnhancedExplosions g_enhanced_explosions;
 
+// Lightning that strikes the ground in a thunderstorm: the post pass picks where (world, game
+// units: around Jak, mostly far) and asks; the game (pc-enhanced-strike) finds the ground there,
+// sets off an explosion that hurts what it touches and says where it hit (pc-enhanced-strike-hit),
+// and the bolt is drawn down to that point
+struct EnhancedStrike {
+  std::mutex mutex;
+  bool asked = false;
+  float at[4] = {};  // where (y: Jak's height), w: the blast's radius
+  bool hit = false;
+  float hit_pos[3] = {};
+};
+extern EnhancedStrike g_enhanced_strike;
+
 // The vehicles' headlights near the camera, sent by the game every frame (pc-enhanced-headlight):
 // world position (game units), strength; the way they point (unit)
 struct EnhancedHeadlights {

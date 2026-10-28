@@ -307,6 +307,49 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 (define *enhanced-nap-wanted* 0)
 (define *enhanced-nap-wait* 0)
 
+;; Enhanced: lightning that strikes the ground in a thunderstorm. The renderer picks the spot (around
+;; Jak, mostly far: pc-enhanced-strike); the ground is found under it and a blast set off there that
+;; hurts what it touches, and the renderer told where, to draw the bolt down to it
+(define-extern explosion-spawn (function explosion-init-params process-drawable none))
+(define *enhanced-strike-at* (new 'global 'vector))
+
+(defun enhanced-strike-update ()
+  (when (and *target* (pc-enhanced-strike (the-as pointer *enhanced-strike-at*)))
+    (let ((from (new 'stack-no-clear 'vector))
+          (to (new 'stack-no-clear 'vector)))
+      (vector-copy! from *enhanced-strike-at*)
+      (vector-copy! to *enhanced-strike-at*)
+      (+! (-> from y) (meters 150.0))
+      (+! (-> to y) (meters -150.0))
+      (let ((t (enhanced-probe-line from to 2048.0)))
+        (when (>= t 0.0)
+          (let ((hit (new 'stack-no-clear 'vector))
+                (ep (new 'stack-no-clear 'explosion-init-params)))
+            (vector-lerp! hit from to t)
+            (set! (-> hit w) 1.0)
+            (pc-enhanced-strike-hit (the-as pointer hit))
+            (vector-copy! (-> ep spawn-point) hit)
+            (quaternion-identity! (-> ep spawn-quat))
+            (set! (-> ep radius) (-> *enhanced-strike-at* w))
+            (set! (-> ep scale) 1.0)
+            (set! (-> ep group) (-> *part-group-id-table* 219)) ;; group-kg-explosion (enemy-part.gc)
+            (set! (-> ep collide-with)
+                  (collide-spec jak crate civilian enemy obstacle vehicle-sphere hit-by-others-list player-list pusher)
+                  )
+            (set! (-> ep damage) 2.0)
+            (set! (-> ep damage-scale) 1.0)
+            (set! (-> ep vehicle-damage-factor) 1.0)
+            (set! (-> ep vehicle-impulse-factor) 1.0)
+            (set! (-> ep ignore-proc) (the-as handle #f))
+            (explosion-spawn ep (the-as process-drawable *target*))
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun enhanced-menu-update ()
   ;; a nap asked for and not started (Jak wasn't standing still) is forgotten after two seconds
   (when (> *enhanced-nap-wanted* 0)
@@ -2264,6 +2307,7 @@ capture exactly."
   (enhanced-piazza-autoload)
   (enhanced-review-update)
   (enhanced-menu-update)
+  (enhanced-strike-update)
   ;; Enhanced: holding triangle on foot (half a second) switches Jak's lantern on or off; counted
   ;; and sent with the player's state (a tap still enters vehicles and talks)
   (when *target*

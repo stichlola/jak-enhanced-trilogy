@@ -1264,6 +1264,35 @@ u64 pc_enhanced_poll_request(u32 dest, u32 max_len) {
 }
 
 // Enhanced: the Enhanced menu's state for the game: 2 x the times it opened, + 1 while it's open
+// Enhanced: a lightning strike the renderer asked for (g_enhanced_strike): its spot written to out
+// (world, game units; w: the blast's radius) and #t, once. Never when the weather doesn't affect
+// play (the menu's switch, Enhanced Light)
+u64 pc_enhanced_strike(u32 out) {
+  std::lock_guard<std::mutex> lock(g_enhanced_strike.mutex);
+  if (!g_enhanced_strike.asked) {
+    return bool_to_symbol(false);
+  }
+  g_enhanced_strike.asked = false;
+  if (!g_enhanced_play_weather.enabled || enhanced_light()) {
+    return bool_to_symbol(false);
+  }
+  float* o = Ptr<float>(out).c();
+  for (int i = 0; i < 4; i++) {
+    o[i] = g_enhanced_strike.at[i];
+  }
+  return bool_to_symbol(true);
+}
+
+// Enhanced: where the strike hit the ground (a vector, game units): the bolt goes down to it
+void pc_enhanced_strike_hit(u32 pos) {
+  const float* p = Ptr<float>(pos).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_strike.mutex);
+  for (int i = 0; i < 3; i++) {
+    g_enhanced_strike.hit_pos[i] = p[i];
+  }
+  g_enhanced_strike.hit = true;
+}
+
 // Enhanced: whether this is Enhanced Light (the launcher's single-game build, enhanced_light.h)
 u64 pc_enhanced_light() {
   return bool_to_symbol(enhanced_light());
@@ -1596,6 +1625,8 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
   make_func_symbol_func("pc-enhanced-light?", (void*)pc_enhanced_light);
+  make_func_symbol_func("pc-enhanced-strike", (void*)pc_enhanced_strike);
+  make_func_symbol_func("pc-enhanced-strike-hit", (void*)pc_enhanced_strike_hit);
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
