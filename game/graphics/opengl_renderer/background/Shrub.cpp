@@ -4,6 +4,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 
 #include "common/log/log.h"
@@ -112,6 +113,7 @@ void Shrub::update_load(const LevelData* loader_data) {
       m_trees[l_tree].proto_name_to_idx[name].push_back(i++);
     }
     m_trees[l_tree].colors = &tree.time_of_day_colors;
+    m_trees[l_tree].source = &tree;
     m_trees[l_tree].index_data = tree.indices.data();
     glBindBuffer(GL_ARRAY_BUFFER, m_trees[l_tree].vertex_buffer);
     glEnableVertexAttribArray(0);
@@ -153,6 +155,10 @@ void Shrub::update_load(const LevelData* loader_data) {
     glEnableVertexAttribArray(4);
     glVertexAttribPointer(4, 4, GL_INT_2_10_10_10_REV, GL_TRUE, sizeof(tfrag3::ShrubGpuVertex),
                           (void*)offsetof(tfrag3::ShrubGpuVertex, pad0));
+    // Enhanced: 1 where a detailed model stands in near the camera (EnhancedScenery)
+    glEnableVertexAttribArray(5);
+    glVertexAttribIPointer(5, 1, GL_UNSIGNED_BYTE, sizeof(tfrag3::ShrubGpuVertex),
+                           (void*)offsetof(tfrag3::ShrubGpuVertex, pad2));
 
     glGenBuffers(1, &m_trees[l_tree].single_draw_index_buffer);
     glGenBuffers(1, &m_trees[l_tree].index_buffer);
@@ -330,6 +336,13 @@ void Shrub::render_tree(int idx,
     }
   }
 
+  {
+    // the crossfade to the detailed models near the camera (0, 0: none)
+    auto fade = enhanced_scenery_fade(*tree.source);
+    glUniform2f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_lod"),
+                fade.x(), fade.y());
+  }
+
   glBindVertexArray(tree.vao);
   glBindBuffer(GL_ARRAY_BUFFER, tree.vertex_buffer);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,
@@ -437,6 +450,8 @@ void Shrub::render_tree(int idx,
         ASSERT(false);
     }
   }
+
+  enhanced_draw_scenery(*tree.source, settings, render_state, prof);
 
   glBindVertexArray(0);
   tree.perf.draw_time.add(draw_timer.getSeconds());

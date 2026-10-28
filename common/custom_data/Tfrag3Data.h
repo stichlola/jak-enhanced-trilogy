@@ -2,6 +2,7 @@
 
 // Data format for the tfrag3 renderer.
 #include <array>
+#include <memory>
 
 #include "common/common_types.h"
 #include "common/dma/gs.h"
@@ -162,7 +163,7 @@ struct ShrubGpuVertex {
   u16 color_index;
   u16 pad1;
   u8 rgba_base[3];
-  u8 pad2;
+  u8 pad2;  // Enhanced: 1 = a proto with a detailed model near the camera (EnhancedScenery)
 };
 static_assert(sizeof(ShrubGpuVertex) == 32, "ShrubGpuVertex size");
 
@@ -459,6 +460,19 @@ struct ShrubTree {
   // jak 2 and later can toggle on and off visibility per proto by name
   bool has_per_proto_visibility_toggle = false;
   std::vector<std::string> proto_names;
+
+  // Enhanced (not saved): the vegetation's copies of whole plants (EnhancedVegetation): the source
+  // vertices [src_first, src_end), copied to offset, turned by yaw and scaled around the source's
+  // foot (cx, base, cz) and set down at (x, y, z)
+  struct EnhCopy {
+    u32 src_first, src_end, offset;
+    u8 tier;
+    float cx, cz, base, x, y, z, yaw, scale;
+  };
+  std::vector<EnhCopy> enh_copies;
+  // Enhanced (not saved): the detailed models drawn instead of some protos near the camera
+  // (EnhancedScenery)
+  std::shared_ptr<void> enh_scenery;
 
   void serialize(Serializer& ser);
   void memory_usage(MemoryUsageTracker* tracker) const;

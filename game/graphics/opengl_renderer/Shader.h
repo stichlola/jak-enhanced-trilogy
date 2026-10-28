@@ -85,6 +85,7 @@ enum class ShaderId {
   ENH_VOLUME = 54,
   ENH_SHADOW = 55,
   ENH_SHADOW_MERC = 56,
+  SHRUB_INST = 57,  // Enhanced: detailed scenery (EnhancedScenery)
   MAX_SHADERS
 };
 

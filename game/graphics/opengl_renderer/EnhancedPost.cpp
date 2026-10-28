@@ -17,6 +17,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
@@ -4962,6 +4963,8 @@ void EnhancedPost::draw_menu() {
     weather_menu(s, "Weather");
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderFloat("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
@@ -5203,6 +5206,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["wind"] = g_enhanced_wind.enabled;
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
+  j["scenery_dist"] = g_enhanced_scenery_dist;
   j["water_reflections"] = s.water_reflections;
   j["water_swell"] = s.water_swell;
   j["water_refraction"] = s.water_refraction;
@@ -5281,6 +5285,10 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   if (!std::getenv("JAK_ENHANCED_VEGETATION")) {
     get("vegetation", g_enhanced_vegetation);
     g_enhanced_vegetation = std::clamp(g_enhanced_vegetation, 0, 2);
+  }
+  if (!std::getenv("JAK_ENHANCED_SCENERY")) {
+    get("scenery_dist", g_enhanced_scenery_dist);
+    g_enhanced_scenery_dist = std::clamp(g_enhanced_scenery_dist, 0.f, 200.f);
   }
   get("water_reflections", s.water_reflections);
   get("water_swell", s.water_swell);

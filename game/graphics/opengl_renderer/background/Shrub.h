@@ -40,6 +40,7 @@ class Shrub : public BucketRenderer {
     const std::vector<tfrag3::ShrubDraw>* draws = nullptr;
     const std::vector<tfrag3::TieWindInstance>* instance_info = nullptr;
     const tfrag3::PackedTimeOfDay* colors = nullptr;
+    const tfrag3::ShrubTree* source = nullptr;  // Enhanced: the tree (its detailed scenery)
     const u32* index_data = nullptr;
     std::vector<bool> proto_vis_mask;
     std::unordered_map<std::string, std::vector<u32>> proto_name_to_idx;

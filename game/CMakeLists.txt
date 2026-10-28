@@ -65,6 +65,7 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/foreground/Shadow2.cpp
         graphics/opengl_renderer/loader/Loader.cpp
         graphics/opengl_renderer/loader/EnhancedRayTrace.cpp
+        graphics/opengl_renderer/loader/EnhancedScenery.cpp
         graphics/opengl_renderer/loader/EnhancedVegetation.cpp
         graphics/opengl_renderer/loader/LoaderStages.cpp
         graphics/opengl_renderer/ocean/CommonOceanRenderer.cpp

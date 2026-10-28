@@ -466,6 +466,9 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       for (const auto& [d, s] : plant_strips[g]) {
         emit(d, tier, s, p.first_vert, offset);
       }
+      // (so a detailed model can stand in for the copy too)
+      tree.enh_copies.push_back({p.first_vert, p.end_vert, offset, (u8)tier, p.cx, p.cz, p.base,
+                                 x, y - 0.03f * kMeter, z, yaw, scale});
       stats->copies++;
     }
   }

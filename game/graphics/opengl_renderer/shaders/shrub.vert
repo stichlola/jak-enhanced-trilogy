@@ -5,6 +5,7 @@ layout (location = 1) in vec3 tex_coord_in;
 layout (location = 2) in vec3 rgba_base;
 layout (location = 3) in int time_of_day_index;
 layout (location = 4) in vec4 normal_in;  // Enhanced
+layout (location = 5) in int enh_flag_in;  // Enhanced: 1 = a detailed model stands in near the camera
 
 uniform vec4 hvdf_offset;
 uniform mat4 camera;
@@ -27,6 +28,7 @@ out vec3 tex_coord;
 out float fogginess;
 out vec3 enh_normal;
 out vec3 enh_pos;
+flat out int enh_lod_kind;
 
 void main() {
   // old system:
@@ -105,5 +107,6 @@ void main() {
   tex_coord = tex_coord_in;
   enh_normal = normal_in.xyz;
   enh_pos = vert;
+  enh_lod_kind = enh_flag_in;
   tex_coord.xy /= 4096;
 }
