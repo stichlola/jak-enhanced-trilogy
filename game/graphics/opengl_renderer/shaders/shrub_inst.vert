@@ -26,6 +26,8 @@ uniform float enh_foliage;
 uniform vec4 enh_player;
 uniform vec4 enh_pushers[8];
 uniform int enh_pusher_count;
+uniform sampler2D tex_T2;  // the crush map (EnhancedScenery)
+uniform vec4 enh_crush;    // its corner (world x, z), its size (game units), on
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -58,9 +60,23 @@ void main() {
       offset += (hd > 1.0 ? d.xz / hd : vec2(1.0, 0.0)) * near;
       press = max(press, near);
     }
-    float push = tip * tip;
     float len = length(offset);
-    world.xz += (len > 1.0 ? offset / len : offset) * push * 0.45 * 4096.0;
+    offset = len > 1.0 ? offset / len : offset;
+    // where someone went through a little while ago the grass still lies (the crush map,
+    // EnhancedScenery): bent away from their path, rising back over a few seconds
+    if (enh_crush.w > 0.0) {
+      vec2 cuv = (inst_c3.xz - enh_crush.xy) / enh_crush.z;
+      if (all(greaterThan(cuv, vec2(0.0))) && all(lessThan(cuv, vec2(1.0)))) {
+        vec3 c = texture(tex_T2, cuv).xyz;  // the bend (direction x amount), the height it was made at (m)
+        float lie = length(c.xy) * (1.0 - smoothstep(1.5, 3.0, abs(c.z - inst_c3.y / 4096.0)));
+        if (lie > press) {
+          offset = c.xy / max(length(c.xy), 1e-4) * lie;
+          press = lie;
+        }
+      }
+    }
+    float push = tip * tip;
+    world.xz += offset * push * 0.45 * 4096.0;
     world.y -= press * push * 0.25 * 4096.0;
   }
 

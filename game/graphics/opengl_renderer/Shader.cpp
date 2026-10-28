@@ -48,7 +48,7 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
       file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
   // (Enhanced: the detailed scenery's instanced models are colored like the shrubs they replace)
   const std::string frag_name =
-      shader_name == "shrub_inst" || shader_name == "shrub_imp" ? "shrub" : shader_name;
+      shader_name == "shrub_inst" ? "shrub" : shader_name;
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
 

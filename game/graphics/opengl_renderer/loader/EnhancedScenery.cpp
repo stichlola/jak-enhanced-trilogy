@@ -33,6 +33,7 @@ namespace {
 constexpr float kMeter = 4096.f;
 constexpr int kFarLods = 1;  // far versions per model, each drawn over one more detailed distance
 constexpr float kImpReach = 500.f;  // m: the impostors (past the far versions) reach this far
+constexpr float kThinKeep = 0.5f;  // the share of impostors left at kImpReach (thinned from half way)
 constexpr int kImpGrid = 8;  // impostor atlas: views per side (tools/blender/grass_variants.py)
 constexpr float kFarReach = 1.f + kFarLods;  // so they reach this many times the detailed distance
 
@@ -63,8 +64,8 @@ struct Mesh {
   int far_lod = -1;      // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
   // its impostor (<file>_imp.png): pictures of it from kImpGrid^2 directions, drawn past them all
   int imp_w = 0, imp_h = 0;
-  std::vector<u8> imp_rgba;
-  GLuint imp_tex = 0;
+  std::vector<u8> imp_rgba, imp_nrm;  // the pictures, their normals (<file>_nrm.png, may be missing)
+  GLuint imp_tex = 0, imp_nrm_tex = 0;
   GLuint vao = 0, vbo = 0, ibo = 0, tex = 0;
 };
 
@@ -90,6 +91,17 @@ struct SceneryTree {
   bool impostors = false;  // every model has one: the game's protos only past kImpReach
 };
 
+// the crush map (update_crush)
+struct Crush {
+  static constexpr int kCells = 128;
+  static constexpr float kCell = 0.5f;  // m: so 64 m across
+  std::vector<float> rgb;
+  int ox = 0, oz = 0;  // its corner, in cells
+  bool on = false;
+  double last = 0;
+  GLuint tex = 0;
+};
+
 struct Library {
   std::mutex mutex;
   bool loaded_config = false;
@@ -100,6 +112,7 @@ struct Library {
   // the copies drawn, per batch, per version (the model, its far versions, its impostor)
   std::vector<std::array<std::vector<GpuInstance>, kFarLods + 2>> copies;
   GLuint imp_vao = 0, imp_vbo = 0;  // the impostors' quad
+  Crush crush;
 };
 
 Library& library() {
@@ -268,6 +281,17 @@ void load_config(Library& lib) {
               mesh.imp_h = h;
               mesh.imp_rgba.assign(px, px + (size_t)w * h * 4);
               stbi_image_free(px);
+              auto nrm_path = scenery_dir() / (fs::path(file).stem().string() + "_nrm.png");
+              int nw = 0, nh = 0;
+              u8* npx = fs::exists(nrm_path)
+                            ? stbi_load(nrm_path.string().c_str(), &nw, &nh, nullptr, 4)
+                            : nullptr;
+              if (npx && nw == w && nh == h) {
+                mesh.imp_nrm.assign(npx, npx + (size_t)w * h * 4);
+              }
+              if (npx) {
+                stbi_image_free(npx);
+              }
             }
           }
           // its far versions, a chain: <file>_lod1.glb, _lod2.glb ...
@@ -545,6 +569,8 @@ void prepare_tree(tfrag3::ShrubTree& tree,
   tree.enh_scenery = data;
 }
 
+void upload_cutout(const std::vector<u8>& rgba, int w, int h);
+
 void make_gl(Mesh& mesh, Library& lib) {
   if (!lib.instance_vbo) {
     glGenBuffers(1, &lib.instance_vbo);
@@ -586,12 +612,149 @@ void make_gl(Mesh& mesh, Library& lib) {
   glGenTextures(1, &mesh.tex);
   lib.textures.emplace(mesh.tex_key, mesh.tex);
   glBindTexture(GL_TEXTURE_2D, mesh.tex);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mesh.tex_w, mesh.tex_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               mesh.rgba.data());
-  glGenerateMipmap(GL_TEXTURE_2D);
+  upload_cutout(mesh.rgba, mesh.tex_w, mesh.tex_h);
+  mesh.rgba = {};  // (on the GPU now)
+}
+
+// A cutout texture with its mipmaps made here: each level's alpha scaled so as much of it passes
+// the cutout as of the full size one. Plain averaging lets thin blades fade below the cutout a
+// few levels down, so far grass thins out and vanishes (Castano, "Computing alpha mipmaps").
+void upload_cutout(const std::vector<u8>& rgba, int w, int h) {
+  constexpr float kCut = 0.5f;  // (about where the shrubs' alpha test cuts the texture's alpha)
+  auto coverage = [&](const std::vector<u8>& px, float scale) {
+    size_t n = 0;
+    for (size_t p = 3; p < px.size(); p += 4) {
+      n += px[p] * scale > kCut * 255.f;
+    }
+    return (float)n / std::max<size_t>(px.size() / 4, 1);
+  };
+  const float want = coverage(rgba, 1.f);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+  std::vector<u8> level = rgba, next;
+  int level_w = w, level_h = h;
+  // the box filter runs on the unscaled levels; only what's uploaded gets its alpha scaled
+  for (int mip = 1; level_w > 1 || level_h > 1; mip++) {
+    int nw = std::max(level_w / 2, 1), nh = std::max(level_h / 2, 1);
+    next.assign((size_t)nw * nh * 4, 0);
+    for (int y = 0; y < nh; y++) {
+      for (int x = 0; x < nw; x++) {
+        for (int c = 0; c < 4; c++) {
+          u32 sum = 0;
+          for (int dy = 0; dy < 2; dy++) {
+            for (int dx = 0; dx < 2; dx++) {
+              int sx = std::min(2 * x + dx, level_w - 1), sy = std::min(2 * y + dy, level_h - 1);
+              sum += level[((size_t)sy * level_w + sx) * 4 + c];
+            }
+          }
+          next[((size_t)y * nw + x) * 4 + c] = (u8)((sum + 2) / 4);
+        }
+      }
+    }
+    level.swap(next);
+    level_w = nw;
+    level_h = nh;
+    // the alpha scale that keeps the coverage (bisection: coverage grows with the scale)
+    float lo = 0.f, hi = 8.f;
+    for (int it = 0; it < 12; it++) {
+      float mid = 0.5f * (lo + hi);
+      (coverage(level, mid) < want ? lo : hi) = mid;
+    }
+    std::vector<u8> scaled = level;
+    for (size_t p = 3; p < scaled.size(); p += 4) {
+      scaled[p] = (u8)std::min(255.f, scaled[p] * hi + 0.5f);
+    }
+    glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA, level_w, level_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 scaled.data());
+  }
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  mesh.rgba = {};  // (on the GPU now)
+}
+
+// The crush map: a square of ground around Jak where whoever walks or drives through the grass
+// leaves it lying, bent away from their path, rising back over a few seconds. Each cell holds the
+// bend (direction x amount) and the height it was made at (m; grass far above or below isn't
+// touched). Follows Jak a cell at a time; updated once a frame.
+void update_crush(Library& lib) {
+  auto& c = lib.crush;
+  constexpr int N = Crush::kCells;
+  const float cell = Crush::kCell * kMeter;
+  using clock = std::chrono::steady_clock;
+  const double now = std::chrono::duration<double>(clock::now().time_since_epoch()).count();
+  if (now - c.last < 0.004) {
+    return;  // (once a frame: every shrub tree draws)
+  }
+  const float dt = c.last > 0 ? (float)std::min(now - c.last, 0.1) : 0.f;
+  c.last = now;
+  const auto& pl = g_enhanced_player;
+  if (!pl.valid || !g_enhanced_wind.push) {
+    c.on = false;
+    return;
+  }
+  if (c.rgb.empty()) {
+    c.rgb.assign(N * N * 3, 0.f);
+  }
+  // follow Jak: the corner snapped to whole cells, the grid moved along
+  int ox = (int)std::floor(pl.pos[0] / cell) - N / 2, oz = (int)std::floor(pl.pos[2] / cell) - N / 2;
+  if (!c.on || ox != c.ox || oz != c.oz) {
+    std::vector<float> moved(N * N * 3, 0.f);
+    if (c.on) {
+      for (int z = 0; z < N; z++) {
+        for (int x = 0; x < N; x++) {
+          int sx = x + ox - c.ox, sz = z + oz - c.oz;
+          if (sx >= 0 && sx < N && sz >= 0 && sz < N) {
+            for (int k = 0; k < 3; k++) {
+              moved[(z * N + x) * 3 + k] = c.rgb[(sz * N + sx) * 3 + k];
+            }
+          }
+        }
+      }
+    }
+    c.rgb.swap(moved);
+    c.ox = ox;
+    c.oz = oz;
+    c.on = true;
+  }
+  // rising back
+  const float keep = std::exp(-dt / 2.5f);
+  for (int p = 0; p < N * N; p++) {
+    c.rgb[p * 3] *= keep;
+    c.rgb[p * 3 + 1] *= keep;
+  }
+  // pressed where someone is now: away from them, as hard as the live push
+  auto stamp = [&](const float* pos, float radius) {
+    int r = (int)std::ceil(radius / cell);
+    int cx = (int)std::floor(pos[0] / cell) - ox, cz = (int)std::floor(pos[2] / cell) - oz;
+    for (int z = std::max(cz - r, 0); z <= std::min(cz + r, N - 1); z++) {
+      for (int x = std::max(cx - r, 0); x <= std::min(cx + r, N - 1); x++) {
+        float dx = (ox + x + 0.5f) * cell - pos[0], dz = (oz + z + 0.5f) * cell - pos[2];
+        float d = std::hypot(dx, dz);
+        float t = std::clamp((d - radius * 0.25f) / (radius * 0.75f), 0.f, 1.f);
+        float amount = 1.f - t * t * (3.f - 2.f * t);
+        float* v = &c.rgb[(z * N + x) * 3];
+        if (amount > std::hypot(v[0], v[1])) {
+          v[0] = d > 1.f ? dx / d * amount : amount;
+          v[1] = d > 1.f ? dz / d * amount : 0.f;
+          v[2] = pos[1] / kMeter;
+        }
+      }
+    }
+  };
+  stamp(pl.pos, g_enhanced_wind.push_radius * kMeter);
+  const auto& ps = g_enhanced_pushers;
+  for (int i = 0; i < ps.count; i++) {
+    stamp(ps.pos[i], ps.pos[i][3]);
+  }
+  if (!c.tex) {
+    glGenTextures(1, &c.tex);
+    glBindTexture(GL_TEXTURE_2D, c.tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  }
+  glBindTexture(GL_TEXTURE_2D, c.tex);
+  // (rows along z: the shader's v is z)
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB32F, N, N, 0, GL_RGB, GL_FLOAT, c.rgb.data());
 }
 
 // the impostor's atlas, and the quad all impostors share (its corners; the copies' columns from
@@ -620,14 +783,22 @@ void make_imp_gl(Mesh& mesh, Library& lib) {
   }
   glGenTextures(1, &mesh.imp_tex);
   glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mesh.imp_w, mesh.imp_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-               mesh.imp_rgba.data());
-  glGenerateMipmap(GL_TEXTURE_2D);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  upload_cutout(mesh.imp_rgba, mesh.imp_w, mesh.imp_h);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  if (!mesh.imp_nrm.empty()) {
+    glGenTextures(1, &mesh.imp_nrm_tex);
+    glBindTexture(GL_TEXTURE_2D, mesh.imp_nrm_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mesh.imp_w, mesh.imp_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 mesh.imp_nrm.data());
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  }
   mesh.imp_rgba = {};  // (on the GPU now)
+  mesh.imp_nrm = {};
 }
 
 }  // namespace
@@ -682,6 +853,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
   const float step = g_enhanced_scenery_dist * kMeter;
   const float swap = step * 0.2f;
   const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
+  const float thin_from = std::max(far_end * 0.5f, (kFarLods + 1.5f) * step);
   const auto& cam = settings.camera.trans;
   auto fade = enhanced_scenery_fade(tree);
   using clock = std::chrono::steady_clock;
@@ -727,6 +899,19 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
         out[k].push_back(inst);
         inst.col[2][3] = 1.f;
         out[k + 1].push_back(inst);
+      } else if (k == kImp && d > thin_from) {
+        // far out fewer copies (the ones a stable hash ranks last go first, fading out over a
+        // band): a few pixels each, most of them are just cost there
+        float keep = 1.f - (1.f - kThinKeep) * std::min((d - thin_from) / (far_end - thin_from), 1.f);
+        float shown = std::clamp((keep - hash01((u32)bi, (u32)i, 7)) / 0.1f, 0.f, 1.f);
+        if (shown <= 0.f) {
+          continue;
+        }
+        if (shown < 1.f) {
+          inst.col[1][3] = 1.f - shown;
+          inst.col[2][3] = -1.f;
+        }
+        out[k].push_back(inst);
       } else {
         out[k].push_back(inst);
       }
@@ -777,6 +962,16 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
       if (pushers > 0) {
         glUniform4fv(glGetUniformLocation(sh.id(), "enh_pushers"), pushers, &ps.pos[0][0]);
       }
+      // where the grass still lies
+      update_crush(lib);
+      const auto& cr = lib.crush;
+      const float cell = Crush::kCell * kMeter;
+      glUniform4f(glGetUniformLocation(sh.id(), "enh_crush"), cr.ox * cell, cr.oz * cell,
+                  Crush::kCells * cell, cr.on && cr.tex ? 1.f : 0.f);
+      glUniform1i(glGetUniformLocation(sh.id(), "tex_T2"), 2);
+      glActiveTexture(GL_TEXTURE2);
+      glBindTexture(GL_TEXTURE_2D, cr.tex);
+      glActiveTexture(GL_TEXTURE0);
     }
     glUniform3f(glGetUniformLocation(sh.id(), "enh_base_rgb"), b.base_rgb[0] * b.tint[0],
                 b.base_rgb[1] * b.tint[1], b.base_rgb[2] * b.tint[2]);
@@ -831,6 +1026,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)kImpGrid);
+      glUniform1i(glGetUniformLocation(ish.id(), "tex_T1"), 1);
     }
     glUniform3f(glGetUniformLocation(ish.id(), "enh_base_rgb"), b.base_rgb[0] * b.tint[0],
                 b.base_rgb[1] * b.tint[1], b.base_rgb[2] * b.tint[2]);
@@ -838,12 +1034,21 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     glUniform4f(glGetUniformLocation(ish.id(), "enh_imp"), center.x(), center.y(), center.z(),
                 (mesh.hi - mesh.lo).length() * 0.5f);
     glUniform1f(glGetUniformLocation(ish.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
+    glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
+                std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
+                b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+    glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_IMP);
 
     glBindVertexArray(lib.imp_vao);
     glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
     glBufferData(GL_ARRAY_BUFFER, copies.size() * sizeof(GpuInstance), copies.data(),
                  GL_STREAM_DRAW);
+    if (mesh.imp_nrm_tex) {
+      glActiveTexture(GL_TEXTURE1);
+      glBindTexture(GL_TEXTURE_2D, mesh.imp_nrm_tex);
+    }
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
     glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, copies.size());
