@@ -3155,6 +3155,13 @@ void main() {
         vec3 k = clamp(abs(mod(h2 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
         c = mx * mix(vec3(1.0), k, s2);
       }
+      // and its pale slopes: the game lights some near white, a little blue (any hue, barely any
+      // color, bright): to a sand beige, a touch darker
+      float wp = (1.0 - smoothstep(0.08, 0.2, sat)) * smoothstep(0.45, 0.7, mx) * sand * (1.0 - w);
+      if (wp > 0.0) {
+        vec3 beige = clamp(abs(mod(0.095 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+        c = mix(c, mx * 0.92 * mix(vec3(1.0), beige, 0.27), wp);
+      }
     }
     // on the sand (its normals written 0.9 long: tfrag3.frag, hfrag.frag): the wind's ripples,
     // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
@@ -3226,7 +3233,7 @@ void main() {
   // the desert under a high sun: the game lights its ground near white, the eye stops down (the
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
-    c *= 1.0 - 0.22 * sun_haze * smoothstep(0.35, 0.8, sky_sun.w) * (1.0 - clouds.w);
+    c *= 1.0 - 0.3 * sun_haze * smoothstep(0.35, 0.8, sky_sun.w) * (1.0 - clouds.w);
   }
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
@@ -3241,12 +3248,13 @@ void main() {
   // to sand, instead of paper
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
     float ls = luma(c);
-    if (ls > 0.45) {
-      // (at most ~0.62: the noon sand a warm mid tone, the ripples' shading kept in it)
-      float to = 0.45 + (ls - 0.45) * 0.42 / (1.0 + (ls - 0.45) * 2.4);
+    // (only the near whites: one squeezing everything over the mid tones flattened the sand,
+    // its ripples and soft shading gone; the exposure above brings it down instead)
+    if (ls > 0.7) {
+      float to = 0.7 + (ls - 0.7) * 0.6 / (1.0 + (ls - 0.7) * 2.0);
       vec3 tone = c * (to / ls);
       tone = max(mix(vec3(to), tone, 1.35), 0.0);  // (some of the saturation back)
-      float k = smoothstep(0.5, 0.8, ls);          // (the whiter, the more toward sand)
+      float k = smoothstep(0.75, 0.95, ls);        // (the whiter, the more toward sand)
       tone = mix(tone, to * vec3(1.2, 0.98, 0.7), 0.7 * k);
       c = mix(c, tone, min(sun_haze * 1.25, 1.0));
     }

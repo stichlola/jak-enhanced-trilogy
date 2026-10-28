@@ -1229,10 +1229,26 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     reproject = std::sqrt(moved) < 8.f * kMeter;
   }
 
-  // temporal anti-aliasing: this frame blended into the reprojected history
+  // temporal anti-aliasing: this frame blended into the reprojected history. After the composite
+  // (late): its occlusion, shadows, lights and sand are made from this frame's jittered depth, a
+  // fraction of a pixel off each frame: resolved before it, their edges (grass blades, pebbles)
+  // flickered. (JAK_ENHANCED_TAA_CYCLE: early, late and off in turn, 6 s each, to compare.)
   GLuint scene_tex = m_scene_tex;
-  const bool taa = m_settings.taa && m_jittered && have_scene;
-  if (taa) {
+  const bool taa_on = m_settings.taa && m_jittered && have_scene;
+  static const bool taa_cycle = std::getenv("JAK_ENHANCED_TAA_CYCLE") != nullptr;
+  int taa_mode = taa_on ? 1 : -1;  // 0 early, 1 late
+  if (taa_on && taa_cycle) {
+    static int last_mode = -2;
+    taa_mode = (int)(m_time / 6.0) % 3;
+    taa_mode = taa_mode == 2 ? -1 : taa_mode;
+    if (taa_mode != last_mode) {
+      lg::info("[enhanced] taa mode {}", taa_mode == 0 ? "early" : taa_mode == 1 ? "late" : "off");
+      last_mode = taa_mode;
+      m_taa_history = false;
+    }
+  }
+  const bool taa = taa_mode >= 0;
+  auto resolve_taa = [&](GLuint src_tex) -> GLuint {
     if (w != m_taa_w || h != m_taa_h) {
       if (m_taa_fbo[0]) {
         glDeleteFramebuffers(2, m_taa_fbo);
@@ -1272,7 +1288,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, m_taa_tex[1 - cur]);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+    glBindTexture(GL_TEXTURE_2D, src_tex);
     glUniform1i(glGetUniformLocation(rid, "tex_T0"), 0);
     glUniform1i(glGetUniformLocation(rid, "tex_T1"), 1);
     glUniform1i(glGetUniformLocation(rid, "tex_T3"), 3);
@@ -1289,10 +1305,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
     ENH_TIMED("enh-taa", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
     prof.add_draw_call();
-    scene_tex = m_taa_tex[cur];
     m_taa_cur = 1 - cur;
     m_taa_history = true;
-  } else {
+    return m_taa_tex[cur];
+  };
+  if (taa && taa_mode == 0) {
+    scene_tex = resolve_taa(m_scene_tex);
+  } else if (!taa) {
     m_taa_history = false;
   }
 
@@ -2640,6 +2659,16 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   }
   prof.add_draw_call();
   glBindSampler(13, 0);
+  if (taa && taa_mode == 1) {
+    // the finished frame through the TAA, and back
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    resolve_taa(m_scene_tex);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taa_fbo[1 - m_taa_cur]);  // (the one just written)
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  }
 
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
