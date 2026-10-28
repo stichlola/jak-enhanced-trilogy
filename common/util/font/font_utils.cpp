@@ -118,10 +118,10 @@ bool font_bank_exists(GameTextVersion version) {
  */
 static std::string xbox_buttons(const std::string& str) {
   static const std::pair<std::string_view, std::string_view> kSwaps[] = {
-      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~25L~+5HB~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~27L~+7HX~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H"}};
+      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~25L~+3HB~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~27L~+1HX~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+26H"}};
   std::string out = str;
   for (const auto& [ps, xbox] : kSwaps) {
     for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {

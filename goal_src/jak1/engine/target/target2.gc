@@ -242,7 +242,7 @@
       ;; what the buttons do (the game's own button pictures: no format, its ~ codes would be eaten)
       (enhanced-nap-ui-box buf 86 280 426 281 (new 'static 'rgba :r #x80 :g #x80 :b #x40 :a #x60))
       (enhanced-nap-ui-text buf
-                            "~Y~22L<~Z~Y~26L~+4HA~Z~Y~1L>~Z~Y~23L[~Z~+26H SLEEP    ~Y~22L<~Z~Y~5L~+6HY~Z~Y~1L>~Z~Y~23L[~Z~+26H CANCEL"
+                            "~Y~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+26H SLEEP    ~Y~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+26H CANCEL"
                             292
                             1.0))) ;; (the button pictures are in the large font only)
   (none))
