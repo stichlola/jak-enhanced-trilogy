@@ -30,6 +30,7 @@ DATA = [
     "scripts/enhanced/hd_setup.py",  # the HD textures, made by the player (the launcher asks)
     "scripts/enhanced/hd_textures.py",
     "scripts/enhanced/minimap_maps.py",
+    "scripts/enhanced/update.ps1",  # a new release installed over this one (the launcher asks)
 ]
 
 
@@ -80,7 +81,9 @@ def main():
     (dest / "data/VERSION").write_text(f"{args.version or 'dev'}-{rev}", encoding="ascii")
 
     for bat in ("Jak Enhanced Trilogy.bat", "Report a problem.bat"):
-        shutil.copy2(ROOT / bat, dest / bat)
+        # CRLF whatever the checkout has (cmd's labels and goto break with LF)
+        text = (ROOT / bat).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+        (dest / bat).write_bytes(text)
     (dest / "ISO").mkdir()
     shutil.copy2(ROOT / "ISO/PUT-YOUR-ISO-FILES-HERE.txt", dest / "ISO/PUT-YOUR-ISO-FILES-HERE.txt")
     (dest / "README.txt").write_text(

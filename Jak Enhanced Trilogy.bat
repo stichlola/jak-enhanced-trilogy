@@ -53,7 +53,8 @@ set "VER="
 if exist "%PROJ%\VERSION" set /p VER=<"%PROJ%\VERSION"
 
 rem A newer release on GitHub? (the release only; 4 seconds at most, nothing happens offline; the
-rem player chooses whether to open the page: nothing is downloaded by itself)
+rem player chooses: U installs it over this folder with scripts\enhanced\update.ps1, which keeps the
+rem extracted discs and starts this launcher again; nothing is downloaded without asking)
 if defined VER (
   set "LATEST="
   for /f "usebackq delims=" %%L in (`powershell -NoProfile -Command "try { (Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest').tag_name } catch {}"`) do set "LATEST=%%L"
@@ -62,8 +63,11 @@ if defined VER (
     powershell -NoProfile -Command "$v = { param($s) $p = @($s.TrimStart('v') -split '\.') + @('0','0','0'); [version]($p[0..2] -join '.') }; if ((& $v '!LATEST!') -gt (& $v '!MINE!')) { exit 1 }" || (
       echo.
       echo A new version is out: !LATEST! ^(you have !MINE!^).
-      choice /c UC /t 8 /d C /m "U opens the download page, C carries on"
-      if not errorlevel 2 start "" "https://github.com/stichlola/jak-enhanced-trilogy/releases/latest"
+      choice /c UC /t 10 /d C /m "U updates now, about 120 MB to download, your games are kept; C carries on"
+      if not errorlevel 2 (
+        start "Jak Enhanced Trilogy update" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJ%\scripts\enhanced\update.ps1'))) -Root '%ROOT%' -Tag '!LATEST!'"
+        exit /b 0
+      )
     )
   )
 )
