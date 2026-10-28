@@ -3148,11 +3148,12 @@ void main() {
       w = max(w, smoothstep(0.2, 0.26, hue) * (1.0 - smoothstep(0.42, 0.5, hue)) * (1.0 - smoothstep(0.35, 0.6, sat)) * 0.8);
       w *= smoothstep(0.03, 0.12, sat) * sand;
       if (w > 0.0) {
-        // (a pale, dusty beige: less saturated and a little lighter than the game's olive)
-        float h2 = mix(hue, 0.088, w);
-        float s2 = sat * (1.0 - 0.2 * w);
+        // (a pale, dusty beige: less saturated than the game's olive (no lighter: noon burned out); never
+        // past a sand's saturation: the yellower patches went bright orange, in blotches and bands)
+        float h2 = mix(hue, 0.095, w);
+        float s2 = mix(sat, min(sat, 0.3), w);
         vec3 k = clamp(abs(mod(h2 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
-        c = mx * (1.0 + 0.1 * w) * mix(vec3(1.0), k, s2);
+        c = mx * mix(vec3(1.0), k, s2);
       }
     }
     // on the sand (its normals written 0.9 long: tfrag3.frag, hfrag.frag): the wind's ripples,
@@ -3222,6 +3223,11 @@ void main() {
   // rain: colder, the colors kept (a touch richer, like the wet slums at night)
   c *= mix(vec3(1.0), vec3(0.9, 0.98, 1.1), weather.x);
   c = max(mix(vec3(luma(c)), c, 1.0 + 0.1 * weather.x), 0.0);
+  // the desert under a high sun: the game lights its ground near white, the eye stops down (the
+  // ground only: the sky keeps its own)
+  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
+    c *= 1.0 - 0.22 * sun_haze * smoothstep(0.35, 0.8, sky_sun.w) * (1.0 - clouds.w);
+  }
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);

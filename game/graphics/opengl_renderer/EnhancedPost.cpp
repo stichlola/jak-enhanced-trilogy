@@ -1659,7 +1659,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (lit_already || c.pos[2] < -c.pos[3] || dist > 400.f * kMeter) {
         continue;
       }
-      float k = (0.35f + 0.9f * fire_night) * m_settings.light_strength;
+      // (by day next to nothing: a torch's 13 m of orange light, with every slab's shadow, laid
+      // a bright orange pool on the sunlit sand)
+      float k = (0.04f + 1.21f * fire_night) * m_settings.light_strength;
       if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
         float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
