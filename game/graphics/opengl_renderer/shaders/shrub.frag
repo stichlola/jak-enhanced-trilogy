@@ -6,7 +6,7 @@ in vec3 enh_normal;
 in vec3 enh_pos;  // world position (relative to the camera where known)
 flat in int enh_lod_kind;  // Enhanced: 1 the game's proto, 2 its detailed model (EnhancedScenery)
 uniform vec2 enh_lod;      // the crossfade between them, distance from the camera (0, 0 = off)
-uniform float enh_time;    // seconds (the dither moves each frame, TAA blends it smooth)
+uniform float enh_time;    // seconds (unused: the dithers stay put)
 uniform vec3 enh_model_avg;  // the detailed model's texture, averaged (its far look: the proto's flat one)
 // Enhanced: a detailed model's copy swapping to its next simpler version (x: how far through,
 // y: +1 the incoming one, -1 the outgoing one, 0 no swap). The two draw complementary pixels of
@@ -50,11 +50,12 @@ vec4 enh_pack_normal(vec3 n) {
   return vec4(n * 0.5 + 0.5, 1.0);
 }
 
-// a 4x4 ordered dither threshold for the pixel, shifted each frame
+// a 4x4 ordered dither threshold for the pixel (fixed: shifted each frame it shimmered, the
+// TAA doesn't settle cutout foliage)
 float enh_dither() {
   ivec2 p = ivec2(gl_FragCoord.xy) & 3;
   int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
-  return fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0 + floor(enh_time * 60.0) * 0.618034);
+  return fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
 }
 
 void main() {
@@ -67,10 +68,9 @@ void main() {
     }
   }
   if (enh_xfade.y != 0.0) {
-    // interleaved gradient noise moved each frame by the golden ratio: spread like blue noise,
-    // no grid to see (the 4x4 ordered dither showed one)
-    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
-                    floor(enh_time * 60.0) * 0.618034);
+    // interleaved gradient noise: spread like blue noise, no grid to see (the 4x4 ordered dither
+    // showed one); fixed in place (moved each frame the swapping tufts shimmered)
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     if ((n < enh_xfade.x) != (enh_xfade.y > 0.0)) {
       discard;
     }

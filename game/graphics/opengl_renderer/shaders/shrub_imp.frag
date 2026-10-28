@@ -30,8 +30,7 @@ uniform float enh_foliage;
 uniform float enh_wet;
 
 float noise() {
-  return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
-               floor(enh_time * 60.0) * 0.618034);
+  return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 }
 
 void main() {
@@ -39,7 +38,7 @@ void main() {
   if (enh_lod.y > 0.0) {
     ivec2 p = ivec2(gl_FragCoord.xy) & 3;
     int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
-    float dither = fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0 + floor(enh_time * 60.0) * 0.618034);
+    float dither = fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
     if (smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) > dither) {
       discard;
     }
