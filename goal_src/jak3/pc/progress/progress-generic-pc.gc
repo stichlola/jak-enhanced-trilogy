@@ -538,21 +538,21 @@
      ;; "cross" seems to be mainly a UK thing (those weirdos)
      ;; (Enhanced: the Xbox buttons, the PlayStation's in Enhanced Light)
      (cond
-       ((not (pc-enhanced-light?)) "~Y~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+26H A")
+       ((not (pc-enhanced-light?)) "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+29H A")
        ((language? uk-english) "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Cross")
        (else "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H X")))
     (((controller-keybind square))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H S~+7Vq~-7Vuare"
-         "~Y~22L<~Z~Y~27L~+1HX~Z~Y~1L>~Z~Y~23L[~Z~+26H X"))
+         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~27L~+1HX~Z~Y~1L>~Z~Y~23L[~Z~+29H X"))
     (((controller-keybind circle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H Circle"
-         "~Y~22L<~Z~Y~25L~+3HB~Z~Y~1L>~Z~Y~23L[~Z~+26H B"))
+         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~25L~+3HB~Z~Y~1L>~Z~Y~23L[~Z~+29H B"))
     (((controller-keybind triangle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Trian~+7Vg~-7Vle"
-         "~Y~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+26H Y"))
+         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+29H Y"))
     (((controller-keybind dpad-up))
      "~Y~0L\ca1~Z~3L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad U~+7Vp~-7V")
     (((controller-keybind dpad-down))

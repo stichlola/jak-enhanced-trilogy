@@ -117,12 +117,40 @@ bool font_bank_exists(GameTextVersion version) {
  * are the font's own glyphs, redrawn: scripts/enhanced/xbox_font_glyphs.py). Only on the way into
  * the game: the PlayStation sequences still read back as <PAD_X> and the rest.
  */
+// The button's round body: the font has no scale code, so the disc glyph ('<', color 22) is drawn
+// nine times, around the middle and kButtonGrow units out in eight directions: their union is a
+// disc that much wider, with the letter (unchanged) well inside it. The whole button moves right
+// by kButtonGrow and takes 2 * kButtonGrow more room, so it doesn't run into the text beside it.
+constexpr int kButtonGrow = 3;
+
+static std::string xbox_button(const std::string& letter) {
+  static const std::string body = [] {
+    const int g = kButtonGrow, d = (kButtonGrow * 7 + 5) / 10;  // (the diagonals: g / sqrt(2))
+    const int offsets[][2] = {{0, 0}, {g, 0}, {-g, 0}, {0, g},  {0, -g},
+                              {d, d}, {d, -d}, {-d, d}, {-d, -d}};
+    std::string s;
+    for (const auto& o : offsets) {
+      s += "~Y";
+      if (o[0]) {
+        s += fmt::format("~{:+d}H", o[0]);
+      }
+      if (o[1]) {
+        s += fmt::format("~{:+d}V", o[1]);
+      }
+      s += "~22L<~Z";
+    }
+    return s;
+  }();
+  return fmt::format("~+{}H{}~Y{}~Z~Y~1L>~Z~Y~23L[~Z~+{}H", kButtonGrow, body, letter,
+                     26 + kButtonGrow);
+}
+
 static std::string xbox_buttons(const std::string& str) {
-  static const std::pair<std::string_view, std::string_view> kSwaps[] = {
-      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~25L~+3HB~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~27L~+1HX~Z~Y~1L>~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+26H"}};
+  static const std::pair<std::string, std::string> kSwaps[] = {
+      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~26L~+1HA")},
+      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~25L~+3HB")},
+      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~27L~+1HX")},
+      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~5L~+2HY")}};
   std::string out = str;
   for (const auto& [ps, xbox] : kSwaps) {
     for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {

@@ -212,7 +212,7 @@
     ;; what the buttons do (the game's own button pictures: no format, its ~ codes would be eaten)
     (enhanced-nap-ui-box 86.0 276.0 426.0 318.0 #x408080 (the int (* 24.0 fade)) 2)
     (enhanced-nap-ui-text
-      "~Y~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+26H Sleep    ~Y~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+26H Cancel"
+      "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+29H Sleep    ~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+29H Cancel"
       286.0
       0.6
       (font-color font-color-32)
