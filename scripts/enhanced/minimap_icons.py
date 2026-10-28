@@ -3,12 +3,16 @@
   python scripts/enhanced/minimap_icons.py ref            # the reference sheets (free)
   python scripts/enhanced/minimap_icons.py image <0-3>    # one sheet redrawn by Tripo (~5 credits)
   python scripts/enhanced/minimap_icons.py atlas          # cut the sheets, build the 8x atlases
+  python scripts/enhanced/minimap_icons.py shapes         # the dots and arrows drawn here (free)
 
 The game's icon atlas (mini-map-icons, 128 x 128: a grid of 20 x 20 cells) comes from the
 decompiler's texture dump; its 47 picture icons go to Tripo in four 4 x 3 sheets, each icon 8x on a
 light gray background, with a description of every icon. The redrawn icons are cut back out of the
 answer (the background flooded away from the edges up to the icons' dark outlines) and put in the
-same cells of a 1024 x 1024 atlas; the plain dots are drawn here. Everything stays in
+same cells of a 1024 x 1024 atlas. The plain shapes (the dots, the little arrow markers, the
+player's arrow map-target-marker, the HUD's green and red dots) are drawn here instead: their exact
+outlines (circles, triangles) supersampled at 8x, filled with the game's own colors enlarged
+smoothly, so they stay crisp at any size (atlas runs shapes at the end). Everything stays in
 local/minimap_icons; the finished atlases (new drawings) go in the repo where the game loads them,
 game/assets/enhanced/hud/<game>/<tpage>/mini-map-icons.png (EnhancedMapTextures.cpp).
 The Tripo key comes from TRIPO_API_KEY and is never printed.
@@ -23,6 +27,7 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+import numpy as np
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,6 +38,16 @@ ATLAS = {
     "jak2": DUMP / "jak2_pal/textures/ctywide-minimap/mini-map-icons.png",
 }
 CELL, UP = 20, 8          # the game's cell, and how much bigger the new atlas is
+SS = 4                     # supersampling of the drawn shapes, per new pixel and axis
+HUD = ROOT / "game" / "assets" / "enhanced" / "hud"
+# the textures drawn whole: (game, the dump's tpage, the texture)
+SHAPES = [
+    ("jak3", "level-default-minimap", "map-target-marker"),
+    ("jak3", "level-default-minimap", "hud-newhud-greendot-01"),
+    ("jak3", "level-default-minimap", "hud-newhud-reddot-01"),
+    ("jak2", "common", "map-target-marker"),
+]
+NEIGHBORS = ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1))
 BG = (200, 200, 200, 255)  # the sheets' background
 API = "https://openapi.tripo3d.ai/v3"
 
@@ -259,6 +274,150 @@ def atlas():
         print(f"{game}: {OUT / f'{game}-mini-map-icons.png'} (the game's copy: {game_copy})")
 
 
+def field(src, keep, w, h):
+    """The game's colors where keep is set, spread into the rest and enlarged smoothly to w x h."""
+    rgb = src[..., :3].astype(np.float64)
+    known = keep.copy()
+    H, W = known.shape
+    while not known.all() and known.any():
+        pr = np.pad(rgb * known[..., None], ((1, 1), (1, 1), (0, 0)))
+        pk = np.pad(known.astype(np.float64), 1)
+        tot = sum(pr[1 + dy:H + 1 + dy, 1 + dx:W + 1 + dx] for dy, dx in NEIGHBORS)
+        cnt = sum(pk[1 + dy:H + 1 + dy, 1 + dx:W + 1 + dx] for dy, dx in NEIGHBORS)
+        grow = ~known & (cnt > 0)
+        rgb[grow] = tot[grow] / cnt[grow][:, None]
+        known |= grow
+    return np.dstack([np.asarray(Image.fromarray(rgb[..., c].astype(np.float32), "F").resize((w, h), Image.BICUBIC))
+                      for c in range(3)])
+
+
+def grid(w, h):
+    """Sample positions in the game's texels, SS x SS per new pixel."""
+    n = UP * SS
+    return np.meshgrid((np.arange(w * n) + 0.5) / n, (np.arange(h * n) + 0.5) / n)
+
+
+def resolve(rgb, inside, alpha):
+    """Supersamples to new pixels: colors weighted by coverage, alpha in the PS2's range (128 opaque)."""
+    hh, ww = inside.shape[0] // SS, inside.shape[1] // SS
+    cover = inside.astype(np.float64).reshape(hh, SS, ww, SS)
+    n = cover.sum(axis=(1, 3))
+    pre = (rgb * inside[..., None]).reshape(hh, SS, ww, SS, 3).sum(axis=(1, 3))
+    # (where nothing is covered the color is still the shape's nearest, so the filtered edge isn't dark)
+    col = np.where(n[..., None] > 0, pre / np.maximum(n, 1)[..., None], rgb.reshape(hh, SS, ww, SS, 3).mean(axis=(1, 3)))
+    a = np.round(n / (SS * SS) * alpha / 2)
+    return np.dstack([np.clip(np.round(col), 0, 255), a]).astype(np.uint8)
+
+
+def triangle(a, b, c, u, v):
+    """Distances to the sides a-b, b-c, c-a (positive inside), whichever way the corners turn."""
+    def side(p, q, x, y):
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        return ((x - p[0]) * dy - (y - p[1]) * dx) / np.hypot(dx, dy)
+    cx, cy = (a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3
+    sign = 1 if side(a, b, cx, cy) > 0 else -1
+    return [sign * side(a, b, u, v), sign * side(b, c, u, v), sign * side(c, a, u, v)]
+
+
+def draw_circle(src, keep, ink, cx, cy, r, ow, alpha):
+    """A dot: an outline ow texels wide in ink (none if 0), the inside with the game's colors."""
+    h, w = src.shape[:2]
+    u, v = grid(w, h)
+    d = np.hypot(u - cx, v - cy) - r
+    rgb = np.where((d > -ow)[..., None], np.array(ink, float), field(src, keep, u.shape[1], u.shape[0]))
+    return resolve(rgb, d < 0, alpha)
+
+
+def draw_marker(src, keep):
+    """The little arrow over a target: a square above a triangle pointing down, a black outline."""
+    h, w = src.shape[:2]
+    u, v = grid(w, h)
+    box = np.maximum(np.abs(u - 10) - 2, np.abs(v - 6) - 2)  # the square, x 8..12, y 4..8
+    d = np.minimum(box, -np.minimum.reduce(triangle((5, 9), (15, 9), (10, 15), u, v)))
+    rgb = np.where((d > -1)[..., None], np.zeros(3), field(src, keep, u.shape[1], u.shape[0]))
+    return resolve(rgb, d < 0, 255)
+
+
+def draw_target(src):
+    """The player's arrow (16 x 16, tinted by the game): a triangle pointing up-left, a thick black
+    outline on its back edge, a thin one with a soft dark band on the two front edges."""
+    h, w = src.shape[:2]
+    u, v = grid(w, h)
+    ab, bc, ca = triangle((0.3, 0.3), (15.4, 6.7), (6.7, 15.4), u, v)
+    front = np.minimum(ab, ca)
+    band = np.clip((front - 1.1) / 1.2, 0, 1)[..., None]
+    rgb = np.array([123.0, 123.0, 123.0]) * (0.25 + 0.75 * band)
+    rgb = np.where((np.minimum(front - 1.1, bc - 1.9) < 0)[..., None], np.zeros(3), rgb)
+    return resolve(rgb, np.minimum(front, bc) > 0, 255)
+
+
+def draw_cell(cell, arrow_mask):
+    """A dot or arrow cell of the game's atlas drawn at 8x, or None if it is neither."""
+    a = cell[..., 3]
+    m = a > 0
+    if not m.any():
+        return None
+    dark = m & (cell[..., :3].max(axis=-1) < 60)
+    keep = m & ~dark & (a >= 100)
+    if (m == arrow_mask).all():
+        return draw_marker(cell, keep)
+    ys, xs = np.nonzero(m)
+    bw, bh = xs.max() - xs.min() + 1, ys.max() - ys.min() + 1
+    if bw != bh or m.sum() < 0.6 * bw * bh:  # (the small ones fill their square: still round dots)
+        return None
+    cx, cy, r = (xs.min() + xs.max() + 1) / 2, (ys.min() + ys.max() + 1) / 2, bw / 2
+    if not keep.any() and dark.any():
+        # a plain dark disc
+        solid = dark & (a >= 100)
+        return draw_circle(cell, solid, cell[solid][:, :3].mean(axis=0), cx, cy, r, 0, 255)
+    if not keep.any():
+        # a faint dot, no outline (its own alpha)
+        return draw_circle(cell, m, (0, 0, 0), cx, cy, r, 0, min(255, int(a.max()) * 2))
+    row = cell[int(cy)]
+    ow = 0
+    for x in range(xs.min(), int(cx)):
+        if row[x, 3] == 0 or row[x, :3].max() >= 60:
+            break
+        ow += 1
+    return draw_circle(cell, keep, (0, 0, 0), cx, cy, r, ow, 255)
+
+
+def shapes():
+    """Fill the atlases' cells not redrawn by Tripo (still see-through magenta) with the drawn shapes,
+    and draw the whole textures in SHAPES."""
+    # the game's own green marker, jak3's cell (1, 0): the shape the other arrow cells are matched to
+    arrow = np.asarray(Image.open(ATLAS["jak3"]).convert("RGBA"))[0:CELL, CELL:2 * CELL, 3] > 0
+    z = CELL * UP
+    for game, path in ATLAS.items():
+        old = np.asarray(Image.open(path).convert("RGBA"))
+        dst = HUD / game / path.parent.name / "mini-map-icons.png"
+        new = np.array(Image.open(dst).convert("RGBA"))
+        drawn = []
+        for j in range(6):
+            for i in range(6):
+                cur = new[j * z:(j + 1) * z, i * z:(i + 1) * z]
+                if (cur != (255, 0, 255, 0)).any():
+                    continue  # redrawn by Tripo
+                out = draw_cell(old[j * CELL:(j + 1) * CELL, i * CELL:(i + 1) * CELL], arrow)
+                if out is not None:
+                    cur[...] = out
+                    drawn.append((i, j))
+        Image.fromarray(new, "RGBA").save(dst)
+        print(f"{game}: {dst}, cells drawn {drawn}")
+    for game, tpage, name in SHAPES:
+        src = np.asarray(Image.open(DUMP / f"{game}_pal/textures/{tpage}/{name}.png").convert("RGBA"))
+        if name == "map-target-marker":
+            out = draw_target(src)
+        else:
+            ys, xs = np.nonzero(src[..., 3])
+            cx, cy = (xs.min() + xs.max() + 1) / 2, (ys.min() + ys.max() + 1) / 2
+            out = draw_circle(src, src[..., 3] >= 0x70, (0, 0, 0), cx, cy, (xs.max() - xs.min() + 1) / 2, 0, 255)
+        dst = HUD / game / tpage / f"{name}.png"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(out, "RGBA").save(dst)
+        print(f"{game}: {dst}")
+
+
 if __name__ == "__main__":
     step = sys.argv[1] if len(sys.argv) > 1 else ""
     if step == "ref":
@@ -267,5 +426,8 @@ if __name__ == "__main__":
         image(int(sys.argv[2]))
     elif step == "atlas":
         atlas()
+        shapes()
+    elif step == "shapes":
+        shapes()
     else:
         sys.exit(__doc__)
