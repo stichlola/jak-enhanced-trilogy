@@ -78,6 +78,7 @@ uniform float saturation;
 uniform float contrast;
 uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
+uniform float noon;             // the hours around noon (0..1)
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
 uniform float rock_detail_avg;  // that picture's average brightness
@@ -1821,6 +1822,11 @@ void main() {
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
     vec3 body = night_dim(mix(water_deep_color, water_shallow_color, clear_water) * shade);
+    // (a pond's edge: its sandy bed seen through a few cm of murky water, not the sea's light
+    // turquoise: that drew a pale line along the shore, there only once the near water is drawn)
+    if (pond_here) {
+      body = mix(night_dim(water_deep_color * shade), c * vec3(0.7, 0.76, 0.78), clear_water);
+    }
     // (only a little of the game's own water texture shows: it's a small repeating tile)
     vec3 wc = mix(body, c, clear_water * 0.3 * water_unify + (1.0 - water_unify));
 
@@ -1933,8 +1939,8 @@ void main() {
       wc = mix(wc, wc * 1.3 + vec3(0.16, 0.17, 0.19) + fog_color * 0.4, min(rain_hits, 1.0) * 0.8);
     }
 
-    // foam where the water meets the shore, moving with the waves
-    if (!water_deep && seabed_level && depth_m < 0.8) {
+    // foam where the sea meets the shore, moving with the waves (a still pond has none)
+    if (!water_deep && seabed_level && depth_m < 0.8 && !pond_here) {
       float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
@@ -3233,7 +3239,10 @@ void main() {
   // the desert under a high sun: the game lights its ground near white, the eye stops down (the
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
-    c *= 1.0 - 0.3 * sun_haze * smoothstep(0.35, 0.8, sky_sun.w) * (1.0 - clouds.w);
+    float high = sun_haze * noon * (1.0 - clouds.w);
+    c *= 1.0 - 0.49 * high;
+    // (and the color the glare washed out of it back: sand, not chalk)
+    c = max(mix(vec3(luma(c)), c, 1.0 + 0.2 * high), 0.0);
   }
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);

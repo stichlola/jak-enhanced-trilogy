@@ -4698,6 +4698,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
+  {
+    // the hours around noon (11-13, eased in from 9:30 and out by 14:30)
+    const float hr = m_last_hour < 0.f ? 12.f : m_last_hour;
+    const float noon = std::clamp((hr - 9.5f) / 1.5f, 0.f, 1.f) *
+                       (1.f - std::clamp((hr - 13.f) / 1.5f, 0.f, 1.f));
+    glUniform1f(glGetUniformLocation(id, "noon"), noon);
+  }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
   // the rock picture (custom_assets/<game>/scenery/rock_detail.png), loaded on first use
   if (!m_rock_loaded) {
