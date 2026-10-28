@@ -1962,10 +1962,17 @@ void main() {
     float th = 1.0 - snow_cover * 1.15;
     float lie = on_jak ? 0.0 : slope * smoothstep(th, th + 0.2, n);
     if (lie > 0.0) {
-      float light = mix(clamp(luma(c) * 2.2, 0.04, 1.1),
-                        0.25 + 0.75 * clamp(sky_sun.w * 2.5, 0.0, 1.0), 0.5);
-      c = mix(c, vec3(0.9, 0.93, 1.0) * light, lie * 0.95);
+      // (only as bright as the ground's own light allows, a bit over it: snow is whiter than sand,
+      // not a lamp. Capped below white so it keeps its shading, grain from the patch noise)
+      // (half from the daylight alone, so it stays white on dark wood and stone too)
+      float day = clamp(sky_sun.w * 2.5, 0.0, 1.0);
+      float light = clamp(mix(luma(c) * 1.4, 0.55 * (0.3 + 0.7 * day), 0.4), 0.03, 0.72);
+      light *= 0.9 + 0.12 * n;
+      c = mix(c, vec3(0.88, 0.92, 1.0) * light, lie * 0.9);
     }
+    // the bare ground between the patches is damp from melt: darker, less saturated
+    float damp = on_jak ? 0.0 : snow_cover * slope * (1.0 - lie);
+    c = mix(c, vec3(luma(c)), 0.35 * damp) * (1.0 - 0.25 * damp);
   }
 
   // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
