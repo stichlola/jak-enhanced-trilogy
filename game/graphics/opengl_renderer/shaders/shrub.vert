@@ -29,6 +29,7 @@ out float fogginess;
 out vec3 enh_normal;
 out vec3 enh_pos;
 flat out int enh_lod_kind;
+flat out vec2 enh_xfade;  // (the detailed models' swaps: none here)
 
 void main() {
   // old system:
@@ -108,5 +109,6 @@ void main() {
   enh_normal = normal_in.xyz;
   enh_pos = vert;
   enh_lod_kind = enh_flag_in;
+  enh_xfade = vec2(0.0);
   tex_coord.xy /= 4096;
 }

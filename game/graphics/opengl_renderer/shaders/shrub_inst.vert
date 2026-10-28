@@ -7,7 +7,7 @@ layout (location = 0) in vec3 position_in;  // the model's own space, game units
 layout (location = 1) in vec2 tex_coord_in;
 layout (location = 2) in vec4 normal_in;
 layout (location = 3) in vec4 inst_c0;  // the copy's model-to-world columns; c0.w: its time of day color
-layout (location = 4) in vec4 inst_c1;
+layout (location = 4) in vec4 inst_c1;  // c1.w, c2.w: a swap (shrub.frag's enh_xfade)
 layout (location = 5) in vec4 inst_c2;
 layout (location = 6) in vec4 inst_c3;
 
@@ -33,6 +33,7 @@ out float fogginess;
 out vec3 enh_normal;
 out vec3 enh_pos;
 flat out int enh_lod_kind;
+flat out vec2 enh_xfade;
 
 void main() {
   mat3 turn = mat3(inst_c0.xyz, inst_c1.xyz, inst_c2.xyz);
@@ -79,4 +80,5 @@ void main() {
   enh_normal = normalize(turn * normal_in.xyz);
   enh_pos = vert;
   enh_lod_kind = 2;
+  enh_xfade = vec2(inst_c1.w, inst_c2.w);  // a swap to the next version (EnhancedScenery)
 }

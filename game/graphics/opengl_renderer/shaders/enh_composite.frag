@@ -945,7 +945,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   }
   float cam_y = cam_pos.y / 4096.0;
   float t0 = max((1100.0 - cam_y) / wd.y, 0.0);
-  float t1 = min((2000.0 - cam_y) / wd.y, t0 + 9000.0);
+  float t1 = min((2000.0 - cam_y) / wd.y, t0 + 7000.0);
   if (t0 > 30000.0) {
     return vec4(0.0, 0.0, 0.0, 1.0);
   }
@@ -959,7 +959,9 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   vec3 top = sky * 0.9 + 0.08;
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
-  const int N = 18;
+  // more steps toward the horizon, where the ray crosses kilometers of slab: long steps there
+  // left a per-pixel grain (the jitter) the TAA couldn't smooth, drawn as fine diagonal hatching
+  int N = int(mix(34.0, 16.0, clamp(wd.y * 2.5, 0.0, 1.0)));
   float dt = (t1 - t0) / float(N);
   vec3 sum = vec3(0.0);
   float trans = 1.0;

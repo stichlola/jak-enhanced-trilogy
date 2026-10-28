@@ -15,7 +15,7 @@ bool enhanced_jitters(const std::string& name) {
                                 "etie",        "etie_base",     "merc2",       "emerc",
                                 "generic",     "hfrag",         "ocean_common", "sprite_3d",
                                 "sprite3_3d",  "shadow2",       "glow_draw",   "collision",
-                                "sky",         "shrub_inst"};
+                                "sky",         "shrub_inst",    "shrub_imp"};
   for (const char* w : world) {
     if (name == w) {
       return true;
@@ -47,7 +47,8 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   auto vert_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
   // (Enhanced: the detailed scenery's instanced models are colored like the shrubs they replace)
-  const std::string frag_name = shader_name == "shrub_inst" ? "shrub" : shader_name;
+  const std::string frag_name =
+      shader_name == "shrub_inst" || shader_name == "shrub_imp" ? "shrub" : shader_name;
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
 
@@ -236,6 +237,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
   at(ShaderId::ENH_SHADOW) = {"enh_shadow", version};
   at(ShaderId::ENH_SHADOW_MERC) = {"enh_shadow_merc", version};
   at(ShaderId::SHRUB_INST) = {"shrub_inst", version};
+  at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

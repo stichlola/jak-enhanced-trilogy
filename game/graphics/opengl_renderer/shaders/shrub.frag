@@ -7,6 +7,11 @@ in vec3 enh_pos;  // world position (relative to the camera where known)
 flat in int enh_lod_kind;  // Enhanced: 1 the game's proto, 2 its detailed model (EnhancedScenery)
 uniform vec2 enh_lod;      // the crossfade between them, distance from the camera (0, 0 = off)
 uniform float enh_time;    // seconds (the dither moves each frame, TAA blends it smooth)
+uniform vec3 enh_model_avg;  // the detailed model's texture, averaged (its far look: the proto's flat one)
+// Enhanced: a detailed model's copy swapping to its next simpler version (x: how far through,
+// y: +1 the incoming one, -1 the outgoing one, 0 no swap). The two draw complementary pixels of
+// one noise, so together they're whole: no hole, no double, and the TAA blends the grain away
+flat in vec2 enh_xfade;
 
 in vec4 fragment_color;
 in vec3 tex_coord;
@@ -61,9 +66,23 @@ void main() {
       discard;
     }
   }
+  if (enh_xfade.y != 0.0) {
+    // interleaved gradient noise moved each frame by the golden ratio: spread like blue noise,
+    // no grid to see (the 4x4 ordered dither showed one)
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
+                    floor(enh_time * 60.0) * 0.618034);
+    if ((n < enh_xfade.x) != (enh_xfade.y > 0.0)) {
+      discard;
+    }
+  }
   enh_normal_out = enh_pack_normal(enh_normal);
   if (gfx_hack_no_tex == 0) {
     vec4 T0 = texture(tex_T0, tex_coord.xy);
+    if (enh_lod_kind == 2 && enh_lod.y > 0.0) {
+      // the model's light and dark streaks fade out toward the far end, where the game's evenly
+      // colored proto takes over
+      T0.rgb = mix(T0.rgb, enh_model_avg, 0.6 * smoothstep(enh_lod.y * 0.4, enh_lod.y, length(enh_pos)));
+    }
     color = fragment_color * T0;
   } else {
     color = fragment_color;

@@ -1,6 +1,7 @@
 #include "EnhancedScenery.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -20,6 +21,8 @@
 #include "game/graphics/pipelines/opengl.h"
 #include "game/runtime.h"
 
+#include "third-party/stb_image/stb_image.h"
+
 float g_enhanced_scenery_dist = [] {
   const char* env = std::getenv("JAK_ENHANCED_SCENERY");
   return env ? std::clamp((float)std::atof(env), 0.f, 200.f) : 60.f;
@@ -28,6 +31,10 @@ float g_enhanced_scenery_dist = [] {
 namespace {
 
 constexpr float kMeter = 4096.f;
+constexpr int kFarLods = 1;  // far versions per model, each drawn over one more detailed distance
+constexpr float kImpReach = 500.f;  // m: the impostors (past the far versions) reach this far
+constexpr int kImpGrid = 8;  // impostor atlas: views per side (tools/blender/grass_variants.py)
+constexpr float kFarReach = 1.f + kFarLods;  // so they reach this many times the detailed distance
 
 using Vec3 = math::Vector3f;
 
@@ -52,6 +59,12 @@ struct Mesh {
   Vec3 lo, hi;  // bounds, game units
   Vec3 avg;      // its texture's average color (opaque texels), 0..1
   float foot_y = 0;  // where it meets the ground: the bottom of its middle, not of drooping tips
+  u64 tex_key = 0;   // the texture's content (models sharing it share one GL texture)
+  int far_lod = -1;      // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
+  // its impostor (<file>_imp.png): pictures of it from kImpGrid^2 directions, drawn past them all
+  int imp_w = 0, imp_h = 0;
+  std::vector<u8> imp_rgba;
+  GLuint imp_tex = 0;
   GLuint vao = 0, vbo = 0, ibo = 0, tex = 0;
 };
 
@@ -74,6 +87,7 @@ struct Batch {
 
 struct SceneryTree {
   std::vector<Batch> batches;
+  bool impostors = false;  // every model has one: the game's protos only past kImpReach
 };
 
 struct Library {
@@ -81,8 +95,11 @@ struct Library {
   bool loaded_config = false;
   std::unordered_map<std::string, std::vector<int>> protos;  // proto name -> meshes
   std::vector<Mesh> meshes;
+  std::unordered_map<u64, GLuint> textures;  // by the texture's content
   GLuint instance_vbo = 0;
-  std::vector<GpuInstance> scratch;
+  // the copies drawn, per batch, per version (the model, its far versions, its impostor)
+  std::vector<std::array<std::vector<GpuInstance>, kFarLods + 2>> copies;
+  GLuint imp_vao = 0, imp_vbo = 0;  // the impostors' quad
 };
 
 Library& library() {
@@ -152,6 +169,32 @@ bool load_mesh(Mesh& mesh) {
     mesh.tex_w = mesh.tex_h = 1;
     mesh.rgba = {200, 200, 200, 255};
   }
+  // halved down to 2048 at most (a tuft is never that big on screen; Tripo's are 4096)
+  while (std::max(mesh.tex_w, mesh.tex_h) > 2048 && mesh.tex_w % 2 == 0 && mesh.tex_h % 2 == 0) {
+    int w = mesh.tex_w / 2, h = mesh.tex_h / 2;
+    std::vector<u8> half((size_t)w * h * 4);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        for (int c = 0; c < 4; c++) {
+          auto at = [&](int dx, int dy) {
+            return (u32)mesh.rgba[((size_t)(2 * y + dy) * mesh.tex_w + 2 * x + dx) * 4 + c];
+          };
+          half[((size_t)y * w + x) * 4 + c] = (u8)((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1) + 2) / 4);
+        }
+      }
+    }
+    mesh.rgba = std::move(half);
+    mesh.tex_w = w;
+    mesh.tex_h = h;
+  }
+  // the variants of one tuft carry the same texture: a key to share one GL texture among them
+  {
+    u64 h = 1469598103934665603ull ^ ((u64)mesh.tex_w << 32 | (u32)mesh.tex_h);
+    for (size_t p = 0; p < mesh.rgba.size(); p += 61) {
+      h = (h ^ mesh.rgba[p]) * 1099511628211ull;
+    }
+    mesh.tex_key = h;
+  }
   {
     double sum[3] = {0, 0, 0}, n = 0;
     for (size_t p = 0; p < mesh.rgba.size(); p += 4) {
@@ -214,6 +257,36 @@ void load_config(Library& lib) {
           mesh.ok = load_mesh(mesh);
           it = by_file.emplace(file, (int)lib.meshes.size()).first;
           lib.meshes.push_back(std::move(mesh));
+          // its impostor
+          auto imp_path = scenery_dir() / (fs::path(file).stem().string() + "_imp.png");
+          if (lib.meshes[it->second].ok && fs::exists(imp_path)) {
+            int w = 0, h = 0;
+            u8* px = stbi_load(imp_path.string().c_str(), &w, &h, nullptr, 4);
+            if (px) {
+              auto& mesh = lib.meshes[it->second];
+              mesh.imp_w = w;
+              mesh.imp_h = h;
+              mesh.imp_rgba.assign(px, px + (size_t)w * h * 4);
+              stbi_image_free(px);
+            }
+          }
+          // its far versions, a chain: <file>_lod1.glb, _lod2.glb ...
+          int prev = it->second;
+          for (int k = 1; k <= kFarLods && lib.meshes[prev].ok; k++) {
+            auto far_file = fmt::format("{}_lod{}.glb", fs::path(file).stem().string(), k);
+            if (!fs::exists(scenery_dir() / far_file)) {
+              break;
+            }
+            Mesh lod;
+            lod.file = far_file;
+            lod.ok = load_mesh(lod);
+            if (!lod.ok) {
+              break;
+            }
+            lib.meshes[prev].far_lod = (int)lib.meshes.size();
+            prev = (int)lib.meshes.size();
+            lib.meshes.push_back(std::move(lod));
+          }
         }
         if (lib.meshes[it->second].ok) {
           lib.protos[proto].push_back(it->second);
@@ -316,14 +389,29 @@ void prepare_tree(tfrag3::ShrubTree& tree,
   auto data = std::make_shared<SceneryTree>();
   std::unordered_map<u64, size_t> batch_of;  // (proto, mesh) -> batch
   // the copy's model fitted into its proto (proto's local space): the foot on the foot, as tall
-  auto fit = [&](u32 g, const Mesh& mesh, float yaw) {
+  auto bounds = [&](u32 g, Vec3& lo, Vec3& hi) {
     const auto& grp = groups[g];
-    Vec3 lo(1e30f, 1e30f, 1e30f), hi(-1e30f, -1e30f, -1e30f);
+    lo = Vec3(1e30f, 1e30f, 1e30f);
+    hi = Vec3(-1e30f, -1e30f, -1e30f);
     for (u32 v = grp.start_vert; v < grp.end_vert; v++) {
       const auto& pv = tree.packed_vertices.vertices[v];
       lo = Vec3(std::min(lo.x(), pv.x), std::min(lo.y(), pv.y), std::min(lo.z(), pv.z));
       hi = Vec3(std::max(hi.x(), pv.x), std::max(hi.y(), pv.y), std::max(hi.z(), pv.z));
     }
+  };
+  // width over height: a proto's, a model's (above its foot)
+  auto proto_aspect = [&](u32 g) {
+    Vec3 lo, hi;
+    bounds(g, lo, hi);
+    return std::max(std::max(hi.x() - lo.x(), hi.z() - lo.z()), 1.f) / std::max(hi.y() - lo.y(), 1.f);
+  };
+  auto mesh_aspect = [](const Mesh& mesh) {
+    return std::max(std::max(mesh.hi.x() - mesh.lo.x(), mesh.hi.z() - mesh.lo.z()), 1.f) /
+           std::max(mesh.hi.y() - mesh.foot_y, 1.f);
+  };
+  auto fit = [&](u32 g, const Mesh& mesh, float yaw) {
+    Vec3 lo, hi;
+    bounds(g, lo, hi);
     Vec3 msize = mesh.hi - mesh.lo;
     msize = Vec3(msize.x(), mesh.hi.y() - mesh.foot_y, msize.z());
     float h = std::max(hi.y() - lo.y(), 1.f);
@@ -342,7 +430,25 @@ void prepare_tree(tfrag3::ShrubTree& tree,
   auto add = [&](u32 g, const Affine& place, u8 tier, u32 seed) {
     u32 proto = group_proto[g];
     const auto& meshes = *models_for(lib, tree.proto_names[proto]);
-    int m = meshes[std::min((size_t)(hash01(tree_idx, seed, 1) * meshes.size()), meshes.size() - 1)];
+    // a model about as wide for its height as the proto (a bush of tufts where the proto spreads,
+    // one tuft where it's narrow: no swelling when it takes over), at random among the close ones
+    const float pa = proto_aspect(g);
+    float wsum = 0;
+    std::vector<float> wts(meshes.size());
+    for (size_t i = 0; i < meshes.size(); i++) {
+      float d = std::log(mesh_aspect(lib.meshes[meshes[i]]) / pa);
+      wts[i] = std::exp(-d * d / 0.08f) + 1e-4f;
+      wsum += wts[i];
+    }
+    float pick = hash01(tree_idx, seed, 1) * wsum;
+    int m = meshes.back();
+    for (size_t i = 0; i < meshes.size(); i++) {
+      pick -= wts[i];
+      if (pick <= 0) {
+        m = meshes[i];
+        break;
+      }
+    }
     const auto& mesh = lib.meshes[m];
     Affine full = place.after(fit(g, mesh, 6.2831853f * hash01(tree_idx, seed, 2)));
     u64 key = ((u64)proto << 32) | (u32)m;
@@ -432,6 +538,10 @@ void prepare_tree(tfrag3::ShrubTree& tree,
       verts[v].pad2 = 1;
     }
   }
+  data->impostors = !data->batches.empty();
+  for (const auto& b : data->batches) {
+    data->impostors = data->impostors && !lib.meshes[b.mesh].imp_rgba.empty();
+  }
   tree.enh_scenery = data;
 }
 
@@ -467,13 +577,57 @@ void make_gl(Mesh& mesh, Library& lib) {
                GL_STATIC_DRAW);
   glBindVertexArray(0);
 
+  auto shared = lib.textures.find(mesh.tex_key);
+  if (shared != lib.textures.end()) {
+    mesh.tex = shared->second;
+    mesh.rgba = {};
+    return;
+  }
   glGenTextures(1, &mesh.tex);
+  lib.textures.emplace(mesh.tex_key, mesh.tex);
   glBindTexture(GL_TEXTURE_2D, mesh.tex);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mesh.tex_w, mesh.tex_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                mesh.rgba.data());
   glGenerateMipmap(GL_TEXTURE_2D);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  mesh.rgba = {};  // (on the GPU now)
+}
+
+// the impostor's atlas, and the quad all impostors share (its corners; the copies' columns from
+// the instance buffer, as the models)
+void make_imp_gl(Mesh& mesh, Library& lib) {
+  if (!lib.imp_vao) {
+    if (!lib.instance_vbo) {
+      glGenBuffers(1, &lib.instance_vbo);
+    }
+    const float corners[] = {-1, -1, 1, -1, -1, 1, 1, 1};
+    glGenVertexArrays(1, &lib.imp_vao);
+    glBindVertexArray(lib.imp_vao);
+    glGenBuffers(1, &lib.imp_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, lib.imp_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(corners), corners, GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), nullptr);
+    glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
+    for (int c = 0; c < 4; c++) {
+      glEnableVertexAttribArray(3 + c);
+      glVertexAttribPointer(3 + c, 4, GL_FLOAT, GL_FALSE, sizeof(GpuInstance),
+                            (void*)(sizeof(float) * 4 * c));
+      glVertexAttribDivisor(3 + c, 1);
+    }
+    glBindVertexArray(0);
+  }
+  glGenTextures(1, &mesh.imp_tex);
+  glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, mesh.imp_w, mesh.imp_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               mesh.imp_rgba.data());
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  mesh.imp_rgba = {};  // (on the GPU now)
 }
 
 }  // namespace
@@ -501,8 +655,12 @@ math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree) {
   if (!tree.enh_scenery || g_enhanced_scenery_dist <= 0.f) {
     return math::Vector2f(0, 0);
   }
-  float end = g_enhanced_scenery_dist * kMeter;
-  return math::Vector2f(end * 0.9f, end);
+  // the game's protos only where the models end: with their far pictures (impostors) out to
+  // kImpReach, where the protos are a few pixels; else the far versions' reach (dithered: the two
+  // differ, up close it showed)
+  const auto& data = *static_cast<const SceneryTree*>(tree.enh_scenery.get());
+  float end = data.impostors ? kImpReach * kMeter : g_enhanced_scenery_dist * kFarReach * kMeter;
+  return math::Vector2f(end * 0.85f, end);
 }
 
 void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
@@ -518,43 +676,98 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     return;  // (the loader is reading a model for a level coming in: the game's protos for now)
   }
   const auto& data = *static_cast<const SceneryTree*>(tree.enh_scenery.get());
-  const float far_end = g_enhanced_scenery_dist * kMeter;
+  // each version reaches one detailed distance further (the impostor: to kImpReach); a copy near
+  // the end of its version's reach swaps to the next over the last part of it (both drawn,
+  // complementary pixels: shrub.frag's enh_xfade)
+  const float step = g_enhanced_scenery_dist * kMeter;
+  const float swap = step * 0.2f;
+  const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
   const auto& cam = settings.camera.trans;
+  auto fade = enhanced_scenery_fade(tree);
+  using clock = std::chrono::steady_clock;
+  static const auto start = clock::now();
+  const float now = std::chrono::duration<float>(clock::now() - start).count();
 
-  bool setup = false;
-  auto& sh = render_state->shaders[ShaderId::SHRUB_INST];
-  for (const auto& b : data.batches) {
-    auto& mesh = lib.meshes[b.mesh];
-    // the copies near enough, in view, at the vegetation density shown
-    lib.scratch.clear();
+  // the copies to draw: per batch, per version (the far versions, then the impostor last)
+  constexpr int kImp = kFarLods + 1;
+  lib.copies.resize(data.batches.size());
+  bool any = false;
+  for (size_t bi = 0; bi < data.batches.size(); bi++) {
+    const auto& b = data.batches[bi];
+    const auto& mesh = lib.meshes[b.mesh];
+    auto& out = lib.copies[bi];
+    for (auto& c : out) {
+      c.clear();
+    }
+    // the last version this model has: its impostor, else its last far version
+    int last = mesh.imp_rgba.empty() && !mesh.imp_tex ? 0 : kImp;
+    if (!last) {
+      for (int k = 0, m = b.mesh; k < kFarLods && lib.meshes[m].far_lod >= 0; k++) {
+        m = lib.meshes[m].far_lod;
+        last = k + 1;
+      }
+    }
     for (size_t i = 0; i < b.instances.size(); i++) {
       const auto& s = b.spheres[i];
       float dx = s.x() - cam.x(), dy = s.y() - cam.y(), dz = s.z() - cam.z();
+      float d2 = dx * dx + dy * dy + dz * dz;
       float reach = far_end + s.w();
-      if (dx * dx + dy * dy + dz * dz > reach * reach || b.tiers[i] > g_enhanced_vegetation ||
+      if (d2 > reach * reach || b.tiers[i] > g_enhanced_vegetation ||
           !sphere_in_view_ref(s, settings.camera.planes)) {
         continue;
       }
-      lib.scratch.push_back(b.instances[i]);
+      float d = std::sqrt(d2);
+      int k = std::min((int)(d / step), last);
+      GpuInstance inst = b.instances[i];
+      float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
+      if (k < last && into > 0.f) {
+        float f = std::min(into / swap, 1.f);
+        inst.col[1][3] = f;
+        inst.col[2][3] = -1.f;
+        out[k].push_back(inst);
+        inst.col[2][3] = 1.f;
+        out[k + 1].push_back(inst);
+      } else {
+        out[k].push_back(inst);
+      }
+      any = true;
     }
-    if (lib.scratch.empty()) {
+  }
+  if (!any) {
+    return;
+  }
+
+  // the models and their far versions
+  bool setup = false;
+  auto& sh = render_state->shaders[ShaderId::SHRUB_INST];
+  for (size_t bi = 0; bi < data.batches.size(); bi++) {
+    const auto& b = data.batches[bi];
+    auto& mesh = lib.meshes[b.mesh];
+    const auto& out = lib.copies[bi];
+    // the model and its far versions (the last one stands in for any missing)
+    std::array<Mesh*, kFarLods + 1> lods;
+    lods[0] = &mesh;
+    bool some = !out[0].empty();
+    for (int k = 1; k <= kFarLods; k++) {
+      lods[k] = lods[k - 1]->far_lod >= 0 ? &lib.meshes[lods[k - 1]->far_lod] : lods[k - 1];
+      some = some || !out[k].empty();
+    }
+    if (!some) {
       continue;
     }
-    if (!mesh.vao) {
-      make_gl(mesh, lib);
+    for (int k = 0; k <= kFarLods; k++) {
+      if (!out[k].empty() && !lods[k]->vao) {
+        make_gl(*lods[k], lib);
+      }
     }
     if (!setup) {
       setup = true;
       first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_INST);
-      auto fade = enhanced_scenery_fade(tree);
       glUniform2f(glGetUniformLocation(sh.id(), "enh_lod"), fade.x(), fade.y());
       glUniform1f(glGetUniformLocation(sh.id(), "enh_wet"), g_enhanced_wind.wet);
       glUniform1i(glGetUniformLocation(sh.id(), "tex_T10"), 10);
       // wind and the push of Jak and whoever is near him, as the shrubs
-      using clock = std::chrono::steady_clock;
-      static const auto start = clock::now();
-      glUniform1f(glGetUniformLocation(sh.id(), "enh_time"),
-                  std::chrono::duration<float>(clock::now() - start).count());
+      glUniform1f(glGetUniformLocation(sh.id(), "enh_time"), now);
       const auto& pl = g_enhanced_player;
       glUniform4f(glGetUniformLocation(sh.id(), "enh_player"), pl.pos[0], pl.pos[1], pl.pos[2],
                   pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * kMeter : 0.f);
@@ -567,6 +780,8 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     }
     glUniform3f(glGetUniformLocation(sh.id(), "enh_base_rgb"), b.base_rgb[0] * b.tint[0],
                 b.base_rgb[1] * b.tint[1], b.base_rgb[2] * b.tint[2]);
+    glUniform3f(glGetUniformLocation(sh.id(), "enh_model_avg"), mesh.avg.x(), mesh.avg.y(),
+                mesh.avg.z());
     glUniform2f(glGetUniformLocation(sh.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
@@ -574,18 +789,66 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
                 b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_INST);
 
-    glBindVertexArray(mesh.vao);
+    glDisable(GL_PRIMITIVE_RESTART);
+    glActiveTexture(GL_TEXTURE0);
+    for (int k = 0; k <= kFarLods; k++) {
+      const auto& m = *lods[k];
+      const auto& copies = out[k];
+      if (copies.empty()) {
+        continue;
+      }
+      glBindVertexArray(m.vao);
+      glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
+      glBufferData(GL_ARRAY_BUFFER, copies.size() * sizeof(GpuInstance), copies.data(),
+                   GL_STREAM_DRAW);
+      glBindTexture(GL_TEXTURE_2D, m.tex);
+      glDrawElementsInstanced(GL_TRIANGLES, m.indices.size(), GL_UNSIGNED_INT, nullptr,
+                              copies.size());
+      prof.add_draw_call();
+      prof.add_tri(m.indices.size() / 3 * copies.size());
+    }
+    glEnable(GL_PRIMITIVE_RESTART);
+  }
+
+  // the impostors: one quad a copy
+  bool imp_setup = false;
+  auto& ish = render_state->shaders[ShaderId::SHRUB_IMP];
+  for (size_t bi = 0; bi < data.batches.size(); bi++) {
+    const auto& b = data.batches[bi];
+    auto& mesh = lib.meshes[b.mesh];
+    const auto& copies = lib.copies[bi][kImp];
+    if (copies.empty()) {
+      continue;
+    }
+    if (!mesh.imp_tex) {
+      make_imp_gl(mesh, lib);
+    }
+    if (!imp_setup) {
+      imp_setup = true;
+      first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_IMP);
+      glUniform2f(glGetUniformLocation(ish.id(), "enh_lod"), fade.x(), fade.y());
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_wet"), g_enhanced_wind.wet);
+      glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)kImpGrid);
+    }
+    glUniform3f(glGetUniformLocation(ish.id(), "enh_base_rgb"), b.base_rgb[0] * b.tint[0],
+                b.base_rgb[1] * b.tint[1], b.base_rgb[2] * b.tint[2]);
+    Vec3 center = (mesh.lo + mesh.hi) * 0.5f;
+    glUniform4f(glGetUniformLocation(ish.id(), "enh_imp"), center.x(), center.y(), center.z(),
+                (mesh.hi - mesh.lo).length() * 0.5f);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
+    setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_IMP);
+
+    glBindVertexArray(lib.imp_vao);
     glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
-    glBufferData(GL_ARRAY_BUFFER, lib.scratch.size() * sizeof(GpuInstance), lib.scratch.data(),
+    glBufferData(GL_ARRAY_BUFFER, copies.size() * sizeof(GpuInstance), copies.data(),
                  GL_STREAM_DRAW);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mesh.tex);
-    glDisable(GL_PRIMITIVE_RESTART);
-    glDrawElementsInstanced(GL_TRIANGLES, mesh.indices.size(), GL_UNSIGNED_INT, nullptr,
-                            lib.scratch.size());
-    glEnable(GL_PRIMITIVE_RESTART);
+    glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, copies.size());
     prof.add_draw_call();
-    prof.add_tri(mesh.indices.size() / 3 * lib.scratch.size());
+    prof.add_tri(2 * copies.size());
   }
   glBindVertexArray(0);
 }
