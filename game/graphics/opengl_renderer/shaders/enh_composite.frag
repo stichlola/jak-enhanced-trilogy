@@ -2739,7 +2739,8 @@ void main() {
 
   // bloom and god rays
   c += texture(tex_T1, tex_coord).rgb * bloom_strength;
-  c += texture(tex_T4, tex_coord).rgb * shafts_strength;
+  // (god rays a quarter softer than the setting reads: they washed the low sun's side out)
+  c += texture(tex_T4, tex_coord).rgb * shafts_strength * 0.75;
 
   // a town's glow over the horizon at night: warm, low, spread over the town's width, on the sky
   // and the far haze
