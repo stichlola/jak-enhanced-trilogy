@@ -647,8 +647,54 @@
 (define *enhanced-blast-test* (pc-enhanced-getenv "JAK_ENHANCED_JAK1_BLAST" *enhanced-blast-buf* 16))
 (define *enhanced-blast-frames* 0)
 
+;; Enhanced: lightning that strikes the ground in a strong storm (the renderer picks where, around
+;; Jak, mostly far: pc-enhanced-strike); the ground is found under it and a blast set off there: a
+;; dark eco crate's explosion, Jak thrown back and hurt inside its radius, enemies in it killed
+(define *enhanced-strike-at* (new 'global 'vector))
+
+(defbehavior enhanced-strike-update target ()
+  (when (pc-enhanced-strike (the-as pointer *enhanced-strike-at*))
+    (let ((from (new 'stack-no-clear 'vector))
+          (move (new 'stack-no-clear 'vector))
+          (tri (new 'stack-no-clear 'collide-tri-result)))
+      (vector-copy! from *enhanced-strike-at*)
+      (+! (-> from y) (meters 150.0))
+      (set-vector! move 0.0 (meters -300.0) 0.0 1.0)
+      (let ((t (fill-and-probe-using-line-sphere *collide-cache* from move 2048.0
+                                                 (collide-kind background) (the-as process #f) tri
+                                                 (new 'static 'pat-surface :noentity #x1))))
+        (when (>= t 0.0)
+          (let ((hit *enhanced-strike-at*)
+                (radius (-> *enhanced-strike-at* w)))
+            (vector+float*! hit from move t)
+            (set! (-> hit w) 1.0)
+            (pc-enhanced-strike-hit (the-as pointer hit))
+            (set! (-> hit w) radius)
+            (process-spawn part-tracker :init part-tracker-init group-dark-eco-box-explosion -1 #f #f #f hit
+                           :to *entity-pool*)
+            ;; Jak: hurt and thrown away from it
+            (let ((away (vector-! (new 'stack-no-clear 'vector) (-> self control trans) hit)))
+              (when (< (vector-length away) radius)
+                (set! (-> away y) 0.0)
+                (vector-normalize! away 16384.0)
+                (send-event self 'attack #f
+                            (static-attack-info ((vector away) (shove-up (meters 2.0)) (shove-back (meters 4.0)))))))
+            ;; enemies inside it
+            (iterate-process-tree *entity-pool*
+                                  (lambda ((p process-drawable))
+                                    (when (and (logtest? (process-mask enemy) (-> p mask))
+                                               (type-type? (-> p type) process-drawable)
+                                               (nonzero? (-> p root))
+                                               (< (vector-vector-distance (-> p root trans) *enhanced-strike-at*)
+                                                  (-> *enhanced-strike-at* w)))
+                                      (send-event p 'instant-death))
+                                    #f)
+                                  *null-kernel-context*))))))
+  (none))
+
 (defbehavior enhanced-player-update target ()
   (enhanced-menu-update)
+  (enhanced-strike-update)
   (when *enhanced-blast-test*
     (+! *enhanced-blast-frames* 1)
     (when (zero? (mod *enhanced-blast-frames* 180))

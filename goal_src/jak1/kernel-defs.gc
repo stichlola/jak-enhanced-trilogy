@@ -617,6 +617,8 @@
 ;; Enhanced (shared with Jak 2 and 3, see kmachine.cpp)
 (define-extern pc-enhanced-set-sun (function pointer none))
 (define-extern pc-enhanced-set-player (function pointer none))
+(define-extern pc-enhanced-strike (function pointer symbol))
+(define-extern pc-enhanced-strike-hit (function pointer none))
 (define-extern pc-enhanced-set-scene (function string float symbol none))
 (define-extern pc-enhanced-thunder (function int))
 (define-extern pc-enhanced-set-pushers (function pointer int none))
