@@ -3124,7 +3124,7 @@ void main() {
   // too small for the pixels, a size averages out by itself
   if (rock_detail > 0.0 && z > 0.0) {
     float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-    if (nl > 0.7 && nl < 0.8) {
+    if (nl > 0.55 && nl < 0.8) {
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
       // (sharp: the view from above, its strata lines, stays off steep faces, where they ran down
@@ -3165,6 +3165,11 @@ void main() {
                     gnoise(vec2(wp.x - wp.y * 0.5, wp.z + wp.y * 0.7) / 13.0 + 7.4) * 0.4;
       d += macro * 0.12 * (0.4 + 0.6 * smoothstep(30.0, 150.0, dist));
       c *= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
+      // (the rocky ground (normals 0.6 long): the game paints it as pale as the sand around)
+      // (and its grain stronger: gravel, mottled light and dark, warm)
+      if (nl < 0.65) {
+        c *= 0.55 * max(1.0 + rock_detail * 2.4 * d * bands, 0.3) * vec3(1.06, 1.0, 0.9);
+      }
     }
   }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -11,8 +12,9 @@
 // surfaces (glass, marble) reflections and a highlight. Written by the background shaders in
 // the normal target's alpha (2 bits): 1 plain, 2/3 metal, 1/3 glossy, 0 no normal; sand is plain
 // with its normal written 0.9 long (the composite draws the wind's ripples on it), rock 0.75 (a
-// tiling rock picture laid over it).
-enum EnhancedMaterial : u8 { kPlain = 0, kMetal = 1, kGlossy = 2, kSand = 3, kRock = 4 };
+// tiling rock picture laid over it), rocky ground 0.6 (rock, and darker: the game paints it as pale
+// as the sand).
+enum EnhancedMaterial : u8 { kPlain = 0, kMetal = 1, kGlossy = 2, kSand = 3, kRock = 4, kGround = 5 };
 
 inline u8 enhanced_material(std::string name) {
   std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -24,9 +26,23 @@ inline u8 enhanced_material(std::string name) {
     }
     return false;
   };
+  // test switch: JAK_ENHANCED_ROCK_TEX=<a,b,...> takes textures whose names contain one of those
+  // as rock
+  if (const char* extra = std::getenv("JAK_ENHANCED_ROCK_TEX")) {
+    std::string list = std::string(extra) + ",";
+    for (size_t at = 0, end; (end = list.find(',', at)) != std::string::npos; at = end + 1) {
+      if (end > at && name.find(list.substr(at, end - at)) != std::string::npos) {
+        return kRock;
+      }
+    }
+  }
   // the ground's sand (not sandstone, not a sandbag)
   if (has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick"})) {
     return kSand;
+  }
+  // the desert's cracked rocky ground (its slopes)
+  if (has({"wascity-ground"})) {
+    return kGround;
   }
   // bare rock: cliffs, mountains, boulders (not rock-shrub plants)
   if (has({"cliff", "mount", "rock", "boulder", "sandstone"}) && !has({"shrub", "grass", "metal", "rust"})) {
