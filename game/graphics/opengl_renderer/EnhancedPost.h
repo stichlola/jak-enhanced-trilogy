@@ -450,6 +450,7 @@ class EnhancedPost {
   int m_shaft_w = 0;
   int m_shaft_h = 0;
   bool m_shafts_ready = false;
+  bool m_haze_shadow_ready = false;  // the shafts texture's alpha: the desert haze's shadow
 
   // indirect light, half resolution (0: raw, 1: blur temp)
   void do_gi(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,

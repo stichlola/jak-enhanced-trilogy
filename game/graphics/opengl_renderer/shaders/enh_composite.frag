@@ -78,6 +78,7 @@ uniform float saturation;
 uniform float contrast;
 uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
+uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
 uniform float rock_detail_avg;  // that picture's average brightness
 uniform sampler2D tex_T10;      // the rock picture (tiling, mipmapped)
@@ -2471,8 +2472,18 @@ void main() {
     float up = max(world_dir(ray).y, 0.0);
     float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
     float toward = max(dot(ray, sky_sun.xyz), 0.0);
+    // the mountains' shadows in the haze (the god rays pass, alpha), stronger toward the sun
+    float lit = 1.0;
+    if (haze_shadow > 0.0) {
+      // (smoothed over a few of its texels: the march's noise)
+      vec2 st = 2.0 / vec2(textureSize(tex_T4, 0));
+      float a = texture(tex_T4, uv).a * 0.2 +
+                (texture(tex_T4, uv + vec2(st.x, st.y)).a + texture(tex_T4, uv + vec2(-st.x, st.y)).a +
+                 texture(tex_T4, uv + vec2(st.x, -st.y)).a + texture(tex_T4, uv + vec2(-st.x, -st.y)).a) * 0.2;
+      lit = 1.0 - (1.0 - a) * (0.55 + 0.45 * toward);
+    }
     vec3 hc = mix(fog_color, sun_color() * vec3(1.0, 0.76, 0.48), 0.85);
-    hc *= 0.9 + 0.5 * toward * toward + 0.6 * pow(toward, 12.0);
+    hc *= (0.9 + (0.5 * toward * toward + 0.6 * pow(toward, 12.0)) * lit) * mix(0.62, 1.0, lit);
     float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
     // fade into it, their tops stand out (height over the camera's, m)

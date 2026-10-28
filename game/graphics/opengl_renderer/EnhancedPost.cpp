@@ -3223,20 +3223,35 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
       lg::info("[enhanced] sun view {} {} {}", m_sun_view[0], m_sun_view[1], m_sun_view[2]);
     }
   }
-  if (len < 1e-6f || m_sun_view[2] / len < 0.05f) {
-    return;  // behind the camera
+  // (the desert's haze shadow runs at every quality, with the sun anywhere; the rays need it in
+  // front)
+  bool haze = m_grade.sun_haze > 0.f && m_settings.enabled;
+  bool rays = m_settings.shafts && m_auto_level < 3;
+  if (len < 1e-6f) {
+    return;
   }
-  float sx = 0.5f * m_last_proj[2] * m_sun_view[0] / m_sun_view[2] + 0.5f;
-  float sy = 0.5f * m_last_proj[3] * m_sun_view[1] / m_sun_view[2] + 0.5f;
+  float side = m_sun_view[2] / len < 0.05f ? -1.f : 1.f;  // behind: toward the opposite point
+  if (side < 0.f) {
+    rays = false;
+  }
+  if (!rays && !haze) {
+    return;
+  }
+  float sz = std::max(std::abs(m_sun_view[2]), 0.05f * len);
+  float sx = 0.5f * m_last_proj[2] * side * m_sun_view[0] / sz + 0.5f;
+  float sy = 0.5f * m_last_proj[3] * side * m_sun_view[1] / sz + 0.5f;
   // fade out as the sun leaves the screen
   float off = std::max(std::max(-sx, sx - 1.f), std::max(-sy, sy - 1.f));
-  float fade = 1.f - std::clamp(off / 0.6f, 0.f, 1.f);
+  float fade = side > 0.f ? 1.f - std::clamp(off / 0.6f, 0.f, 1.f) : 0.f;
   static int debug_counter = 0;
   if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
     lg::info("[enhanced] sun on screen {} {} fade {}", sx, sy, fade);
   }
   if (fade <= 0.f) {
-    return;
+    rays = false;
+    if (!haze) {
+      return;
+    }
   }
 
   int w = std::max(1, m_ssao_w / 2);
@@ -3278,10 +3293,16 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
   glUniform2f(glGetUniformLocation(id, "sun_uv"), sx, sy);
   glUniform1f(glGetUniformLocation(id, "threshold"), m_settings.shafts_threshold);
   glUniform1f(glGetUniformLocation(id, "fade"), fade);
+  glUniform1f(glGetUniformLocation(id, "rays"), rays ? 1.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "haze"), haze ? 1.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "sun_side"), side);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
   glBindVertexArray(0);
-  m_shafts_ready = true;
+  m_shafts_ready = rays;
+  m_haze_shadow_ready = haze;
 }
 
 void EnhancedPost::do_gi(GLuint scene_tex,
@@ -4106,6 +4127,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
   }
   m_ssao_ready = false;
   m_shafts_ready = false;
+  m_haze_shadow_ready = false;
   m_gi_ready = false;
   m_vol_ready = false;
   m_shadow_ready = false;
@@ -4123,7 +4145,8 @@ void EnhancedPost::prepare(GLuint scene_tex,
     if (m_settings.gi && m_auto_level < 2 && m_ssao_ready) {
       ENH_TIMED("enh-gi", do_gi(scene_tex, screen_vao, render_state, prof));
     }
-    if (m_settings.shafts && m_auto_level < 3 && m_ssao_ready && g_enhanced_sun.valid) {
+    if (((m_settings.shafts && m_auto_level < 3) || m_grade.sun_haze > 0.f) && m_ssao_ready &&
+        g_enhanced_sun.valid) {
       ENH_TIMED("enh-shafts", do_shafts(scene_tex, screen_vao, render_state, prof));
     }
   }
@@ -4431,7 +4454,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_ssao_ready ? m_depth_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE4);
-  glBindTexture(GL_TEXTURE_2D, m_shafts_ready ? m_shaft_tex : m_black_tex);
+  glBindTexture(GL_TEXTURE_2D, m_shafts_ready || m_haze_shadow_ready ? m_shaft_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE7);
   glBindTexture(GL_TEXTURE_2D, m_gi_ready ? m_gi_tex[0] : m_black_tex);
   glActiveTexture(GL_TEXTURE8);
@@ -4502,6 +4525,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
+  glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
   // the rock picture (custom_assets/<game>/scenery/rock_detail.png), loaded on first use
   if (!m_rock_loaded) {
     m_rock_loaded = true;
