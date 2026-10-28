@@ -392,6 +392,8 @@ void Shrub::render_tree(int idx,
                                                                       : 0.f);
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_foliage"),
                 draw.mode.get_at_enable() ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_wet"),
+                g_enhanced_wind.wet);
 
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, ShaderId::SHRUB);
 

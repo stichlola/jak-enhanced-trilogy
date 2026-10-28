@@ -15,6 +15,8 @@ uniform float alpha_max;
 uniform vec4 fog_color;
 
 uniform int gfx_hack_no_tex;
+uniform float enh_foliage;  // Enhanced: 1 on grass and leaves (cutout draws)
+uniform float enh_wet;      // Enhanced: how soaked they are (rain), 0..1
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
@@ -51,6 +53,13 @@ void main() {
 
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
+  }
+
+  // Enhanced: soaked in the rain: grass and leaves darker and deeper in color (dry straw turns
+  // brown-green), stones and props darker (the post pass adds their wet sheen)
+  if (enh_wet > 0.0) {
+    float w = enh_wet * (enh_foliage > 0.5 ? 1.0 : 0.7);
+    color.xyz = mix(color.xyz, color.xyz * color.xyz * 1.8, 0.5 * w) * (1.0 - 0.22 * w);
   }
 
   color.xyz = mix(color.xyz, fog_color.rgb, clamp(fogginess * fog_color.a, 0, 1));

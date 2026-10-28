@@ -2906,6 +2906,7 @@ void EnhancedPost::update_scene() {
   ease(m_heat, heat, k_grade);
   // the ground soaks in a few seconds and takes a minute and a half to dry
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
+  g_enhanced_wind.wet = m_settings.enabled ? m_wet : 0.f;
   // the puddles fill over a minute of rain and dry from their rims in, for minutes after
   ease(m_puddle, wet, 1.f - std::exp(-dt / (wet > m_puddle ? 20.f : 220.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);

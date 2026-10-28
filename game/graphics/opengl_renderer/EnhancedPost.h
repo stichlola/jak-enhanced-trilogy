@@ -60,6 +60,7 @@ struct EnhancedWind {
   float strength = 1.0f;
   bool push = true;          // grass bends away from Jak
   float push_radius = 1.3f;  // meters
+  float wet = 0.f;           // how soaked grass and leaves look (the weather, each frame)
 };
 extern EnhancedWind g_enhanced_wind;
 

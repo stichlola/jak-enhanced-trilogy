@@ -850,7 +850,7 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
   float md = dot(dv, sky_sun.xyz);
   if (md > 0.9 && sky_sun.w > 0.0) {
     float mclear = (1.0 - clamp((clouds.y - 0.6) * 2.0, 0.0, 1.0)) * (1.0 - min(weather.x + weather.y, 1.0));
-    float rr = 0.0135;
+    float rr = 0.054;  // (4x the real moon: a big storybook moon)
     float off = sqrt(max(2.0 * (1.0 - md), 0.0));
     float disk = 1.0 - smoothstep(rr - px, rr + px, off);
     vec3 side = normalize(cross(sky_sun.xyz, vec3(0.0, 1.0, 0.0)) + 1e-4);
@@ -868,7 +868,7 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
     vec3 blood = vec3(0.62, 0.17, 0.07) * (0.55 + 0.45 * limb) * (1.0 - 0.35 * seas) *
                  (0.7 + 0.3 * smoothstep(-1.0, 1.0, mq.x + mq.y));
     moon = mix(moon, blood, sky_kind.z);
-    float halo = (pow(md, 900.0) * 0.25 + pow(md, 60.0) * 0.06) * (1.0 + 0.8 * full) * (1.0 - 0.6 * sky_kind.z);
+    float halo = (pow(md, 60.0) * 0.25 + pow(md, 12.0) * 0.06) * (1.0 + 0.8 * full) * (1.0 - 0.6 * sky_kind.z);
     add = mix(add, moon, disk * mclear * smoothstep(0.0, 0.05, up));
     add += mix(vec3(0.6, 0.68, 0.85), vec3(0.7, 0.25, 0.15), sky_kind.z) * halo * (0.4 + 0.6 * mclear);
   }
@@ -1919,12 +1919,32 @@ void main() {
   float wet = 0.0;
   float wet_flat = 0.0;  // level ground, where puddles stay after the rest has dried
   vec3 wet_n = vec3(0.0);
-  if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
+  if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
-    wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
-               (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
+    // (out to the horizon: far away the ground still reads soaked, only the puddles' detail goes)
+    wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view));
     wet = weather.w * wet_flat;
     c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
+    // what isn't level ground (grass, bushes, rocks, walls): soaked too, darker and deeper in color,
+    // with a wet sheen at grazing angles and drops glinting on it up close
+    float wet_side = weather.w * (1.0 - wet_flat);
+    if (wet_side > 0.01) {
+      vec3 wq = (view_to_world * p + cam_pos) / 4096.0;
+      // (streaks: noise stretched down the slope, where the rain runs off)
+      float runs = smoothstep(0.45, 0.75, vnoise3(wq * vec3(1.6, 0.12, 1.6)));
+      c = mix(c, c * c * 1.7, 0.5 * wet_side);
+      c *= 1.0 - (0.22 + 0.18 * runs) * wet_side;
+      vec3 vd = normalize(p);
+      float graze = pow(1.0 - clamp(abs(dot(-vd, wet_n)), 0.0, 1.0), 4.0);
+      c += (fog_color * 0.35 + 0.04) * graze * wet_side;
+      if (z < 25.0 * 4096.0) {
+        vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
+        float drop = smoothstep(0.86, 0.97, vnoise3(wp * 38.0)) *
+                     (0.5 + 0.5 * sin(weather.z * 3.0 + dot(wp, vec3(17.0, 11.0, 23.0))));
+        c += vec3(0.85, 0.9, 1.0) * drop * wet_side * 0.35 *
+             (1.0 - smoothstep(10.0 * 4096.0, 25.0 * 4096.0, z));
+      }
+    }
   }
 
   // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
@@ -2191,7 +2211,7 @@ void main() {
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
-                   (1.0 - smoothstep(80.0 * 4096.0, 140.0 * 4096.0, z)) * step(0.001, puddle_level);
+                   (1.0 - smoothstep(350.0 * 4096.0, 700.0 * 4096.0, z)) * step(0.001, puddle_level);
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
     wet = max(wet, puddle * wet_flat * water);
@@ -2219,8 +2239,7 @@ void main() {
     vec3 refl = trace_reflection(p, r, z, hit);
     // a sheen, not a mirror: the ground's own color stays, dimmer reflections outside the puddles
     refl = mix(refl, c, 0.25 * (1.0 - puddle));
-    float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0) *
-                   (1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z));
+    float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0);
     c = mix(c, refl, amount);
     // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
     if (weather.x > 0.0 && z < 15.0 * 4096.0) {
@@ -2320,6 +2339,15 @@ void main() {
     vec3 base = c;
     c *= 1.0 - 0.75 * night_dark.x;
     c += night_sky(ray, base, pixel_rad);
+  } else if (clouds.w > 0.01 && z > 3500.0 * 4096.0 && wsurf == 0.0) {
+    // the game's painted cloud cards, kilometers out: at night it draws them near black, cut-outs
+    // against our moonlit sky. Lit by the moon instead: dim blue-grey, a silver rim toward it
+    // (red in an eclipse), keeping a little of their own shading
+    float md = max(dot(ray, sky_sun.xyz), 0.0);
+    vec3 moonlit = mix(vec3(0.6, 0.68, 0.85), vec3(0.7, 0.25, 0.15), sky_kind.z);
+    vec3 cl = moonlit * (0.09 + 0.3 * pow(md, 12.0) + 0.5 * pow(md, 60.0)) * (0.55 + 0.45 * sky_kind.y);
+    cl *= 0.85 + 0.6 * clamp(luma(c) * 4.0, 0.0, 1.0);
+    c = mix(c, cl, clouds.w * 0.9);
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
