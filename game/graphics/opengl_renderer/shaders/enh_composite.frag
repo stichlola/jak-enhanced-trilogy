@@ -3021,22 +3021,32 @@ void main() {
       tw /= tw.x + tw.y + tw.z;
       float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, surf_n)), 0.1);  // m per pixel
       float d = 0.0;
-      const vec2 size[3] = vec2[](vec2(1.6, 0.35), vec2(7.0, 0.75), vec2(31.0, 0.3));  // (tile m, strength)
+      float dist = length(p) / 4096.0;  // m
+      // (as big games do it: the picture is close-up detail, each size only within its own reach
+      // (the small one near, the big one out to ~150 m); farther the rock keeps only a soft, broad
+      // light and dark (macro variation), so big faces far away don't show a repeated pattern that
+      // fights their own texture)
+      const vec4 size[2] = vec4[](vec4(1.6, 0.5, 15.0, 45.0), vec4(7.0, 0.85, 60.0, 160.0));  // (tile m, strength, fade from, to)
       // (the picture: cracked blocky rock; its blocks shift a little from place to place, and it
       // comes and goes: strong in some places, fainter in others)
       float wander = gnoise(wp.xz / 9.0 + vec2(0.0, wp.y / 25.0) + 1.3) * 0.8;
       float bands = 0.5 + 0.5 * smoothstep(-0.35, 0.35, gnoise(vec2(wp.x + wp.z, wp.y) / 30.0 + 5.3));
-      for (int k = 0; k < 3; k++) {
+      for (int k = 0; k < 2; k++) {
         float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
-        if (lod > 9.0) {
-          continue;  // (one texel over the pixel: its average, nothing to add)
+        float near = 1.0 - smoothstep(size[k].z, size[k].w, dist);
+        if (lod > 9.0 || near <= 0.0) {
+          continue;  // (one texel over the pixel, or past its reach: nothing to add)
         }
         vec3 q = wp / size[k].x + float(k) * 0.37;
         vec3 qs = q + vec3(wander, 0.0, wander) / size[k].x;
         float t = luma(textureLod(tex_T10, qs.zy, lod).rgb) * tw.x + luma(textureLod(tex_T10, q.xz, lod).rgb) * tw.y +
                   luma(textureLod(tex_T10, qs.xy, lod).rgb) * tw.z;
-        d += size[k].y * (t - rock_detail_avg);
+        d += size[k].y * near * (t - rock_detail_avg);
       }
+      // (the broad variation: a few tens of meters, gentle, it fades in as the detail fades out)
+      float macro = gnoise(vec2(wp.x + wp.y * 0.6, wp.z - wp.y * 0.4) / 45.0 + 2.1) * 0.6 +
+                    gnoise(vec2(wp.x - wp.y * 0.5, wp.z + wp.y * 0.7) / 13.0 + 7.4) * 0.4;
+      d += macro * 0.12 * (0.4 + 0.6 * smoothstep(30.0, 150.0, dist));
       c *= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
     }
   }
