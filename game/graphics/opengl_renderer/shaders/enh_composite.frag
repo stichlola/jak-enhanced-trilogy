@@ -963,7 +963,7 @@ float cloud_density(vec3 p, float lo, int octaves) {
   // flat bottoms, heaped tops
   float shape = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.35, 1.0, h));
   // (the late afternoon's heaps with crisper edges: cumulus, clear sky between)
-  return clamp((n * shape - lo) * (4.0 + 4.0 * golden), 0.0, 1.0);
+  return clamp((n * shape - lo) * (4.0 + 4.0 * min(golden * 2.0, 1.0)), 0.0, 1.0);
 }
 
 vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
@@ -992,9 +992,11 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25 * (1.0 - clouds.w)), sun_haze * 0.55);
     top = mix(top, vec3(0.95, 0.72, 0.55), sun_haze * 0.35);
     // (and late in the day their shaded undersides a deep warm brown, the sun's gold on the rims)
-    under = mix(under, vec3(0.3, 0.2, 0.15), golden * 0.9);
-    top = mix(top, vec3(0.7, 0.52, 0.4), golden * 0.5);
-    sc *= mix(vec3(1.0), vec3(1.3, 1.0, 0.7), golden);
+    // (full from half the area's golden look, as the sky)
+    float gs = min(golden * 2.0, 1.0);
+    under = mix(under, vec3(0.3, 0.2, 0.15), gs * 0.9);
+    top = mix(top, vec3(0.7, 0.52, 0.4), gs * 0.5);
+    sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58), gs);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -1009,13 +1011,14 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     float d = cloud_density(p, lo, 3);
     if (d > 0.002) {
       float dl = cloud_density(p + sw * 90.0, lo, 2) * 90.0 + cloud_density(p + sw * 300.0, lo, 2) * 210.0;
-      float lit = exp(-dl * 0.012);
+      // (the late afternoon's heaps dense: dark cores under the low sun, bright thin rims)
+      float lit = exp(-dl * 0.012 * (1.0 + 2.0 * min(golden * 2.0, 1.0) * sun_haze));
       float powder = 1.0 - exp(-d * 4.0);
       float h = (p.y - 1100.0) / 900.0;
       vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
       // (thinner by night: under the moon they read as dark cut-out slabs over the dim sky)
       // (the late afternoon's heaps solid: dark bellies, not veils)
-      float a = 1.0 - exp(-d * 0.022 * (1.0 + 1.2 * golden) * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
+      float a = 1.0 - exp(-d * 0.022 * (1.0 + 1.2 * min(golden * 2.0, 1.0)) * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
       sum += trans * a * light;
       trans *= 1.0 - a;
       if (trans < 0.02) {
