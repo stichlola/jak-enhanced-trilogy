@@ -113,6 +113,9 @@ uniform sampler2D tex_T13;      // the sun shadow map as plain depths (soft shad
 uniform vec4 shadow_params;     // depth span (m), map side (m), penumbra per meter, soft (1) or not
 uniform vec4 sky_sun;           // toward the sun (or moon) in view space, day or night; w: its height
 uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night (0..1)
+uniform int cloud_pass;         // 1: this draw only marches the clouds, a pixel for every 2x2
+uniform sampler2D tex_T15;      // the clouds at a quarter of the pixels (last frame's in the pass)
+uniform vec4 cloud_info;        // the clouds texture is ready, history to blend in, how much of it to keep
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
 uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
@@ -988,6 +991,62 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   return vec4(sum, trans);
 }
 
+// the clouds at a quarter of the pixels (cloud_pass): a = -1 where no sky shows. Read back
+// bilinearly from only the texels that hold clouds (they stop at the scene's edges)
+vec4 cloud_fetch(vec2 uv) {
+  vec2 size = vec2(textureSize(tex_T15, 0));
+  vec2 g = uv * size - 0.5;
+  ivec2 i0 = ivec2(floor(g));
+  vec2 f = g - vec2(i0);
+  vec4 sum = vec4(0.0);
+  float wsum = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k & 1, k >> 1);
+    vec4 s = texelFetch(tex_T15, clamp(i0 + o, ivec2(0), ivec2(size) - 1), 0);
+    float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    if (s.a >= 0.0 && w > 0.0) {
+      sum += s * w;
+      wsum += w;
+    }
+  }
+  return wsum > 1e-4 ? sum / wsum : vec4(0.0, 0.0, 0.0, -1.0);
+}
+
+// the cloud pass: one pixel here covers 2x2 of the screen. Marched only where the sky shows in
+// one of them, then blended into last frame's clouds, found where this direction was then (the
+// clouds are far enough to ignore the camera's move): the march's noise averages out over frames.
+vec4 cloud_march() {
+  vec2 uv = tex_coord;
+  vec3 ray = normalize(vec3((uv.x * 2.0 - 1.0) / proj.z, (uv.y * 2.0 - 1.0) / proj.w, 1.0));
+  ivec2 base = ivec2(gl_FragCoord.xy) * 2;
+  ivec2 top = textureSize(tex_T3, 0) - 1;
+  bool sky = false;
+  for (int k = 0; k < 4; k++) {
+    float zz = view_z(texelFetch(tex_T3, min(base + ivec2(k & 1, k >> 1), top), 0).r);
+    sky = sky || zz == 0.0 || zz > 2800.0 * 4096.0;
+  }
+  if (!sky || world_dir(ray).y < 0.015) {
+    return vec4(0.0, 0.0, 0.0, -1.0);
+  }
+  // the sky behind them as the composite makes it (by night the game's own, read from the scene)
+  vec3 s = sky_color(ray);
+  vec3 cs = mix(texture(tex_T0, uv).rgb, s, clouds.x * (1.0 - clouds.w));
+  vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(s, cs, clouds.w));
+  if (cloud_info.y > 0.0) {
+    vec3 pp = to_prev * ray;
+    vec2 prev_uv = 0.5 * motion.xy * pp.xy / pp.z + 0.5;
+    if (pp.z > 0.0 && all(greaterThan(prev_uv, vec2(0.0))) && all(lessThan(prev_uv, vec2(1.0)))) {
+      vec4 h = cloud_fetch(prev_uv);
+      // (lightning changes them at once)
+      float keep = cloud_info.z * (1.0 - 0.8 * clamp((weather2.w + sheet) * 4.0, 0.0, 1.0));
+      if (h.a >= 0.0) {
+        cl = mix(cl, h, keep);
+      }
+    }
+  }
+  return cl;
+}
+
 // rain: real drops in the world. Each cell of a horizontal grid holds a column where drops fall
 // (one every few meters, each a short streak, as a camera sees it); the view ray walks the cells
 // it crosses (2D DDA) and meets each column where it passes closest. So the drops stay put in the
@@ -1403,6 +1462,10 @@ vec3 fxaa_at(vec2 uv) {
 }
 
 void main() {
+  if (cloud_pass == 1) {
+    color = cloud_march();
+    return;
+  }
   vec2 uv = tex_coord;
   float d = texture(tex_T3, uv).r;
   float z = view_z(d);
@@ -2347,7 +2410,10 @@ void main() {
     if (clouds.x > 0.0) {
       vec3 sky = sky_color(ray);
       c = mix(c, sky, clouds.x * (1.0 - clouds.w));
-      vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
+      vec4 cl = cloud_info.x > 0.0 ? cloud_fetch(uv) : vec4(0.0, 0.0, 0.0, -1.0);
+      if (cl.a < 0.0) {
+        cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
+      }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? lightning_bolt(ray, pixel_rad) : 0.0;

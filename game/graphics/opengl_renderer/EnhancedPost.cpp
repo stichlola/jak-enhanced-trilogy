@@ -889,6 +889,10 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(1, &m_vol_fbo);
     glDeleteTextures(1, &m_vol_tex);
   }
+  if (m_cloud_fbo[0]) {
+    glDeleteFramebuffers(2, m_cloud_fbo);
+    glDeleteTextures(2, m_cloud_tex);
+  }
   if (m_shadow_fbo) {
     glDeleteFramebuffers(1, &m_shadow_fbo);
     glDeleteTextures(1, &m_shadow_tex);
@@ -2473,6 +2477,20 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy, strength, 0.02f);
   glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
 
+  // the clouds first, at a quarter of the pixels (the composite then reads them)
+  // (JAK_ENHANCED_CLOUDS_FULL: marched at every pixel, as before, to compare)
+  static const bool clouds_full = std::getenv("JAK_ENHANCED_CLOUDS_FULL") != nullptr;
+  const bool clouds = have_scene && m_settings.clouds && m_settings.cloud_amount > 0.f && !clouds_full;
+  if (clouds) {
+    if (reproject) {
+      glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    }
+    draw_clouds(id, w, h, reproject, render_fbo, prof);
+  } else {
+    m_cloud_history = false;
+    glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
+  }
+
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   prof.add_draw_call();
   glBindSampler(13, 0);
@@ -3774,6 +3792,63 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   prof.add_draw_call();
   glBindVertexArray(0);
   m_vol_ready = true;
+}
+
+// the cloud volume, marched by the composite shader (cloud_pass) for one pixel in every 2x2 into
+// a small target, each frame blended into the last one (reprojected): the march's noise averages
+// out, at a quarter of the cost. Leaves the composite's target bound and its texture on unit 15.
+void EnhancedPost::draw_clouds(GLuint id,
+                               int w,
+                               int h,
+                               bool history,
+                               GLuint render_fbo,
+                               ScopedProfilerNode& prof) {
+  const int cw = std::max(1, (w + 1) / 2);
+  const int ch = std::max(1, (h + 1) / 2);
+  if (cw != m_cloud_w || ch != m_cloud_h) {
+    if (m_cloud_fbo[0]) {
+      glDeleteFramebuffers(2, m_cloud_fbo);
+      glDeleteTextures(2, m_cloud_tex);
+    }
+    m_cloud_w = cw;
+    m_cloud_h = ch;
+    glGenFramebuffers(2, m_cloud_fbo);
+    glGenTextures(2, m_cloud_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_cloud_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, cw, ch, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_cloud_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_cloud_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_cloud_history = false;
+  }
+  const int cur = m_cloud_cur;
+  glBindFramebuffer(GL_FRAMEBUFFER, m_cloud_fbo[cur]);
+  glViewport(0, 0, cw, ch);
+  glActiveTexture(GL_TEXTURE15);
+  glBindTexture(GL_TEXTURE_2D, m_cloud_tex[1 - cur]);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T15"), 15);
+  glUniform1i(glGetUniformLocation(id, "cloud_pass"), 1);
+  glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, m_cloud_history && history ? 1.f : 0.f,
+              0.85f, 0.f);
+  ENH_TIMED("enh-clouds", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  prof.add_draw_call();
+  m_cloud_cur = 1 - cur;
+  m_cloud_history = true;
+
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
+  glActiveTexture(GL_TEXTURE15);
+  glBindTexture(GL_TEXTURE_2D, m_cloud_tex[cur]);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);
+  glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, 0.f);
 }
 
 void EnhancedPost::free_ssao() {

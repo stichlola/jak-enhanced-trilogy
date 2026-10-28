@@ -515,6 +515,15 @@ class EnhancedPost {
   int m_vol_h = 0;
   bool m_vol_ready = false;
 
+  // the clouds, a pixel for every 2x2, blended over frames (draw_clouds)
+  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof);
+  GLuint m_cloud_fbo[2] = {0, 0};
+  GLuint m_cloud_tex[2] = {0, 0};
+  int m_cloud_w = 0;
+  int m_cloud_h = 0;
+  int m_cloud_cur = 0;
+  bool m_cloud_history = false;
+
   // the area's look and weather, eased toward the current area's each frame (update_scene)
   struct Grade {
     float lift[3] = {0.f, 0.f, 0.f};  // added in the shadows
