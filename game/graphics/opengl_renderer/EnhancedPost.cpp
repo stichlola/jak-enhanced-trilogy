@@ -102,7 +102,7 @@ namespace {
 // The world's look and weather for the three games: game/assets/enhanced/world.json, reloaded while
 // the game runs whenever it's saved (see the file for what each value does)
 struct ZoneLook {
-  float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze;
+  float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -277,7 +277,7 @@ WorldZone neutral_zone() {
   WorldZone z;
   z.name = "other";
   for (auto& l : z.look) {
-    l = {{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f, 0.f, 0.f};
+    l = {{0, 0, 0}, {1, 1, 1}, 1.f, 0.f, 0.f, 0.4f, 0.f, 0.f, 0.f};
   }
   return z;
 }
@@ -307,6 +307,7 @@ void load_world() {
       out.clouds = l.value("clouds", 0.4f);
       out.sand = l.value("sand", 0.f);
       out.sun_haze = l.value("sun_haze", 0.f);
+      out.rock_detail = l.value("rock_detail", 0.f);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -1006,6 +1007,9 @@ void EnhancedPost::update_auto_quality() {
     lg::info("[enhanced] auto quality: room for {:.1f} ms more, level {}",
              m_level_cost[m_auto_level + 1], m_auto_level);
   }
+  // each level also brings the detailed scenery models in closer (the far versions are cheap)
+  static constexpr float kSceneryScale[4] = {1.f, 0.85f, 0.7f, 0.55f};
+  g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, 3)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
   m_gpu_query_open = true;
 }
@@ -2649,6 +2653,7 @@ void EnhancedPost::update_scene() {
   want.clouds = mix(day.clouds, night.clouds);
   want.sand = s.area_grading ? mix(day.sand, night.sand) : 0.f;
   want.sun_haze = s.area_grading ? mix(day.sun_haze, night.sun_haze) : 0.f;
+  want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -2919,6 +2924,7 @@ void EnhancedPost::update_scene() {
   ease(m_grade.warmth, want.warmth, k_grade);
   ease(m_grade.sand, want.sand, k_grade);
   ease(m_grade.sun_haze, want.sun_haze, k_grade);
+  ease(m_grade.rock_detail, want.rock_detail, k_grade);
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
@@ -4496,6 +4502,38 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
+  // the rock picture (custom_assets/<game>/scenery/rock_detail.png), loaded on first use
+  if (!m_rock_loaded) {
+    m_rock_loaded = true;
+    const auto path = file_util::get_jak_project_dir() / "custom_assets" /
+                      game_version_names[g_game_version] / "scenery" / "rock_detail.png";
+    int rw = 0, rh = 0, rn = 0;
+    unsigned char* px = stbi_load(path.string().c_str(), &rw, &rh, &rn, 4);
+    if (px) {
+      double sum = 0.0;
+      for (int i = 0; i < rw * rh; i++) {
+        sum += 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
+      }
+      m_rock_avg = (float)(sum / (255.0 * rw * rh));
+      glGenTextures(1, &m_rock_tex);
+      glBindTexture(GL_TEXTURE_2D, m_rock_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+      glGenerateMipmap(GL_TEXTURE_2D);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      stbi_image_free(px);
+    }
+  }
+  glActiveTexture(GL_TEXTURE10);
+  glBindTexture(GL_TEXTURE_2D, m_rock_tex ? m_rock_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T10"), 10);
+  glUniform1f(glGetUniformLocation(id, "rock_detail"),
+              m_rock_tex && m_normals_ready ? m_grade.rock_detail : 0.f);
+  glUniform1f(glGetUniformLocation(id, "rock_detail_avg"), m_rock_avg);
   glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   glUniform3fv(glGetUniformLocation(id, "grade_gain"), 1, m_grade.gain);
   // soft shadows: the shadow map again, read as plain depths for the blocker search

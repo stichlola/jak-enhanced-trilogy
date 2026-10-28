@@ -28,6 +28,7 @@ float g_enhanced_scenery_dist = [] {
   const char* env = std::getenv("JAK_ENHANCED_SCENERY");
   return env ? std::clamp((float)std::atof(env), 0.f, 200.f) : 60.f;
 }();
+float g_enhanced_scenery_scale = 1.f;
 
 namespace {
 
@@ -871,7 +872,8 @@ math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree) {
   // kImpReach, where the protos are a few pixels; else the far versions' reach (dithered: the two
   // differ, up close it showed)
   const auto& data = *static_cast<const SceneryTree*>(tree.enh_scenery.get());
-  float end = data.impostors ? kImpReach * kMeter : g_enhanced_scenery_dist * kFarReach * kMeter;
+  float end = data.impostors ? kImpReach * kMeter
+                             : g_enhanced_scenery_dist * g_enhanced_scenery_scale * kFarReach * kMeter;
   return math::Vector2f(end * 0.85f, end);
 }
 
@@ -891,7 +893,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
   // each version reaches one detailed distance further (the impostor: to kImpReach); a copy near
   // the end of its version's reach swaps to the next over the last part of it (both drawn,
   // complementary pixels: shrub.frag's enh_xfade)
-  const float step = g_enhanced_scenery_dist * kMeter;
+  const float step = g_enhanced_scenery_dist * g_enhanced_scenery_scale * kMeter;
   const float swap = step * 0.2f;
   const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
   const float thin_from = std::max(far_end * 0.5f, (kFarLods + 1.5f) * step);

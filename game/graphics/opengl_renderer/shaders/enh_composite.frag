@@ -78,6 +78,9 @@ uniform float saturation;
 uniform float contrast;
 uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
+uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
+uniform float rock_detail_avg;  // that picture's average brightness
+uniform sampler2D tex_T10;      // the rock picture (tiling, mipmapped)
 uniform float sand;             // the area's olive and dull greens pushed toward golden sand (0..1)
 uniform float vignette;
 
@@ -2998,9 +3001,41 @@ void main() {
     c *= mix(vec3(1.0), wb, 0.35 * (1.0 - clouds.w));
   }
 
+  // rock and cliffs (normals written 0.75 long: tfrag3.frag): the game's textures are a blur up
+  // close and stretched over whole mountains, so a tiling rock picture (rock_detail.png) is laid
+  // over them in the world from three sides (triplanar), three sizes, its brightness only (the
+  // game's colors kept). Each read at the mip level of the pixel's size (no derivatives in here):
+  // too small for the pixels, a size averages out by itself
+  if (rock_detail > 0.0 && z > 0.0) {
+    float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if (nl > 0.7 && nl < 0.8) {
+      vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
+      vec3 wn = world_dir(surf_n);
+      vec3 tw = pow(abs(wn), vec3(4.0));
+      tw /= tw.x + tw.y + tw.z;
+      float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, surf_n)), 0.1);  // m per pixel
+      float d = 0.0;
+      const vec2 size[3] = vec2[](vec2(1.6, 0.8), vec2(9.0, 0.8), vec2(40.0, 0.7));  // (tile m, strength)
+      for (int k = 0; k < 3; k++) {
+        vec3 q = wp / size[k].x + float(k) * 0.37;
+        float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
+        float t = luma(textureLod(tex_T10, q.zy, lod).rgb) * tw.x + luma(textureLod(tex_T10, q.xz, lod).rgb) * tw.y +
+                  luma(textureLod(tex_T10, q.xy, lod).rgb) * tw.z;
+        d += size[k].y * (t - rock_detail_avg);
+      }
+      c *= max(1.0 + rock_detail * 1.6 * d, 0.3);
+    }
+  }
+
   // the desert's sand: the game paints it olive, and lit at dusk it goes green. Its yellow-greens
   // (and the dull dark greens of its pebbles) turned toward warm gold; the sky and the strong
   // greens of plants kept
+  // (the sand ripples' meters across the crests per pixel, from the screen's derivatives, out
+  // here where every pixel runs: the crests run nearly toward the camera, and along them the
+  // ground isn't squeezed by the grazing view, so a wave stays sharp much farther than the
+  // pixel's worst-case size says)
+  const vec2 rip_across = vec2(0.82, 0.57);  // the crests run across the wind
+  float rip_m = fwidth(dot((cam_pos.xz + world_dir(p).xz) / 4096.0, rip_across));
   if (sand > 0.0 && z > 0.0) {
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
@@ -3019,42 +3054,57 @@ void main() {
         float s2 = sat * (1.0 - 0.2 * w);
         vec3 k = clamp(abs(mod(h2 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
         c = mx * (1.0 + 0.1 * w) * mix(vec3(1.0), k, s2);
-        // on the dunes (the hfrag terrain, marked in the normals' alpha): the wind's ripples, made
-        // up in the world (the game's sand is a blur up close), shaded by the sun across them. Two
-        // sizes, each faded only as it gets too small for the pixels: no edge that follows Jak
-        // (sand's normals are written 0.9 long: tfrag3.frag)
-        float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-        float dune = step(0.85, nl) * step(nl, 0.95);
-        float level = dot(surf_n, up_view);
-        float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
-        float rip = dune * w / sand * smoothstep(0.4, 0.75, level);
-        if (rip > 0.0) {
-          vec2 xz = cam_pos.xz / 4096.0 + world_dir(p).xz / 4096.0;
-          vec2 across = vec2(0.82, 0.57);  // the crests run across the wind
-          vec2 sun_xz = world_dir(sky_sun.xyz).xz;
-          float facing = dot(across, sun_xz) / max(length(sun_xz), 1e-3);
-          float warp = gnoise(xz * 0.35) * 2.2 + gnoise(xz * 1.3) * 0.6;
-          // in patches: sharp in some places, smoothed out in others
-          float patches = 0.35 + 0.65 * smoothstep(-0.25, 0.35, gnoise(xz * 0.11 + 3.7));
-          float shade = 0.0;
-          // (wavelength m, strength): visible while a wave spans 3+ pixels; the bigger ones carry
-          // the ripples far out, so the small ones fading never shows as an edge
-          const vec2 octave[4] = vec2[](vec2(0.24, 1.0), vec2(1.1, 0.7), vec2(3.6, 0.55), vec2(11.0, 0.4));
-          for (int k = 0; k < 4; k++) {
-            float wl = octave[k].x;
-            float vis = 1.0 - smoothstep(wl / 8.0, wl / 2.5, foot);
-            if (vis > 0.0) {
-              float phase = dot(xz, across) * 6.2832 / wl + warp * 6.2832 * (k == 0 ? 1.0 : 0.45 / float(k)) + float(k) * 1.7;
-              float crest = sin(phase) + 0.35 * sin(2.0 * phase);
-              float slope = cos(phase) + 0.7 * cos(2.0 * phase);
-              shade += vis * octave[k].y * (0.08 * slope * facing + 0.025 * crest);
-            }
-          }
-          float grain = gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4;
-          float fine = 1.0 - smoothstep(0.006, 0.015, foot);
-          c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
+      }
+    }
+    // on the sand (its normals written 0.9 long: tfrag3.frag, hfrag.frag): the wind's ripples,
+    // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
+    // By the mark only, not the color: the warm haze turns the far sand orange
+    float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float dune = step(0.85, nl) * step(nl, 0.95);
+    float level = dot(surf_n, up_view);
+    float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
+    float rip = dune * smoothstep(0.4, 0.75, level);
+    if (rip > 0.0) {
+      vec2 xz = cam_pos.xz / 4096.0 + world_dir(p).xz / 4096.0;
+      vec2 across = rip_across;
+      vec2 sun_xz = world_dir(sky_sun.xyz).xz;
+      float facing = dot(across, sun_xz) / max(length(sun_xz), 1e-3);
+      // in patches: sharp in some places, smoothed out in others
+      float patches = 0.35 + 0.65 * smoothstep(-0.25, 0.35, gnoise(xz * 0.11 + 3.7));
+      // the same ripples at four sizes, each a copy of the smallest scaled up (its wiggles too),
+      // each kept while a wave spans 2+ pixels, and their weights renormalized: where the small
+      // ones fade the bigger take over at the same strength, so far off looks like up close
+      // (the waves' spacing on screen stays about the same, as perspective shrinks them)
+      float shade = 0.0, wsum = 0.0;
+      const float octave[4] = float[](0.24, 0.9, 3.4, 12.0);  // wavelength, m
+      for (int k = 0; k < 4; k++) {
+        float wl = octave[k];
+        // (while a wave spans 2.5+ pixels across the crests; the depth's edges give a huge
+        // derivative: there the pixel's own size)
+        float m = rip_m < foot * 3.0 ? rip_m : foot;
+        float vis = 1.0 - smoothstep(wl / 6.0, wl / 2.5, m);
+        if (vis > 0.0) {
+          float sc = 0.24 / wl;
+          vec2 o = vec2(5.1, 3.3) * float(k);
+          float wk = gnoise(xz * 0.35 * sc + o) * 2.2 + gnoise(xz * 1.3 * sc + o.yx) * 0.6;
+          float phase = dot(xz, across) * 6.2832 / wl + wk * 6.2832;
+          float crest = sin(phase) + 0.35 * sin(2.0 * phase);
+          float slope = cos(phase) + 0.7 * cos(2.0 * phase);
+          // (the smallest fully up close, the next ones mixed under it a little)
+          float wgt = vis * (k == 0 ? 1.0 : 0.35);
+          shade += wgt * (0.08 * slope * facing + 0.025 * crest);
+          wsum += wgt;
         }
       }
+      shade *= 2.6 * min(wsum / 0.35, 1.0) / max(wsum, 1e-3);  // (the biggest fades out alone)
+      // crests across the view (stripes along the horizon) read far too strong in the distance:
+      // fainter there, the ones running toward the camera kept
+      vec2 look = normalize(world_dir(p).xz + 1e-4);
+      float side = abs(dot(look, across));
+      shade *= 1.0 - 0.7 * side * side * smoothstep(15.0, 120.0, length(p) / 4096.0);
+      float grain = gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4;
+      float fine = 1.0 - smoothstep(0.006, 0.015, foot);
+      c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
     }
   }
 

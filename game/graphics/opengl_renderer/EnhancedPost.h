@@ -316,6 +316,9 @@ class EnhancedPost {
   int m_w = 0;
   int m_h = 0;
   GLuint m_black_tex = 0;
+  GLuint m_rock_tex = 0;  // rock_detail.png: a tiling rock picture over rock surfaces
+  float m_rock_avg = 0.5f;
+  bool m_rock_loaded = false;
   // the start menu's portraits, the games set up, the one picked
   GLuint m_start_tex[3] = {0, 0, 0};
   GLuint m_start_text[4] = {0, 0, 0, 0};  // the lettering: the title, the three names
@@ -534,6 +537,7 @@ class EnhancedPost {
     float clouds = 0.45f;             // sky cover, 0..1
     float sand = 0.f;                 // olive and dull greens pushed toward golden sand (0..1)
     float sun_haze = 0.f;             // warm haze lit by the sun over the distance (0..1)
+    float rock_detail = 0.f;          // the rock picture over rock and cliffs (0..1)
   };
   void update_scene();
   Grade m_grade;

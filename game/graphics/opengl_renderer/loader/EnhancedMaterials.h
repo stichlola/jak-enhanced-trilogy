@@ -10,8 +10,9 @@
 // Enhanced: a material for each level texture, from its name: the post pass gives metal and glossy
 // surfaces (glass, marble) reflections and a highlight. Written by the background shaders in
 // the normal target's alpha (2 bits): 1 plain, 2/3 metal, 1/3 glossy, 0 no normal; sand is plain
-// with its normal written 0.9 long (the composite draws the wind's ripples on it).
-enum EnhancedMaterial : u8 { kPlain = 0, kMetal = 1, kGlossy = 2, kSand = 3 };
+// with its normal written 0.9 long (the composite draws the wind's ripples on it), rock 0.75 (a
+// tiling rock picture laid over it).
+enum EnhancedMaterial : u8 { kPlain = 0, kMetal = 1, kGlossy = 2, kSand = 3, kRock = 4 };
 
 inline u8 enhanced_material(std::string name) {
   std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -26,6 +27,10 @@ inline u8 enhanced_material(std::string name) {
   // the ground's sand (not sandstone, not a sandbag)
   if (has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick"})) {
     return kSand;
+  }
+  // bare rock: cliffs, mountains, boulders (not rock-shrub plants)
+  if (has({"cliff", "mount", "rock", "boulder", "sandstone"}) && !has({"shrub", "grass", "metal", "rust"})) {
+    return kRock;
   }
   // rusty, old or dirty: rough, whatever it's made of
   if (has({"rust", "old", "dirt", "grime", "moss", "mud", "sand", "rock", "wood", "cloth"})) {

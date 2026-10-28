@@ -43,7 +43,7 @@ vec4 enh_pack_normal(vec3 n) {
   // the material in the 2-bit alpha: 1 plain, 2/3 metal, 1/3 glossy (0: no normal); sand (plain)
   // as a normal 0.9 long (the composite draws the wind's ripples on it)
   float a = enh_material == 1 ? 2.0 / 3.0 : (enh_material == 2 ? 1.0 / 3.0 : 1.0);
-  return vec4(n * (enh_material == 3 ? 0.9 : 1.0) * 0.5 + 0.5, a);
+  return vec4(n * (enh_material == 3 ? 0.9 : (enh_material == 4 ? 0.75 : 1.0)) * 0.5 + 0.5, a);
 }
 
 void main() {

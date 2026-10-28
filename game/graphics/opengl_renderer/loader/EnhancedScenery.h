@@ -36,3 +36,5 @@ math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree);
 
 // how far out the detailed models are drawn, meters (0 = off)
 extern float g_enhanced_scenery_dist;
+// times that, set by the auto quality (1 = all of it): the far versions and impostors take over sooner
+extern float g_enhanced_scenery_scale;
