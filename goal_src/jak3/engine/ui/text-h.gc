@@ -1659,5 +1659,7 @@
 ;; One of the reasons we didn't do this is because it makes it obvious which strings are remaining,
 ;; but there are better ways to keep track or check if strings are missing.
 (#when PC_PORT
-  (kheap-alloc (define *fallback-text-heap* (new 'global 'kheap)) (* 80 1024))
+  ;; og:preserve-this (Enhanced: as big as the common one; the English common text is 82.5 KB, at 80 KB
+  ;; it never loaded and was retried every frame)
+  (kheap-alloc (define *fallback-text-heap* (new 'global 'kheap)) (* 128 1024))
   (define *fallback-text* (the game-text-info #f)))
