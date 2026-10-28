@@ -199,12 +199,12 @@ float view_z(float d) {
 
 // screen-space shadow toward a dynamic light: a few steps through the depth buffer, up to 3 m
 // (and short of the light itself, which often sits inside its lamp)
-float light_blocked(vec3 from, vec3 lp, float jitter) {
+// (reach: how far toward the light the ray looks, game units; steps: how many samples)
+float light_blocked_by(vec3 from, vec3 lp, float jitter, float reach, int steps) {
   vec3 dir = lp - from;
   float len = length(dir);
-  float reach = min(len * 0.85, 3.0 * 4096.0);
-  vec3 stp = dir / len * (reach / 8.0);
-  for (int s = 0; s < 8; s++) {
+  vec3 stp = dir / len * (reach / float(steps));
+  for (int s = 0; s < steps; s++) {
     vec3 q = from + stp * (float(s) + jitter);
     if (q.z < 0.3 * 4096.0) {
       break;
@@ -224,6 +224,10 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
     }
   }
   return 0.0;
+}
+
+float light_blocked(vec3 from, vec3 lp, float jitter) {
+  return light_blocked_by(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
 }
 
 vec3 view_pos(vec2 uv, float d) {
@@ -1998,6 +2002,10 @@ void main() {
   if ((light_count > 0 || spot_count > 0) && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surface_normal(tex_coord, p);
     vec3 added = vec3(0.0);
+    // per-pixel jitter of the shadow steps (the TAA averages it)
+    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
+                         haze.w * 7.13);
+    vec3 from = p + nn * (0.05 * 4096.0 + z * 0.003);
     // headlights: a cone of warm white down the road out to 100 m, and a dim spill around it
     for (int i = 0; i < spot_count; i++) {
       vec3 tl = spot_pos[i].xyz - p;
@@ -2010,12 +2018,15 @@ void main() {
       // gentler in the first meters (the ground under the lamps would burn white)
       float fall = 1.0 / (1.0 + dm * dm / 700.0) * (1.0 - smoothstep(65.0, 100.0, dm)) *
                    (0.4 + 0.6 * smoothstep(2.0, 12.0, dm));
-      added += vec3(1.0, 0.9, 0.72) * cone * fall * ndl * spot_pos[i].w * 2.6;
+      float lit = cone * fall * ndl * spot_pos[i].w;
+      // shadows: rocks, walls and people block the beam (looking up to 12 m back toward the lamp,
+      // stopping 3 m short of it: the vehicle itself is in the depth buffer too)
+      if (light_shadow > 0.0 && lit > 0.01 && dm > 4.0) {
+        float reach = min(d - 3.0 * 4096.0, 12.0 * 4096.0);
+        lit *= 1.0 - light_shadow * light_blocked_by(from, spot_pos[i].xyz, jitter, reach, 10);
+      }
+      added += vec3(1.0, 0.9, 0.72) * lit * 2.6;
     }
-    // per-pixel jitter of the shadow steps (the TAA averages it)
-    float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
-                         haze.w * 7.13);
-    vec3 from = p + nn * (0.05 * 4096.0 + z * 0.003);
     vec3 glints = vec3(0.0);  // the lights' highlights on wet ground
     vec3 vdir = normalize(-p);
     for (int i = 0; i < light_count; i++) {

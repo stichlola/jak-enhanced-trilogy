@@ -66,6 +66,8 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 | Something wrong? | `Report a problem.bat`: logs, graphics card and settings in a ZIP on your Desktop | |
 | Photo mode | **F3** (F2 takes the picture) | |
 
+The menu, photo mode, nap and next-game keys can be rebound in the Enhanced menu's **Controls**.
+
 The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT RT, Menu).
 
 ## What's new
@@ -75,9 +77,15 @@ The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT 
   per area; more grass and plants that bend; footprints and tire ruts.
 - **Weather**: fair, clouds, rain, storms, fog, snow, sandstorms, different on every visit; puddles
   that fill and dry; ambient sounds (rain, wind, crickets, birds, frogs, the sea, the city).
-- **Gameplay**: nap through the hours while the world runs fast; F9 to the next game of the trilogy (each resumes its newest save); photo mode; city population from Low to Extreme; Jak II and 3 tweaks
-  (ammo, guns, jetboard).
-- **HUD**: a smaller, modern minimap with redrawn icons and maps; subtitle size.
+- **Gameplay**: nap through the hours while the world runs fast, on a bed you mark in the menu
+  (with its own camera); F9 to the next game of the trilogy (each resumes its newest save); photo
+  mode; city population from Low to Extreme; Jak II and 3 tweaks (ammo, guns, jetboard).
+- **Weather and night that change the play** (a menu switch): sandstorms slow vehicles on sand,
+  thick fog and sandstorms hide the minimap, more marauders roam the desert at night; wheels throw
+  spray on wet ground; headlights cast shadows.
+- **HUD**: a smaller, modern minimap with redrawn icons and maps; Jak 3's pause maps redrawn as
+  parchment in HD; subtitle size.
+- **Start menu**: the three games as cards with new portraits, play or continue from the newest save.
 - **Menu**: presets (Classic, Performance, Medium, Maximum), a switch for every effect, weather, time
   of day, field of view. Choices are saved.
 

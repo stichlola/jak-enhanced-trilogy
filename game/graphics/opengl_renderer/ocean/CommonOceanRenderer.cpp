@@ -2,6 +2,8 @@
 
 #include "common/log/log.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 constexpr int OCEAN_TEX_TBP_JAK1 = 8160;  // todo
 constexpr int OCEAN_TEX_TBP_JAK2 = 672;
 
@@ -294,6 +296,11 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
   glEnable(GL_BLEND);
   glDepthFunc(GL_GEQUAL);
 
+  // Enhanced: the sea's own (level) normal for the post pass, not one rebuilt from the depth (the
+  // near sea writes none); its blending is the color's only (each bucket's glBlendFunc below sets
+  // every target: the normal's is set again right after it)
+  EnhancedNormalTarget normals;
+
   for (int bucket = 0; bucket < 3; bucket++) {
     switch (bucket) {
       case 0: {
@@ -340,6 +347,10 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
             glGetUniformLocation(render_state->shaders[ShaderId::OCEAN_COMMON].id(), "bucket"), 2);
         break;
     }
+    // (the normal: the surface's pass only, written as it is)
+    const GLboolean write_normal = bucket == 0;
+    glColorMaski(1, write_normal, write_normal, write_normal, write_normal);
+    glBlendFunci(1, GL_ONE, GL_ZERO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ogl.index_buffer[bucket]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_next_free_index[bucket] * sizeof(u32),
                  m_indices[bucket].data(), GL_STREAM_DRAW);
@@ -486,6 +497,7 @@ void CommonOceanRenderer::flush_mid(SharedRenderState* render_state, ScopedProfi
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_ALWAYS);
   glDisable(GL_BLEND);
+  // (Enhanced: no normal from here: the mid sea is drawn with depth test off, under the level)
 
   // note:
   // there are some places where the game draws the same section of ocean twice, in this order:

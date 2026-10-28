@@ -287,6 +287,14 @@
   (none)
   )
 
+;; og:preserve-this Enhanced: how many marauders chase Jak across the desert: 1-4, 2-6 at night
+(defun enhanced-interceptor-count ()
+  (if (pc-enhanced-night?)
+      (rand-vu-int-range 2 6)
+      (rand-vu-int-range 1 4)
+      )
+  )
+
 ;; WARN: Return type mismatch time-frame vs none.
 (defmethod task-manager-method-26 ((this task-manager-desert-interceptors-attack))
   (let ((t9-0 (method-of-type task-manager task-manager-method-26)))
@@ -295,7 +303,8 @@
   (let ((s5-0 *was-squad-control*))
     (when (time-elapsed? (-> this target-set-time) (seconds 15))
       (set-time! (-> this target-set-time))
-      (set! (-> s5-0 target-count) (rand-vu-int-range 1 4))
+      ;; og:preserve-this Enhanced: more at night
+      (set! (-> s5-0 target-count) (enhanced-interceptor-count))
       (set! (-> s5-0 reserve-count) 4000)
       )
     (let ((a0-4 *target*))
@@ -317,7 +326,8 @@
     (suspend)
     (was-squad-manager-start self)
     (let ((gp-1 *was-squad-control*))
-      (set! (-> gp-1 target-count) (rand-vu-int-range 1 4))
+      ;; og:preserve-this Enhanced: more at night
+      (set! (-> gp-1 target-count) (enhanced-interceptor-count))
       (set! (-> gp-1 reserve-count) 4000)
       )
     (set-setting! 'music 'desattck 0.0 0)

@@ -1269,8 +1269,49 @@ u64 pc_enhanced_menu_state() {
 
 // Enhanced: whether the HUD shows the minimap (the menu's switch)
 u64 pc_enhanced_minimap() {
-  // (hidden in photo mode)
-  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active);
+  // (hidden in photo mode, and in a thick fog or sandstorm when the weather affects play)
+  const auto& w = g_enhanced_play_weather;
+  const bool blind = w.enabled && std::max(w.sand.load(), w.fog.load()) > 0.7f;
+  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active && !blind);
+}
+
+// Enhanced: a marked bed within 3 m of pos (a vector, game units; and 2 m up or down): its place
+// written to out, #f when there's none (g_enhanced_beds)
+u64 pc_enhanced_bed(u32 pos, u32 out) {
+  const float* p = Ptr<float>(pos).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_beds.mutex);
+  const float* best = nullptr;
+  float best_d2 = 3.f * 4096.f * 3.f * 4096.f;
+  for (const auto& b : g_enhanced_beds.pos) {
+    const float dx = b[0] - p[0], dz = b[2] - p[2];
+    const float d2 = dx * dx + dz * dz;
+    if (d2 < best_d2 && std::abs(b[1] - p[1]) < 2.f * 4096.f) {
+      best_d2 = d2;
+      best = b.data();
+    }
+  }
+  if (!best) {
+    return bool_to_symbol(false);
+  }
+  float* o = Ptr<float>(out).c();
+  o[0] = best[0];
+  o[1] = best[1];
+  o[2] = best[2];
+  o[3] = 1.f;
+  return bool_to_symbol(true);
+}
+
+// Enhanced: night, for the play (more marauders in the desert); #f when it doesn't affect play
+u64 pc_enhanced_night() {
+  const auto& w = g_enhanced_play_weather;
+  return bool_to_symbol(w.enabled && w.night.load() > 0.5f);
+}
+
+// Enhanced: how much the sand in the air drags on wheels on sand and dirt, percent over the
+// ground's own (0: none, up to 75 in a full sandstorm; 0 when the weather doesn't affect play)
+u64 pc_enhanced_storm_drag() {
+  const auto& w = g_enhanced_play_weather;
+  return w.enabled ? (u64)(std::clamp(w.sand.load(), 0.f, 1.f) * 75.f) : 0;
 }
 
 // Enhanced: the field of view in play, percent of the game's (the Enhanced menu)
@@ -1536,6 +1577,9 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
+  make_func_symbol_func("pc-enhanced-storm-drag", (void*)pc_enhanced_storm_drag);
+  make_func_symbol_func("pc-enhanced-night?", (void*)pc_enhanced_night);
+  make_func_symbol_func("pc-enhanced-bed", (void*)pc_enhanced_bed);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
   make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
   make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);

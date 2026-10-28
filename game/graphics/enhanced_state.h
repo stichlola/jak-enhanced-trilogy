@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <mutex>
+#include <vector>
 #include <string>
 
 #include "common/common_types.h"
@@ -56,6 +58,28 @@ struct EnhancedDust {
   std::atomic<int> now{0};        // the renderer's frame counter
 };
 extern EnhancedDust g_enhanced_dust;
+
+// Weather and night that change the play (the menu's "Weather and night affect play"), set every
+// frame by the post pass: the sand in the air (the game's sandstorm or ours, 0..1), the fog (0..1)
+// and the night (0..1). Read by the game: sand slows vehicles on sand and dirt
+// (pc-enhanced-storm-drag), a thick fog or sandstorm hides the minimap, more marauders roam the
+// desert at night (pc-enhanced-night?).
+struct EnhancedPlayWeather {
+  std::atomic<bool> enabled{true};
+  std::atomic<float> sand{0.f};
+  std::atomic<float> fog{0.f};
+  std::atomic<float> night{0.f};
+};
+extern EnhancedPlayWeather g_enhanced_play_weather;
+
+// Beds for the nap (game/assets/enhanced/beds.json, marked from the Enhanced menu where Jak stands on
+// one): napping within 3 m of one, Jak lies down on it, seen by a camera of its own. The running
+// game's, world positions in game units (pc-enhanced-bed).
+struct EnhancedBeds {
+  std::mutex mutex;
+  std::vector<std::array<float, 3>> pos;
+};
+extern EnhancedBeds g_enhanced_beds;
 
 // Thunder after a lightning bolt, for the game to play (pc-enhanced-thunder): 0 none, else
 // kind * 1000 + the bolt's azimuth in degrees (0..359, world: atan2(x, z))

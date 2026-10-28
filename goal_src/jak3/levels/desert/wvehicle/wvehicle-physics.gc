@@ -5,6 +5,16 @@
 ;; name in dgo: wvehicle-physics
 ;; dgos: LPATK, LFACCAR, WASALL
 
+;; og:preserve-this Enhanced: the drag of a wheel's ground, more on sand and dirt in a sandstorm
+;; (pc-enhanced-storm-drag: percent over the ground's own, 0 when the weather doesn't affect play)
+(defun enhanced-surface-drag ((surface vehicle-wheel-surface))
+  (if (or (= (-> surface surface-type) (vehicle-wheel-surface-type sand))
+          (= (-> surface surface-type) (vehicle-wheel-surface-type dirt)))
+      (* (-> surface drag) (+ 1.0 (* 0.01 (the float (pc-enhanced-storm-drag)))))
+      (-> surface drag)
+      )
+  )
+
 ;; DECOMP BEGINS
 
 (define *wvehicle-surfaces* (new 'static 'inline-array vehicle-wheel-surface 7
@@ -297,7 +307,8 @@
                      )
                   )
             )
-          (set! (-> arg1 probe-work-array 0 ground-normal x) (-> s2-1 surface drag))
+          ;; og:preserve-this Enhanced: sand in the air drags the wheels
+          (set! (-> arg1 probe-work-array 0 ground-normal x) (enhanced-surface-drag (-> s2-1 surface)))
           )
         (set! (-> arg1 probe-work-array 0 ground-pos y) (-> s2-1 torque))
         (when (< 0.0 (-> s2-1 up-force))

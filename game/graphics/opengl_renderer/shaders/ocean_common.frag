@@ -1,6 +1,7 @@
 #version 410 core
 
-out vec4 color;
+layout (location = 0) out vec4 color;
+layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal (the sea is level)
 
 in vec4 fragment_color;
 in vec3 tex_coord;
@@ -15,6 +16,7 @@ in float fog;
 uniform sampler2D tex_T0;
 
 void main() {
+  enh_normal_out = vec4(0.5, 1.0, 0.5, 1.0);
   vec4 T0 = texture(tex_T0, tex_coord.xy / tex_coord.z);
   if (bucket == 0) {
     color.rgb = fragment_color.rgb * T0.rgb;

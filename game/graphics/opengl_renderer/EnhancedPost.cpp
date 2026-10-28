@@ -33,6 +33,8 @@ EnhancedPlayer g_enhanced_player;
 bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
+EnhancedPlayWeather g_enhanced_play_weather;
+EnhancedBeds g_enhanced_beds;
 std::atomic<int> g_enhanced_thunder{0};
 EnhancedPushers g_enhanced_pushers;
 EnhancedSmokeLights g_enhanced_smoke_lights;
@@ -498,6 +500,59 @@ void save_manual_lights() {
   file_util::write_text_file(manual_lights_path(), j.dump(2));
 }
 
+// beds.json: beds for the nap, per game ({"jak3": [[x, y, z], ...]}, meters: where Jak stood on it)
+std::vector<std::array<float, 3>> g_beds[3];
+
+fs::path beds_path() {
+  return file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "beds.json";
+}
+
+void publish_beds() {
+  std::lock_guard<std::mutex> lock(g_enhanced_beds.mutex);
+  g_enhanced_beds.pos = g_beds[game_index()];
+}
+
+void load_beds() {
+  for (auto& b : g_beds) {
+    b.clear();
+  }
+  std::error_code ec;
+  if (fs::exists(beds_path(), ec)) {
+    try {
+      auto j = parse_commented_json(file_util::read_text_file(beds_path()), "beds.json");
+      const char* games[3] = {"jak1", "jak2", "jak3"};
+      for (int g = 0; g < 3; g++) {
+        if (j.contains(games[g])) {
+          for (const auto& e : j[games[g]]) {
+            g_beds[g].push_back({e[0].get<float>() * 4096.f, e[1].get<float>() * 4096.f,
+                                 e[2].get<float>() * 4096.f});
+          }
+        }
+      }
+    } catch (const std::exception& e) {
+      lg::error("[enhanced] beds.json not loaded: {}", e.what());
+    }
+  }
+  publish_beds();
+}
+
+void save_beds() {
+  nlohmann::json j = nlohmann::json::object();
+  const char* games[3] = {"jak1", "jak2", "jak3"};
+  for (int g = 0; g < 3; g++) {
+    auto arr = nlohmann::json::array();
+    for (const auto& b : g_beds[g]) {
+      auto r = [](float v) { return std::round(v / 4096.f * 100.f) / 100.f; };
+      arr.push_back({r(b[0]), r(b[1]), r(b[2])});
+    }
+    if (!arr.empty()) {
+      j[games[g]] = arr;
+    }
+  }
+  file_util::write_text_file(beds_path(), j.dump(2));
+  publish_beds();
+}
+
 // once a second: load world.json again if it was saved since
 void poll_world() {
   static int frames = 0;
@@ -516,6 +571,7 @@ void poll_world() {
     }
     load_world();
     load_manual_lights();
+    load_beds();
   }
 }
 
@@ -1953,6 +2009,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         const float back = (board ? 0.6f : 2.2f) + (test_puffs ? (float)std::fmod(m_time * 6.0, 12.0) : 0.f);
         if (on_water && sp > 3.f && m_settings.wake > 0.f) {
           add_puff(back, side, board ? 0.2f : 0.6f, std::min(0.5f + sp * 0.04f, 2.f), 1, 1.1f);
+        } else if (!on_water && std::max(m_wet, m_puddle) > 0.3f && sp > 6.f &&
+                   m_settings.wake > 0.f) {
+          // wet ground (rain, puddles): the wheels throw spray, not dust
+          add_puff(back, side, board ? 0.1f : 1.3f, std::min(0.4f + sp * 0.03f, 1.6f), 1, 0.8f);
         } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
           add_puff(back, side, board ? 0.1f : 1.4f, std::min(0.6f + sp * 0.05f, 2.4f), 0, 2.2f);
         }
@@ -2293,6 +2353,7 @@ void EnhancedPost::update_scene() {
   // night from 19 to 21 in, from 5 to 7 out
   auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
   m_night = std::max(ramp(19.f, 21.f, hour), 1.f - ramp(5.f, 7.f, hour));
+  g_enhanced_play_weather.night = m_night;
 
   const auto& s = m_settings;
   const ZoneLook& day = (s.area_grading ? zone : g_world.zones[0]).look[0];
@@ -2584,6 +2645,8 @@ void EnhancedPost::update_scene() {
   // the puddles fill over a minute of rain and dry from their rims in, for minutes after
   ease(m_puddle, wet, 1.f - std::exp(-dt / (wet > m_puddle ? 20.f : 220.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
+  g_enhanced_play_weather.sand = std::clamp(std::max(m_dust, game_dust), 0.f, 1.f);
+  g_enhanced_play_weather.fog = std::clamp(std::max(m_fog, m_mist), 0.f, 1.f);
 
   // the ambient sound loops (game/sound/common/enhanced_ambience): rain, light and then heavy, the
   // dripping once it stops while the puddles are still there, the storm's (and sandstorm's) wind,
@@ -4096,7 +4159,7 @@ void EnhancedPost::draw_start_menu() {
     for (int i = 0; i < 3; i++) {
       m_start_ready[i] =
           i == current || fs::exists(proj / "out" / fmt::format("jak{}", i + 1) / "iso");
-      load(fmt::format("jak{}.png", i + 1), &m_start_tex[i], &unused_w, &unused_h);
+      load(fmt::format("menu{}.jpg", i + 1), &m_start_tex[i], &unused_w, &unused_h);
     }
     for (int i = 0; i < 4; i++) {
       load(i == 0 ? std::string("title.png") : fmt::format("name{}.png", i), &m_start_text[i],
@@ -4265,8 +4328,13 @@ void EnhancedPost::draw_photo_hint() {
                ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                    ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoFocusOnAppearing |
                    ImGuiWindowFlags_NoNav);
-  ImGui::TextUnformatted("Photo mode   left stick: move   right stick: look   L1 / R1: down / up   "
-                         "R2: slower   F2: picture   F1: filters   F3 or Start: back");
+  // (the menu's and photo mode's keys as bound in the menu's Controls)
+  const std::string hint = fmt::format(
+      "Photo mode   left stick: move   right stick: look   L1 / R1: down / up   R2: slower   "
+      "F2: picture   {}: filters   {} or Start: back",
+      SDL_GetKeyName((SDL_Keycode)g_enhanced_menu.keys[0].load()),
+      SDL_GetKeyName((SDL_Keycode)g_enhanced_menu.keys[1].load()));
+  ImGui::TextUnformatted(hint.c_str());
   ImGui::End();
 }
 
@@ -4324,6 +4392,37 @@ void EnhancedPost::draw_menu() {
     if (ImGui::Button("Nap...  (N, Select)")) {
       g_enhanced_menu.ask(12, "");
       g_enhanced_menu.open = false;
+    }
+    // a bed for the nap: Jak standing on it (saved in game/assets/enhanced/beds.json)
+    {
+      auto& beds = g_beds[game_index()];
+      const auto& pl = g_enhanced_player;
+      ImGui::SameLine();
+      if (ImGui::Button("Mark a bed here") && pl.valid) {
+        beds.push_back({pl.pos[0], pl.pos[1], pl.pos[2]});
+        save_beds();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Unmark the nearest bed") && pl.valid && !beds.empty()) {
+        size_t best = 0;
+        float best_d2 = 1e30f;
+        for (size_t i = 0; i < beds.size(); i++) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            d2 += (beds[i][k] - pl.pos[k]) * (beds[i][k] - pl.pos[k]);
+          }
+          if (d2 < best_d2) {
+            best_d2 = d2;
+            best = i;
+          }
+        }
+        beds.erase(beds.begin() + best);
+        save_beds();
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Napping within 3 m of a marked bed, Jak sleeps on it (%d in this game)",
+                          (int)beds.size());
+      }
     }
     ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
     ImGui::BeginDisabled(!s.enabled);
@@ -4511,6 +4610,15 @@ void EnhancedPost::draw_menu() {
       g_enhanced_menu.minimap_size = map_size;
     }
     ImGui::EndDisabled();
+    bool play_weather = g_enhanced_play_weather.enabled;
+    if (ImGui::Checkbox("Weather and night affect play", &play_weather)) {
+      g_enhanced_play_weather.enabled = play_weather;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(
+          "Sandstorms slow vehicles on sand; thick fog and sandstorms hide the minimap;\n"
+          "more marauders roam the desert at night (Jak 3)");
+    }
   }
   save_menu_settings();
   if (ImGui::CollapsingHeader("Time of day", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -4658,6 +4766,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
+  j["weather_affects_play"] = g_enhanced_play_weather.enabled.load();
   auto keys = nlohmann::json::array();
   for (const auto& k : g_enhanced_menu.keys) {
     keys.push_back(k.load());
@@ -4744,6 +4853,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   g_enhanced_menu.minimap = map;
   int map_size = g_enhanced_menu.minimap_size;
   get("minimap_size", map_size);
+  bool play_weather = true;
+  get("weather_affects_play", play_weather);
+  g_enhanced_play_weather.enabled = play_weather;
   g_enhanced_menu.minimap_size = map_size;
   std::vector<u32> keys;
   get("shortcut_keys", keys);

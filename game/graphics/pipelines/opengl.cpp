@@ -335,6 +335,13 @@ void enhanced_shortcuts(const SDL_Event& event) {
   const int listening = g_enhanced_menu.listening;
   if (listening >= 0 && listening < EnhancedMenu::kShortcuts) {
     if (key != SDLK_ESCAPE) {
+      // a key another shortcut had: the two swap (one key never does two things)
+      const u32 old = g_enhanced_menu.keys[listening];
+      for (int i = 0; i < EnhancedMenu::kShortcuts; i++) {
+        if (i != listening && g_enhanced_menu.keys[i] == key) {
+          g_enhanced_menu.keys[i] = old;
+        }
+      }
       g_enhanced_menu.keys[listening] = key;
     }
     g_enhanced_menu.listening = -1;

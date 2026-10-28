@@ -92,11 +92,48 @@
   (none)
   )
 
+;; a nap on a bed (marked in the Enhanced menu, pc-enhanced-bed): Jak onto it, and a camera of its
+;; own looking down at him from the side (the external camera, held still)
+(define *enhanced-nap-bed-cam* #f)
+
+(defbehavior enhanced-nap-bed target ()
+  (let ((bed (new 'stack-no-clear 'vector)))
+    (when (pc-enhanced-bed (the-as pointer (-> self control trans)) (the-as pointer bed))
+      (move-to-point! (-> self control) bed)
+      (let ((side (vector-x-quaternion! (new 'stack-no-clear 'vector) (-> self control quat)))
+            (fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self control quat)))
+            (cam (new 'stack-no-clear 'vector))
+            (look (new 'stack-no-clear 'vector))
+            )
+        (vector-copy! cam bed)
+        ;; (from the side and behind his head: he lies down toward his side)
+        (vector+float*! cam cam side (meters -2.6))
+        (vector+float*! cam cam fwd (meters -2.4))
+        (+! (-> cam y) (meters 2.6))
+        (vector-copy! look bed)
+        (+! (-> look y) (meters 0.3))
+        (vector-! look look cam)
+        (vector-normalize! look 1.0)
+        (vector-copy! (-> *math-camera* trans) cam)
+        (forward-up->inv-matrix *save-camera-inv-rot* look (new 'static 'vector :y 1.0))
+        (set! *external-cam-mode* 'locked)
+        (set! *enhanced-nap-bed-cam* #t)
+        )
+      )
+    )
+  (none)
+  )
+
 (defstate target-enhanced-nap (target)
   :event target-standard-event-handler
   :exit (behavior ()
     ;; woken before the hours went by: the clock back as it was
     (enhanced-nap-world 1.0)
+    ;; (the bed's camera let go)
+    (when *enhanced-nap-bed-cam*
+      (set! *enhanced-nap-bed-cam* #f)
+      (set! *external-cam-mode* #f)
+      )
     (when (> *enhanced-nap-left* 0.0)
       (set! *enhanced-nap-left* 0.0)
       (enhanced-nap-clock *enhanced-nap-ratio*)
@@ -115,6 +152,8 @@
           (nap-stretch (get-art-by-name (-> self draw art-group) "jakb-nap-stretch" art-joint-anim))
           )
       (set! *enhanced-nap-wanted* 0)
+      ;; onto a bed, if one is marked near
+      (enhanced-nap-bed)
       ;; down onto the ground
       (ja-channel-push! 1 (seconds 0.4))
       (cond
