@@ -81,7 +81,7 @@ Technical notes in [ENHANCED.md](ENHANCED.md), rules for contributions in
 | Nap: the hours go by while the world around runs fast | **N** | **Select** (Xbox: View) |
 | Start menu (opens with the game played last, when more than one is set up): pick a game | **Left / Right**, **Enter**; **C** continues from its newest save | **D-pad**, **A**; **Y** continues |
 | Next game of the trilogy | **F9** (rebind it in the menu's Controls) | |
-| Something wrong? | `Report a problem.bat`: logs, graphics card and settings in a ZIP on your Desktop | |
+| Something wrong? | A crash opens a report window by itself: one click sends logs, graphics card and settings. Any time: *Send feedback* in the Enhanced menu, or `Report a problem.bat` | |
 | Photo mode | **F3** (F2 takes the picture) | |
 
 The menu, photo mode, nap and next-game keys can be rebound in the Enhanced menu's **Controls**.

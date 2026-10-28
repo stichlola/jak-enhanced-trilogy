@@ -170,7 +170,9 @@ if exist "%PROJ%\game\assets\jak3\enhanced-save\bank6.bin" if not exist "%SAVES%
 )
 endlocal
 cd /d "%PROJ%"
-start "" "%BIN%\gk.exe" --game jak%PICK% -- -boot -fakeiso
+rem a hidden PowerShell starts the game and waits for it: if gk.exe closes with an error it opens
+rem the report window (scripts\enhanced\report.ps1: one click sends the logs, nothing without it)
+start "" powershell -NoProfile -WindowStyle Hidden -Command "$p = Start-Process -FilePath '%BIN%\gk.exe' -ArgumentList '--game jak%PICK% -- -boot -fakeiso' -PassThru; $null = $p.Handle; $p.WaitForExit(); if ($p.ExitCode -ne 0) { & ([scriptblock]::Create([IO.File]::ReadAllText('%PROJ%\scripts\enhanced\report.ps1'))) -Proj '%PROJ%' -Crash $p.ExitCode }"
 exit /b 0
 
 :tools

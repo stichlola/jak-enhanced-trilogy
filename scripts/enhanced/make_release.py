@@ -30,7 +30,8 @@ NAME = "Jak-Enhanced-Trilogy"
 LIGHT_NAME = "Jak-Enhanced-Light"
 # (not in Enhanced Light: the launcher there is OpenGOAL's, and the HD textures need Python)
 FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py",
-             "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1"}
+             "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1",
+             "scripts/enhanced/report.ps1"}
 DATA = [
     "decompiler/config",
     "goal_src",
@@ -41,6 +42,7 @@ DATA = [
     "scripts/enhanced/hd_textures.py",
     "scripts/enhanced/minimap_maps.py",
     "scripts/enhanced/update.ps1",  # a new release installed over this one (the launcher asks)
+    "scripts/enhanced/report.ps1",  # the report window (a crash opens it, the menu button too)
 ]
 
 
@@ -119,8 +121,8 @@ def main():
         "whether to make the HD textures from it (optional: 30 minutes to 2 hours a game).\r\n"
         "In the game: F1 (or \\, or Select + R3 on a pad) opens the Enhanced menu; Select (View on an\r\n"
         "Xbox pad) or N opens the nap window: Jak sleeps the hours away while the world runs fast.\r\n\r\n"
-        "Something wrong? Double-click \"Report a problem.bat\": it puts your newest logs, graphics card,\r\n"
-        "driver and settings in a ZIP on your Desktop to attach to a message (nothing is sent by itself).\r\n\r\n"
+        "Something wrong? If the game crashes, a report window opens by itself: one click sends it.\r\n"
+        "Feedback any time: \"Send feedback\" in the Enhanced menu, or \"Report a problem.bat\".\r\n\r\n"
         "Free and unofficial: no donations of any kind are accepted for this project.\r\n\r\n"
         "https://github.com/stichlola/jak-enhanced-trilogy\r\n", encoding="ascii")
 
