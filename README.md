@@ -26,6 +26,21 @@ over the old install: extracted discs and saves stay.
 No installer? The release also has a ZIP: unzip it, put your .iso files in `ISO`, double-click
 `Jak Enhanced Trilogy.bat`.
 
+## OpenGOAL launcher mod (Enhanced Light)
+
+Already playing with the [OpenGOAL launcher](https://opengoal.dev)? **Jak Enhanced Light** is the
+single-game version, installed as a mod for Jak 1, Jak II or Jak 3: the same graphics, HD pause maps,
+weather and night and the Enhanced menu (F1), with the game itself untouched (PlayStation buttons,
+no start menu, nap or game switch, weather that never changes the play). Each mod keeps its own
+settings and saves, so it doesn't clash with other mods.
+
+1. In the launcher: **Settings > Mods**, add this source:
+   `https://raw.githubusercontent.com/stichlola/jak-enhanced-trilogy/main/mods.json`
+2. Pick a game, **Features > Mods**, install **Jak Enhanced Light** and play.
+
+The full trilogy above has more (the three games in one program, the nap and beds, photo mode,
+weather that affects play, Xbox buttons, optional HD textures).
+
 ## Install (developers)
 
 1. `git clone https://github.com/stichlola/jak-enhanced-trilogy.git`
@@ -35,6 +50,9 @@ No installer? The release also has a ZIP: unzip it, put your .iso files in `ISO`
    (`-SkipBuild`, `-HdTextures`...).
 3. After a change: `cmake --build out\build\Release` (C++),
    `out\build\Release\bin\goalc.exe --user-auto --game jak3 --cmd "(mi)"` (game code; `jak1`, `jak2`).
+4. A release: `python scripts/enhanced/make_release.py --version vX --installer` (the full trilogy) and
+   `--light` (the launcher mod, `data/enhanced-light` switches the single-game build on), then
+   `python scripts/enhanced/mod_source.py --add vX` updates `mods.json`.
 
 Where things are: graphics in `game/graphics/opengl_renderer/EnhancedPost.cpp` and
 `game/graphics/opengl/shaders/enh_*`; game code (GOAL) in `goal_src/jak1|jak2|jak3`, changes marked

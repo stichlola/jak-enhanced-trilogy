@@ -16,6 +16,7 @@
 
 #include "common/util/Assert.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 #include "common/util/font/dbs/font_db_jak1.h"
 #include "common/util/font/dbs/font_db_jak2.h"
 #include "common/util/font/dbs/font_db_jak3.h"
@@ -162,7 +163,8 @@ std::string GameTextFontBank::replace_to_game(const std::string& str) const {
       i += remap->utf8_string.size();
     }
   }
-  return xbox_buttons(newstr);
+  // (Enhanced Light keeps the PlayStation buttons)
+  return enhanced_light() ? newstr : xbox_buttons(newstr);
 }
 
 std::string GameTextFontBank::encode_utf8_to_game(const std::string& str) const {

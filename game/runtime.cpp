@@ -35,6 +35,7 @@
 
 #include "game/external/discord.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/gfx.h"
@@ -271,7 +272,9 @@ void ee_runner(SystemThreadInterface& iface) {
   if (!g_enhanced_menu.start_menu_shown) {
     g_enhanced_menu.start_menu_shown = true;
     const char* force = std::getenv("JAK_ENHANCED_START_MENU");
-    if (force) {
+    if (enhanced_light()) {
+      g_enhanced_menu.start_menu = false;
+    } else if (force) {
       g_enhanced_menu.start_menu = std::strcmp(force, "0") != 0;
     } else if (!g_enhanced_debug_toolbar) {
       int ready = 0;

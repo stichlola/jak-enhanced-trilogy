@@ -12,6 +12,7 @@
 
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 #include "common/util/json_util.h"
 
 #include "game/graphics/enhanced_state.h"
@@ -4457,7 +4458,8 @@ void EnhancedPost::draw_menu() {
   }
   auto& s = m_settings;
   // photo mode: in and out, and while it's on its filter
-  if (ImGui::Button(g_enhanced_menu.photo ? "Leave photo mode  (F3, Start)" : "Photo mode  (F3)")) {
+  if (!enhanced_light() &&
+      ImGui::Button(g_enhanced_menu.photo ? "Leave photo mode  (F3, Start)" : "Photo mode  (F3)")) {
     g_enhanced_menu.photo = !g_enhanced_menu.photo;
     if (g_enhanced_menu.photo) {
       g_enhanced_menu.open = false;
@@ -4490,13 +4492,13 @@ void EnhancedPost::draw_menu() {
         apply_preset(preset_ids[i]);
       }
     }
-    // the game's nap window
-    if (ImGui::Button("Nap...  (N, Select)")) {
+    // the game's nap window (and the beds, the report: not in Enhanced Light)
+    if (!enhanced_light() && ImGui::Button("Nap...  (N, Select)")) {
       g_enhanced_menu.ask(12, "");
       g_enhanced_menu.open = false;
     }
     // a bed for the nap: Jak standing on it (saved in game/assets/enhanced/beds.json)
-    {
+    if (!enhanced_light()) {
       auto& beds = g_beds[game_index()];
       const auto& pl = g_enhanced_player;
       ImGui::SameLine();
@@ -4527,7 +4529,7 @@ void EnhancedPost::draw_menu() {
       }
     }
     // "Report a problem.bat" next to the launcher: data\ in the release, the project in the source
-    {
+    if (!enhanced_light()) {
       const auto proj = file_util::get_jak_project_dir();
       fs::path bat = proj.parent_path() / "Report a problem.bat";
       if (!fs::exists(bat)) {
@@ -4741,14 +4743,17 @@ void EnhancedPost::draw_menu() {
       g_enhanced_menu.minimap_size = map_size;
     }
     ImGui::EndDisabled();
+    // (not in Enhanced Light: the game plays as it was, see pc_enhanced_storm_drag and the rest)
     bool play_weather = g_enhanced_play_weather.enabled;
-    if (ImGui::Checkbox("Weather and night affect play", &play_weather)) {
-      g_enhanced_play_weather.enabled = play_weather;
-    }
-    if (ImGui::IsItemHovered()) {
-      ImGui::SetTooltip(
-          "Sandstorms slow vehicles on sand; thick fog and sandstorms hide the minimap;\n"
-          "more marauders roam the desert at night (Jak 3)");
+    if (!enhanced_light()) {
+      if (ImGui::Checkbox("Weather and night affect play", &play_weather)) {
+        g_enhanced_play_weather.enabled = play_weather;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Sandstorms slow vehicles on sand; thick fog and sandstorms hide the minimap;\n"
+            "more marauders roam the desert at night (Jak 3)");
+      }
     }
   }
   save_menu_settings();
@@ -4784,7 +4789,7 @@ void EnhancedPost::draw_menu() {
     static const char* names[EnhancedMenu::kShortcuts] = {"This menu (\\ too)", "Photo mode",
                                                           "Nap", "Next game of the trilogy"};
     const int listening = g_enhanced_menu.listening;
-    for (int i = 0; i < EnhancedMenu::kShortcuts; i++) {
+    for (int i = 0; i < (enhanced_light() ? 1 : EnhancedMenu::kShortcuts); i++) {
       ImGui::PushID(i);
       ImGui::TextUnformatted(names[i]);
       ImGui::SameLine(260);

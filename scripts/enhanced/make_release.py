@@ -1,6 +1,12 @@
 """Jak Enhanced Trilogy: the release ZIP for players (nothing to build or install).
 
     python scripts/enhanced/make_release.py [--bin out/build/Release-static/bin] [--version v1.0] [--installer]
+    python scripts/enhanced/make_release.py --light [--version v1.0]
+
+--light makes Enhanced Light instead, the mod for OpenGOAL's launcher (mods.json): the same programs
+and data/ at the ZIP's root (the launcher unpacks it into its own mod folder and runs the extractor
+itself), with data/enhanced-light switching the single-game build on (enhanced_light.h), and none of
+the trilogy's own launcher, report and update scripts.
 
 Lays out what OpenGOAL's own releases have (.github/scripts/releases/extract_build_windows.sh):
 gk.exe, goalc.exe and extractor.exe (the statically linked build: no runtime DLLs), and next to them
@@ -21,6 +27,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 NAME = "Jak-Enhanced-Trilogy"
+LIGHT_NAME = "Jak-Enhanced-Light"
+# (not in Enhanced Light: the launcher there is OpenGOAL's, and the HD textures need Python)
+FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py",
+             "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1"}
 DATA = [
     "decompiler/config",
     "goal_src",
@@ -46,6 +56,7 @@ def main():
     parser.add_argument("--version", default="")
     parser.add_argument("--out", type=Path, default=ROOT / "out/release")
     parser.add_argument("--installer", action="store_true", help="also the setup .exe (Inno Setup 6)")
+    parser.add_argument("--light", action="store_true", help="Enhanced Light, the OpenGOAL launcher mod")
     parser.add_argument("--skip-shader-check", action="store_true",
                         help="don't stop on shader errors (check_shaders.py: glslang, ASCII only)")
     args = parser.parse_args()
@@ -57,7 +68,8 @@ def main():
         if check.returncode != 0:
             sys.exit("shader check failed (see above); --skip-shader-check to package anyway")
 
-    dest = args.out / NAME
+    name = LIGHT_NAME if args.light else NAME
+    dest = args.out / name
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -65,7 +77,7 @@ def main():
         shutil.copy2(args.bin / exe, dest / exe)
 
     count = 0
-    for folder in DATA:
+    for folder in [d for d in DATA if not (args.light and d in FULL_ONLY)]:
         for rel in tracked(folder):
             target = dest / "data" / rel
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -79,6 +91,18 @@ def main():
     rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True,
                          text=True).stdout.strip()
     (dest / "data/VERSION").write_text(f"{args.version or 'dev'}-{rev}", encoding="ascii")
+
+    if args.light:
+        (dest / "data/enhanced-light").write_text(
+            "Enhanced Light: the single-game build (common/util/enhanced_light.h)\n", encoding="ascii")
+        zip_path = args.out / f"{LIGHT_NAME}{'-' + args.version if args.version else ''}.zip"
+        zip_path.unlink(missing_ok=True)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+            for f in sorted(dest.rglob("*")):
+                # (no top folder: the launcher wants gk.exe and data/ at the root)
+                z.write(f, f.relative_to(dest))
+        print(f"{count} data files; {zip_path} ({zip_path.stat().st_size / 1e6:.0f} MB)")
+        return
 
     for bat in ("Jak Enhanced Trilogy.bat", "Report a problem.bat"):
         # CRLF whatever the checkout has (cmd's labels and goto break with LF)

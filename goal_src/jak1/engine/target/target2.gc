@@ -268,7 +268,9 @@
   "Called first in determine-pause-mode: Select opens the nap window (as it's let go), and the windows' buttons"
   (let ((ms (pc-enhanced-menu-state)))
     (cond
-      ((cpad-pressed? 0 select) (if (not *enhanced-nap-ui*) (set! *enhanced-select-menu* ms)))
+      ;; (no nap in Enhanced Light)
+      ((and (cpad-pressed? 0 select) (not (pc-enhanced-light?)))
+       (if (not *enhanced-nap-ui*) (set! *enhanced-select-menu* ms)))
       ((and (>= *enhanced-select-menu* 0) (not (cpad-hold? 0 select)))
        ;; (unless Select + R3 opened the Enhanced menu meanwhile)
        (if (and (= ms *enhanced-select-menu*) (zero? (logand ms 1)) (not *enhanced-nap-ui*))

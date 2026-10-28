@@ -10,6 +10,7 @@
 #include "common/log/log.h"
 #include "common/symbols.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 #include "common/util/Timer.h"
 #include "common/util/font/font_utils.h"
 #include "common/util/string_util.h"
@@ -1263,6 +1264,11 @@ u64 pc_enhanced_poll_request(u32 dest, u32 max_len) {
 }
 
 // Enhanced: the Enhanced menu's state for the game: 2 x the times it opened, + 1 while it's open
+// Enhanced: whether this is Enhanced Light (the launcher's single-game build, enhanced_light.h)
+u64 pc_enhanced_light() {
+  return bool_to_symbol(enhanced_light());
+}
+
 u64 pc_enhanced_menu_state() {
   return (u64)(g_enhanced_menu.opens.load() * 2 + (g_enhanced_menu.open ? 1 : 0));
 }
@@ -1271,13 +1277,16 @@ u64 pc_enhanced_menu_state() {
 u64 pc_enhanced_minimap() {
   // (hidden in photo mode, and in a thick fog or sandstorm when the weather affects play)
   const auto& w = g_enhanced_play_weather;
-  const bool blind = w.enabled && std::max(w.sand.load(), w.fog.load()) > 0.7f;
+  const bool blind = w.enabled && !enhanced_light() && std::max(w.sand.load(), w.fog.load()) > 0.7f;
   return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active && !blind);
 }
 
 // Enhanced: a marked bed within 3 m of pos (a vector, game units; and 2 m up or down): its place
 // written to out, #f when there's none (g_enhanced_beds)
 u64 pc_enhanced_bed(u32 pos, u32 out) {
+  if (enhanced_light()) {
+    return bool_to_symbol(false);
+  }
   const float* p = Ptr<float>(pos).c();
   std::lock_guard<std::mutex> lock(g_enhanced_beds.mutex);
   const float* best = nullptr;
@@ -1316,14 +1325,14 @@ u64 pc_enhanced_hint_once(u32 bit) {
 // Enhanced: night, for the play (more marauders in the desert); #f when it doesn't affect play
 u64 pc_enhanced_night() {
   const auto& w = g_enhanced_play_weather;
-  return bool_to_symbol(w.enabled && w.night.load() > 0.5f);
+  return bool_to_symbol(w.enabled && !enhanced_light() && w.night.load() > 0.5f);
 }
 
 // Enhanced: how much the sand in the air drags on wheels on sand and dirt, percent over the
 // ground's own (0: none, up to 75 in a full sandstorm; 0 when the weather doesn't affect play)
 u64 pc_enhanced_storm_drag() {
   const auto& w = g_enhanced_play_weather;
-  return w.enabled ? (u64)(std::clamp(w.sand.load(), 0.f, 1.f) * 75.f) : 0;
+  return w.enabled && !enhanced_light() ? (u64)(std::clamp(w.sand.load(), 0.f, 1.f) * 75.f) : 0;
 }
 
 // Enhanced: the field of view in play, percent of the game's (the Enhanced menu)
@@ -1586,6 +1595,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
+  make_func_symbol_func("pc-enhanced-light?", (void*)pc_enhanced_light);
   make_func_symbol_func("pc-enhanced-fov", (void*)pc_enhanced_fov);
   make_func_symbol_func("pc-enhanced-subtitle-size", (void*)pc_enhanced_subtitle_size);
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);

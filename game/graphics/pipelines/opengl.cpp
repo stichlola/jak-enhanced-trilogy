@@ -15,6 +15,7 @@
 #include "common/goal_constants.h"
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 #include "common/util/FrameLimiter.h"
 #include "common/util/Timer.h"
 #include "common/util/compress.h"
@@ -356,6 +357,10 @@ void enhanced_shortcuts(const SDL_Event& event) {
     if (g_enhanced_menu.keys[i] == key) {
       which = i;
     }
+  }
+  // (Enhanced Light: only the menu's)
+  if (enhanced_light() && which > 0) {
+    return;
   }
   switch (which) {
     case 0:

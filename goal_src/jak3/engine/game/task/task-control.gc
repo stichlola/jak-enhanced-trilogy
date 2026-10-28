@@ -244,7 +244,8 @@
   ;; Select: the nap window opens as it's let go, unless Select + R3 opened the Enhanced menu meanwhile
   (let ((ms (pc-enhanced-menu-state)))
     (cond
-      ((cpad-pressed? 0 select)
+      ;; (no nap in Enhanced Light)
+      ((and (cpad-pressed? 0 select) (not (pc-enhanced-light?)))
        (set! *enhanced-select-menu* ms)
        )
       ((and (>= *enhanced-select-menu* 0) (not (cpad-hold? 0 select)))

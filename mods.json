@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "1.0.0",
+  "sourceName": "Jak Enhanced",
+  "lastUpdated": "2026-10-28T10:29:43Z",
+  "mods": {
+    "jak-enhanced-light": {
+      "displayName": "Jak Enhanced Light",
+      "description": "New lighting and graphics for the game as it is: real-time sun and shadows, ambient occlusion, reflections on water and wet streets, rain, fog, sandstorms and a night sky, HD pause maps, and an in-game menu to tune it all (F1). Gameplay is untouched. The single-game version of Jak Enhanced Trilogy (the full one, with the three games in one program, is on GitHub).",
+      "authors": [
+        "stichlola"
+      ],
+      "tags": [
+        "graphics",
+        "visual",
+        "weather"
+      ],
+      "supportedGames": [
+        "jak1",
+        "jak2",
+        "jak3"
+      ],
+      "websiteUrl": "https://github.com/stichlola/jak-enhanced-trilogy",
+      "coverArtUrl": "https://raw.githubusercontent.com/stichlola/jak-enhanced-trilogy/main/game/assets/enhanced/art/cover.jpg",
+      "thumbnailArtUrl": "https://raw.githubusercontent.com/stichlola/jak-enhanced-trilogy/main/game/assets/enhanced/art/banner-1280x640.png",
+      "versions": []
+    }
+  },
+  "texturePacks": {}
+}
