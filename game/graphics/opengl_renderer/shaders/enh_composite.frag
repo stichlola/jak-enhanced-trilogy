@@ -924,6 +924,18 @@ vec3 sky_color(vec3 dv) {
     col = mix(col, above, low);
     col = mix(col, warm * (0.8 + 0.5 * sky_kind.w), band * low * (0.35 + 0.55 * sky_kind.w) * (1.0 - over * 0.6));
   }
+  // the desert's late afternoon: a pale lilac sky over a cream glow that floods the horizon on the
+  // sun's side
+  if (golden > 0.0) {
+    vec3 lilac = mix(vec3(0.9, 0.74, 0.62), vec3(0.72, 0.68, 0.8), smoothstep(0.02, 0.3, up));
+    col = mix(col, lilac, golden * 0.75 * (1.0 - over));
+    // (the glow low on the horizon under the sun, wherever it stands: the light across the valley)
+    vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+    float az = max(dot(normalize(wd.xz + 1e-4), sh), 0.0);
+    float glow = pow(az, 4.0) * exp(-up * 7.0) + 0.4 * pow(az, 16.0) * exp(-up * 3.0);
+    col += vec3(1.0, 0.68, 0.46) * glow * golden * 0.5 * (1.0 - over * 0.7);
+    col += sc * pow(sd, 16.0) * 0.3 * golden * (1.0 - over * 0.7);
+  }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
   return col;
@@ -948,7 +960,8 @@ float cloud_density(vec3 p, float lo, int octaves) {
   }
   // flat bottoms, heaped tops
   float shape = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.35, 1.0, h));
-  return clamp((n * shape - lo) * 4.0, 0.0, 1.0);
+  // (the late afternoon's heaps with crisper edges: cumulus, clear sky between)
+  return clamp((n * shape - lo) * (4.0 + 4.0 * golden), 0.0, 1.0);
 }
 
 vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
@@ -976,6 +989,10 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     sc *= mix(vec3(1.0), vec3(1.2, 0.86, 0.52), sun_haze * 0.75);
     under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25 * (1.0 - clouds.w)), sun_haze * 0.55);
     top = mix(top, vec3(0.95, 0.72, 0.55), sun_haze * 0.35);
+    // (and late in the day their shaded undersides a deep warm brown, the sun's gold on the rims)
+    under = mix(under, vec3(0.3, 0.2, 0.15), golden * 0.9);
+    top = mix(top, vec3(0.7, 0.52, 0.4), golden * 0.5);
+    sc *= mix(vec3(1.0), vec3(1.3, 1.0, 0.7), golden);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -995,7 +1012,8 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
       float h = (p.y - 1100.0) / 900.0;
       vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
       // (thinner by night: under the moon they read as dark cut-out slabs over the dim sky)
-      float a = 1.0 - exp(-d * 0.022 * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
+      // (the late afternoon's heaps solid: dark bellies, not veils)
+      float a = 1.0 - exp(-d * 0.022 * (1.0 + 1.2 * golden) * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
       sum += trans * a * light;
       trans *= 1.0 - a;
       if (trans < 0.02) {
@@ -2195,7 +2213,8 @@ void main() {
       float d = 3.0 * cloud_density(wp + sw * ((1450.0 - wp.y) / sw.y), lo, 2);
       float cs = (1.0 - exp(-d * 2.5)) * min(clouds.x, 1.0) * (1.0 - clouds.w) *
                  smoothstep(0.06, 0.2, sw.y) * (1.0 - smoothstep(0.75, 0.97, clouds.y));
-      c *= vec3(1.0) - 0.5 * cs * vec3(1.03, 0.97, 0.86);
+      // (faint in the late afternoon: the low sun's light across the valley stays whole)
+      c *= vec3(1.0) - 0.5 * (1.0 - 0.75 * golden) * cs * vec3(1.03, 0.97, 0.86);
     }
   }
 
@@ -2556,6 +2575,17 @@ void main() {
     // fade into it, their tops stand out (height over the camera's, m)
     float rel = z > 0.0 ? world_dir(p).y / 4096.0 : 0.0;
     c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75, 0.0, 1.0));
+    // the late afternoon: the air toward the sun's side of the horizon glows, the far mountains and
+    // dunes there melt into a bright gold (by the sun's bearing, not its height: it can stand high)
+    if (golden > 0.0) {
+      vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+      float az = max(dot(normalize(world_dir(ray).xz + 1e-4), sh), 0.0);
+      // (low down: the mountains' feet sink into it, their peaks stand out)
+      float hrel = z > 0.0 ? world_dir(p).y / 4096.0 : 0.0;
+      float g = pow(az, 3.0) * (1.0 - exp(-dist / 900.0)) * exp(-up * 6.0) * exp(-max(hrel, 0.0) / 90.0) *
+                golden * daylight;
+      c = mix(c, vec3(1.0, 0.86, 0.6), clamp(g * 0.45, 0.0, 1.0));
+    }
     // (the dust in a pale sand color: in the haze's own, under an afternoon sun, it laid a band of
     // bright orange over the middle distance)
     float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.3;
@@ -3253,7 +3283,7 @@ void main() {
     // (the sand stopped down; the mountains lifted, the low sun lights them face on. By the
     // normals' tag lengths, tfrag3.frag / hfrag.frag)
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-    float rock_expo = mix(1.0, 1.25, smoothstep(15.0, 60.0, length(p) / 4096.0));
+    float rock_expo = mix(1.0, 1.12, smoothstep(15.0, 60.0, length(p) / 4096.0));
     float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
     c *= 1.0 - 0.4 * golden * (1.0 - smoothstep(0.2, 0.55, lg));
