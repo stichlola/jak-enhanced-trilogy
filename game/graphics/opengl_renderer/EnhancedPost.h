@@ -659,7 +659,8 @@ class EnhancedPost {
   double m_fast_since = 0.0;
   int m_auto_level = 0;
   double m_auto_changed = 0.0;
-  float m_level_post[4] = {};  // the post pass's time when a level was entered, then what it saved
-  float m_level_cost[4] = {};
+  static constexpr int kAutoLevels = 6;
+  float m_level_post[kAutoLevels] = {};  // the post pass's time when a level was entered, then what it saved
+  float m_level_cost[kAutoLevels] = {};
   bool m_level_cost_pending = false;
 };

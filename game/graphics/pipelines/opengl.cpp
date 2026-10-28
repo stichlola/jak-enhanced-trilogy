@@ -47,6 +47,8 @@
 
 #include "third-party/stb_image/stb_image.h"
 
+extern float g_enhanced_render_scale;  // EnhancedPost.cpp: the auto quality's resolution
+
 constexpr bool run_dma_copy = false;
 
 constexpr PerGameVersion<int> fr3_level_count(jak1::LEVEL_TOTAL,
@@ -606,6 +608,12 @@ void render_game_frame(int game_width,
     options.save_screenshot = false;
     options.quick_screenshot = false;
     options.internal_res_screenshot = false;
+    // (Enhanced: the auto quality's last levels draw the game at fewer pixels; the window
+    // stretches it)
+    if (g_enhanced_render_scale < 1.f) {
+      options.game_res_w = std::max(1, (int)(game_width * g_enhanced_render_scale));
+      options.game_res_h = std::max(1, (int)(game_height * g_enhanced_render_scale));
+    }
     // (JAK_ENHANCED_PROFILE=1: each renderer waits for the GPU, so the log's profile is GPU time)
     static const bool profile_env = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
     options.gpu_sync = g_gfx_data->debug_gui.should_gl_finish() || profile_env;

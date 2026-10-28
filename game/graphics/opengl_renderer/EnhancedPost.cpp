@@ -68,6 +68,7 @@ static bool enh_profiling() {
     __VA_ARGS__;                                    \
   }
 EnhancedTimeOfDay g_enhanced_tod;
+float g_enhanced_render_scale = 1.f;
 EnhancedNormals g_enhanced_normals;
 
 bool enhanced_has_piazza() {
@@ -989,7 +990,8 @@ void EnhancedPost::update_auto_quality() {
   }
   if (!m_settings.auto_quality) {
     m_auto_level = 0;
-  } else if (slow && m_gpu_ms > 16.0f && m_auto_level < 3 && now - m_auto_changed > 1.5) {
+  } else if (slow && m_gpu_ms > 16.0f && m_auto_level < kAutoLevels - 1 &&
+             now - m_auto_changed > 1.5) {
     // the graphics card is what holds the frame back: one more pass aside
     m_auto_level++;
     m_level_post[m_auto_level] = m_gpu_post_ms;
@@ -1007,9 +1009,18 @@ void EnhancedPost::update_auto_quality() {
     lg::info("[enhanced] auto quality: room for {:.1f} ms more, level {}",
              m_level_cost[m_auto_level + 1], m_auto_level);
   }
-  // each level also brings the detailed scenery models in closer (the far versions are cheap)
-  static constexpr float kSceneryScale[4] = {1.f, 0.85f, 0.7f, 0.55f};
-  g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, 3)];
+  // each level also brings the detailed scenery models in closer (the far versions are cheap);
+  // the last two draw the game at fewer pixels (85%, 72% a side), stretched to the window
+  static constexpr float kSceneryScale[kAutoLevels] = {1.f, 0.85f, 0.7f, 0.55f, 0.55f, 0.55f};
+  static constexpr float kRenderScale[kAutoLevels] = {1.f, 1.f, 1.f, 1.f, 0.85f, 0.72f};
+  // (test switch: JAK_ENHANCED_AUTO_MIN=n keeps the level at n or above)
+  static const int auto_min = [] {
+    const char* env = std::getenv("JAK_ENHANCED_AUTO_MIN");
+    return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : 0;
+  }();
+  m_auto_level = std::max(m_auto_level, auto_min);
+  g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
+  g_enhanced_render_scale = kRenderScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
   m_gpu_query_open = true;
 }
@@ -2497,6 +2508,49 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
   }
 
+  // (JAK_ENHANCED_COMPOSITE_OFF=sand,rock_detail,...: those uniforms zeroed, to measure what each
+  // part of the composite costs with JAK_ENHANCED_PROFILE)
+  static const std::vector<std::string> composite_off = [] {
+    std::vector<std::string> out;
+    if (const char* env = std::getenv("JAK_ENHANCED_COMPOSITE_OFF")) {
+      std::string s = env;
+      size_t at = 0;
+      while (at < s.size()) {
+        size_t comma = std::min(s.find(',', at), s.size());
+        if (comma > at) {
+          out.push_back(s.substr(at, comma - at));
+        }
+        at = comma + 1;
+      }
+    }
+    return out;
+  }();
+  for (auto& name : composite_off) {
+    GLint loc = glGetUniformLocation(id, name.c_str());
+    GLint n = 0;
+    glGetProgramiv(id, GL_ACTIVE_UNIFORMS, &n);
+    GLenum type = 0;
+    for (GLint i = 0; loc >= 0 && i < n; i++) {
+      char buf[128];
+      GLint size;
+      GLenum t;
+      glGetActiveUniform(id, i, sizeof(buf), nullptr, &size, &t, buf);
+      if (name == buf) {
+        type = t;
+      }
+    }
+    if (type == GL_INT) {
+      glUniform1i(loc, 0);
+    } else if (type == GL_FLOAT) {
+      glUniform1f(loc, 0.f);
+    } else if (type == GL_FLOAT_VEC2) {
+      glUniform2f(loc, 0.f, 0.f);
+    } else if (type == GL_FLOAT_VEC3) {
+      glUniform3f(loc, 0.f, 0.f, 0.f);
+    } else if (type == GL_FLOAT_VEC4) {
+      glUniform4f(loc, 0.f, 0.f, 0.f, 0.f);
+    }
+  }
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   prof.add_draw_call();
   glBindSampler(13, 0);
@@ -5067,12 +5121,14 @@ void EnhancedPost::draw_menu() {
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip(
           "Where the graphics card can't keep 60 fps (Haven at night...), the mist volume, the\n"
-          "indirect light, the god rays and the soft shadows are set aside one at a time, and come\n"
-          "back when there is room again. Now: %s",
+          "indirect light, the god rays and the soft shadows are set aside one at a time, then the\n"
+          "resolution is lowered, and they come back when there is room again. Now: %s",
           m_auto_level == 0 ? "everything on"
           : m_auto_level == 1 ? "mist volume off"
           : m_auto_level == 2 ? "mist volume and indirect light off"
-                              : "mist volume, indirect light, god rays and soft shadows off");
+          : m_auto_level == 3 ? "mist volume, indirect light, god rays and soft shadows off"
+          : m_auto_level == 4 ? "those off, and 85% resolution"
+                              : "those off, and 72% resolution");
     }
     check("Clouds", &s.clouds);
     check("Cutscene depth of field", &s.cine_dof);

@@ -163,9 +163,11 @@ float luma(vec3 c) {
 }
 
 // gradient noise, for water that doesn't repeat
+// (without sine: plain arithmetic, cheaper, and gnoise calls it four times; Dave Hoskins' hash)
 vec2 hash2(vec2 q) {
-  q = vec2(dot(q, vec2(127.1, 311.7)), dot(q, vec2(269.5, 183.3)));
-  return -1.0 + 2.0 * fract(sin(q) * 43758.5453);
+  vec3 p3 = fract(q.xyx * vec3(0.1031, 0.1030, 0.0973));
+  p3 += dot(p3, p3.yzx + 33.33);
+  return -1.0 + 2.0 * fract((p3.xx + p3.yz) * p3.zy);
 }
 
 float gnoise(vec2 x) {
