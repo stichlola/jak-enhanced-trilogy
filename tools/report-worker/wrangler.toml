@@ -1,6 +1,9 @@
 name = "jak-enhanced-reports"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
+# the address the report window posts to (scripts/enhanced/report.ps1): workers.dev on, no preview URLs
+workers_dev = true
+preview_urls = false
 
 # the reports, private: a KV namespace (free, no card needed). Made once with
 #   npx wrangler kv namespace create REPORTS
@@ -10,7 +13,3 @@ binding = "REPORTS"
 id = "d426054bf51942a7b4f52bf48bc27cc1"
 
 # ADMIN_KEY (to read the reports) is a secret: npx wrangler secret put ADMIN_KEY
-
-# the address the report window posts to (scripts/enhanced/report.ps1): workers.dev on, no preview URLs
-workers_dev = true
-preview_urls = false
