@@ -1392,6 +1392,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     static int debug_beacons = 0;
     const bool on = m_settings.lights && have_scene && cam.valid;
     g_enhanced_smoke_lights.count = 0;
+    // in the sun's full daylight the glows' light is lost in it: a garage door's big orange glow
+    // lit the sand around for tens of meters, with hard shadows of every slab (the beacons stay)
+    const float glow_day =
+        g_enhanced_sun.valid ? 1.f - std::max(m_night, night_darkness()) : 0.f;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
       const auto& l = g_enhanced_lights.lights[i];
       Candidate c;
@@ -1431,7 +1435,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (peak <= 0.f) {
         continue;
       }
-      float intensity = std::min(1.5f, bright * 4.f) * m_settings.light_strength;
+      float intensity =
+          std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day);
       // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
       // far beacons and the sky's glows are bigger), and staying put
       const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&

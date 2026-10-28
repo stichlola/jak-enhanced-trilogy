@@ -1032,6 +1032,25 @@ vec4 cloud_fetch(vec2 uv) {
   return wsum > 1e-4 ? sum / wsum : vec4(0.0, 0.0, 0.0, -1.0);
 }
 
+// the game's own sky around a point, broadly: its average over a wide ring of sky pixels (its
+// painted cloud cards drift through it: read pixel by pixel they printed their cut-out shapes into
+// our clouds' color); our sky where none of the ring is sky
+vec3 game_sky_around(vec2 uv, vec3 fallback, vec2 radius) {
+  vec3 sum = vec3(0.0);
+  float n = 0.0;
+  for (int k = 0; k < 12; k++) {
+    float a = float(k) * 2.39996;
+    float r = k < 6 ? 0.45 : 1.0;
+    vec2 q = clamp(uv + r * radius * vec2(cos(a), sin(a) * (texel.x / texel.y)), vec2(0.002), vec2(0.998));
+    float zz = view_z(texture(tex_T3, q).r);
+    if (zz == 0.0 || zz > 2800.0 * 4096.0) {
+      sum += texture(tex_T0, q).rgb;
+      n += 1.0;
+    }
+  }
+  return n > 0.0 ? sum / n : fallback;
+}
+
 // the cloud pass: one pixel here covers 2x2 of the screen. Marched only where the sky shows in
 // one of them, then blended into last frame's clouds, found where this direction was then (the
 // clouds are far enough to ignore the camera's move): the march's noise averages out over frames.
@@ -1050,10 +1069,10 @@ vec4 cloud_march() {
   }
   // the sky behind them as the composite makes it (by night the game's own, read from the scene)
   vec3 s = sky_color(ray);
-  vec3 cs = mix(texture(tex_T0, uv).rgb, s, clouds.x * (1.0 - clouds.w));
   // (at dawn and dusk too: the game's dim sky, not ours, or the clouds come out darker than it)
   float dim = max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(s)));
-  vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(s, mix(texture(tex_T0, uv).rgb, s, 0.25), dim));
+  vec3 gs = dim > 0.0 ? game_sky_around(uv, s, vec2(0.22)) : s;
+  vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(s, mix(gs, s, 0.25), dim));
   if (cloud_info.y > 0.0) {
     vec3 pp = to_prev * ray;
     vec2 prev_uv = 0.5 * motion.xy * pp.xy / pp.z + 0.5;
@@ -1481,6 +1500,33 @@ vec3 fxaa_at(vec2 uv) {
   vec3 b = a * 0.5 + 0.25 * (texture(tex_T0, uv - dir * 0.5).rgb + texture(tex_T0, uv + dir * 0.5).rgb);
   float lb = luma(b);
   return (lb < lmin || lb > lmax) ? a : b;
+}
+
+// the occlusion and the characters' sun shadows, made at half the resolution a side: of the four
+// texels around, those at this pixel's depth (plain bilinear blurred them across the edges of
+// grass blades and pebbles, and the TAA's jitter moved those edges each frame: they flickered)
+float ao_upsample(vec2 uv, float zc) {
+  vec2 size = vec2(textureSize(tex_T2, 0));
+  vec2 g = uv * size - 0.5;
+  ivec2 i0 = ivec2(floor(g));
+  vec2 f = g - vec2(i0);
+  if (zc <= 0.0) {
+    return texture(tex_T2, uv).r;
+  }
+  float sum = 0.0;
+  float wsum = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k & 1, k >> 1);
+    ivec2 ic = clamp(i0 + o, ivec2(0), ivec2(size) - 1);
+    vec2 tuv = (vec2(ic) + 0.5) / size;
+    float zs = view_z(texture(tex_T3, tuv).r);
+    float bw = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+    float dz = abs(zs - zc) / (zc * 0.02 + 0.05 * 4096.0);
+    float w = (bw + 1e-3) / (1.0 + dz * dz * 16.0);
+    sum += texelFetch(tex_T2, ic, 0).r * w;
+    wsum += w;
+  }
+  return sum / wsum;
 }
 
 void main() {
@@ -1973,7 +2019,7 @@ void main() {
   }
 
   // ambient occlusion and sun shadows
-  float ao = wsurf > 0.0 ? 1.0 : texture(tex_T2, tex_coord).r;
+  float ao = wsurf > 0.0 ? 1.0 : ao_upsample(tex_coord, z);
   if (ao_debug != 0) {
     // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
     float lm = z > 0.0 ? log(z / 4096.0) / log(10.0) / 4.0 : -1.0;
@@ -2420,18 +2466,23 @@ void main() {
 
   // the sky: ours by day over the game's (its painted clouds go), the game's at night; the lightning
   // bolt behind the clouds; the cloud volume over both; greyer under rain
-  // (the game's painted cloud cards kilometers out above the horizon count as sky by day: ours
-  // replaces them)
+  // (the game's painted cloud cards kilometers out above the horizon count as sky: ours replaces
+  // them by day, by night they're smoothed into the game's sky)
   float bolt_light = 0.0;
   float sky_k = z == 0.0 ? 1.0
                          : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
-                               smoothstep(0.04, 0.09, world_dir(ray).y) * (1.0 - clouds.w) *
-                               step(0.0, clouds.x - 0.001);
+                               smoothstep(0.04, 0.09, world_dir(ray).y) * step(0.0, clouds.x - 0.001);
   if (sky_k > 0.0 && wsurf == 0.0) {
     vec3 c0 = c;
     if (clouds.x > 0.0) {
       vec3 sky = sky_color(ray);
       c = mix(c, sky, clouds.x * (1.0 - clouds.w));
+      // the game's own sky by night, dawn and dusk: its painted cloud cards (far geometry, here as
+      // sky at any hour) smoothed away: sharp dark cut-outs drifting across it; its colors and its
+      // gradient kept, ours are the clouds
+      if (clouds.w > 0.0) {
+        c = mix(c, game_sky_around(uv, c, vec2(0.3, 0.035)), clouds.x * clouds.w);
+      }
       vec4 cl = cloud_info.x > 0.0 ? cloud_fetch(uv) : vec4(0.0, 0.0, 0.0, -1.0);
       if (cl.a < 0.0) {
         cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
@@ -2497,8 +2548,12 @@ void main() {
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
     // fade into it, their tops stand out (height over the camera's, m)
     float rel = z > 0.0 ? world_dir(p).y / 4096.0 : 0.0;
-    amount += (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.45;
     c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75, 0.0, 1.0));
+    // (the dust in a pale sand color: in the haze's own, under an afternoon sun, it laid a band of
+    // bright orange over the middle distance)
+    float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.3;
+    vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
+    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75, 0.0, 1.0));
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -3152,7 +3207,10 @@ void main() {
       // fainter there, the ones running toward the camera kept
       vec2 look = normalize(world_dir(p).xz + 1e-4);
       float side = abs(dot(look, across));
-      shade *= 1.0 - 0.7 * side * side * smoothstep(40.0, 200.0, length(p) / 4096.0);
+      float rdist = length(p) / 4096.0;
+      shade *= 1.0 - 0.7 * side * side * smoothstep(40.0, 200.0, rdist);
+      // and all of them softer far off: the big waves there drew thick dark lines over the dunes
+      shade *= 1.0 - 0.65 * smoothstep(50.0, 220.0, rdist);
       float fine = 1.0 - smoothstep(0.006, 0.015, foot);
       float grain = fine > 0.0 ? gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4 : 0.0;  // (near only)
       c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
@@ -3177,13 +3235,14 @@ void main() {
   // to sand, instead of paper
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
     float ls = luma(c);
-    if (ls > 0.58) {
-      float to = 0.58 + (ls - 0.58) * 0.45 / (1.0 + (ls - 0.58) * 1.5);
+    if (ls > 0.45) {
+      // (at most ~0.62: the noon sand a warm mid tone, the ripples' shading kept in it)
+      float to = 0.45 + (ls - 0.45) * 0.42 / (1.0 + (ls - 0.45) * 2.4);
       vec3 tone = c * (to / ls);
       tone = max(mix(vec3(to), tone, 1.35), 0.0);  // (some of the saturation back)
-      float k = smoothstep(0.58, 0.8, ls);         // (the whiter, the more toward sand)
+      float k = smoothstep(0.5, 0.8, ls);          // (the whiter, the more toward sand)
       tone = mix(tone, to * vec3(1.2, 0.98, 0.7), 0.7 * k);
-      c = mix(c, tone, sun_haze);
+      c = mix(c, tone, min(sun_haze * 1.25, 1.0));
     }
   }
 
