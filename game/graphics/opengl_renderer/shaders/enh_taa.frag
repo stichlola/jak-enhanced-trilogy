@@ -108,6 +108,11 @@ void main() {
   // keep less history when the pixel moves fast (it was resampled more, it blurs)
   float speed = length((uv - prev_uv) / texel);
   float weight = mix(keep.x, keep.y, clamp(speed / 12.0, 0.0, 1.0));
-  vec3 c = mix(to_ycocg(cur), hist, weight);
+  // weighted by 1 / (1 + brightness) (Karis): a bright speck the jitter lands on in one frame of
+  // several doesn't flash in and out (the shimmer of thin, far detail)
+  vec3 cy = to_ycocg(cur);
+  float wc = (1.0 - weight) / (1.0 + max(cy.x, 0.0));
+  float wh = weight / (1.0 + max(hist.x, 0.0));
+  vec3 c = (cy * wc + hist * wh) / max(wc + wh, 1e-5);
   color = vec4(from_ycocg(c), 1.0);
 }
