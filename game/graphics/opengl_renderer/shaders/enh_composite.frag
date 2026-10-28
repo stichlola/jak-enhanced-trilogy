@@ -924,17 +924,19 @@ vec3 sky_color(vec3 dv) {
     col = mix(col, above, low);
     col = mix(col, warm * (0.8 + 0.5 * sky_kind.w), band * low * (0.35 + 0.55 * sky_kind.w) * (1.0 - over * 0.6));
   }
-  // the desert's late afternoon: a pale lilac sky over a cream glow that floods the horizon on the
-  // sun's side
+  // the desert's late afternoon: a pale lilac sky over a dusky amber horizon, and a strong glow
+  // low under the sun (full from half the area's golden look: a softer ground keeps the sky)
   if (golden > 0.0) {
-    vec3 lilac = mix(vec3(0.9, 0.74, 0.62), vec3(0.72, 0.68, 0.8), smoothstep(0.02, 0.3, up));
-    col = mix(col, lilac, golden * 0.75 * (1.0 - over));
+    float gs = min(golden * 2.0, 1.0);
+    vec3 lilac = mix(vec3(0.76, 0.5, 0.3), vec3(0.66, 0.6, 0.7), smoothstep(0.03, 0.35, up));
+    col = mix(col, lilac, gs * 0.8 * (1.0 - over));
+    col *= 1.0 - 0.15 * gs * (1.0 - over);
     // (the glow low on the horizon under the sun, wherever it stands: the light across the valley)
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = max(dot(normalize(wd.xz + 1e-4), sh), 0.0);
-    float glow = pow(az, 4.0) * exp(-up * 7.0) + 0.4 * pow(az, 16.0) * exp(-up * 3.0);
-    col += vec3(1.0, 0.68, 0.46) * glow * golden * 0.5 * (1.0 - over * 0.7);
-    col += sc * pow(sd, 16.0) * 0.3 * golden * (1.0 - over * 0.7);
+    float glow = 0.9 * pow(az, 6.0) * exp(-up * 6.0) + 0.6 * pow(az, 24.0) * exp(-up * 2.5);
+    col += vec3(1.0, 0.6, 0.3) * glow * gs * 0.4 * (1.0 - over * 0.7);
+    col += sc * pow(sd, 16.0) * 0.3 * gs * (1.0 - over * 0.7);
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
@@ -3305,6 +3307,19 @@ void main() {
       c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
     }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
+    // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
+    if (tag > 0.7 && tag < 0.8) {
+      float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
+      float lit = smoothstep(-0.05, 0.35, dot(surf_n, sun_dir.xyz));
+      vec3 lg3 = vec3(luma(c));
+      vec3 sunny = max(mix(lg3, c, 1.35), 0.0) * vec3(1.1, 0.95, 0.78);
+      vec3 shade = c * vec3(0.84, 0.76, 0.7);
+      c = mix(c, mix(shade, sunny, lit), golden * far);
+      // (and, looking toward the sun, the warm haze between: backlit mountains glow amber)
+      vec2 shz = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+      float toward = max(dot(normalize(world_dir(ray).xz + 1e-4), shz), 0.0);
+      c += vec3(0.24, 0.12, 0.035) * pow(toward, 5.0) * golden * far;
+    }
     c *= 1.0 - 0.4 * golden * (1.0 - smoothstep(0.2, 0.55, lg));
   }
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
