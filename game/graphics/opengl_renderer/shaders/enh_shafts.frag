@@ -12,7 +12,7 @@ uniform float fade;  // 0..1 as the sun leaves the screen
 in vec2 tex_coord;
 out vec4 color;
 
-const int STEPS = 40;
+const int STEPS = 64;  // (fewer shimmered as the sky's bright edges moved)
 
 void main() {
   vec2 delta = (sun_uv - tex_coord) / float(STEPS);
@@ -24,9 +24,10 @@ void main() {
     if (uv.x >= 0.0 && uv.y >= 0.0 && uv.x <= 1.0 && uv.y <= 1.0 && texture(tex_T1, uv).r <= 1e-7) {
       vec3 s = texture(tex_T0, uv).rgb;
       float lum = max(s.r, max(s.g, s.b));
-      sum += s * max(lum - threshold, 0.0) / max(1.0 - threshold, 1e-3) * decay;
+      // (eased in over the threshold: a pixel crossing it doesn't pop)
+      sum += s * smoothstep(threshold, 1.0, lum) * decay;
     }
-    decay *= 0.96;
+    decay *= 0.975;
     uv += delta;
   }
   // weaker far from the sun
