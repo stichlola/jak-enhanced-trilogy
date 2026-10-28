@@ -4635,6 +4635,7 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
 }
 
 Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w, int h) {
+  render_state->shaders.hot_reload();
   auto& shader = render_state->shaders[ShaderId::ENH_COMPOSITE];
   shader.activate();
   glActiveTexture(GL_TEXTURE1);

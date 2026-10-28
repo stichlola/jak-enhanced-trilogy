@@ -3138,14 +3138,19 @@ void main() {
       // (the small one near, the big one out to ~150 m); farther the rock keeps only a soft, broad
       // light and dark (macro variation), so big faces far away don't show a repeated pattern that
       // fights their own texture)
-      const vec4 size[2] = vec4[](vec4(1.6, 0.5, 15.0, 45.0), vec4(7.0, 0.85, 60.0, 160.0));  // (tile m, strength, fade from, to)
+      // (and in the late afternoon a third, mountain-sized: the low sun rakes the far faces, their
+      // cracks and blocks show out to the mountains)
+      const vec4 size[3] = vec4[](vec4(1.6, 0.5, 15.0, 45.0), vec4(7.0, 0.85, 60.0, 160.0), vec4(60.0, 0.8, 900.0, 1600.0));  // (tile m, strength, fade from, to)
       // (the picture: cracked blocky rock; its blocks shift a little from place to place, and it
       // comes and goes: strong in some places, fainter in others)
       float wander = gnoise(wp.xz / 9.0 + vec2(0.0, wp.y / 25.0) + 1.3) * 0.8;
       float bands = 0.5 + 0.5 * smoothstep(-0.35, 0.35, gnoise(vec2(wp.x + wp.z, wp.y) / 30.0 + 5.3));
-      for (int k = 0; k < 2; k++) {
+      for (int k = 0; k < 3; k++) {
         float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
         float near = 1.0 - smoothstep(size[k].z, size[k].w, dist);
+        if (k == 2) {
+          near *= golden * smoothstep(60.0, 160.0, dist);
+        }
         if (lod > 9.0 || near <= 0.0) {
           continue;  // (one texel over the pixel, or past its reach: nothing to add)
         }
@@ -3285,6 +3290,15 @@ void main() {
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     float rock_expo = mix(1.0, 1.12, smoothstep(15.0, 60.0, length(p) / 4096.0));
     float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
+    // (the grey rock slabs in the sand: warm sandstone in this light, not ash)
+    if (tag > 0.7 && tag < 0.8) {
+      float mxr = max(c.r, max(c.g, c.b));
+      float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
+      float grey = (1.0 - smoothstep(0.3, 0.6, satr)) * (1.0 - smoothstep(40.0, 120.0, length(p) / 4096.0));
+      // (and lit: the game bakes them near black; the low sun catches their tops)
+      float lift = mix(1.55, 1.2, smoothstep(20.0, 80.0, length(p) / 4096.0));
+      c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
+    }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
     c *= 1.0 - 0.4 * golden * (1.0 - smoothstep(0.2, 0.55, lg));
   }

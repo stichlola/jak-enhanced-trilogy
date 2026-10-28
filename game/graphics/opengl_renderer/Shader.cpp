@@ -1,5 +1,7 @@
 #include "Shader.h"
 
+#include <filesystem>
+
 #include "common/log/log.h"
 #include "common/util/Assert.h"
 #include "common/util/FileUtil.h"
@@ -178,7 +180,7 @@ void Shader::activate() const {
   glUseProgram(m_program);
 }
 
-ShaderLibrary::ShaderLibrary(GameVersion version) {
+ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::SOLID_COLOR) = {"solid_color", version};
   at(ShaderId::DIRECT_BASIC) = {"direct_basic", version};
   at(ShaderId::DIRECT_BASIC_TEXTURED) = {"direct_basic_textured", version};
@@ -241,6 +243,45 @@ ShaderLibrary::ShaderLibrary(GameVersion version) {
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");
+  }
+}
+
+void ShaderLibrary::hot_reload() {
+  static const bool on = std::getenv("JAK_ENHANCED_SHADER_RELOAD") != nullptr;
+  static int frames = 0;
+  static std::filesystem::file_time_type last[(int)ShaderId::MAX_SHADERS]{};
+  if (!on || ++frames < 60) {
+    return;
+  }
+  frames = 0;
+  for (auto& shader : m_shaders) {
+    const auto& name = shader.name();
+    if (name.rfind("enh_", 0) != 0) {
+      continue;
+    }
+    std::error_code ec;
+    auto t = std::filesystem::last_write_time(
+        file_util::get_file_path({Shader::shader_folder, name + ".frag"}), ec);
+    const auto tv = std::filesystem::last_write_time(
+        file_util::get_file_path({Shader::shader_folder, name + ".vert"}), ec);
+    t = std::max(t, tv);
+    auto& seen = last[&shader - m_shaders];
+    if (seen == std::filesystem::file_time_type{}) {
+      seen = t;
+      continue;
+    }
+    if (t == seen) {
+      continue;
+    }
+    seen = t;
+    Shader fresh(name, m_version);
+    if (fresh.okay()) {
+      glDeleteProgram(shader.id());
+      shader = fresh;
+      lg::info("[enhanced] shader {} reloaded", name);
+    } else {
+      lg::error("[enhanced] shader {} failed, keeping the old one", name);
+    }
   }
 }
 

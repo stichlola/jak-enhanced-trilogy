@@ -12,6 +12,7 @@ class Shader {
   Shader() = default;
   void activate() const;
   bool okay() const { return m_is_okay; }
+  const std::string& name() const { return m_name; }
   u64 id() const { return m_program; }
   // Enhanced TAA: NDC offset added to gl_Position (only for the 3D world's shaders)
   void set_jitter(float x, float y) const;
@@ -96,7 +97,11 @@ class ShaderLibrary {
   Shader& operator[](ShaderId id) { return m_shaders[(int)id]; }
   Shader& at(ShaderId id) { return m_shaders[(int)id]; }
   void set_jitter(float x, float y);
+  // Enhanced: test switch JAK_ENHANCED_SHADER_RELOAD=1 compiles the enh_* shaders again when
+  // their files are saved (checked once a second; a shader that fails keeps the old one)
+  void hot_reload();
 
  private:
   Shader m_shaders[(int)ShaderId::MAX_SHADERS];
+  GameVersion m_version;
 };
