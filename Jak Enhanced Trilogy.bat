@@ -131,6 +131,9 @@ if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\
   if not "!BUILT!"=="!VER!" (
     echo.
     echo Updating Jak %%G to !VER!: compiling the game again ^(a minute or two, only this once^).
+    rem the game's text too: it is rebuilt only when its own files change, not when the text
+    rem encoder does ^(the buttons drawn in the messages^)
+    del /q "%PROJ%\out\jak%%G\iso\*COMMON.TXT" 2>nul
     "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -c "!JAK%%G_ISO!" || goto :failed
     echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
   )

@@ -912,10 +912,96 @@ float halton(u32 i, u32 base) {
 }
 }  // namespace
 
+// Reads the GPU time of the frame drawn four frames ago (no waiting: the result is long ready),
+// smooths it, and moves the auto quality level: one more pass set aside after 1.5 s over the
+// 60 fps budget, one back after 6 s with room for it. Then starts timing this frame.
+void EnhancedPost::update_auto_quality() {
+  if (!m_gpu_query[0][0]) {
+    glGenQueries(12, &m_gpu_query[0][0]);
+  }
+  const int slot = m_gpu_query_slot;
+  if (m_gpu_query_used[slot]) {
+    GLint ready = 0;
+    glGetQueryObjectiv(m_gpu_query[slot][2], GL_QUERY_RESULT_AVAILABLE, &ready);
+    if (ready) {
+      GLuint64 t0 = 0, t1 = 0;
+      glGetQueryObjectui64v(m_gpu_query[slot][0], GL_QUERY_RESULT, &t0);
+      glGetQueryObjectui64v(m_gpu_query[slot][1], GL_QUERY_RESULT, &t1);
+      GLuint64 t2 = 0;
+      glGetQueryObjectui64v(m_gpu_query[slot][2], GL_QUERY_RESULT, &t2);
+      const float post = (float)(t2 - t1) / 1e6f;
+      if (post > 0.f && post < 200.f) {
+        m_gpu_post_ms = m_gpu_post_ms <= 0.f ? post : m_gpu_post_ms * 0.95f + post * 0.05f;
+      }
+      const float ms = (float)(t2 - t0) / 1e6f;
+      if (ms > 0.f && ms < 200.f) {
+        m_gpu_ms = m_gpu_ms <= 0.f ? ms : m_gpu_ms * 0.95f + ms * 0.05f;
+      }
+    }
+    m_gpu_query_used[slot] = false;
+  }
+  const double now =
+      std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  // (with vsync the GPU waits for the screen inside the frame when it has time to spare: the
+  // frame's GPU time is only true when it can't keep up. The post pass has no waits in it.)
+  if (m_last_frame > 0.0) {
+    const float dt = (float)(now - m_last_frame) * 1000.f;
+    if (dt > 0.f && dt < 200.f) {
+      m_frame_ms = m_frame_ms * 0.95f + dt * 0.05f;
+    }
+  }
+  m_last_frame = now;
+  // slow: under ~58 fps for 3 s in a row, but not under 40 (a level loading: the CPU, not the
+  // graphics card, and the GPU's clock then counts the waits for it)
+  const bool under = m_frame_ms > 17.2f && m_frame_ms < 25.f;
+  if (!under) {
+    m_slow_since = -1.0;
+  } else if (m_slow_since < 0.0) {
+    m_slow_since = now;
+  }
+  if (m_frame_ms <= 17.2f && m_fast_since <= 0.0) {
+    m_fast_since = now;
+  } else if (m_frame_ms > 17.2f) {
+    m_fast_since = 0.0;
+  }
+  const bool slow = m_slow_since >= 0.0 && now - m_slow_since > 3.0;
+  if (slow && m_gpu_ms > 0.f) {
+    m_gpu_other_ms = std::max(0.f, m_gpu_ms - m_gpu_post_ms);
+  }
+  if (m_level_cost_pending && now - m_auto_changed > 1.5) {
+    // what the level just entered saved
+    m_level_cost[m_auto_level] = std::max(0.3f, m_level_post[m_auto_level] - m_gpu_post_ms);
+    m_level_cost_pending = false;
+  }
+  if (!m_settings.auto_quality) {
+    m_auto_level = 0;
+  } else if (slow && m_gpu_ms > 16.0f && m_auto_level < 3 && now - m_auto_changed > 1.5) {
+    // the graphics card is what holds the frame back: one more pass aside
+    m_auto_level++;
+    m_level_post[m_auto_level] = m_gpu_post_ms;
+    m_level_cost_pending = true;
+    m_auto_changed = now;
+    lg::info("[enhanced] auto quality: {:.1f} fps, GPU {:.1f} ms a frame, level {}",
+             1000.f / m_frame_ms, m_gpu_ms, m_auto_level);
+  } else if (m_auto_level > 0 && !m_level_cost_pending && now - m_auto_changed > 6.0 &&
+             (m_gpu_other_ms + m_gpu_post_ms + m_level_cost[m_auto_level] < 15.3f ||
+              (m_fast_since > 0.0 && now - m_fast_since > 60.0 && now - m_auto_changed > 60.0))) {
+    // the frame would still fit with that pass back (or a minute at 60 fps: worth a try, the
+    // estimate may come from a heavier place)
+    m_auto_level--;
+    m_auto_changed = now;
+    lg::info("[enhanced] auto quality: room for {:.1f} ms more, level {}",
+             m_level_cost[m_auto_level + 1], m_auto_level);
+  }
+  glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
+  m_gpu_query_open = true;
+}
+
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
+  update_auto_quality();
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
@@ -1040,6 +1126,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   GLuint screen_vao,
                                   SharedRenderState* render_state,
                                   ScopedProfilerNode& prof) {
+  if (m_gpu_query_open) {
+    glQueryCounter(m_gpu_query[m_gpu_query_slot][1], GL_TIMESTAMP);
+  }
   if (!m_settings.enabled) {
     g_enhanced_camera.valid = false;
     // the ambient sounds go quiet with the rest of Enhanced
@@ -2284,6 +2373,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
+
+  // the end of this frame's 3D and post work, for the auto quality
+  if (m_gpu_query_open) {
+    glQueryCounter(m_gpu_query[m_gpu_query_slot][2], GL_TIMESTAMP);
+    m_gpu_query_used[m_gpu_query_slot] = true;
+    m_gpu_query_slot = (m_gpu_query_slot + 1) % 4;
+    m_gpu_query_open = false;
+  }
 
   // leave the state the way the bucket renderers expect it
   glBindVertexArray(0);
@@ -3671,13 +3768,14 @@ void EnhancedPost::prepare(GLuint scene_tex,
   ENH_TIMED("enh-rt-update", update_rt(render_state));
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
-    if (m_settings.volume && m_ssao_ready && m_fog > 0.01f) {
+    // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
+    if (m_settings.volume && m_auto_level < 1 && m_ssao_ready && m_fog > 0.01f) {
       ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
-    if (m_settings.gi && m_ssao_ready) {
+    if (m_settings.gi && m_auto_level < 2 && m_ssao_ready) {
       ENH_TIMED("enh-gi", do_gi(scene_tex, screen_vao, render_state, prof));
     }
-    if (m_settings.shafts && m_ssao_ready && g_enhanced_sun.valid) {
+    if (m_settings.shafts && m_auto_level < 3 && m_ssao_ready && g_enhanced_sun.valid) {
       ENH_TIMED("enh-shafts", do_shafts(scene_tex, screen_vao, render_state, prof));
     }
   }
@@ -4072,7 +4170,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T13"), 13);
   // the map's depth spans 2 x 300 m (do_shadow_map), its side 2 x range
   glUniform4f(glGetUniformLocation(id, "shadow_params"), 600.f, 2.f * m_settings.shadow_range,
-              m_settings.shadow_softness, m_settings.soft_shadows ? 1.f : 0.f);
+              m_settings.shadow_softness,
+              m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);
   {
     // the sun for the clouds, day or night (view space), and how high it stands (the camera's up:
     // last frame's, near enough)
@@ -4517,6 +4616,17 @@ void EnhancedPost::draw_menu() {
     check("Grass bends away", &g_enhanced_wind.push);
     check("Color grade per area", &s.area_grading);
     check("Soft shadows", &s.soft_shadows);
+    check("Auto quality (keeps 60 fps)", &s.auto_quality);
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(
+          "Where the graphics card can't keep 60 fps (Haven at night...), the mist volume, the\n"
+          "indirect light, the god rays and the soft shadows are set aside one at a time, and come\n"
+          "back when there is room again. Now: %s",
+          m_auto_level == 0 ? "everything on"
+          : m_auto_level == 1 ? "mist volume off"
+          : m_auto_level == 2 ? "mist volume and indirect light off"
+                              : "mist volume, indirect light, god rays and soft shadows off");
+    }
     check("Clouds", &s.clouds);
     check("Cutscene depth of field", &s.cine_dof);
     bool sparks = s.blast_sparks > 0.f;
@@ -4772,6 +4882,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["water_caustics"] = s.water_caustics;
   j["area_grading"] = s.area_grading;
   j["soft_shadows"] = s.soft_shadows;
+  j["auto_quality"] = s.auto_quality;
   j["clouds"] = s.clouds;
   j["cine_dof"] = s.cine_dof;
   j["blast_sparks"] = s.blast_sparks;
@@ -4848,6 +4959,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("water_caustics", s.water_caustics);
   get("area_grading", s.area_grading);
   get("soft_shadows", s.soft_shadows);
+  get("auto_quality", s.auto_quality);
   get("clouds", s.clouds);
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);

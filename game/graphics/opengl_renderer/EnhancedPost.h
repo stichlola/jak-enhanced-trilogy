@@ -196,6 +196,9 @@ class EnhancedPost {
     float sharpen = 0.25f;
     bool area_grading = true;      // a color grade per area (Haven, desert, forest...), day and night
     bool soft_shadows = true;      // sun shadows sharp at the contact, softer further from the caster
+    // the costliest passes (mist volume, indirect light, god rays, soft shadows) set aside while the
+    // graphics card can't keep 60 fps, back when there is room again
+    bool auto_quality = true;
     float shadow_softness = 0.02f;  // penumbra per meter between caster and receiver
     bool clouds = true;            // a drifting cloud layer in the sky, lit by the sun
     float cloud_amount = 1.0f;
@@ -582,4 +585,31 @@ class EnhancedPost {
   bool m_taa_history = false;
   bool m_jittered = false;
   u32 m_frame = 0;
+
+  // auto quality: the GPU time of each frame (timestamps at begin_frame and the end of the post
+  // pass, read back a few frames later), smoothed; the level is how many passes are set aside
+  void update_auto_quality();
+
+ public:
+  float gpu_ms() const { return m_gpu_ms; }
+  float gpu_post_ms() const { return m_gpu_post_ms; }
+  int auto_level() const { return m_auto_level; }
+
+ private:
+  GLuint m_gpu_query[4][3] = {};  // frame start, post start, post end
+  bool m_gpu_query_used[4] = {};
+  int m_gpu_query_slot = 0;
+  bool m_gpu_query_open = false;
+  float m_gpu_ms = 0.f;
+  float m_gpu_post_ms = 0.f;
+  float m_gpu_other_ms = 0.f;  // the frame's GPU time outside the post pass, when it was measurable
+  float m_frame_ms = 16.7f;    // the real frame time (the CPU's clock), smoothed
+  double m_last_frame = 0.0;
+  double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)
+  double m_fast_since = 0.0;
+  int m_auto_level = 0;
+  double m_auto_changed = 0.0;
+  float m_level_post[4] = {};  // the post pass's time when a level was entered, then what it saved
+  float m_level_cost[4] = {};
+  bool m_level_cost_pending = false;
 };

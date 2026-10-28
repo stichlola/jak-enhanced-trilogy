@@ -1840,11 +1840,14 @@ void main() {
     color = tex_coord.x > 0.5 ? (z > 0.0 ? vec4(vec3(lm), 1.0) : vec4(0.0, 0.0, 1.0, 1.0)) : vec4(vec3(ao), 1.0);
     return;
   }
+  // the surface normal, once: the shadows, the wet ground, the prints, the lights and the
+  // reflections all use it
+  vec3 surf_n = z > 0.0 ? surface_normal(tex_coord, p) : vec3(0.0, 0.0, -1.0);
   if (normal_debug != 0 && z > 0.0) {
     // the level's own normals in color, the depth-rebuilt ones in grey
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
     // depth-rebuilt ones in color, to compare
-    vec3 nn = surface_normal(tex_coord, p);
+    vec3 nn = surf_n;
     bool own = texture(tex_T11, tex_coord).a > 0.17;
     if (tex_coord.x > 0.5) {
       vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
@@ -1865,7 +1868,7 @@ void main() {
   float wet_flat = 0.0;  // level ground, where puddles stay after the rest has dried
   vec3 wet_n = vec3(0.0);
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0 && z < 150.0 * 4096.0) {
-    wet_n = surface_normal(tex_coord, p);
+    wet_n = surf_n;
     wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view)) *
                (1.0 - smoothstep(100.0 * 4096.0, 150.0 * 4096.0, z));
     wet = weather.w * wet_flat;
@@ -1878,7 +1881,7 @@ void main() {
   if (print_count > 0 && z > 0.0 && z < 40.0 * 4096.0 && wsurf == 0.0) {
     float sandy = (1.0 - smoothstep(1.05, 1.2, c.g / max(c.r, 0.01))) *
                   smoothstep(0.08, 0.2, dot(c, vec3(0.333)));
-    vec3 nn = surface_normal(tex_coord, p);
+    vec3 nn = surf_n;
     float level_ground = smoothstep(0.75, 0.9, dot(nn, up_view));
     if (sandy * level_ground > 0.0) {
       vec3 w = view_to_world * p + cam_pos;
@@ -1921,7 +1924,7 @@ void main() {
   // sun shadow map: surfaces facing the sun but blocked from it lose some light (the game's light is
   // baked per vertex and knows nothing of what stands between them and the sun)
   if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
-    vec3 nn = surface_normal(tex_coord, p);
+    vec3 nn = surf_n;
     float ndl = dot(nn, sun_dir.xyz);
     if (ndl > 0.0) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
@@ -2000,7 +2003,7 @@ void main() {
   // dynamic lights: each glow lights the surfaces around it that face it, tinted by the surface's
   // own color (the scene's color stands in for its albedo), with a smooth falloff to its radius
   if ((light_count > 0 || spot_count > 0) && z > 0.0 && wsurf == 0.0) {
-    vec3 nn = surface_normal(tex_coord, p);
+    vec3 nn = surf_n;
     vec3 added = vec3(0.0);
     // per-pixel jitter of the shadow steps (the TAA averages it)
     float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
@@ -2082,7 +2085,7 @@ void main() {
     float ga = texture(tex_T11, tex_coord).a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
     if (mat != 0) {
-      vec3 nn = surface_normal(tex_coord, p);
+      vec3 nn = surf_n;
       vec3 vdir = normalize(p);
       vec3 r = reflect(vdir, nn);
       float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
@@ -2208,7 +2211,7 @@ void main() {
     vec3 pu = view_pos(tex_coord + ty, du), pd = view_pos(tex_coord - ty, dd);
     float span = 0.004 * z + 0.05 * 4096.0;
     if (abs(pr.z - pl.z) < span && abs(pu.z - pd.z) < span) {
-      vec3 nn = surface_normal(tex_coord, p);
+      vec3 nn = surf_n;
       float gx = luma(texture(tex_T0, tex_coord + tx).rgb) - luma(texture(tex_T0, tex_coord - tx).rgb);
       float gy = luma(texture(tex_T0, tex_coord + ty).rgb) - luma(texture(tex_T0, tex_coord - ty).rgb);
       vec3 t = normalize(pr - pl), b = normalize(pu - pd);
@@ -2223,7 +2226,7 @@ void main() {
   // sun relight: the game's light is baked per vertex; shade each pixel a little more by how it
   // faces the sun, with normals rebuilt from the depth buffer (the levels have none)
   if (relight > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
-    vec3 nn = surface_normal(tex_coord, p);
+    vec3 nn = surf_n;
     float ndl = dot(nn, sun_dir.xyz);
     float k = relight * (1.0 - smoothstep(150.0 * 4096.0, 300.0 * 4096.0, z));
     c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;
