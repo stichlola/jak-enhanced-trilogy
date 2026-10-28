@@ -3088,13 +3088,20 @@ void main() {
         if (vis > 0.0) {
           float sc = 0.24 / wl;
           vec2 o = vec2(5.1, 3.3) * float(k);
-          float wk = gnoise(xz * 0.35 * sc + o) * 2.2 + gnoise(xz * 1.3 * sc + o.yx) * 0.6;
+          // wiggles, and a slow bend of many waves over tens of meters: the wind's direction drifts,
+          // the crests turn with it (a rotation would slip by the distance from the world's origin)
+          float wk = gnoise(xz * 0.35 * sc + o) * 2.2 + gnoise(xz * 1.3 * sc + o.yx) * 0.6 +
+                     gnoise(xz * 0.03 * sc + o * 0.3) * 9.0;
           float phase = dot(xz, across) * 6.2832 / wl + wk * 6.2832;
           float crest = sin(phase) + 0.35 * sin(2.0 * phase);
           float slope = cos(phase) + 0.7 * cos(2.0 * phase);
+          // crests broken off here and there (noise long along them, short across): ends and gaps
+          // instead of endless parallel lines
+          vec2 cr = vec2(dot(xz, vec2(-across.y, across.x)) / (wl * 7.0), dot(xz, across) / (wl * 1.8));
+          float whole = 0.25 + 0.75 * smoothstep(-0.3, 0.3, gnoise(cr + o * 1.7));
           // (the smallest fully up close, the next ones mixed under it a little)
           float wgt = vis * (k == 0 ? 1.0 : 0.35);
-          shade += wgt * (0.08 * slope * facing + 0.025 * crest);
+          shade += wgt * whole * (0.08 * slope * facing + 0.025 * crest);
           wsum += wgt;
         }
       }
