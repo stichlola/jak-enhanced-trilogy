@@ -216,6 +216,7 @@ class EnhancedPost {
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
     float cine_aperture = 1.0f;
     float blast_sparks = 1.0f;     // explosions throw sparks and leave hot air (0 = off)
+    float motes = 1.0f;            // out in the wild: fireflies at night, seeds and pollen by day (0 = off)
     float ambience = 0.7f;         // the ambient sounds' volume: rain, dripping, wind, crickets (0 = off)
   };
 
@@ -413,6 +414,16 @@ class EnhancedPost {
     double time;
   };
   std::vector<Puff> m_puffs;
+  // fireflies at night, seeds and pollen drifting by day, around Jak out in the wild (world, game
+  // units; vel in game units a second)
+  struct Mote {
+    float pos[3];
+    float vel[3];
+    float seed;
+  };
+  std::vector<Mote> m_motes;
+  float m_motes_on = 0.f;  // fades in and out with the place and the weather
+  double m_motes_time = -1.0;
   // a puff of what the ground is made of where Jak steps or lands (sand in the desert, snow while
   // it snows; nothing on wet ground: the puddles splash instead)
   void ground_puff(const float* pos, float size, float life, bool step);

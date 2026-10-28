@@ -818,6 +818,10 @@ EnhancedPost::EnhancedPost() {
   if (const char* sparks = std::getenv("JAK_ENHANCED_SPARKS")) {
     m_settings.blast_sparks = (float)std::atof(sparks);
   }
+  if (const char* motes = std::getenv("JAK_ENHANCED_MOTES")) {
+    // fireflies and pollen: 0 off, else their amount; "force" shows them anywhere (screenshots)
+    m_settings.motes = std::strcmp(motes, "force") == 0 ? 1.f : (float)std::atof(motes);
+  }
   // what's set now (saved choices plus test switches) counts as saved: the file is written only
   // when the player changes something in the menu, so a test run's switches don't stick
   m_saved_settings = menu_settings_json();
@@ -2196,6 +2200,91 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
       glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
+    }
+    // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
+    // city), dry and calm, a few dozen meters around Jak, each wandering on its own
+    {
+      constexpr int kMotes = 24;
+      const auto& pl = g_enhanced_player;
+      static const bool force = [] {
+        const char* m = std::getenv("JAK_ENHANCED_MOTES");
+        return m && std::strcmp(m, "force") == 0;
+      }();
+      const bool wild =
+          force || (!m_city && !m_pond && m_snow < 0.1f && m_rain < 0.1f && m_storm < 0.1f);
+      const float dt = m_motes_time < 0 ? 0.f : (float)std::min(0.1, m_time - m_motes_time);
+      m_motes_time = m_time;
+      const float target = wild && pl.valid && on && m_settings.motes > 0.f ? 1.f : 0.f;
+      m_motes_on += (target - m_motes_on) * std::min(1.f, dt * (force ? 5.f : 0.5f));
+      const bool night = m_night > 0.5f;
+      static std::mt19937 rng{std::random_device{}()};
+      std::uniform_real_distribution<float> u(0.f, 1.f);
+      auto spawn = [&](Mote& m) {
+        const float a = u(rng) * 6.2832f, r = (3.f + 19.f * std::sqrt(u(rng))) * kMeter;
+        m.pos[0] = pl.pos[0] + std::cos(a) * r;
+        m.pos[1] = pl.pos[1] + (0.3f + 2.2f * u(rng)) * kMeter;
+        m.pos[2] = pl.pos[2] + std::sin(a) * r;
+        m.vel[0] = m.vel[1] = m.vel[2] = 0.f;
+        m.seed = u(rng) * 100.f;
+      };
+      if (m_motes_on <= 0.01f || !pl.valid) {
+        m_motes.clear();
+      } else {
+        while ((int)m_motes.size() < kMotes) {
+          m_motes.emplace_back();
+          spawn(m_motes.back());
+        }
+        for (auto& m : m_motes) {
+          const float dx = m.pos[0] - pl.pos[0], dz = m.pos[2] - pl.pos[2];
+          if (dx * dx + dz * dz > 26.f * 26.f * kMeter * kMeter) {
+            spawn(m);  // left behind: one comes in somewhere else around Jak
+          }
+          // a wander: a slow random push, damped; fireflies hover, seeds drift with the breeze and
+          // sink slowly
+          for (int k = 0; k < 3; k++) {
+            m.vel[k] += (u(rng) - 0.5f) * (night ? 3.f : 1.5f) * kMeter * dt;
+            m.vel[k] *= 1.f - std::min(1.f, dt * 0.8f);
+          }
+          if (!night) {
+            m.vel[0] += 0.25f * kMeter * dt;
+            m.vel[2] += 0.12f * kMeter * dt;
+            m.vel[1] -= 0.05f * kMeter * dt;
+          }
+          // between half a meter and three over Jak's ground
+          const float above = (m.pos[1] - pl.pos[1]) / kMeter;
+          if (above < 0.4f) {
+            m.vel[1] += 1.f * kMeter * dt;
+          }
+          if (above > 3.f) {
+            m.vel[1] -= 1.f * kMeter * dt;
+          }
+          for (int k = 0; k < 3; k++) {
+            m.pos[k] += m.vel[k] * dt;
+          }
+        }
+      }
+      float mote[kMotes * 4] = {};
+      int mote_count = 0;
+      for (const auto& m : m_motes) {
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (m.pos[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        if (v[2] < 0.3f * kMeter) {
+          continue;
+        }
+        std::memcpy(mote + mote_count * 4, v, sizeof(v));
+        mote[mote_count * 4 + 3] = m.seed;
+        mote_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "mote_count"), cam.valid ? mote_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "mote"), kMotes, mote);
+      // kind (0 fireflies, 1 seeds and pollen), strength, time (s)
+      glUniform3f(glGetUniformLocation(id, "mote_style"), night ? 0.f : 1.f,
+                  m_motes_on * m_settings.motes * (night ? m_night : 1.f - m_night),
+                  (float)std::fmod(m_time, 1000.0));
     }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
     glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
@@ -4830,6 +4919,10 @@ void EnhancedPost::draw_menu() {
     if (check("Explosion sparks", &sparks)) {
       s.blast_sparks = sparks ? 1.f : 0.f;
     }
+    bool motes = s.motes > 0.f;
+    if (check("Fireflies and pollen", &motes)) {
+      s.motes = motes ? 1.f : 0.f;
+    }
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
     ImGui::SetNextItemWidth(200);
@@ -5103,6 +5196,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["clouds"] = s.clouds;
   j["cine_dof"] = s.cine_dof;
   j["blast_sparks"] = s.blast_sparks;
+  j["motes"] = s.motes;
   j["ambience"] = s.ambience;
   j["weather"] = s.weather;
   j["weather_mix"] = s.weather_mix;
@@ -5180,6 +5274,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("clouds", s.clouds);
   get("cine_dof", s.cine_dof);
   get("blast_sparks", s.blast_sparks);
+  get("motes", s.motes);
   get("ambience", s.ambience);
   get("weather", s.weather);
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
@@ -5285,6 +5380,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.area_grading = d.area_grading;
   s.clouds = d.clouds;
   s.blast_sparks = d.blast_sparks;
+  s.motes = d.motes;
   s.weather = d.weather;
   s.weather_mix = d.weather_mix;
   s.vivid = d.vivid;

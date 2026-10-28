@@ -44,6 +44,9 @@ uniform int fire_count;         // the nearest fires: view space, flame size (ga
 uniform vec4 fire_pos[4];
 uniform float fire_seed[4];
 uniform vec3 fire;              // hot air strength, embers strength, time (s)
+uniform int mote_count;         // fireflies or seeds drifting around Jak: view space (game units),
+uniform vec4 mote[24];          // w: seed
+uniform vec3 mote_style;        // kind (0 fireflies, 1 seeds and pollen), strength, time (s)
 uniform vec2 vol_texel;
 uniform float gi_strength;
 uniform int ao_debug;
@@ -2395,6 +2398,38 @@ void main() {
     // under rain the mist is grey, whatever the area's fog tint
     v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.82, 0.94, 1.15), weather.x * 0.6);
     c = c * v.a + v.rgb * (1.0 - 0.85 * night_dark.x);
+  }
+
+  // fireflies (a green-gold glow that swells and dies every few seconds) or seeds and pollen (pale
+  // specks catching the light), hidden behind the scene
+  for (int i = 0; i < mote_count; i++) {
+    vec3 mp = mote[i].xyz;
+    if (mote_style.y <= 0.0 || (z > 0.0 && mp.z > z)) {
+      continue;
+    }
+    vec2 muv = vec2(mp.x * proj.z / mp.z, mp.y * proj.w / mp.z) * 0.5 + 0.5;
+    vec2 dpx = (tex_coord - muv) / texel;
+    if (dot(dpx, dpx) > 1600.0) {
+      continue;
+    }
+    float seed = mote[i].w;
+    if (mote_style.x < 0.5) {
+      // a blink: on for about a second out of every 2-5
+      float period = 2.0 + 3.0 * fract(seed * 0.618);
+      float ph = fract(mote_style.z / period + seed * 0.37);
+      float on_k = smoothstep(0.0, 0.1, ph) * (1.0 - smoothstep(0.3, 0.55, ph));
+      float radius = clamp(0.05 * 4096.0 * abs(proj.z) * 0.5 / (mp.z * texel.x), 1.3, 4.0);
+      float d2 = dot(dpx, dpx);
+      float glow = exp(-d2 / (radius * radius)) + 0.35 * exp(-d2 / (radius * radius * 25.0));
+      c += vec3(0.75, 1.0, 0.3) * glow * on_k * mote_style.y * 2.6;
+    } else {
+      float radius = clamp(0.02 * 4096.0 * abs(proj.z) * 0.5 / (mp.z * texel.x), 0.9, 2.2);
+      float glow = exp(-dot(dpx, dpx) / (radius * radius));
+      // (they twinkle as they turn in the light)
+      float tw = 0.6 + 0.4 * sin(mote_style.z * (2.0 + fract(seed) * 3.0) + seed);
+      vec3 lit = vec3(1.0, 0.96, 0.86) * (0.35 + 0.9 * clamp(sky_sun.w * 2.5, 0.0, 1.0));
+      c = mix(c, lit, clamp(glow * tw * mote_style.y * 1.1, 0.0, 1.0));
+    }
   }
 
   // embers rising from the fires: small sparks drifting up and fading, hidden behind the scene
