@@ -133,6 +133,7 @@ uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after t
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
 uniform float sheet;            // sheet lightning: the whole sky lit from inside the clouds (0..1)
 uniform vec2 snow_heat;          // snowfall, hot air over lava (0..1)
+uniform float snow_cover;        // snow lying on the ground (0..1)
 uniform vec4 strike;            // a bolt to the ground: its foot's elevation (sine), the cloud base's, its distance (game units), on
 uniform vec4 sky_kind;          // the evening's sky: stars shown (0..1), the moon's lit part, red eclipse, red sunset now
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
@@ -1944,6 +1945,26 @@ void main() {
         c += vec3(0.85, 0.9, 1.0) * drop * wet_side * 0.35 *
              (1.0 - smoothstep(10.0 * 4096.0, 25.0 * 4096.0, z));
       }
+    }
+  }
+
+  // snow lying on the ground: first in patches on level ground, then over everything that faces
+  // up as it builds; lit by the light that reached the ground there, bluish in the shade. Not on Jak
+  // himself (the prints below are pressed into it)
+  if (snow_cover > 0.0 && z > 0.0 && wsurf == 0.0) {
+    bool on_jak = player_view.w > 0.0 && length(p - player_view.xyz) < 1.5 * 4096.0 &&
+                  dot(p - player_view.xyz, up_view) > 0.25 * 4096.0;
+    vec3 sw = (view_to_world * p + cam_pos) / 4096.0;
+    float upn = dot(surf_n, up_view);
+    float n = vnoise3(vec3(sw.xz * 0.35, 0.0)) * 0.6 + vnoise3(vec3(sw.xz * 1.7, 3.0)) * 0.3 +
+              vnoise3(vec3(sw.xz * 7.0, 9.0)) * 0.1;
+    float slope = smoothstep(mix(0.95, 0.35, snow_cover), mix(1.0, 0.6, snow_cover), upn);
+    float th = 1.0 - snow_cover * 1.15;
+    float lie = on_jak ? 0.0 : slope * smoothstep(th, th + 0.2, n);
+    if (lie > 0.0) {
+      float light = mix(clamp(luma(c) * 2.2, 0.04, 1.1),
+                        0.25 + 0.75 * clamp(sky_sun.w * 2.5, 0.0, 1.0), 0.5);
+      c = mix(c, vec3(0.9, 0.93, 1.0) * light, lie * 0.95);
     }
   }
 

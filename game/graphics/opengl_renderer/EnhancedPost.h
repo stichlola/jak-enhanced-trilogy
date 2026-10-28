@@ -217,6 +217,7 @@ class EnhancedPost {
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
     float cine_aperture = 1.0f;
     float blast_sparks = 1.0f;     // explosions throw sparks and leave hot air (0 = off)
+    float snow_cover = 0.6f;       // how white the snow can make the ground (0 = it never lies)
     float motes = 1.0f;            // out in the wild: fireflies at night, seeds and pollen by day (0 = off)
     float ambience = 0.7f;         // the ambient sounds' volume: rain, dripping, wind, crickets (0 = off)
   };
@@ -532,6 +533,7 @@ class EnhancedPost {
   float m_storm = 0.f;  // thunderstorm: lightning, wind
   float m_mist = 0.f;   // low fog on the ground
   float m_clear = 0.f;  // the sun out after the rain: shafts, rainbow, steam
+  float m_snow_cover = 0.f;  // snow lying on the ground (0..1): builds up as it snows, melts after
   float m_snow = 0.f;   // snowfall (0..1)
   std::string m_visit_zone;     // the zone (town) Jak was last in; m_visit_offset: where its weather cycle starts
   double m_visit_offset = 0.0;

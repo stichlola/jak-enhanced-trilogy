@@ -1978,7 +1978,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             p.kind = rut ? 2 : (m_print_left ? 0 : 1);
             p.time = m_time;
             p.seg = moved;
-            if (soft && m_settings.prints > 0.f) {
+            // (in lying snow any ground takes them)
+            if ((soft || m_snow_cover > 0.15f) && m_settings.prints > 0.f) {
               m_prints.push_back(p);
             }
             if (!rut) {
@@ -2907,6 +2908,18 @@ void EnhancedPost::update_scene() {
   // the ground soaks in a few seconds and takes a minute and a half to dry
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
   g_enhanced_wind.wet = m_settings.enabled ? m_wet : 0.f;
+  // snow lies: it builds up over ~6 minutes of heavy snow, melts in ~4 after (in a minute in the
+  // rain). JAK_ENHANCED_SNOW_COVER=<0..1> holds it (screenshots)
+  {
+    static const char* cover_test = std::getenv("JAK_ENHANCED_SNOW_COVER");
+    if (cover_test) {
+      m_snow_cover = (float)std::atof(cover_test);
+    } else if (m_snow > 0.05f) {
+      m_snow_cover = std::min(1.f, m_snow_cover + dt * m_snow / 360.f);
+    } else {
+      m_snow_cover = std::max(0.f, m_snow_cover - dt * (m_rain > 0.1f ? 1.f / 60.f : 1.f / 240.f));
+    }
+  }
   // the puddles fill over a minute of rain and dry from their rims in, for minutes after
   ease(m_puddle, wet, 1.f - std::exp(-dt / (wet > m_puddle ? 20.f : 220.f)));
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
@@ -4480,6 +4493,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "sunny"), m_sunny * on);
   glUniform1f(glGetUniformLocation(id, "sheet"), m_sheet * on);
   glUniform2f(glGetUniformLocation(id, "snow_heat"), m_snow * on, m_heat * on);
+  glUniform1f(glGetUniformLocation(id, "snow_cover"), m_snow_cover * m_settings.snow_cover * on);
   glUniform4f(glGetUniformLocation(id, "bolt"), m_bolt[0], m_bolt[1], m_bolt[2],
               m_bolt[3] * m_storm * on);
   {
@@ -4928,6 +4942,8 @@ void EnhancedPost::draw_menu() {
     ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderFloat("Snow on the ground", &s.snow_cover, 0.f, 1.f, "%.2f");
     // the subtitles' size (accessibility): the default is smaller than the PS2's
     {
       static const int kSizes[] = {100, 120, 138, 170};
@@ -5199,6 +5215,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["blast_sparks"] = s.blast_sparks;
   j["motes"] = s.motes;
   j["ambience"] = s.ambience;
+  j["snow_cover"] = s.snow_cover;
   j["weather"] = s.weather;
   j["weather_mix"] = s.weather_mix;
   j["season"] = s.season;
@@ -5277,6 +5294,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("blast_sparks", s.blast_sparks);
   get("motes", s.motes);
   get("ambience", s.ambience);
+  get("snow_cover", s.snow_cover);
   get("weather", s.weather);
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
   get("weather_mix", s.weather_mix);
