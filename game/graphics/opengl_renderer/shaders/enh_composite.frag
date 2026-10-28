@@ -3015,9 +3015,11 @@ void main() {
       tw /= tw.x + tw.y + tw.z;
       float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, surf_n)), 0.1);  // m per pixel
       float d = 0.0;
-      const vec2 size[3] = vec2[](vec2(1.6, 0.8), vec2(9.0, 0.8), vec2(40.0, 0.7));  // (tile m, strength)
+      const vec2 size[3] = vec2[](vec2(1.6, 0.8), vec2(7.0, 0.45), vec2(31.0, 0.15));  // (tile m, strength)
+      // (bent by noise: straight strata repeating across a whole mountain looked painted on)
+      vec3 bend = vec3(gnoise(wp.xz / 23.0), gnoise(wp.zy / 19.0 + 4.1), gnoise(wp.xy / 21.0 + 8.3));
       for (int k = 0; k < 3; k++) {
-        vec3 q = wp / size[k].x + float(k) * 0.37;
+        vec3 q = wp / size[k].x + bend * (0.9 / (1.0 + float(k))) + float(k) * 0.37;
         float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
         float t = luma(textureLod(tex_T10, q.zy, lod).rgb) * tw.x + luma(textureLod(tex_T10, q.xz, lod).rgb) * tw.y +
                   luma(textureLod(tex_T10, q.xy, lod).rgb) * tw.z;
