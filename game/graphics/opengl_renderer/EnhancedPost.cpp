@@ -106,7 +106,7 @@ namespace {
 // the game runs whenever it's saved (see the file for what each value does)
 struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
-  float golden = 0.f, sun_yaw = 0.f;
+  float golden = 0.f, sun_yaw = 0.f, sun_max_elev = 90.f;
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -315,6 +315,7 @@ void load_world() {
       // (as the day's unless the night says otherwise)
       out.golden = l.value("golden", out.golden);
       out.sun_yaw = l.value("sun_yaw", out.sun_yaw);
+      out.sun_max_elev = l.value("sun_max_elev", out.sun_max_elev);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -632,6 +633,9 @@ constexpr float kMeter = 4096.f;
 
 // the area's turn of the sun's path ("sun_yaw" in world.json, degrees), eased (update_scene)
 float g_sun_yaw = 0.f;
+// how high the sun may stand (degrees): the area's "sun_max_elev" by the late afternoon's amount,
+// so the golden hour's sun is low and grazing (update_scene)
+float g_sun_max_elev = 90.f;
 
 // the key light in world space, turned around the world's up axis by the area's sun_yaw; test
 // switch: JAK_ENHANCED_SUN_YAW=<degrees> instead
@@ -642,6 +646,17 @@ void sun_world(float out[3]) {
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
   out[2] = -std::sin(yaw) * d[0] + std::cos(yaw) * d[2];
+  // (lowered toward the horizon, keeping its bearing)
+  const float max_y = std::sin(g_sun_max_elev * 3.14159265f / 180.f);
+  if (out[1] > max_y) {
+    const float flat = std::sqrt(out[0] * out[0] + out[2] * out[2]);
+    if (flat > 1e-4f) {
+      const float k = std::sqrt(1.f - max_y * max_y) / flat;
+      out[0] *= k;
+      out[2] *= k;
+      out[1] = max_y;
+    }
+  }
 }
 }  // namespace
 
@@ -2838,6 +2853,7 @@ void EnhancedPost::update_scene() {
   want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
   want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
+  want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -3112,6 +3128,14 @@ void EnhancedPost::update_scene() {
   ease(m_grade.golden, want.golden, k_grade);
   ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
   g_sun_yaw = m_grade.sun_yaw;
+  ease(m_grade.sun_max_elev, want.sun_max_elev, k_grade);
+  {
+    // (by the late afternoon's amount, as the "golden" uniform)
+    auto smooth = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
+    const float g = smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)) *
+                    std::min(m_grade.golden, 1.f);
+    g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
+  }
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);

@@ -541,6 +541,7 @@ class EnhancedPost {
     float rock_detail = 0.f;          // the rock picture over rock and cliffs (0..1)
     float golden = 0.f;               // the late afternoon's amber look (0..1)
     float sun_yaw = 0.f;              // the sun's path turned around the up axis (degrees)
+    float sun_max_elev = 90.f;        // in the late afternoon, the sun no higher than (degrees)
   };
   void update_scene();
   Grade m_grade;
