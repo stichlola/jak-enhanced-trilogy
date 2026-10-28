@@ -2130,11 +2130,9 @@ void main() {
     if (sw.y > 0.06) {
       vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
       float lo = 0.6 - clouds.y * 0.42;
-      float d = 0.0;
-      for (int k = 0; k < 3; k++) {
-        float hy = 1200.0 + 250.0 * float(k);
-        d += cloud_density(wp + sw * ((hy - wp.y) / sw.y), lo, 2);
-      }
+      // (one look through the middle of the layer, counted for three: the patches are big and soft,
+      // three looks cost a millisecond)
+      float d = 3.0 * cloud_density(wp + sw * ((1450.0 - wp.y) / sw.y), lo, 2);
       float cs = (1.0 - exp(-d * 2.5)) * min(clouds.x, 1.0) * (1.0 - clouds.w) *
                  smoothstep(0.06, 0.2, sw.y) * (1.0 - smoothstep(0.75, 0.97, clouds.y));
       c *= vec3(1.0) - 0.5 * cs * vec3(1.03, 0.97, 0.86);
@@ -2211,6 +2209,7 @@ void main() {
       added += vec3(1.0, 0.9, 0.72) * lit * 2.6;
     }
     vec3 glints = vec3(0.0);  // the lights' highlights on wet ground
+    bool full_day = night_dark.x <= 0.0 && sky_sun.w > 0.05 && clouds.w < 0.3 && weather.x <= 0.0;
     vec3 vdir = normalize(-p);
     for (int i = 0; i < light_count; i++) {
       vec3 to_light = light_pos[i].xyz - p;
@@ -2222,7 +2221,8 @@ void main() {
         float lit = clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
         // the strongest lights (sorted first) cast shadows where they still matter
         // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
-        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5) {
+        // (not in full daylight: a torch's shadow doesn't show under the sun)
+        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5 && !full_day) {
           lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter);
         }
         added += light_color[i].rgb * (k * k) * lit;
@@ -3146,8 +3146,8 @@ void main() {
       vec2 look = normalize(world_dir(p).xz + 1e-4);
       float side = abs(dot(look, across));
       shade *= 1.0 - 0.7 * side * side * smoothstep(40.0, 200.0, length(p) / 4096.0);
-      float grain = gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4;
       float fine = 1.0 - smoothstep(0.006, 0.015, foot);
+      float grain = fine > 0.0 ? gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4 : 0.0;  // (near only)
       c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
     }
   }

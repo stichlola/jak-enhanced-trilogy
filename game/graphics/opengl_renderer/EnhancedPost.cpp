@@ -1013,12 +1013,17 @@ void EnhancedPost::update_auto_quality() {
   // the last two draw the game at fewer pixels (85%, 72% a side), stretched to the window
   static constexpr float kSceneryScale[kAutoLevels] = {1.f, 0.85f, 0.7f, 0.55f, 0.55f, 0.55f};
   static constexpr float kRenderScale[kAutoLevels] = {1.f, 1.f, 1.f, 1.f, 0.85f, 0.72f};
-  // (test switch: JAK_ENHANCED_AUTO_MIN=n keeps the level at n or above)
+  // (test switches: JAK_ENHANCED_AUTO_MIN=n / JAK_ENHANCED_AUTO_MAX=n keep the level at n or
+  // above / below; both for a fixed level while measuring)
   static const int auto_min = [] {
     const char* env = std::getenv("JAK_ENHANCED_AUTO_MIN");
     return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : 0;
   }();
-  m_auto_level = std::max(m_auto_level, auto_min);
+  static const int auto_max = [] {
+    const char* env = std::getenv("JAK_ENHANCED_AUTO_MAX");
+    return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : kAutoLevels - 1;
+  }();
+  m_auto_level = std::clamp(m_auto_level, auto_min, std::max(auto_min, auto_max));
   g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   g_enhanced_render_scale = kRenderScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
@@ -1822,6 +1827,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+    // only those whose reach (and halo, 1.5x) touches the view: every pixel loops over the list
+    {
+      const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
+      const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
+      const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
+      std::erase_if(candidates, [&](const Candidate& c) {
+        const float r = c.pos[3] * 1.5f;
+        return (std::abs(c.pos[0]) - c.pos[2] * ix) * nx > r ||
+               (std::abs(c.pos[1]) - c.pos[2] * iy) * ny > r;
+      });
+    }
     const int n = std::min((int)candidates.size(), kLights);
     float pos[kLights * 4] = {};
     float color[kLights * 4] = {};
@@ -2508,50 +2524,113 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
   }
 
-  // (JAK_ENHANCED_COMPOSITE_OFF=sand,rock_detail,...: those uniforms zeroed, to measure what each
-  // part of the composite costs with JAK_ENHANCED_PROFILE)
-  static const std::vector<std::string> composite_off = [] {
-    std::vector<std::string> out;
+  // (test switch, what each part of the composite costs, in one run:
+  // JAK_ENHANCED_COMPOSITE_OFF="sand;rock_detail;light_count,lantern": every 3 s the next group of
+  // uniforms is zeroed (first: none), the draw timed on the GPU (waited for: the clock stays up);
+  // after two rounds the log has each group's average)
+  struct CostProbe {
+    std::vector<std::vector<std::string>> groups;
+    std::vector<double> sum;
+    std::vector<int> count;
+    double start = -1.0;
+    bool done = false;
+    GLuint query = 0;
+  };
+  static CostProbe probe = [] {
+    CostProbe out;
     if (const char* env = std::getenv("JAK_ENHANCED_COMPOSITE_OFF")) {
       std::string s = env;
-      size_t at = 0;
-      while (at < s.size()) {
-        size_t comma = std::min(s.find(',', at), s.size());
-        if (comma > at) {
-          out.push_back(s.substr(at, comma - at));
+      out.groups.push_back({});  // everything on
+      std::vector<std::string> group;
+      std::string name;
+      for (size_t i = 0; i <= s.size(); i++) {
+        char ch = i < s.size() ? s[i] : ';';
+        if (ch == ',' || ch == ';') {
+          if (!name.empty()) {
+            group.push_back(name);
+          }
+          name.clear();
+          if (ch == ';' && !group.empty()) {
+            out.groups.push_back(group);
+            group.clear();
+          }
+        } else {
+          name += ch;
         }
-        at = comma + 1;
       }
+      out.sum.assign(out.groups.size(), 0.0);
+      out.count.assign(out.groups.size(), 0);
     }
     return out;
   }();
-  for (auto& name : composite_off) {
-    GLint loc = glGetUniformLocation(id, name.c_str());
-    GLint n = 0;
-    glGetProgramiv(id, GL_ACTIVE_UNIFORMS, &n);
-    GLenum type = 0;
-    for (GLint i = 0; loc >= 0 && i < n; i++) {
-      char buf[128];
-      GLint size;
-      GLenum t;
-      glGetActiveUniform(id, i, sizeof(buf), nullptr, &size, &t, buf);
-      if (name == buf) {
-        type = t;
+  int probe_group = -1;
+  if (!probe.groups.empty() && !probe.done) {
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (probe.start < 0.0) {
+      probe.start = now + 10.0;  // (the level settles first)
+      glGenQueries(1, &probe.query);
+    }
+    const double t = now - probe.start;
+    const int slots = (int)probe.groups.size() * 2;
+    if (t >= 0.0 && t < slots * 3.0) {
+      probe_group = (int)(t / 3.0) % (int)probe.groups.size();
+      if (std::fmod(t, 3.0) < 0.5) {
+        probe_group = -probe_group - 2;  // (switched just now: not timed yet, but zeroed)
+      }
+    } else if (t >= slots * 3.0) {
+      probe.done = true;
+      for (size_t g = 0; g < probe.groups.size(); g++) {
+        std::string names;
+        for (auto& n : probe.groups[g]) {
+          names += (names.empty() ? "" : ",") + n;
+        }
+        lg::info("[enhanced] composite cost: {:6.2f} ms without {}",
+                 probe.count[g] ? probe.sum[g] / probe.count[g] : 0.0,
+                 names.empty() ? "(nothing: all on)" : names);
       }
     }
-    if (type == GL_INT) {
-      glUniform1i(loc, 0);
-    } else if (type == GL_FLOAT) {
-      glUniform1f(loc, 0.f);
-    } else if (type == GL_FLOAT_VEC2) {
-      glUniform2f(loc, 0.f, 0.f);
-    } else if (type == GL_FLOAT_VEC3) {
-      glUniform3f(loc, 0.f, 0.f, 0.f);
-    } else if (type == GL_FLOAT_VEC4) {
-      glUniform4f(loc, 0.f, 0.f, 0.f, 0.f);
+  }
+  const int zero_group = probe_group >= 0 ? probe_group : (probe_group < -1 ? -probe_group - 2 : -1);
+  if (zero_group >= 0) {
+    GLint n = 0;
+    glGetProgramiv(id, GL_ACTIVE_UNIFORMS, &n);
+    for (auto& name : probe.groups[zero_group]) {
+      GLint loc = glGetUniformLocation(id, name.c_str());
+      GLenum type = 0;
+      for (GLint i = 0; loc >= 0 && i < n; i++) {
+        char buf[128];
+        GLint size;
+        GLenum t;
+        glGetActiveUniform(id, i, sizeof(buf), nullptr, &size, &t, buf);
+        if (name == buf) {
+          type = t;
+        }
+      }
+      if (type == GL_INT) {
+        glUniform1i(loc, 0);
+      } else if (type == GL_FLOAT) {
+        glUniform1f(loc, 0.f);
+      } else if (type == GL_FLOAT_VEC2) {
+        glUniform2f(loc, 0.f, 0.f);
+      } else if (type == GL_FLOAT_VEC3) {
+        glUniform3f(loc, 0.f, 0.f, 0.f);
+      } else if (type == GL_FLOAT_VEC4) {
+        glUniform4f(loc, 0.f, 0.f, 0.f, 0.f);
+      }
     }
   }
+  if (probe_group >= 0) {
+    glBeginQuery(GL_TIME_ELAPSED, probe.query);
+  }
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  if (probe_group >= 0) {
+    glEndQuery(GL_TIME_ELAPSED);
+    GLuint64 ns = 0;
+    glGetQueryObjectui64v(probe.query, GL_QUERY_RESULT, &ns);
+    probe.sum[probe_group] += ns / 1e6;
+    probe.count[probe_group]++;
+  }
   prof.add_draw_call();
   glBindSampler(13, 0);
 
