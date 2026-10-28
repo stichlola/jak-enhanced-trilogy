@@ -4003,11 +4003,14 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glBindFramebuffer(GL_FRAMEBUFFER, m_normal_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_normal_tex, 0);
 
+    // (the occlusion and the characters' sun shadows at half the resolution a side: blurred anyway,
+    // a quarter of the pixels to march)
     glGenFramebuffers(2, m_ao_fbo);
     glGenTextures(2, m_ao_tex);
     for (int i = 0; i < 2; i++) {
       glBindTexture(GL_TEXTURE_2D, m_ao_tex[i]);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, w, h, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, (w + 1) / 2, (h + 1) / 2, 0, GL_RED, GL_UNSIGNED_BYTE,
+                   nullptr);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -4036,7 +4039,8 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
   glBindVertexArray(screen_vao);
-  glViewport(0, 0, w, h);
+  const int aw = (w + 1) / 2, ah = (h + 1) / 2;
+  glViewport(0, 0, aw, ah);
 
   const auto& cam = g_enhanced_camera;
   const float fy = cam.fy * kScissorHeightScale;
@@ -4119,8 +4123,8 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   for (int pass = 0; pass < 2; pass++) {
     glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[1 - pass]);
     glBindTexture(GL_TEXTURE_2D, m_ao_tex[pass]);
-    glUniform2f(glGetUniformLocation(id, "step"), pass == 0 ? 1.f / w : 0.f,
-                pass == 0 ? 0.f : 1.f / h);
+    glUniform2f(glGetUniformLocation(id, "step"), pass == 0 ? 1.f / aw : 0.f,
+                pass == 0 ? 0.f : 1.f / ah);
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     prof.add_draw_call();
   }
