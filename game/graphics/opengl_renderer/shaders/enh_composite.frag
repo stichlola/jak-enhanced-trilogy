@@ -972,7 +972,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   // undersides and peach tops
   if (sun_haze > 0.0) {
     sc *= mix(vec3(1.0), vec3(1.2, 0.86, 0.52), sun_haze * 0.75);
-    under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25), sun_haze * 0.55);
+    under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25 * (1.0 - clouds.w)), sun_haze * 0.55);
     top = mix(top, vec3(0.95, 0.72, 0.55), sun_haze * 0.35);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
@@ -992,7 +992,8 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
       float powder = 1.0 - exp(-d * 4.0);
       float h = (p.y - 1100.0) / 900.0;
       vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
-      float a = 1.0 - exp(-d * 0.022 * dt);
+      // (thinner by night: under the moon they read as dark cut-out slabs over the dim sky)
+      float a = 1.0 - exp(-d * 0.022 * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
       sum += trans * a * light;
       trans *= 1.0 - a;
       if (trans < 0.02) {
@@ -1003,6 +1004,10 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   // far clouds melt into the haze at the horizon
   float haze = 1.0 - exp(-t0 / 14000.0);
   sum = mix(sum, (1.0 - trans) * sky, haze);
+  // by night they keep close to the sky's color, a little lighter (moonlit), never blacker than it
+  // (the dawn's and dusk's dim skies too: the game doesn't call those night)
+  float dim = max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)));
+  sum = mix(sum, (1.0 - trans) * sky * 1.15, 0.7 * dim);
   return vec4(sum, trans);
 }
 
@@ -1046,7 +1051,9 @@ vec4 cloud_march() {
   // the sky behind them as the composite makes it (by night the game's own, read from the scene)
   vec3 s = sky_color(ray);
   vec3 cs = mix(texture(tex_T0, uv).rgb, s, clouds.x * (1.0 - clouds.w));
-  vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(s, cs, clouds.w));
+  // (at dawn and dusk too: the game's dim sky, not ours, or the clouds come out darker than it)
+  float dim = max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(s)));
+  vec4 cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(s, mix(texture(tex_T0, uv).rgb, s, 0.25), dim));
   if (cloud_info.y > 0.0) {
     vec3 pp = to_prev * ray;
     vec2 prev_uv = 0.5 * motion.xy * pp.xy / pp.z + 0.5;
@@ -3164,6 +3171,21 @@ void main() {
   c = mix(c, curve, contrast);
   // (less in the brightest parts: they'd go yellow)
   c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35) * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
+
+  // the desert under a high sun: the game's ground comes in near white (bluish on the slopes), the
+  // grade above whiter still: its highlights rolled off softly (a film shoulder) and warmed back
+  // to sand, instead of paper
+  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
+    float ls = luma(c);
+    if (ls > 0.58) {
+      float to = 0.58 + (ls - 0.58) * 0.45 / (1.0 + (ls - 0.58) * 1.5);
+      vec3 tone = c * (to / ls);
+      tone = max(mix(vec3(to), tone, 1.35), 0.0);  // (some of the saturation back)
+      float k = smoothstep(0.58, 0.8, ls);         // (the whiter, the more toward sand)
+      tone = mix(tone, to * vec3(1.2, 0.98, 0.7), 0.7 * k);
+      c = mix(c, tone, sun_haze);
+    }
+  }
 
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky
