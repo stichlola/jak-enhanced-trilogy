@@ -2339,15 +2339,6 @@ void main() {
     vec3 base = c;
     c *= 1.0 - 0.75 * night_dark.x;
     c += night_sky(ray, base, pixel_rad);
-  } else if (clouds.w > 0.01 && z > 3500.0 * 4096.0 && wsurf == 0.0) {
-    // the game's painted cloud cards, kilometers out: at night it draws them near black, cut-outs
-    // against our moonlit sky. Lit by the moon instead: dim blue-grey, a silver rim toward it
-    // (red in an eclipse), keeping a little of their own shading
-    float md = max(dot(ray, sky_sun.xyz), 0.0);
-    vec3 moonlit = mix(vec3(0.6, 0.68, 0.85), vec3(0.7, 0.25, 0.15), sky_kind.z);
-    vec3 cl = moonlit * (0.09 + 0.3 * pow(md, 12.0) + 0.5 * pow(md, 60.0)) * (0.55 + 0.45 * sky_kind.y);
-    cl *= 0.85 + 0.6 * clamp(luma(c) * 4.0, 0.0, 1.0);
-    c = mix(c, cl, clouds.w * 0.9);
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
