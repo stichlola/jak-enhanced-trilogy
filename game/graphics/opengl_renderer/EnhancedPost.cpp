@@ -1943,6 +1943,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const bool on_foot = pl.state == 1 || pl.state == 3;
       if (pl.valid && on_foot && m_last_player_state == 0) {
         m_steps.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, 2.f, m_time});
+        for (int k = 0; k < 3; k++) {
+          const float a = k * 2.094f + (float)(std::rand() % 100) * 0.01f;
+          const float at[3] = {pl.pos[0] + std::cos(a) * 0.4f * kMeter, pl.pos[1],
+                               pl.pos[2] + std::sin(a) * 0.4f * kMeter};
+          ground_puff(at, 0.7f, 1.6f, false);
+        }
       }
       m_last_player_state = pl.valid ? pl.state : 0;
       if (pl.valid && pl.state > 0 && pl.state <= 3) {
@@ -1973,6 +1979,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             }
             if (!rut) {
               m_steps.push_back({{p.pos[0], p.pos[1], p.pos[2]}, 1.f, m_time});
+              // running kicks up more than walking
+              if (moved > 0.9f * kMeter || (std::rand() % 2) == 0) {
+                ground_puff(p.pos, 0.3f, 1.0f, true);
+              }
             }
             m_print_left = !m_print_left;
           }
@@ -2924,6 +2934,23 @@ void EnhancedPost::update_scene() {
         m_strike_pos[i] = g_enhanced_strike.hit_pos[i];
       }
       m_strike_age = 0.f;
+      // what the strike throws up: a burst of sand or dirt, then a column of smoke that drifts off
+      if (m_settings.blast_sparks > 0.f) {
+        for (int k = 0; k < 7; k++) {
+          Puff f;
+          const float a = k * 0.9f + (float)(std::rand() % 100) * 0.01f;
+          const float r = (k < 4 ? 1.2f : 0.3f) * kMeter;
+          f.pos[0] = m_strike_pos[0] + std::cos(a) * r;
+          f.pos[1] = m_strike_pos[1];
+          f.pos[2] = m_strike_pos[2] + std::sin(a) * r;
+          f.size = k < 4 ? 2.2f : 1.8f;
+          f.kind = k < 4 ? 0 : 3;
+          f.seed = (float)(std::rand() % 1000) / 1000.f;
+          f.life = k < 4 ? 2.5f : 7.f + k;
+          f.time = m_time;
+          m_puffs.push_back(f);
+        }
+      }
       if (std::getenv("JAK_ENHANCED_STRIKE_TEST")) {
         lg::info("[strike] hit {:.1f} {:.1f} {:.1f} jak {:.1f} {:.1f} {:.1f} cam {:.1f} {:.1f} {:.1f} (m)",
                  m_strike_pos[0] / kMeter, m_strike_pos[1] / kMeter, m_strike_pos[2] / kMeter,
@@ -5413,4 +5440,23 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Explosion sparks", &m_settings.blast_sparks, 0.f, 3.f);
     ImGui::TreePop();
   }
+}
+
+void EnhancedPost::ground_puff(const float* pos, float size, float life, bool step) {
+  if (m_settings.prints <= 0.f || std::max(m_wet, m_puddle) > 0.3f) {
+    return;
+  }
+  const bool snow = m_snow > 0.3f;
+  // a step raises dust only in the desert sand (or snow); a landing raises a little anywhere dry
+  if (step && !snow && !m_pond) {
+    return;
+  }
+  Puff f;
+  std::memcpy(f.pos, pos, sizeof(f.pos));
+  f.size = (m_pond || snow) ? size : size * 0.6f;
+  f.kind = snow ? 2 : 0;
+  f.seed = (float)(std::rand() % 1000) / 1000.f;
+  f.life = snow ? life * 0.8f : life;
+  f.time = m_time;
+  m_puffs.push_back(f);
 }

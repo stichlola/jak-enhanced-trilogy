@@ -407,12 +407,15 @@ class EnhancedPost {
   struct Puff {
     float pos[3];
     float size;  // meters
-    int kind;    // 0 dust, 1 spray
+    int kind;    // 0 dust, 1 spray, 2 snow, 3 smoke
     float seed;
     float life;  // seconds
     double time;
   };
   std::vector<Puff> m_puffs;
+  // a puff of what the ground is made of where Jak steps or lands (sand in the desert, snow while
+  // it snows; nothing on wet ground: the puddles splash instead)
+  void ground_puff(const float* pos, float size, float life, bool step);
   float m_ride_last[3] = {};
   double m_ride_last_time = -1.0;
   float m_ride_speed = 0.f;  // m/s, smoothed

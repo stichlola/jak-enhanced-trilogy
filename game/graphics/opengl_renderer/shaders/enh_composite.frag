@@ -32,7 +32,7 @@ uniform vec4 splash[16];         // w: age (s) + 10 * strength (1 step, 2 landin
 uniform float prints_strength;
 uniform int puff_count;         // dust behind a vehicle or the board, spray off the water:
 uniform vec4 puff[32];          // world xyz (game units), age (s)
-uniform vec4 puff_info[32];     // size (m), kind (0 dust, 1 spray), seed, life (s)
+uniform vec4 puff_info[32];     // size (m), kind (0 dust, 1 spray, 2 snow, 3 smoke), seed, life (s)
 uniform float relief;           // relief from the textures' shading under the sun (0 = off; 2 = left half)
 uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
@@ -566,11 +566,22 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
     if (u >= 1.0) {
       continue;
     }
-    bool dust = puff_info[i].y < 0.5;
+    int kind = int(puff_info[i].y + 0.5);
+    bool dust = kind != 1;
     float seed = puff_info[i].z;
     vec3 c = puff[i].xyz / 4096.0;
     float r;
-    if (dust) {
+    if (kind == 3) {
+      // smoke: a column that swells as it climbs and leans with the wind
+      r = puff_info[i].x * (0.5 + 1.8 * sqrt(u));
+      c.y += r * 0.3 + 1.4 * age;
+      c.xz += dust_wind.xy * age * 2.5;
+    } else if (kind == 2) {
+      // snow kicked up: a quick white burst that settles back down
+      r = puff_info[i].x * (0.5 + 1.2 * sqrt(u));
+      c.y += r * 0.25 + 0.6 * age - 0.5 * age * age;
+      c.xz += dust_wind.xy * age;
+    } else if (dust) {
       r = puff_info[i].x * (0.45 + 1.6 * sqrt(u));
       // kicked up off the ground: low at first, its lower half in the sand, rising slowly
       c.y += r * 0.2 + 0.3 * age;
@@ -611,7 +622,14 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
     float lit = 0.75 + 0.25 * dot(normalize(lit_dir + vec3(0.0, 1e-3, 0.0)), sun_w);
     float a;
     vec3 pc;
-    if (dust) {
+    if (kind == 3) {
+      // (thin and grey: a wisp, not a ball; steamier in the rain)
+      a = min(dens * (1.0 - smoothstep(0.15, 1.0, u)) * smoothstep(0.0, 0.15, age) * 0.75, 0.5);
+      pc = vec3(luma(sand)) * mix(0.7, 0.95, weather.x) * lit;
+    } else if (kind == 2) {
+      a = dens * (1.0 - smoothstep(0.2, 1.0, u)) * smoothstep(0.0, 0.04, age) * 1.4;
+      pc = vec3(luma(spray)) * vec3(1.05, 1.1, 1.18) * lit;
+    } else if (dust) {
       a = dens * (1.0 - smoothstep(0.3, 1.0, u)) * smoothstep(0.0, 0.06, age) * 1.3;
       pc = sand * lit;
     } else {
