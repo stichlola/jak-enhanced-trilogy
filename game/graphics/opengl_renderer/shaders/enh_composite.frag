@@ -3011,21 +3011,30 @@ void main() {
     if (nl > 0.7 && nl < 0.8) {
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
-      vec3 tw = pow(abs(wn), vec3(4.0));
+      // (sharp: the view from above, its strata lines, stays off steep faces, where they ran down
+      // the rock)
+      vec3 tw = pow(abs(wn), vec3(8.0));
       tw /= tw.x + tw.y + tw.z;
       float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, surf_n)), 0.1);  // m per pixel
       float d = 0.0;
-      const vec2 size[3] = vec2[](vec2(1.6, 0.8), vec2(7.0, 0.45), vec2(31.0, 0.15));  // (tile m, strength)
-      // (bent by noise: straight strata repeating across a whole mountain looked painted on)
-      vec3 bend = vec3(gnoise(wp.xz / 23.0), gnoise(wp.zy / 19.0 + 4.1), gnoise(wp.xy / 21.0 + 8.3));
+      const vec2 size[3] = vec2[](vec2(1.6, 0.35), vec2(7.0, 0.75), vec2(31.0, 0.3));  // (tile m, strength)
+      // the strata's height wanders along the rock in broad waves and they tilt slightly, each part
+      // of a mountain its own way (tight wiggles looked like wood grain); and they come and go:
+      // strong in some places, nearly gone in others
+      float wander = gnoise(wp.xz / 34.0 + 1.3) * 1.2 + (wp.x + wp.z) * gnoise(wp.xz / 90.0 + 2.7) * 0.03;
+      float bands = 0.35 + 0.65 * smoothstep(-0.35, 0.35, gnoise(vec2(wp.x + wp.z, wp.y * 4.0) / 40.0 + 5.3));
       for (int k = 0; k < 3; k++) {
-        vec3 q = wp / size[k].x + bend * (0.9 / (1.0 + float(k))) + float(k) * 0.37;
         float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
+        if (lod > 9.0) {
+          continue;  // (one texel over the pixel: its average, nothing to add)
+        }
+        vec3 q = wp / size[k].x + float(k) * 0.37;
+        q.y += wander / size[k].x;
         float t = luma(textureLod(tex_T10, q.zy, lod).rgb) * tw.x + luma(textureLod(tex_T10, q.xz, lod).rgb) * tw.y +
                   luma(textureLod(tex_T10, q.xy, lod).rgb) * tw.z;
         d += size[k].y * (t - rock_detail_avg);
       }
-      c *= max(1.0 + rock_detail * 1.6 * d, 0.3);
+      c *= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
     }
   }
 
