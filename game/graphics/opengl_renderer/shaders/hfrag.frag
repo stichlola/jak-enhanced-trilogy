@@ -13,7 +13,8 @@ vec4 enh_pack_normal(vec3 n) {
   if (flen > 0.0) {
     f /= flen;
     float d = dot(n, f);
-    n = abs(d) > 0.82 ? n * sign(d) : f;
+    // (blended, not switched: a hard switch drew the lights' highlights as sharp patches)
+    n = normalize(mix(f, n * sign(d), smoothstep(0.6, 0.85, abs(d))));
   }
   return vec4(n * 0.5 + 0.5, 1.0);
 }

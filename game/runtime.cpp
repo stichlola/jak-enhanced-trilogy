@@ -34,6 +34,8 @@
 #include "common/versions/versions.h"
 
 #include "game/external/discord.h"
+#include "common/util/FileUtil.h"
+
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/gfx.h"
 #include "game/kernel/common/fileio.h"
@@ -262,8 +264,26 @@ void ee_runner(SystemThreadInterface& iface) {
   // Added for OpenGOAL's debugger
   xdbg::allow_debugging();
 
-  // Enhanced: the trilogy's start menu holds the game's boot until a game is picked (the one booting
-  // now, or another: then the runtime ends and boots that one)
+  // Enhanced: the trilogy's start menu, once as the program starts (a game switch doesn't show it
+  // again): whenever more than one game is set up, but not in a debug start (-debug: the REPL and the
+  // test scripts boot straight into the game). JAK_ENHANCED_START_MENU=1 / 0 forces it on / off.
+  // Decided here, before the wait below (the renderer may start after this thread got there)
+  if (!g_enhanced_menu.start_menu_shown) {
+    g_enhanced_menu.start_menu_shown = true;
+    const char* force = std::getenv("JAK_ENHANCED_START_MENU");
+    if (force) {
+      g_enhanced_menu.start_menu = std::strcmp(force, "0") != 0;
+    } else if (!g_enhanced_debug_toolbar) {
+      int ready = 0;
+      for (int i = 1; i <= 3; i++) {
+        ready += i == (int)g_game_version ||
+                 fs::exists(file_util::get_jak_project_dir() / "out" / fmt::format("jak{}", i) / "iso");
+      }
+      g_enhanced_menu.start_menu = ready > 1;
+    }
+  }
+  // the start menu holds the game's boot until a game is picked (the one booting now, or another:
+  // then the runtime ends and boots that one)
   while (g_enhanced_menu.start_menu && MasterExit == RuntimeExitStatus::RUNNING) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }

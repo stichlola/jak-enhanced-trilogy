@@ -30,7 +30,8 @@ vec4 enh_pack_normal(vec3 n) {
     if (len > 0.1) {
       n /= len;
       float d = dot(n, f);
-      n = abs(d) > 0.82 ? n * sign(d) : f;
+      // (blended, not switched: a hard switch drew the lights' highlights as sharp patches)
+      n = normalize(mix(f, n * sign(d), smoothstep(0.6, 0.85, abs(d))));
     } else {
       n = f;
     }

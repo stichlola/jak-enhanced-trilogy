@@ -186,6 +186,10 @@ struct EnhancedMenu {
   std::atomic<u32> keys[kShortcuts] = {kDefaultKeys[0], kDefaultKeys[1], kDefaultKeys[2],
                                        kDefaultKeys[3]};
   std::atomic<int> listening = -1;
+  // the one-time hints already shown (bits, see pc-enhanced-hint-once), saved in
+  // enhanced-settings.json; hints_dirty: shown since the last save
+  std::atomic<int> hints_shown = 0;
+  std::atomic<bool> hints_dirty = false;
   std::mutex mutex;
   int request = 0;
   std::string arg;

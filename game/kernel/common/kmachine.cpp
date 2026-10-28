@@ -1301,6 +1301,18 @@ u64 pc_enhanced_bed(u32 pos, u32 out) {
   return bool_to_symbol(true);
 }
 
+// Enhanced: a hint shown once per install (bit: which; 0 the scattergun's charge): #t the first time,
+// then #f for good (saved in enhanced-settings.json)
+u64 pc_enhanced_hint_once(u32 bit) {
+  const int mask = 1 << (bit & 31);
+  const int before = g_enhanced_menu.hints_shown.fetch_or(mask);
+  if (before & mask) {
+    return bool_to_symbol(false);
+  }
+  g_enhanced_menu.hints_dirty = true;
+  return bool_to_symbol(true);
+}
+
 // Enhanced: night, for the play (more marauders in the desert); #f when it doesn't affect play
 u64 pc_enhanced_night() {
   const auto& w = g_enhanced_play_weather;
@@ -1580,6 +1592,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-storm-drag", (void*)pc_enhanced_storm_drag);
   make_func_symbol_func("pc-enhanced-night?", (void*)pc_enhanced_night);
   make_func_symbol_func("pc-enhanced-bed", (void*)pc_enhanced_bed);
+  make_func_symbol_func("pc-enhanced-hint-once", (void*)pc_enhanced_hint_once);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
   make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
   make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);

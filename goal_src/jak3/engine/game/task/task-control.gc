@@ -1534,8 +1534,11 @@
        (logclear! (-> *game-info* features) (game-feature board))
        )
       (((game-task-node-command add-gun-red-1))
-       ;; Enhanced: the first time, a word on charging it (enhanced-charge-hint-draw)
-       (if (not (logtest? (-> *game-info* features) (game-feature gun-red-1)))
+       ;; Enhanced: the first time, a word on charging it (enhanced-charge-hint-draw): once per install
+       ;; (a continue or a teleport gives the guns again)
+       (if (and (not (logtest? (-> *game-info* features) (game-feature gun-red-1)))
+                (pc-enhanced-hint-once 0)
+                )
            (set! *enhanced-charge-hint* 720)
            )
        (logior! (-> *game-info* features) (game-feature gun gun-red-1))

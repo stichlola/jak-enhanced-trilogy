@@ -68,7 +68,8 @@ void main() {
     if (flen > 0.0) {
       f /= flen;
       float d = len > 0.1 ? dot(sn / len, f) : 0.0;
-      n = abs(d) > 0.82 ? sn / len * sign(d) : f;
+      // (blended, not switched: a hard switch drew the lights' highlights as sharp patches)
+      n = len > 0.1 ? normalize(mix(f, sn / len * sign(d), smoothstep(0.6, 0.85, abs(d)))) : f;
     }
     enh_normal_out = flen > 0.0 ? vec4(n * 0.5 + 0.5, 1.0) : vec4(0.0);
   }

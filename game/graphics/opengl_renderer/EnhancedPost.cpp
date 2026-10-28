@@ -628,23 +628,7 @@ EnhancedPost::EnhancedPost() {
   } catch (std::exception& e) {
     lg::error("[enhanced] could not load the saved settings: {}", e.what());
   }
-  // the trilogy's start menu, once as the program starts (a game switch doesn't show it again):
-  // whenever more than one game is set up, but not in a debug start (-debug: the REPL and the test
-  // scripts boot straight into the game). JAK_ENHANCED_START_MENU=1 / 0 forces it on / off
-  if (!g_enhanced_menu.start_menu_shown) {
-    g_enhanced_menu.start_menu_shown = true;
-    const char* force = std::getenv("JAK_ENHANCED_START_MENU");
-    if (force) {
-      g_enhanced_menu.start_menu = std::strcmp(force, "0") != 0;
-    } else if (!g_enhanced_debug_toolbar) {
-      int ready = 0;
-      for (int i = 1; i <= 3; i++) {
-        ready += i == (int)g_game_version ||
-                 fs::exists(file_util::get_jak_project_dir() / "out" / fmt::format("jak{}", i) / "iso");
-      }
-      g_enhanced_menu.start_menu = ready > 1;
-    }
-  }
+  // (the trilogy's start menu is decided as the runtime boots: ee_runner in runtime.cpp)
   // the game played last, for the launcher to boot it next time
   try {
     // (OpenGOAL's own folder, the parent of the games' ones: %APPDATA%\OpenGOAL)
@@ -913,6 +897,9 @@ float halton(u32 i, u32 base) {
 }  // namespace
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
+  if (g_enhanced_menu.hints_dirty.exchange(false)) {
+    save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
+  }
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
@@ -4772,6 +4759,7 @@ std::string EnhancedPost::menu_settings_json() const {
     keys.push_back(k.load());
   }
   j["shortcut_keys"] = keys;
+  j["hints_shown"] = g_enhanced_menu.hints_shown.load();
   return j.dump(2);
 }
 
@@ -4857,6 +4845,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("weather_affects_play", play_weather);
   g_enhanced_play_weather.enabled = play_weather;
   g_enhanced_menu.minimap_size = map_size;
+  int hints = 0;
+  get("hints_shown", hints);
+  g_enhanced_menu.hints_shown = hints;
   std::vector<u32> keys;
   get("shortcut_keys", keys);
   for (size_t i = 0; i < keys.size() && i < (size_t)EnhancedMenu::kShortcuts; i++) {

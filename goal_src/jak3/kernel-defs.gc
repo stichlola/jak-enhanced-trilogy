@@ -316,6 +316,7 @@
 (define-extern pc-enhanced-storm-drag (function int))
 (define-extern pc-enhanced-night? (function symbol))
 (define-extern pc-enhanced-bed (function pointer pointer symbol))
+(define-extern pc-enhanced-hint-once (function int symbol))
 
 (define-extern pc-encode-utf8-string (function string string none))
 
