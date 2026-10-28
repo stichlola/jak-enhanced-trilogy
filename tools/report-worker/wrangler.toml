@@ -7,6 +7,10 @@ compatibility_date = "2026-10-01"
 # which prints the id to put here
 [[kv_namespaces]]
 binding = "REPORTS"
-id = "PUT-THE-ID-HERE"
+id = "d426054bf51942a7b4f52bf48bc27cc1"
 
 # ADMIN_KEY (to read the reports) is a secret: npx wrangler secret put ADMIN_KEY
+
+# the address the report window posts to (scripts/enhanced/report.ps1): workers.dev on, no preview URLs
+workers_dev = true
+preview_urls = false

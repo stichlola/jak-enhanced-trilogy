@@ -13,7 +13,7 @@ $ErrorActionPreference = 'SilentlyContinue'
 
 # the report server (tools/report-worker: https://<worker>.workers.dev/report); empty until it is
 # deployed (the ZIP goes to the Desktop instead); REPORT_URL in the environment overrides it
-$ReportUrl = ''
+$ReportUrl = 'https://jak-enhanced-reports.davidoz.workers.dev/report'
 if ($env:REPORT_URL) { $ReportUrl = $env:REPORT_URL }
 $Issues = 'https://github.com/stichlola/jak-enhanced-trilogy/issues/new'
 
