@@ -1,13 +1,15 @@
 # Problem reports server
 
 A Cloudflare Worker that receives the ZIPs sent by the report window (`scripts/enhanced/report.ps1`: opened
-by the launcher after a crash, by the Enhanced menu's "Send feedback" button and `Report a problem.bat`) and keeps them in a private R2 bucket. Free plan limits are plenty.
+by the launcher after a crash, by the Enhanced menu's "Send feedback" button and `Report a problem.bat`) and keeps them for 90 days in a private KV namespace (free plan, no card needed: R2 would want one).
 
 ## Setting it up (once, from this folder)
 
+`kv namespace create` prints an `id`: put it in `wrangler.toml` before `deploy`.
+
 ```
 npx wrangler login
-npx wrangler r2 bucket create jak-enhanced-reports
+npx wrangler kv namespace create REPORTS
 npx wrangler secret put ADMIN_KEY
 npx wrangler deploy
 ```

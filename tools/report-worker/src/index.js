@@ -1,6 +1,6 @@
 // Jak Enhanced Trilogy: problem reports. "Report a problem.bat" (or the Enhanced menu's button) posts
 // the player's report ZIP (logs, graphics card, settings) and what they wrote; it is kept in a
-// private R2 bucket. Only the developer reads them, with the ADMIN_KEY secret:
+// private KV namespace. Only the developer reads them, with the ADMIN_KEY secret:
 //   GET  /reports            the list (newest first)
 //   GET  /reports/<key>      one ZIP
 //   GET  /reports/<key>/note what the player wrote
@@ -9,6 +9,7 @@
 const MAX_ZIP = 8 * 1024 * 1024; // a report is usually well under 1 MB
 const MAX_NOTE = 4000;
 const PER_HOUR = 5; // reports a player's address may send an hour
+const KEEP_DAYS = 90; // then KV forgets them by itself
 
 export default {
   async fetch(request, env) {
@@ -50,27 +51,21 @@ async function report(request, env) {
   const version = String(form.get("version") || "").slice(0, 64);
   const id = new Date().toISOString().replace(/[:.]/g, "-") + "-" + crypto.randomUUID().slice(0, 8);
   const meta = { version, game: String(form.get("game") || "").slice(0, 16), country: request.cf?.country || "" };
-  await env.REPORTS.put(`${id}.zip`, bytes, {
-    httpMetadata: { contentType: "application/zip" },
-    customMetadata: meta,
-  });
-  await env.REPORTS.put(`${id}.txt`, note, {
-    httpMetadata: { contentType: "text/plain; charset=utf-8" },
-    customMetadata: meta,
-  });
+  const keep = { expirationTtl: KEEP_DAYS * 86400 };
+  await env.REPORTS.put(`zip/${id}`, bytes, { ...keep, metadata: { ...meta, size: bytes.length, note: note.slice(0, 200) } });
+  await env.REPORTS.put(`note/${id}`, note, keep);
   return text(`Thanks! Report ${id} received.`, 200);
 }
 
-// a few reports an hour from one address, counted in the bucket itself (no other storage needed)
+// a few reports an hour from one address, counted in KV too (the count expires with the hour)
 async function allow(env, ip) {
   const hour = new Date().toISOString().slice(0, 13);
   const key = `_limits/${hour}/${await sha(ip)}`;
-  const seen = await env.REPORTS.get(key);
-  const count = seen ? parseInt(await seen.text(), 10) || 0 : 0;
+  const count = parseInt((await env.REPORTS.get(key)) || "0", 10) || 0;
   if (count >= PER_HOUR) {
     return false;
   }
-  await env.REPORTS.put(key, String(count + 1));
+  await env.REPORTS.put(key, String(count + 1), { expirationTtl: 7200 });
   return true;
 }
 
@@ -81,19 +76,19 @@ async function admin(request, env, url) {
   }
   const rest = url.pathname.slice("/reports".length).replace(/^\//, "");
   if (!rest) {
-    const list = await env.REPORTS.list({ limit: 1000, include: ["customMetadata"] });
-    const rows = list.objects
-      .filter((o) => o.key.endsWith(".zip"))
-      .sort((a, b) => (a.key < b.key ? 1 : -1))
-      .map((o) => ({ id: o.key.slice(0, -4), size: o.size, ...o.customMetadata }));
+    const list = await env.REPORTS.list({ prefix: "zip/", limit: 1000 });
+    const rows = list.keys
+      .sort((a, b) => (a.name < b.name ? 1 : -1))
+      .map((k) => ({ id: k.name.slice(4), ...k.metadata }));
     return new Response(JSON.stringify(rows, null, 2), { headers: { "Content-Type": "application/json" } });
   }
   const [id, part] = rest.split("/");
-  const obj = await env.REPORTS.get(part === "note" ? `${id}.txt` : `${id}.zip`);
-  if (!obj) {
+  const note = part === "note";
+  const body = await env.REPORTS.get(note ? `note/${id}` : `zip/${id}`, { type: note ? "text" : "arrayBuffer" });
+  if (body === null) {
     return text("No such report.", 404);
   }
-  return new Response(obj.body, { headers: { "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream" } });
+  return new Response(body, { headers: { "Content-Type": note ? "text/plain; charset=utf-8" : "application/zip" } });
 }
 
 async function sha(s) {

@@ -2,9 +2,11 @@ name = "jak-enhanced-reports"
 main = "src/index.js"
 compatibility_date = "2026-10-01"
 
-# the reports, private (R2 bucket made once with: npx wrangler r2 bucket create jak-enhanced-reports)
-[[r2_buckets]]
+# the reports, private: a KV namespace (free, no card needed). Made once with
+#   npx wrangler kv namespace create REPORTS
+# which prints the id to put here
+[[kv_namespaces]]
 binding = "REPORTS"
-bucket_name = "jak-enhanced-reports"
+id = "PUT-THE-ID-HERE"
 
 # ADMIN_KEY (to read the reports) is a secret: npx wrangler secret put ADMIN_KEY
