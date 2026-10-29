@@ -1561,12 +1561,14 @@ float ao_upsample(vec2 uv, float zc) {
   return sum / wsum;
 }
 
-// the rocky ground's made-up relief (m): the rock picture's brightness as height, small and turned
-// (crust) plus bigger and turned the other way (plates), as in main's rocky ground
+// the rocky ground's made-up relief (m): rounded lumps of stone (smooth noise, a half meter and
+// more); the rock picture's brightness a faint crust on them (as the main height its cracks
+// crossed into a hatching)
 float ground_height(vec2 xz, float glod, float plod) {
   vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * xz / 0.7;
   vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * xz / 3.1 + 0.29;
-  return luma(textureLod(tex_T10, gq, glod).rgb) * 0.03 + luma(textureLod(tex_T10, pq, plod).rgb) * 0.05;
+  return luma(textureLod(tex_T10, gq, glod).rgb) * 0.008 + luma(textureLod(tex_T10, pq, plod).rgb) * 0.015 +
+         smoothstep(-0.2, 0.4, gnoise(xz / 0.45 + 1.9)) * 0.09 + gnoise(xz / 1.4 + 3.3) * 0.2;
 }
 
 void main() {
@@ -3203,16 +3205,17 @@ void main() {
         float plod = max(log2(foot * 512.0 / 3.1), 0.0);
         float plates = plod < 8.0 ? (luma(textureLod(tex_T10, pq, plod).rgb) - rock_detail_avg) : 0.0;
         // (its dark crack lines kept faint, its light crust strong; and lumps, light and dark)
-        grit = grit > 0.0 ? grit * 2.6 : grit * 1.0;
-        plates = plates > 0.0 ? plates * 1.8 : plates * 0.6;
+        grit = grit > 0.0 ? grit * 1.4 : grit * 0.6;
+        plates = plates > 0.0 ? plates * 1.0 : plates * 0.4;
         float lumps = smoothstep(-0.15, 0.3, gnoise(wp.xz / 0.45 + 1.9)) - 0.5;
         float fine = (gnoise(wp.xz / 0.22 + 5.5) * 0.6 + grit + plates + lumps * 0.55) * close;
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
         // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
         float low_light = min(golden * 2.0, 1.0);
         c *= mix(0.78, 0.47, low_light) * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
-        // (weathered: less yellow in the low light; by day the warm stone the sand's made of)
-        c = mix(vec3(luma(c)), c, 0.92) * mix(vec3(1.12, 1.0, 0.86), vec3(1.04, 0.98, 0.98), low_light);
+        // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
+        // sand's made of)
+        c = mix(vec3(luma(c)), c, mix(0.92, 0.65, low_light)) * mix(vec3(1.12, 1.0, 0.86), vec3(1.1, 1.03, 1.08), low_light);
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
           const float e = 0.06;
