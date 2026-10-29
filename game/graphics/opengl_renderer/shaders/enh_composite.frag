@@ -935,6 +935,8 @@ vec3 sky_color(vec3 dv) {
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = max(dot(normalize(wd.xz + 1e-4), sh), 0.0);
     float glow = 0.9 * pow(az, 6.0) * exp(-up * 6.0) + 0.6 * pow(az, 24.0) * exp(-up * 2.5);
+    // (away from the sun the low sky dusky: dust and far cloud banks along the horizon)
+    col *= 1.0 - 0.22 * gs * (1.0 - smoothstep(0.02, 0.22, up)) * (1.0 - pow(az, 4.0)) * (1.0 - over);
     col += vec3(1.0, 0.6, 0.3) * glow * gs * 0.2 * (1.0 - over * 0.7);
     col += sc * pow(sd, 16.0) * 0.3 * gs * (1.0 - over * 0.7);
   }
@@ -3184,6 +3186,7 @@ void main() {
       // (the rocky ground (normals 0.6 long): the game paints it as pale as the sand around)
       // (and its grain stronger: gravel, mottled light and dark, warm)
       if (nl < 0.65) {
+        vec3 c_far = c;
         // (not the blocky picture: over the flat ground its cracks tile into a grid; weathered stone
         // and gravel instead, soft mottling at a few sizes, the finest only near)
         float m = gnoise(wp.xz / 0.9 + 3.1) * 0.35 + gnoise(wp.xz / 3.0 + 8.2) * 0.4 +
@@ -3203,8 +3206,11 @@ void main() {
         float lumps = smoothstep(-0.15, 0.3, gnoise(wp.xz / 0.45 + 1.9)) - 0.5;
         float fine = (gnoise(wp.xz / 0.22 + 5.5) * 0.6 + grit + plates + lumps * 0.55) * close;
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
-        c *= 0.47 * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
-        c = mix(vec3(luma(c)), c, 0.92) * vec3(1.04, 0.98, 0.98);  // (weathered: less yellow)
+        // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
+        float low_light = min(golden * 2.0, 1.0);
+        c *= mix(0.78, 0.47, low_light) * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
+        // (weathered: less yellow in the low light; by day the warm stone the sand's made of)
+        c = mix(vec3(luma(c)), c, 0.92) * mix(vec3(1.12, 1.0, 0.86), vec3(1.04, 0.98, 0.98), low_light);
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
           const float e = 0.06;
@@ -3224,6 +3230,11 @@ void main() {
         // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
         float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));
         c = mix(c, c * vec3(1.55, 1.38, 1.12), drift * 0.6 * rock_detail * 2.0);
+        // (farther, the game's own: its rocky patches out in the sand blend into it at their edges,
+        // darkened they showed as hard-edged slabs)
+        // (and where the game blends its rocky ground into the sand, the tag is blended too: there
+        // only partly)
+        c = mix(c, c_far, max(smoothstep(30.0, 60.0, dist), smoothstep(0.605, 0.645, nl)));
       }
     }
   }
