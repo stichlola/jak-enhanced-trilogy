@@ -27,23 +27,23 @@
     "jak2": [
       {"zone": "forest", "prefixes": ["for", "lfor"]},
       {"zone": "metalhead", "prefixes": ["mhc", "nst", "lmh", "nes"]},
-      {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide"]},
+      {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide", "lwide", "lcitylow", "portwall", "skatepark", "lrace", "lport", "lshuttle", "lguard", "lcguard", "lpower", "lprotect", "lbombbot", "lbbush", "lwhack", "lprtrace", "lmeetbrt", "lhipout", "lkiddoge", "lhelldog", "lpackage", "lsack"]},
       {"zone": "desert", "prefixes": ["was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"]},
       {"zone": "under", "prefixes": ["sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"]},
       {"zone": "volcano", "prefixes": ["vol"]},
       {"zone": "temple", "prefixes": ["temp", "tomb"]},
-      {"zone": "wilds", "prefixes": ["ruins", "mountain", "mtnext", "mincan", "consite", "sagehut", "skatea", "atoll"]},
+      {"zone": "wilds", "prefixes": ["ruins", "mountain", "mtnext", "mincan", "consite", "sagehut", "skatea", "atoll", "village1", "island1"]},
       {"zone": "under", "prefixes": ["prison", "throne", "garage", "castle"]}
     ],
     "jak3": [
       {"zone": "forest", "prefixes": ["for", "lfor"]},
-      {"zone": "metalhead", "prefixes": ["mhc", "nst", "lmh", "nes"]},
+      {"zone": "metalhead", "prefixes": ["mhc", "nst", "lmh", "nes", "lnst"]},
       {"zone": "haven-industrial", "prefixes": ["ctyind"]},
-      {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide"]},
-      {"zone": "desert", "prefixes": ["was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"]},
-      {"zone": "under", "prefixes": ["sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"]},
+      {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide", "rubble", "rubl", "citylow", "lcitysml", "museum", "lbb", "lppatrol", "lpattack", "lpatkcs"]},
+      {"zone": "desert", "prefixes": ["was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig", "lwland", "oasis", "ldesg", "bikearena"]},
+      {"zone": "under", "prefixes": ["sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas", "ltow", "lfac", "warinta"]},
       {"zone": "volcano", "prefixes": ["vol"]},
-      {"zone": "temple", "prefixes": ["temp", "tomb"]}
+      {"zone": "temple", "prefixes": ["temp", "tomb", "lprecurc"]}
     ]
   },
 
