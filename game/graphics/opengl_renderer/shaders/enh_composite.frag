@@ -3387,6 +3387,9 @@ void main() {
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
       // (by the low sun where its glow is: the faces toward it lit, the ones toward us backlit)
       vec2 brg = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+      // (turned ~57 degrees: here the glow the eye takes for the sun sits well left of the disk,
+      // and the reference lights the mountains from there)
+      brg = mat2(cos(1.0), sin(1.0), -sin(1.0), cos(1.0)) * brg;
       float lit = smoothstep(-0.05, 0.35, dot(world_dir(surf_n), vec3(brg.x * 0.95, 0.3, brg.y * 0.95)));
       vec3 lg3 = vec3(luma(c));
       vec3 sunny = max(mix(lg3, c, 1.35), 0.0) * vec3(1.1, 0.95, 0.78);
