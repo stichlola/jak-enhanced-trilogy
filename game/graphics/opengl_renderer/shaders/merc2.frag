@@ -26,6 +26,7 @@ in vec3 enh_pos;
 uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
 uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
+uniform int enh_cloth;      // Enhanced: see-through cloth, shown as the game draws it (no post)
 
 void main() {
   if (gfx_hack_no_tex == 0) {
@@ -73,7 +74,12 @@ void main() {
     }
     // (0.45 long: a character, so the composite spares it the land's late-afternoon deepening and
     // the sun relight's dark side; the game lights characters by its own lights)
-    enh_normal_out = flen > 0.0 ? vec4(n * 0.45 * 0.5 + 0.5, 1.0) : vec4(0.0);
+    // (cloth is one face, seen from both sides: its normal always toward the camera, from behind too)
+    if (enh_cloth != 0 && flen > 0.0 && dot(n, transpose(enh_world_to_view) * normalize(vtx_view)) < 0.0) {
+      n = -n;
+    }
+    // (0.52: see-through cloth, the composite puts the game's own color back over it)
+    enh_normal_out = flen > 0.0 ? vec4(n * (enh_cloth != 0 ? 0.52 : 0.45) * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
   // Enhanced: a rim of the key light around the silhouette, brighter on the lit side, and a soft

@@ -3745,6 +3745,12 @@ void main() {
   // (the flames as the game drew them: a sprite with no depth of its own, everything above shaded
   // it as what's behind it, the palm's trunk in its shadow: dim, green-blue)
   c = mix(c, flame_raw, flame_keep);
+  // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
+  // and shade made it look transparent
+  {
+    float cl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    c = mix(c, texture(tex_T0, tex_coord).rgb, (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
+  }
 
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky

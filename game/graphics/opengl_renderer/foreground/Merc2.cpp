@@ -751,6 +751,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->fog_color = glGetUniformLocation(id, "fog_color");
   uniforms->perspective_matrix = glGetUniformLocation(id, "perspective_matrix");
   uniforms->ignore_alpha = glGetUniformLocation(id, "ignore_alpha");
+  uniforms->enh_cloth = glGetUniformLocation(id, "enh_cloth");
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
 }
@@ -1432,9 +1433,12 @@ void Merc2::do_draws(const Draw* draw_array,
       // Enhanced: see-through cloth (Jak's tunic, alpha-blended) writes its normal too where it
       // isn't cut out (a = 1 there): without it the post lit the legs' normals behind it, their
       // shape showing through the cloth
-      if (normals.on() && draw.mode.get_ab_enable() &&
-          draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) {
+      // (and marked as cloth: the composite shows it as the game draws it)
+      const bool cloth = normals.on() && draw.mode.get_ab_enable() &&
+                         draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST;
+      if (cloth) {
         glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glUniform1i(uniforms.enh_cloth, 1);
       }
       prof.add_draw_call();
       prof.add_tri(draw.num_triangles);
@@ -1442,6 +1446,9 @@ void Merc2::do_draws(const Draw* draw_array,
                         sizeof(math::Vector4f) * draw.first_bone, 128 * sizeof(ShaderMercMat));
       glDrawElements(draw.no_strip ? GL_TRIANGLES : GL_TRIANGLE_STRIP, draw.index_count,
                      GL_UNSIGNED_INT, (void*)(sizeof(u32) * draw.first_index));
+      if (cloth) {
+        glUniform1i(uniforms.enh_cloth, 0);
+      }
     }
   }
 
