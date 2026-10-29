@@ -3310,7 +3310,7 @@ void main() {
         // (while a wave spans ~2 pixels across the crests; the depth's edges give a huge
         // derivative: there the pixel's own size)
         float m = rip_m < foot * 3.0 ? rip_m : foot;
-        float vis = 1.0 - smoothstep(wl / 5.0, wl / 1.8, m);
+        float vis = 1.0 - smoothstep(wl / 3.2, wl / 1.25, m);
         if (vis > 0.0) {
           float sc = 0.24 / wl;
           vec2 o = vec2(5.1, 3.3) * float(k);
@@ -3326,7 +3326,7 @@ void main() {
           vec2 cr = vec2(dot(xz, vec2(-across.y, across.x)) / (wl * 7.0), dot(xz, across) / (wl * 1.8));
           float whole = 0.25 + 0.75 * smoothstep(-0.3, 0.3, gnoise(cr + o * 1.7));
           // (the smallest fully up close, the next ones mixed under it a little)
-          float wgt = vis * (k == 0 ? 1.0 : 0.35);
+          float wgt = vis * (k == 0 ? 1.0 : 0.6);
           shade += wgt * whole * (0.08 * slope * facing + 0.025 * crest);
           wsum += wgt;
         }
