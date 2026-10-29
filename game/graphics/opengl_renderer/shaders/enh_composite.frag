@@ -1568,7 +1568,7 @@ float ground_height(vec2 xz, float glod, float plod) {
   vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * xz / 0.7;
   vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * xz / 3.1 + 0.29;
   return luma(textureLod(tex_T10, gq, glod).rgb) * 0.008 + luma(textureLod(tex_T10, pq, plod).rgb) * 0.015 +
-         smoothstep(-0.2, 0.4, gnoise(xz / 0.45 + 1.9)) * 0.09 + gnoise(xz / 1.4 + 3.3) * 0.2;
+         smoothstep(-0.2, 0.4, gnoise(xz / 0.45 + 1.9)) * 0.05 + gnoise(xz / 1.4 + 3.3) * 0.12;
 }
 
 void main() {
