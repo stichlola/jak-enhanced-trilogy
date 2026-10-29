@@ -981,7 +981,8 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   if (t0 > 30000.0) {
     return vec4(0.0, 0.0, 0.0, 1.0);
   }
-  float lo = 0.6 - clouds.y * 0.42;
+  // (the late afternoon's heaps fewer over the desert: apart, with clear sky between)
+  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze;
   vec3 sw = world_dir(sky_sun.xyz);
   vec3 sc = sun_color() * (1.0 - 0.6 * weather2.x);
   float cosang = dot(wd, sw);
@@ -2229,7 +2230,8 @@ void main() {
     vec3 sw = world_dir(sky_sun.xyz);
     if (sw.y > 0.06) {
       vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
-      float lo = 0.6 - clouds.y * 0.42;
+      // (the late afternoon's heaps fewer over the desert: apart, with clear sky between)
+  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze;
       // (one look through the middle of the layer, counted for three: the patches are big and soft,
       // three looks cost a millisecond)
       float d = 3.0 * cloud_density(wp + sw * ((1450.0 - wp.y) / sw.y), lo, 2);
