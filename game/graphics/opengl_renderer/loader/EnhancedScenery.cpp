@@ -521,6 +521,16 @@ void prepare_tree(tfrag3::ShrubTree& tree,
         for (int c = 0; c < 3; c++) {
           b.tint[c] = std::clamp(own->second[c] / std::max(mesh.avg[c], 0.02f), 0.2f, 2.5f);
         }
+        // (and the baked light's brightness only: its grey-green hue turned them grey)
+        const float lum = 0.3f * b.base_rgb[0] + 0.59f * b.base_rgb[1] + 0.11f * b.base_rgb[2];
+        static int logged = 0;
+        if (logged++ < 8) {
+          lg::info("[enhanced] scenery {} baked light {:.2f} {:.2f} {:.2f}",
+                   tree.proto_names[proto], b.base_rgb[0], b.base_rgb[1], b.base_rgb[2]);
+        }
+        for (int c = 0; c < 3; c++) {
+          b.base_rgb[c] = lum;
+        }
       } else if (draw.tree_tex_id < textures.size()) {
         Vec3 want = texture_average(textures[draw.tree_tex_id]);
         for (int c = 0; c < 3; c++) {

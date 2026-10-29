@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -19,6 +21,50 @@ constexpr float kMeter = 4096.f;
 constexpr u32 kNoTex = UINT32_MAX;
 
 using Vec3 = math::Vector3f;
+
+// the height field (Jak 3's desert floor, an hfrag): 512 x 512 heights 8 m apart from the world
+// origin, kept from the level that has it for the levels loaded after it (their stones stand on it)
+constexpr int kHfragEdge = 512;
+constexpr float kHfragStep = 8.f * kMeter;
+std::mutex g_hfrag_mutex;
+std::shared_ptr<const std::vector<float>> g_hfrag;
+
+void keep_hfrag(const tfrag3::Level& level) {
+  const auto& verts = level.hfrag.vertices;
+  if (verts.size() < kHfragEdge * kHfragEdge / 2) {
+    return;
+  }
+  auto h = std::make_shared<std::vector<float>>(kHfragEdge * kHfragEdge, NAN);
+  for (const auto& v : verts) {
+    if (v.vi < h->size()) {
+      (*h)[v.vi] = v.height;
+    }
+  }
+  std::lock_guard<std::mutex> lock(g_hfrag_mutex);
+  g_hfrag = h;
+}
+
+std::shared_ptr<const std::vector<float>> current_hfrag() {
+  std::lock_guard<std::mutex> lock(g_hfrag_mutex);
+  return g_hfrag;
+}
+
+// the height field's height at (x, z), between its four nearest heights
+bool hfrag_height(const std::vector<float>& h, float x, float z, float* out) {
+  float fx = x / kHfragStep, fz = z / kHfragStep;
+  int x0 = (int)std::floor(fx), z0 = (int)std::floor(fz);
+  if (x0 < 0 || z0 < 0 || x0 + 1 >= kHfragEdge || z0 + 1 >= kHfragEdge) {
+    return false;
+  }
+  float tx = fx - x0, tz = fz - z0;
+  float a = h[z0 * kHfragEdge + x0], b = h[z0 * kHfragEdge + x0 + 1];
+  float c = h[(z0 + 1) * kHfragEdge + x0], d = h[(z0 + 1) * kHfragEdge + x0 + 1];
+  if (std::isnan(a) || std::isnan(b) || std::isnan(c) || std::isnan(d)) {
+    return false;
+  }
+  *out = (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
+  return true;
+}
 
 /*!
  * The level's floor: its upward-facing triangles (tfrag and tie, most detailed), bucketed on a 2D
@@ -89,11 +135,23 @@ class Ground {
               float* out,
               u32* tex = nullptr) const {
     auto it = m_cells.find(key(cell(x), cell(z)));
-    if (it == m_cells.end()) {
-      return false;
-    }
     bool found = false;
     float best = 0;
+    // (the height field under it all, where there's one)
+    float hy;
+    if (hfrag && hfrag_height(*hfrag, x, z, &hy) && hy >= y_ref - below && hy <= y_ref + above) {
+      best = hy;
+      found = true;
+      if (tex) {
+        *tex = kNoTex;
+      }
+    }
+    if (it == m_cells.end()) {
+      if (found) {
+        *out = best;
+      }
+      return found;
+    }
     for (u32 id : it->second) {
       const Vec3& a = m_tris[id * 3];
       const Vec3& b = m_tris[id * 3 + 1];
@@ -128,6 +186,7 @@ class Ground {
   }
 
   size_t size() const { return m_tex.size(); }
+  std::shared_ptr<const std::vector<float>> hfrag;
   const Vec3* tri(u32 id) const { return &m_tris[id * 3]; }
   u32 tex(u32 id) const { return m_tex[id]; }
 
@@ -285,6 +344,8 @@ struct Plant {
   bool grounded = false;
   bool crossed = false;  // made of crossed cards (a plant, not a fence or litter)
   bool copy = false;     // gets copies around it
+  bool stone = false;    // a pebble or a little rock (solid): copies scattered wider
+  int proto = -1;
   u32 floor_tex = kNoTex;
 };
 
@@ -376,6 +437,7 @@ void add_to_tree(tfrag3::ShrubTree& tree,
         if (v < verts.size() && plant_of[v] != UINT32_MAX) {
           auto& p = plants[plant_of[v]];
           p.seen = true;
+          p.proto = draw.proto_idx;
           if (!cutout) {
             p.cutout = false;
           }
@@ -387,7 +449,14 @@ void add_to_tree(tfrag3::ShrubTree& tree,
   // small cutout plants standing on the floor; the ones made of crossed cards (not a flat fence
   // or sign) get copies around them
   for (auto& p : plants) {
-    if (!p.seen || !p.cutout || p.end_vert - p.first_vert < 4) {
+    if (p.seen && p.proto >= 0 && p.proto < (int)tree.proto_names.size()) {
+      // (the desert's pebbles and little rock clusters: not crossed cards, but strewn about like
+      // the plants)
+      const auto& name = tree.proto_names[p.proto];
+      p.stone = name.find("pebble") != std::string::npos ||
+                name.find("rock-cluster") != std::string::npos;
+    }
+    if (!p.seen || (!p.cutout && !p.stone) || p.end_vert - p.first_vert < 4) {
       continue;
     }
     float min_y = 1e30f, max_y = -1e30f, sx = 0, sz = 0;
@@ -407,7 +476,7 @@ void add_to_tree(tfrag3::ShrubTree& tree,
     p.radius = r;
     p.height = max_y - min_y;
     // 30 cm and up: pebbles and litter are crossed cards too
-    p.grounded = p.height < 1.6f * kMeter && p.height > 0.3f * kMeter &&
+    p.grounded = p.height < 1.6f * kMeter && p.height > (p.stone ? 0.03f : 0.3f) * kMeter &&
                  ground.height(p.cx, p.cz, min_y, 0.4f * kMeter, 0.4f * kMeter, &p.base,
                                &p.floor_tex);
     bool crossed = false;
@@ -418,7 +487,8 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       }
     }
     p.crossed = crossed;
-    p.copy = p.grounded && crossed && r < 2.f * kMeter && r > 0.08f * kMeter;
+    p.copy = p.grounded && (crossed || p.stone) && r < (p.stone ? 6.f : 2.f) * kMeter &&
+             r > 0.08f * kMeter;
   }
 
   // the new strips: per original draw and tier
@@ -448,10 +518,13 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       continue;
     }
     stats->plants++;
-    for (u32 k = 0; k < 3; k++) {
-      int tier = k == 0 ? 1 : 2;
-      float ang = 6.2831853f * (rnd(tree_idx, g, k * 7 + 1) + k / 3.f);
-      float dist = p.radius * (1.1f + 1.2f * rnd(tree_idx, g, k * 7 + 2)) + 0.25f * kMeter;
+    // (stones: more of them and wider, a strewn field instead of a ring)
+    const u32 n_copies = p.stone ? 14 : 3;
+    for (u32 k = 0; k < n_copies; k++) {
+      int tier = k < n_copies / 3 ? 1 : 2;
+      float ang = 6.2831853f * (rnd(tree_idx, g, k * 7 + 1) + k / (float)n_copies);
+      float dist = p.stone ? p.radius * 1.2f + (0.8f + 7.f * rnd(tree_idx, g, k * 7 + 2)) * kMeter
+                           : p.radius * (1.1f + 1.2f * rnd(tree_idx, g, k * 7 + 2)) + 0.25f * kMeter;
       float x = p.cx + std::cos(ang) * dist;
       float z = p.cz + std::sin(ang) * dist;
       float y, y_mid;
@@ -462,6 +535,10 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       }
       float yaw = 6.2831853f * rnd(tree_idx, g, k * 7 + 3);
       float scale = 0.75f + 0.45f * rnd(tree_idx, g, k * 7 + 4);
+      if (p.stone && p.radius > 1.5f * kMeter) {
+        // (a wide cluster's copies smaller: little heaps of it, each sitting on its own spot)
+        scale = (0.6f + 0.5f * rnd(tree_idx, g, k * 7 + 4)) * kMeter / p.radius;
+      }
       u32 offset = place(verts, p.first_vert, p.end_vert, p.cx, p.cz, p.base, x, y, z, yaw, scale);
       for (const auto& [d, s] : plant_strips[g]) {
         emit(d, tier, s, p.first_vert, offset);
@@ -819,10 +896,12 @@ void add_to_tree(tfrag3::ShrubTree& tree,
 }  // namespace
 
 void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
+  keep_hfrag(level);
   if (level.shrub_trees.empty()) {
     return;
   }
   Ground ground;
+  ground.hfrag = current_hfrag();
   Walls walls;
   for (const auto& tree : level.tfrag_trees[0]) {
     if (tree.kind != tfrag3::TFragmentTreeKind::NORMAL &&
@@ -852,7 +931,7 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
                 4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats);
   }
   lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} tufts on {} "
-           "grassy floors, {} wall vines with {} copies",
+           "grassy floors, {} wall vines with {} copies{}",
            name, ground.size(), stats.plants, stats.copies, stats.tufts, stats.habitats,
-           stats.vine_sources, stats.vines);
+           stats.vine_sources, stats.vines, ground.hfrag ? " (and the height field)" : "");
 }
