@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "common/log/log.h"
+
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
@@ -36,8 +38,14 @@ inline u8 enhanced_material(std::string name) {
       }
     }
   }
-  // the ground's sand (not sandstone, not a sandbag)
-  if (has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick"})) {
+  // ("environment" holds "iron": the sky's and sea's environment maps aren't metal)
+  for (size_t at; (at = name.find("environment")) != std::string::npos;) {
+    name.replace(at, 11, "env");
+  }
+  // the ground's sand (not sandstone, not a sandbag); Sandover's beaches (bch-beach-01,
+  // vil-beach-01path, vil1-medres-beach: not its rocks and grass)
+  if ((has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick"})) ||
+      (has({"beach"}) && !has({"rock", "grass", "shrub", "plant", "leaf"}))) {
     return kSand;
   }
   // the desert's cracked rocky ground (its slopes)
@@ -68,9 +76,21 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
   auto& m = lev->enh_materials;
   if (m.size() != lev->level->textures.size()) {
     m.clear();
+    int count[6] = {0, 0, 0, 0, 0, 0};
+    // (JAK_ENHANCED_MATERIAL_NAMES=1: each texture's name and material in the log)
+    static const bool names = std::getenv("JAK_ENHANCED_MATERIAL_NAMES") != nullptr;
     for (const auto& tex : lev->level->textures) {
       m.push_back(enhanced_material(tex.debug_name));
+      count[m.back()]++;
+      if (names) {
+        lg::info("[enhanced] material {} {}: {}", lev->level->level_name, tex.debug_name, m.back());
+      }
     }
+    // (in the log: a level whose rock or sand isn't named so misses the sun on the rock, the
+    // sand's ripples and grade)
+    lg::info("[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} glossy, {} plain",
+             lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
+             count[kGlossy], count[kPlain]);
   }
   return m;
 }

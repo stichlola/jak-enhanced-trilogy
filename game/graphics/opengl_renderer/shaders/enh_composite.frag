@@ -2380,7 +2380,11 @@ void main() {
       // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
       // and fuller (light and shadow apart)
       // (in the desert's day the shade takes the open sky's blue: lilac-grey, not brown)
-      c *= vec3(1.0) - shadow_strength * sh * mix(vec3(1.05, 0.97, 0.8), vec3(1.15, 0.85, 0.3), sky_day);
+      // (the desert's deep lilac; elsewhere only a little cooler: on Sandover's beach that blue
+      // turned the shaded sand navy)
+      float lilac = sky_day * min(sun_haze * 1.25, 1.0);
+      vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
+      c *= vec3(1.0) - shadow_strength * sh * tint;
       c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
                        vec3(0.08, 0.07, 0.05);
     }
@@ -3845,6 +3849,16 @@ void main() {
     float hl = smoothstep(0.72, 0.95, luma(g));
     g = mix(g, luma(g) * vec3(1.08, 0.96, 0.66) * 0.93, hl * 0.75);
     c = mix(c, g, day_look * ground);
+  }
+  // sand outside the desert (Sandover's beach): in the shade never darker than the open sky
+  // lights it, a soft grey-blue (the game's own morning light there near black)
+  if (sky_day > 0.0 && sun_haze == 0.0 && z > 0.0 && wsurf == 0.0) {
+    float stag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if (stag > 0.85 && stag < 0.95) {
+      float lsh = luma(c);
+      vec3 lifted = c * clamp(0.34 / max(lsh, 0.02), 1.0, 2.4) * vec3(1.02, 1.0, 0.97);
+      c = mix(c, lifted, sky_day * (1.0 - smoothstep(80.0, 400.0, length(p) / 4096.0)));
+    }
   }
   c = mix(c, flame_raw, flame_keep);
   // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
