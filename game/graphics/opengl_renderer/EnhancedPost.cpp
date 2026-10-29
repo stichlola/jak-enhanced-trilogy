@@ -3644,6 +3644,46 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     auto& draws = m_shadow_draws[lev->load_id];
     const auto& name = lev->level->level_name;
     const bool cut = (name == "mhcitya" || name == "ctyport") && enhanced_has_piazza();
+    // a tree's draws that cast, as runs of its index buffer: not the alpha-blended ones (decals,
+    // veils): see-through, they cast hard-edged dark slabs (the alpha-tested ones stay solid: in
+    // jak 3 every draw is alpha tested); nor a tie's water, nor the envmapped ones' second (shiny)
+    // draw, the same shape again
+    auto add_solid = [&](const std::vector<tfrag3::StripDraw>& tree_draws, size_t num_idx,
+                         const ShadowDraw& proto, const tfrag3::TieTree* tie) {
+      size_t added = 0;
+      for (size_t k = 0; k < tree_draws.size(); k++) {
+        const auto& draw = tree_draws[k];
+        if (tie) {
+          int cat = 0;
+          while (cat + 1 < tfrag3::kNumTieCategories && k >= tie->category_draw_indices[cat + 1]) {
+            cat++;
+          }
+          const auto c = (tfrag3::TieCategory)cat;
+          if (c == tfrag3::TieCategory::WATER || c == tfrag3::TieCategory::WATER_ENVMAP ||
+              tfrag3::is_envmap_second_draw_category(c)) {
+            continue;
+          }
+        }
+        u32 first = draw.unpacked.idx_of_first_idx_in_full_buffer;
+        u32 end = k + 1 < tree_draws.size()
+                      ? tree_draws[k + 1].unpacked.idx_of_first_idx_in_full_buffer
+                      : (u32)num_idx;
+        if (draw.mode.get_ab_enable() || end <= first) {
+          continue;
+        }
+        if (added && draws.back().first + draws.back().count == first) {
+          draws.back().count += end - first;  // (joined to the run before)
+          continue;
+        }
+        ShadowDraw d = proto;
+        d.own_indices = proto.own_indices && !added;  // (the buffer freed with the first)
+        d.first = first;
+        d.count = end - first;
+        draws.push_back(d);
+        added++;
+      }
+      return added;
+    };
     const auto& tfrags = lev->level->tfrag_trees[0];
     for (size_t i = 0; i < tfrags.size() && i < lev->tfrag_vertex_data[0].size(); i++) {
       const auto& tree = tfrags[i];
@@ -3659,10 +3699,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       glBufferData(GL_ELEMENT_ARRAY_BUFFER, tree.unpacked.indices.size() * sizeof(u32),
                    tree.unpacked.indices.data(), GL_STATIC_DRAW);
       d.own_indices = true;
-      d.count = tree.unpacked.indices.size();
       d.mode = tree.use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
       d.cut = cut;
-      draws.push_back(d);
+      if (!add_solid(tree.draws, tree.unpacked.indices.size(), d, nullptr)) {
+        glDeleteBuffers(1, &d.indices);
+      }
     }
     const auto& ties = lev->level->tie_trees[0];
     for (size_t i = 0; i < ties.size() && i < lev->tie_data[0].size(); i++) {
@@ -3672,10 +3713,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       ShadowDraw d;
       d.vertices = lev->tie_data[0][i].vertex_buffer;
       d.indices = lev->tie_data[0][i].index_buffer;
-      d.count = ties[i].unpacked.indices.size();
       d.mode = ties[i].use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
       d.cut = cut;
-      draws.push_back(d);
+      add_solid(ties[i].static_draws, ties[i].unpacked.indices.size(), d, &ties[i]);
     }
     add_wind_shadow_draws(lev, cut, &draws);
   }
