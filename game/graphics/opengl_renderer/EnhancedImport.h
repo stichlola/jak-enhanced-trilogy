@@ -17,7 +17,6 @@ struct EnhancedImportResult {
   std::string error;
   int faces_in = 0, faces = 0, lod_faces = 0, materials = 0;
   float size[3] = {0, 0, 0};  // m: x, height, z
-  float origin[3] = {0, 0, 0};  // m: the file's point that became the model's foot (where it stood)
 };
 
 EnhancedImportResult enhanced_import_model(const std::string& src,
@@ -26,16 +25,3 @@ EnhancedImportResult enhanced_import_model(const std::string& src,
                                            int max_faces,
                                            float scale = 1.f);
 
-// The editor's objects as one mesh for an OpenGOAL custom level (goalc's build-custom-level): each
-// scenery model (scenery_dir/MODEL) once, a node for each object (its place, turn and scale: cols,
-// the turned and scaled axes; pos, its foot, meters). Written as a .glb at out_path; "" when done,
-// else what went wrong. models: how many different ones it took
-struct EnhancedLevelObject {
-  std::string model;
-  float pos[3];
-  float cols[3][3];
-};
-std::string enhanced_export_level_glb(const std::vector<EnhancedLevelObject>& objs,
-                                      const std::string& scenery_dir,
-                                      const std::string& out_path,
-                                      int* models);
