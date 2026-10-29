@@ -3784,10 +3784,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     auto& draws = m_shadow_draws[lev->load_id];
     const auto& name = lev->level->level_name;
     const bool cut = (name == "mhcitya" || name == "ctyport") && enhanced_has_piazza();
-    // a tree's draws that cast, as runs of its index buffer: not the alpha-blended ones (decals,
-    // veils): see-through, they cast hard-edged dark slabs (the alpha-tested ones stay solid: in
-    // jak 3 every draw is alpha tested); nor a tie's water, nor the envmapped ones' second (shiny)
-    // draw, the same shape again
+    // a tree's draws that cast, as runs of its index buffer: not the alpha-blended ones that leave
+    // the depth alone (decals, veils): see-through, they cast hard-edged dark slabs. The blended
+    // ones that write depth are solid (jak 3's desert draws its rocks, palms and buildings that
+    // way: left out, nothing there cast); nor a tie's water, nor the envmapped ones' second
+    // (shiny) draw, the same shape again
     auto add_solid = [&](const std::vector<tfrag3::StripDraw>& tree_draws, size_t num_idx,
                          const ShadowDraw& proto, const tfrag3::TieTree* tie) {
       size_t added = 0;
@@ -3808,7 +3809,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         u32 end = k + 1 < tree_draws.size()
                       ? tree_draws[k + 1].unpacked.idx_of_first_idx_in_full_buffer
                       : (u32)num_idx;
-        if (draw.mode.get_ab_enable() || end <= first) {
+        if ((draw.mode.get_ab_enable() && !draw.mode.get_depth_write_enable()) || end <= first) {
           continue;
         }
         if (added && draws.back().first + draws.back().count == first) {
@@ -3989,6 +3990,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   // tens of meters long that follows it around (the game's own short shadow stays)
   if (m_settings.shadow_casters && sun[1] / len > 0.12f) {
     draw_shadow_casters(render_state, prof);
+    g_enhanced_casters.cast = true;
   }
   glDisable(GL_POLYGON_OFFSET_FILL);
   glDisable(GL_PRIMITIVE_RESTART);
@@ -4445,8 +4447,9 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
         m_sky_view[col] = -m_sky_view[col];
       }
     }
-    // kept with the shadow map: characters aren't in the map, these give them their shadows
-    const bool on = m_settings.sun_shadows && g_enhanced_sun.valid;
+    // kept with the shadow map when the characters aren't in it: these give them their shadows
+    // (with them in it, a second shadow cast the game's own way: darker, doubled)
+    const bool on = m_settings.sun_shadows && g_enhanced_sun.valid && !g_enhanced_casters.cast;
     glUniform4f(glGetUniformLocation(id, "sun"), sun[0], sun[1], sun[2],
                 on ? m_settings.sun_shadow_strength : 0.f);
     glUniform1f(glGetUniformLocation(id, "sun_length"), m_settings.sun_shadow_length * kMeter);
@@ -4597,6 +4600,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_gi_ready = false;
   m_vol_ready = false;
   m_shadow_ready = false;
+  g_enhanced_casters.cast = false;
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }

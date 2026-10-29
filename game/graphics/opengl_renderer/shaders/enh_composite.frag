@@ -3730,16 +3730,19 @@ void main() {
     if (tag > 0.7 && tag < 0.8) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - morning)) * (1.0 - weather.x);
-      float lit = smoothstep(-0.05, 0.45, dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0))));
+      float rndl = dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0)));
+      // (the low morning sun grazes most of a peak: the light wraps further round, only the faces
+      // turned right away in shade)
+      float lit = smoothstep(mix(-0.05, -0.4, morning), mix(0.45, 0.3, morning), rndl);
       float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
       // (in the morning the faces away from the low sun deep and lilac-brown, the lit ones warm)
-      vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.56, 0.5, 0.6), morning);
-      vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.55, 1.3, 1.0), morning);
+      vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.6, 0.54, 0.64), morning);
+      vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), morning);
       vec3 relit = c * mix(shade_k, lit_k, lit);
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
-      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(0.55, 0.9, far) * sun_haze);
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, morning) * sun_haze);
     }
     // (and the sand and the rocky ground: the game lights them a greyish white, stopped down above
     // they went a dull grey. Warm golden sand instead, its brightness kept, the sun's side and

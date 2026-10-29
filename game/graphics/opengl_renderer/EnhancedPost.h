@@ -96,6 +96,9 @@ struct EnhancedCasters {
     bool strip = true;
   };
   bool capture = false;  // set at the start of a frame when the shadow map wants them
+  // the shadow map drew them (this frame, or the last one for the game's buckets): the game's own
+  // character shadows (Shadow2) and the screen-space sun shadows are left out, a second, wrong one
+  bool cast = false;
   u32 alignment = 1;     // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;

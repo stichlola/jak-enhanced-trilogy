@@ -1,5 +1,7 @@
 #include "Shadow2.h"
 
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+
 #include "third-party/imgui/imgui.h"
 
 Shadow2::Shadow2(const std::string& name, int my_id) : BucketRenderer(name, my_id) {
@@ -421,7 +423,9 @@ void set_uniform(GLint id, const math::Vector4f& value) {
 void Shadow2::draw_buffers(SharedRenderState* render_state,
                            ScopedProfilerNode& prof,
                            const FrameConstants& constants) {
-  if (!m_front_index_buffer_used && !m_back_index_buffer_used) {
+  // (Enhanced: the sun shadow map casts the characters, along the sun; the game's own shadow
+  // would be a second one, the game's way)
+  if ((!m_front_index_buffer_used && !m_back_index_buffer_used) || g_enhanced_casters.cast) {
     return;
   }
 
