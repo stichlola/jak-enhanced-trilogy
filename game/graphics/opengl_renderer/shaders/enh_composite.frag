@@ -3341,6 +3341,9 @@ void main() {
       float fine = 1.0 - smoothstep(0.006, 0.015, foot);
       float grain = fine > 0.0 ? gnoise(xz * 23.0) * 0.6 + gnoise(xz * 61.0) * 0.4 : 0.0;  // (near only)
       c *= 1.0 + rip * (patches * shade + 0.07 * grain * fine);
+      // (and swaths tens of meters across, paler or deeper: wind-sorted sand, not one even tone)
+      float swath = gnoise(xz / 38.0 + 1.3) * 0.6 + gnoise(xz / 11.0 + 4.1) * 0.4;
+      c *= 1.0 + rip * swath * vec3(0.12, 0.15, 0.2);
     }
   }
 
