@@ -1554,6 +1554,14 @@ float ao_upsample(vec2 uv, float zc) {
   return sum / wsum;
 }
 
+// the rocky ground's made-up relief (m): the rock picture's brightness as height, small and turned
+// (crust) plus bigger and turned the other way (plates), as in main's rocky ground
+float ground_height(vec2 xz, float glod, float plod) {
+  vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * xz / 0.7;
+  vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * xz / 3.1 + 0.29;
+  return luma(textureLod(tex_T10, gq, glod).rgb) * 0.03 + luma(textureLod(tex_T10, pq, plod).rgb) * 0.05;
+}
+
 void main() {
   if (cloud_pass == 1) {
     color = cloud_march();
@@ -3173,7 +3181,46 @@ void main() {
       // (the rocky ground (normals 0.6 long): the game paints it as pale as the sand around)
       // (and its grain stronger: gravel, mottled light and dark, warm)
       if (nl < 0.65) {
-        c *= 0.55 * max(1.0 + rock_detail * 2.4 * d * bands, 0.3) * vec3(1.06, 1.0, 0.9);
+        // (not the blocky picture: over the flat ground its cracks tile into a grid; weathered stone
+        // and gravel instead, soft mottling at a few sizes, the finest only near)
+        float m = gnoise(wp.xz / 0.9 + 3.1) * 0.35 + gnoise(wp.xz / 3.0 + 8.2) * 0.4 +
+                  gnoise(wp.xz / 11.0 + 1.7) * 0.25;
+        float close = 1.0 - smoothstep(8.0, 35.0, dist);
+        // (the grit: the rock picture small and turned, so its blocks don't line up into a grid)
+        vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * wp.xz / 0.7;
+        float glod = max(log2(foot * 512.0 / 0.7), 0.0);
+        float grit = glod < 8.0 ? (luma(textureLod(tex_T10, gq, glod).rgb) - rock_detail_avg) : 0.0;
+        // (and crusted plates a few meters across: the same picture bigger, turned the other way)
+        vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * wp.xz / 3.1 + 0.29;
+        float plod = max(log2(foot * 512.0 / 3.1), 0.0);
+        float plates = plod < 8.0 ? (luma(textureLod(tex_T10, pq, plod).rgb) - rock_detail_avg) : 0.0;
+        // (its dark crack lines kept faint, its light crust strong; and lumps, light and dark)
+        grit = grit > 0.0 ? grit * 2.6 : grit * 1.0;
+        plates = plates > 0.0 ? plates * 1.8 : plates * 0.6;
+        float lumps = smoothstep(-0.15, 0.3, gnoise(wp.xz / 0.45 + 1.9)) - 0.5;
+        float fine = (gnoise(wp.xz / 0.22 + 5.5) * 0.6 + grit + plates + lumps * 0.55) * close;
+        c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
+        c *= 0.47 * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
+        c = mix(vec3(luma(c)), c, 0.92) * vec3(1.04, 0.98, 0.98);  // (weathered: less yellow)
+        // (lit by the sun: the relief's slope against the light, near only)
+        if (close > 0.0 && plod < 6.0) {
+          const float e = 0.06;
+          float h0 = ground_height(wp.xz, glod, plod);
+          vec2 grad = vec2(ground_height(wp.xz + vec2(e, 0.0), glod, plod) - h0,
+                           ground_height(wp.xz + vec2(0.0, e), glod, plod) - h0) / e;
+          vec3 bn = normalize(wn - vec3(grad.x, 0.0, grad.y) * 1.0);
+          vec3 ws = normalize(world_dir(sun_dir.xyz));
+          float base = max(dot(wn, ws), 0.05);
+          float relief = clamp(max(dot(bn, ws), 0.0) / base, 0.55, 1.6);
+          float rk = close * 0.7 * clamp(base * 4.0, 0.0, 1.0);
+          // (the sunlit sides warm, the turned-away ones cooler: the sky lights them)
+          vec3 tint = relief > 1.0 ? mix(vec3(1.0), vec3(1.1, 0.98, 0.84), min(relief - 1.0, 1.0))
+                                   : mix(vec3(1.0), vec3(0.92, 0.96, 1.08), min(1.0 - relief, 1.0) * 2.0);
+          c *= mix(vec3(1.0), relief * tint, rk);
+        }
+        // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
+        float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));
+        c = mix(c, c * vec3(1.55, 1.38, 1.12), drift * 0.6 * rock_detail * 2.0);
       }
     }
   }
