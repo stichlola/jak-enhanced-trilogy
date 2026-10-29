@@ -16,6 +16,7 @@ flat in vec3 enh_imp_weight;
 flat in mat3 enh_imp_turn;
 flat in vec3 enh_imp_view;
 flat in vec2 enh_xfade;
+in float enh_imp_tip;
 
 uniform sampler2D tex_T0;  // the pictures
 uniform sampler2D tex_T1;  // their normals (the model's space, 0..1)
@@ -78,6 +79,9 @@ void main() {
   enh_normal_out = vec4(normalize(enh_imp_turn * n) * 0.5 + 0.5, 1.0);
 
   color = fragment_color * T0;
+  // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each
+  // other, deepest at its foot (the models nearer read dark, their far pictures cream puffs)
+  color.xyz *= mix(0.4, 0.85, smoothstep(0.0, 0.9, enh_imp_tip));
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
   }

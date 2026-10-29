@@ -37,6 +37,7 @@ flat out vec3 enh_imp_weight;
 flat out mat3 enh_imp_turn;      // model to world (normals)
 flat out vec3 enh_imp_view;      // toward the camera, the model's space
 flat out vec2 enh_xfade;
+out float enh_imp_tip;            // how high up the model (0 its foot, 1 its top)
 
 // the view direction (y up) at the center of a hemi-octahedral cell (uv 0..1), as the bake
 vec3 hemi_oct_dir(vec2 uv) {
@@ -110,4 +111,5 @@ void main() {
   enh_imp_turn = turn;
   enh_imp_view = to_cam;
   enh_xfade = vec2(inst_c1.w, inst_c2.w);
+  enh_imp_tip = tip;
 }
