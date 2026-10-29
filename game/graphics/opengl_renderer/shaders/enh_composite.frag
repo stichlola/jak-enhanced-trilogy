@@ -84,6 +84,9 @@ uniform float sun_haze;         // the area's warm haze lit by the sun over the 
 uniform float golden;           // the late afternoon's amber look (0..1, the area's times the hour)
 uniform float noon;             // the hours around noon (0..1)
 uniform float morning;          // the desert's morning (0..1): clear blue sky, peach toward the low sun
+uniform float sky_morning;      // the area's morning sky (0..1): pink and peach toward the low sun
+uniform float sky_day;          // the area's day sky (0..1, dawn to sunset): clear blue, its clouds lit to match
+uniform float rock_sun;         // the sun's own direction lighting rock and cliffs (0..1, the area's)
 uniform float day_look;         // the desert's day (0..1, morning to late afternoon): the morning's colors
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
@@ -993,8 +996,8 @@ vec3 sky_color(vec3 dv) {
   // the desert's morning: a clear blue overhead, the low sky pink-peach toward the sun and a pale
   // lilac away from it, a warm yellow-white glow around the sun
   // (the same blue all day, deeper overhead as the sun climbs; the pink and peach the morning's)
-  if (day_look > 0.0) {
-    float pink = clamp(morning / day_look, 0.0, 1.0);
+  if (sky_day > 0.0) {
+    float pink = clamp(sky_morning / sky_day, 0.0, 1.0);
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), sh);
     vec3 zen_m = mix(vec3(0.42, 0.65, 0.98), vec3(0.6, 0.8, 1.0), pink);
@@ -1006,9 +1009,9 @@ vec3 sky_color(vec3 dv) {
     mcol += vec3(1.0, 0.86, 0.6) * glow * pink;
     // (and wide and low on the sun's side: the yellow-peach glow along the horizon)
     mcol = mix(mcol, vec3(1.0, 0.82, 0.55), clamp(pow(az, 6.0) * exp(-up * 3.5) * 0.85 * pink, 0.0, 1.0));
-    col = mix(col, mcol, day_look * (1.0 - over));
+    col = mix(col, mcol, sky_day * (1.0 - over));
   }
-  col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * day_look);
+  col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * sky_day);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
   return col;
 }
@@ -1050,7 +1053,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     return vec4(0.0, 0.0, 0.0, 1.0);
   }
   // (the late afternoon's heaps fewer over the desert: apart, with clear sky between)
-  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze + 0.13 * day_look;
+  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze + 0.13 * sky_day;
   vec3 sw = world_dir(sky_sun.xyz);
   vec3 sc = sun_color() * (1.0 - 0.6 * weather2.x);
   float cosang = dot(wd, sw);
@@ -1073,14 +1076,14 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     top = mix(top, vec3(0.56, 0.46, 0.44), gs * 0.6);
     // (the sunlit sides a soft gold, not lit up: the bodies stay grey-brown against the sky)
     sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.85, gs);
-    // (the morning's: small pink heaps, lilac-grey bellies, lit soft peach)
-    // (pink toward the sun, white-lilac away from it)
-    float tw = smoothstep(-0.3, 0.9, cosang);
-    // (by day the same heaps white, their bellies lilac-grey)
-    tw *= clamp(morning / max(day_look, 1e-3), 0.0, 1.0);
-    under = mix(under, mix(vec3(0.74, 0.74, 0.84), vec3(0.8, 0.62, 0.7), tw), day_look * 0.85);
-    top = mix(top, mix(vec3(0.95, 0.94, 0.98), vec3(1.0, 0.8, 0.82), tw), day_look * 0.8);
-    sc = mix(sc, vec3(1.15, 0.85, 0.75), morning * 0.7);
+  }
+  // the day sky's (any outdoor area): small pink heaps in the morning, lilac-grey bellies, lit
+  // soft peach; pink toward the sun, white-lilac away from it; by day the same heaps white
+  if (sky_day > 0.0) {
+    float tw = smoothstep(-0.3, 0.9, cosang) * clamp(sky_morning / sky_day, 0.0, 1.0);
+    under = mix(under, mix(vec3(0.74, 0.74, 0.84), vec3(0.8, 0.62, 0.7), tw), sky_day * 0.85);
+    top = mix(top, mix(vec3(0.95, 0.94, 0.98), vec3(1.0, 0.8, 0.82), tw), sky_day * 0.8);
+    sc = mix(sc, vec3(1.15, 0.85, 0.75), sky_morning * 0.7);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -2377,7 +2380,7 @@ void main() {
       // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
       // and fuller (light and shadow apart)
       // (in the desert's day the shade takes the open sky's blue: lilac-grey, not brown)
-      c *= vec3(1.0) - shadow_strength * sh * mix(vec3(1.05, 0.97, 0.8), vec3(1.15, 0.85, 0.3), day_look);
+      c *= vec3(1.0) - shadow_strength * sh * mix(vec3(1.05, 0.97, 0.8), vec3(1.15, 0.85, 0.3), sky_day);
       c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
                        vec3(0.08, 0.07, 0.05);
     }
@@ -2693,7 +2696,7 @@ void main() {
     if (clouds.x > 0.0) {
       vec3 sky = sky_color(ray);
       // (the desert's morning: ours, not the game's brown dawn sky)
-      float game_w = clouds.w * (1.0 - day_look);
+      float game_w = clouds.w * (1.0 - sky_day);
       c = mix(c, sky, clouds.x * (1.0 - game_w));
       // the game's own sky by night, dawn and dusk: its painted cloud cards (far geometry, here as
       // sky at any hour) smoothed away: sharp dark cut-outs drifting across it; its colors and its
@@ -3737,24 +3740,24 @@ void main() {
   // by day the same on rock: the game bakes the mountains evenly dark, so the sun's own direction
   // lights them, the faces turned away in a cooler shade (fading out as the late afternoon's takes
   // over)
-  if (z > 0.0 && golden < 0.5 && sun_haze > 0.0) {
+  if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0)) {
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-    if (tag > 0.7 && tag < 0.8) {
+    if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
-      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - day_look)) * (1.0 - weather.x);
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - sky_day)) * (1.0 - weather.x);
       float rndl = dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0)));
       // (the low morning sun grazes most of a peak: the light wraps further round, only the faces
       // turned right away in shade)
-      float lit = smoothstep(mix(-0.05, -0.4, day_look), mix(0.45, 0.3, day_look), rndl);
+      float lit = smoothstep(mix(-0.05, -0.4, sky_day), mix(0.45, 0.3, sky_day), rndl);
       float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
       // (in the morning the faces away from the low sun deep and lilac-brown, the lit ones warm)
-      vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.6, 0.54, 0.64), day_look);
-      vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), day_look);
+      vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.6, 0.54, 0.64), sky_day);
+      vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), sky_day);
       vec3 relit = c * mix(shade_k, lit_k, lit);
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
-      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, day_look) * sun_haze);
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun);
     }
     // (and the sand and the rocky ground: the game lights them a greyish white, stopped down above
     // they went a dull grey. Warm golden sand instead, its brightness kept, the sun's side and
@@ -3762,7 +3765,7 @@ void main() {
     const vec3 noon_sand = vec3(1.13, 1.0, 0.8);  // its color over its brightness: pale warm cream
     const float noon_mix = 0.3;
     const float noon_sunlit = 1.15;
-    if ((tag > 0.85 && tag < 0.95) || (tag > 0.55 && tag < 0.65)) {
+    if (((tag > 0.85 && tag < 0.95) || (tag > 0.55 && tag < 0.65)) && sun_haze > 0.0) {
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - weather.x);
       float k = daylight * (1.0 - golden * 2.0) * sun_haze *
                 (1.0 - 0.6 * smoothstep(80.0, 400.0, length(p) / 4096.0));

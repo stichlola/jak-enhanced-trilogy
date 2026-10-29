@@ -146,6 +146,8 @@ struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
   float golden = 0.f, sun_yaw = 0.f, sun_max_elev = 90.f, light_yaw = 0.f, light_max_elev = 90.f;
   float morning_yaw = 0.f;  // the sun's path turned further in the morning (degrees)
+  float day_sky = 0.f;      // the clear day sky (pink toward the morning sun) and its clouds (0..1)
+  float rock_sun = 0.f;     // the sun's own direction lighting rock and cliffs (0..1)
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -358,6 +360,8 @@ void load_world() {
       out.sun_max_elev = l.value("sun_max_elev", out.sun_max_elev);
       out.light_yaw = l.value("light_yaw", out.light_yaw);
       out.light_max_elev = l.value("light_max_elev", out.light_max_elev);
+      out.day_sky = l.value("day_sky", out.day_sky);
+      out.rock_sun = l.value("rock_sun", out.rock_sun);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -2958,6 +2962,8 @@ void EnhancedPost::update_scene() {
   want.sun_haze = s.area_grading ? mix(day.sun_haze, night.sun_haze) : 0.f;
   want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
+  want.day_sky = s.area_grading ? mix(day.day_sky, night.day_sky) : 0.f;
+  want.rock_sun = s.area_grading ? mix(day.rock_sun, night.rock_sun) : 0.f;
   want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
   want.morning_yaw = mix(day.morning_yaw, night.morning_yaw);
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
@@ -3235,6 +3241,8 @@ void EnhancedPost::update_scene() {
   ease(m_grade.sun_haze, want.sun_haze, k_grade);
   ease(m_grade.rock_detail, want.rock_detail, k_grade);
   ease(m_grade.golden, want.golden, k_grade);
+  ease(m_grade.day_sky, want.day_sky, k_grade);
+  ease(m_grade.rock_sun, want.rock_sun, k_grade);
   ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
   ease(m_grade.morning_yaw, want.morning_yaw, k_grade);
   g_sun_yaw = m_grade.sun_yaw;
@@ -3789,6 +3797,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     // ones that write depth are solid (jak 3's desert draws its rocks, palms and buildings that
     // way: left out, nothing there cast); nor a tie's water, nor the envmapped ones' second
     // (shiny) draw, the same shape again
+    // (counted for the log: what casts, what is left out and why)
+    size_t n_cast = 0, n_veil = 0, n_water = 0;
     auto add_solid = [&](const std::vector<tfrag3::StripDraw>& tree_draws, size_t num_idx,
                          const ShadowDraw& proto, const tfrag3::TieTree* tie) {
       size_t added = 0;
@@ -3802,6 +3812,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
           const auto c = (tfrag3::TieCategory)cat;
           if (c == tfrag3::TieCategory::WATER || c == tfrag3::TieCategory::WATER_ENVMAP ||
               tfrag3::is_envmap_second_draw_category(c)) {
+            n_water += !tfrag3::is_envmap_second_draw_category(c);
             continue;
           }
         }
@@ -3810,8 +3821,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
                       ? tree_draws[k + 1].unpacked.idx_of_first_idx_in_full_buffer
                       : (u32)num_idx;
         if ((draw.mode.get_ab_enable() && !draw.mode.get_depth_write_enable()) || end <= first) {
+          n_veil += end > first;
           continue;
         }
+        n_cast++;
         if (added && draws.back().first + draws.back().count == first) {
           draws.back().count += end - first;  // (joined to the run before)
           continue;
@@ -3859,6 +3872,49 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       add_solid(ties[i].static_draws, ties[i].unpacked.indices.size(), d, &ties[i]);
     }
     add_wind_shadow_draws(lev, cut, &draws);
+    // the shrubs (bushes, plants, small rocks), cut out by their textures' alpha: the near map
+    // only (on the far one they cost the most and their shadows are a texel or two). The game's own
+    // only: the vegetation's extra copies for the denser settings don't cast
+    size_t n_shrubs = 0;
+    const auto& shrubs = lev->level->shrub_trees;
+    for (size_t i = 0; i < shrubs.size() && i < lev->shrub_vertex_data.size(); i++) {
+      const auto& tree = shrubs[i];
+      if (tree.indices.empty()) {
+        continue;
+      }
+      GLuint ib = 0;
+      size_t added = 0;
+      for (const auto& draw : tree.static_draws) {
+        if (draw.enh_tier != 0 || !draw.num_indices ||
+            (draw.mode.get_ab_enable() && !draw.mode.get_depth_write_enable())) {
+          continue;
+        }
+        if (!ib) {
+          glGenBuffers(1, &ib);
+          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ib);
+          glBufferData(GL_ELEMENT_ARRAY_BUFFER, tree.indices.size() * sizeof(u32),
+                       tree.indices.data(), GL_STATIC_DRAW);
+        }
+        ShadowDraw d;
+        d.vertices = lev->shrub_vertex_data[i];
+        d.indices = ib;
+        d.own_indices = !added;
+        d.mode = GL_TRIANGLE_STRIP;
+        d.cut = cut;
+        d.shrub = true;
+        d.first = draw.first_index_index;
+        d.count = draw.num_indices;
+        if (draw.tree_tex_id < lev->textures.size()) {
+          d.tex = lev->textures[draw.tree_tex_id];
+        }
+        draws.push_back(d);
+        added++;
+      }
+      n_shrubs += added;
+    }
+    lg::info("[enhanced] shadow casters {}: {} draws cast, {} shrub draws (near only); left out {} "
+             "see-through (no depth), {} water",
+             name, n_cast, n_shrubs, n_veil, n_water);
   }
   for (auto it = m_shadow_draws.begin(); it != m_shadow_draws.end();) {
     if (std::find(in_use.begin(), in_use.end(), it->first) == in_use.end()) {
@@ -3943,7 +3999,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE0);
-  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind) {
+  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, kRes, kRes);
     glClear(GL_DEPTH_BUFFER_BIT);
@@ -3952,7 +4008,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     glEnableVertexAttribArray(0);
     for (auto& [lid, draws] : m_shadow_draws) {
       for (auto& d : draws) {
-        if (d.wind && (!m_settings.shadow_casters || !wind)) {
+        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map)) {
           continue;
         }
         glUniform1i(u_cut, d.cut);
@@ -3961,6 +4017,12 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
           // x, y, z, s, t
           glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
           glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                                (void*)(3 * sizeof(float)));
+          glEnableVertexAttribArray(1);
+        } else if (d.shrub) {
+          // (the shrubs' vertices: world x, y, z, s, t first)
+          glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex), (void*)0);
+          glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex),
                                 (void*)(3 * sizeof(float)));
           glEnableVertexAttribArray(1);
         } else {
@@ -3980,10 +4042,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   };
   // (the far one every other frame: the sun barely moves, the camera's moves are snapped)
   if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
-    draw_levels(m_shadow_far_fbo, m_light_mvp_far, true);
+    draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true);
     m_shadow_far_ready = true;
   }
-  draw_levels(m_shadow_fbo, m_light_mvp, true);
+  draw_levels(m_shadow_fbo, m_light_mvp, true, false);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);  glDisableVertexAttribArray(1);
   glBindVertexArray(0);
   // characters only with the sun (or moon) above ~7 degrees: lower, a 2 m character casts a band
@@ -5014,6 +5076,14 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     const float day_look = ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) *
                            std::min(m_grade.golden * 2.f, 1.f);
     glUniform1f(glGetUniformLocation(id, "day_look"), day_look);
+    // the same hours for the area's day sky (any outdoor area: its clear blue, the morning's pink
+    // toward the sun, the clouds lit to match, the shade's open-sky blue)
+    const float sky_k = std::max(std::min(m_grade.golden * 2.f, 1.f), m_grade.day_sky);
+    glUniform1f(glGetUniformLocation(id, "sky_morning"),
+                ease(hr - 5.f) * (1.f - ease((hr - 10.f) / 1.5f)) * sky_k);
+    glUniform1f(glGetUniformLocation(id, "sky_day"),
+                ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) * sky_k);
+    glUniform1f(glGetUniformLocation(id, "rock_sun"), m_ssao_ready ? m_grade.rock_sun : 0.f);
     // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);

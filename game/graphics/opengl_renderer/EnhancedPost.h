@@ -501,6 +501,7 @@ class EnhancedPost {
     bool cut = false;
     bool own_vertices = false;  // wind ties: world positions built here
     bool wind = false;          // a caster (drawn with shadow_casters only)
+    bool shrub = false;         // a shrub's (their vertex layout; the near map only)
     u32 first = 0;              // first index
     GLuint tex = 0;             // alpha tested with this texture (0 = solid)
   };
@@ -578,6 +579,8 @@ class EnhancedPost {
     float sun_max_elev = 90.f;        // in the late afternoon, the sun no higher than (degrees)
     float light_yaw = 0.f;            // the light on the scene turned farther than the sun (degrees)
     float light_max_elev = 90.f;      // in the late afternoon, that light no higher than (degrees)
+    float day_sky = 0.f;              // the clear day sky and its clouds (0..1)
+    float rock_sun = 0.f;             // the sun's direction lighting rock and cliffs (0..1)
   };
   void update_scene();
   Grade m_grade;
