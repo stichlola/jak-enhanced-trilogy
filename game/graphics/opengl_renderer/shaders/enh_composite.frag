@@ -2158,6 +2158,12 @@ void main() {
   // (not on the flames: sprites with no depth of their own, they took the occlusion of the trunk or
   // wall behind them, its dark cool tint, and burned green-blue and dim)
   ao = mix(ao, 1.0, flame_keep);
+  // (not on the characters: their see-through cloth (Jak's tunic, scarf) has no depth of its own, it took
+  // the occlusion of the legs and arm behind it and looked transparent)
+  {
+    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    ao = mix(ao, 1.0, (ctag > 0.4 && ctag < 0.5) ? 1.0 : 0.0);
+  }
   if (ao_debug != 0) {
     // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
     float lm = z > 0.0 ? log(z / 4096.0) / log(10.0) / 4.0 : -1.0;

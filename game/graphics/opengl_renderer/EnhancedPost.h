@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <array>
 #include <memory>
@@ -58,7 +58,6 @@ class EnhancedNormalTarget {
  public:
   EnhancedNormalTarget();
   ~EnhancedNormalTarget();
-  bool on() const { return m_on; }
 
  private:
   bool m_on = false;
