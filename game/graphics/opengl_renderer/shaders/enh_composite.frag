@@ -2162,7 +2162,7 @@ void main() {
   // the occlusion of the legs and arm behind it and looked transparent)
   {
     float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-    ao = mix(ao, 1.0, (ctag > 0.4 && ctag < 0.5) ? 1.0 : 0.0);
+    ao = mix(ao, 1.0, (ctag > 0.4 && ctag < 0.535) ? 1.0 : 0.0);  // (and their cloth, the 0.52 tag)
   }
   if (ao_debug != 0) {
     // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
