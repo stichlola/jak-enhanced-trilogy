@@ -3356,8 +3356,9 @@ void main() {
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
     float high = sun_haze * noon * (1.0 - clouds.w);
-    // (by brightness: the near-white sand fully, the dark rocks little; stopped down alike they went black)
-    c *= 1.0 - high * mix(0.15, 0.49, smoothstep(0.2, 0.6, luma(c)));
+    // (by brightness: the near-white sand fully, the dark rocks little; stopped down alike they went black.
+    // Not in the late afternoon's low light: there the shade stays deep)
+    c *= 1.0 - high * mix(mix(0.15, 0.49, smoothstep(0.2, 0.6, luma(c))), 0.49, min(golden * 2.0, 1.0));
     // (and the color the glare washed out of it back: sand, not chalk)
     c = max(mix(vec3(luma(c)), c, 1.0 + 0.2 * high), 0.0);
   }
