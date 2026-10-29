@@ -4249,8 +4249,45 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   }
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
   // traced occlusion
-  const bool rt_ao = m_settings.rt_ao && m_rt_ready;
+  // (test switch, what the traced occlusion costs, in one run: JAK_ENHANCED_AO_CYCLE=1 times the
+  // pass for 3 s each with the ordered traversal, the unordered one and no tracing, twice, and logs
+  // the averages)
+  struct AoProbe {
+    double start = -1.0, sum[3] = {};
+    int count[3] = {};
+    bool done = false;
+    GLuint query = 0;
+  };
+  static AoProbe ao_probe;
+  static const bool ao_cycle = std::getenv("JAK_ENHANCED_AO_CYCLE") != nullptr;
+  int ao_phase = -1;
+  if (ao_cycle && !ao_probe.done) {
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (ao_probe.start < 0.0) {
+      ao_probe.start = now + 10.0;  // (the level settles first)
+      glGenQueries(1, &ao_probe.query);
+    }
+    const double t = now - ao_probe.start;
+    if (t >= 0.0 && t < 18.0) {
+      ao_phase = (int)(t / 3.0) % 3;
+      if (std::fmod(t, 3.0) < 0.5) {
+        ao_phase += 3;  // (switched just now: not timed yet)
+      }
+    } else if (t >= 18.0) {
+      ao_probe.done = true;
+      const char* names[3] = {"ordered", "unordered", "off"};
+      for (int i = 0; i < 3; i++) {
+        lg::info("[enhanced] ao cost: {:6.2f} ms rt {} ({} levels)",
+                 ao_probe.count[i] ? ao_probe.sum[i] / ao_probe.count[i] : 0.0, names[i],
+                 m_rt_count);
+      }
+    }
+  }
+  const int ao_mode = ao_phase >= 3 ? ao_phase - 3 : ao_phase;
+  const bool rt_ao = m_settings.rt_ao && m_rt_ready && ao_mode != 2;
   glUniform1i(glGetUniformLocation(id, "rt_levels"), rt_ao ? m_rt_count : 0);
+  glUniform1i(glGetUniformLocation(id, "rt_unordered"), ao_mode == 1 ? 1 : 0);
   if (rt_ao) {
     for (int i = 0; i < 2; i++) {
       glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
@@ -4264,7 +4301,17 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     lg::info("[enhanced] rt ao {} ready {} levels {}", m_settings.rt_ao, m_rt_ready, m_rt_count);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
+  if (ao_phase >= 0 && ao_phase < 3) {
+    glBeginQuery(GL_TIME_ELAPSED, ao_probe.query);
+  }
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  if (ao_phase >= 0 && ao_phase < 3) {
+    glEndQuery(GL_TIME_ELAPSED);
+    GLuint64 ns = 0;
+    glGetQueryObjectui64v(ao_probe.query, GL_QUERY_RESULT, &ns);
+    ao_probe.sum[ao_phase] += ns / 1e6;
+    ao_probe.count[ao_phase]++;
+  }
   prof.add_draw_call();
 
   // depth-aware blur, horizontal then vertical; the result ends up back in m_ao_tex[0]

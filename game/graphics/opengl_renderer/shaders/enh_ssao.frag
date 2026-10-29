@@ -45,33 +45,48 @@ vec3 view_pos(vec2 uv) {
   return view_pos(uv, texture(tex_T0, uv).r);
 }
 
-// how far along o + d * t the nearest level triangle is (tmax: none)
+// where along o + d * t the ray enters box (a, b), or 1e30 if it misses it before tmax
+float rt_box(vec4 a, vec4 b, vec3 o, vec3 inv, float tmax) {
+  vec3 t0 = (a.xyz - o) * inv;
+  vec3 t1 = (b.xyz - o) * inv;
+  vec3 tlo = min(t0, t1);
+  vec3 thi = max(t0, t1);
+  float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
+  float tf = min(min(thi.x, thi.y), min(thi.z, tmax));
+  return tn <= tf ? tn : 1e30;
+}
+
+uniform int rt_unordered;  // test switch: the old traversal (children in fixed order)
+
+// how far along o + d * t the nearest level triangle is (tmax: none). The nearer child first, so
+// a hit shortens the ray early and the rest of the tree is skipped
 float rt_nearest(vec3 o, vec3 d, float tmax) {
   vec3 dd = vec3(abs(d.x) < 1e-7 ? 1e-7 : d.x, abs(d.y) < 1e-7 ? 1e-7 : d.y,
                  abs(d.z) < 1e-7 ? 1e-7 : d.z);
   vec3 inv = 1.0 / dd;
   float best = tmax;
   int stack[32];
+  float stack_t[32];
   for (int l = 0; l < rt_levels; l++) {
     int nb = rt_base[l].x;
     int tb = rt_base[l].y;
+    // the whole level first: most are nowhere near a short ray
+    if (rt_box(rt_nodes[nb * 2], rt_nodes[nb * 2 + 1], o, inv, best) > 1e29) {
+      continue;
+    }
     int sp = 0;
-    stack[sp++] = 0;
+    stack[sp] = 0;
+    stack_t[sp++] = 0.0;
     int steps = 0;
     while (sp > 0 && steps < 200) {
       steps++;
-      int ni = stack[--sp];
+      sp--;
+      int ni = stack[sp];
+      if (stack_t[sp] > best) {
+        continue;  // a hit since it was pushed is nearer than this whole node
+      }
       vec4 a = rt_nodes[(nb + ni) * 2];
       vec4 b = rt_nodes[(nb + ni) * 2 + 1];
-      vec3 t0 = (a.xyz - o) * inv;
-      vec3 t1 = (b.xyz - o) * inv;
-      vec3 tlo = min(t0, t1);
-      vec3 thi = max(t0, t1);
-      float tn = max(max(tlo.x, tlo.y), max(tlo.z, 0.0));
-      float tf = min(min(thi.x, thi.y), min(thi.z, best));
-      if (tn > tf) {
-        continue;
-      }
       int first = int(floatBitsToUint(a.w));
       int count = int(floatBitsToUint(b.w));
       if (count > 0) {
@@ -101,9 +116,24 @@ float rt_nearest(vec3 o, vec3 d, float tmax) {
             best = t;
           }
         }
-      } else if (sp < 31) {
-        stack[sp++] = first;
-        stack[sp++] = ni + 1;
+      } else if (sp < 30) {
+        int c0 = ni + 1;
+        int c1 = first;
+        float t0 = rt_box(rt_nodes[(nb + c0) * 2], rt_nodes[(nb + c0) * 2 + 1], o, inv, best);
+        float t1 = rt_box(rt_nodes[(nb + c1) * 2], rt_nodes[(nb + c1) * 2 + 1], o, inv, best);
+        if (rt_unordered == 0 && t1 < t0) {
+          int ci = c0; c0 = c1; c1 = ci;
+          float tt = t0; t0 = t1; t1 = tt;
+        }
+        // the far one below the near one
+        if (t1 < 1e29) {
+          stack[sp] = c1;
+          stack_t[sp++] = t1;
+        }
+        if (t0 < 1e29) {
+          stack[sp] = c0;
+          stack_t[sp++] = t0;
+        }
       }
     }
   }
