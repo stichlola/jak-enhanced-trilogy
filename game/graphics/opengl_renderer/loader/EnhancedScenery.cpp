@@ -530,11 +530,6 @@ void prepare_tree(tfrag3::ShrubTree& tree,
         }
         // (and the baked light's brightness only: its grey-green hue turned them grey)
         const float lum = 0.3f * b.base_rgb[0] + 0.59f * b.base_rgb[1] + 0.11f * b.base_rgb[2];
-        static int logged = 0;
-        if (logged++ < 8) {
-          lg::info("[enhanced] scenery {} baked light {:.2f} {:.2f} {:.2f}",
-                   tree.proto_names[proto], b.base_rgb[0], b.base_rgb[1], b.base_rgb[2]);
-        }
         for (int c = 0; c < 3; c++) {
           b.base_rgb[c] = lum;
         }
