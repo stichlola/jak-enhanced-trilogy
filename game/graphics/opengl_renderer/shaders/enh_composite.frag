@@ -1001,7 +1001,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     under = mix(under, vec3(0.3, 0.2, 0.15), gs * 0.9);
     top = mix(top, vec3(0.56, 0.46, 0.44), gs * 0.6);
     // (the sunlit sides a soft gold, not lit up: the bodies stay grey-brown against the sky)
-    sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.6, gs);
+    sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.85, gs);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -1017,7 +1017,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     if (d > 0.002) {
       float dl = cloud_density(p + sw * 90.0, lo, 2) * 90.0 + cloud_density(p + sw * 300.0, lo, 2) * 210.0;
       // (the late afternoon's heaps dense: dark cores under the low sun, bright thin rims)
-      float lit = exp(-dl * 0.012 * (1.0 + 2.0 * min(golden * 2.0, 1.0) * sun_haze));
+      float lit = exp(-dl * 0.012 * (1.0 + 3.5 * min(golden * 2.0, 1.0) * sun_haze));
       float powder = 1.0 - exp(-d * 4.0);
       float h = (p.y - 1100.0) / 900.0;
       vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
