@@ -473,6 +473,8 @@ struct ShrubTree {
   // Enhanced (not saved): the detailed models drawn instead of some protos near the camera
   // (EnhancedScenery)
   std::shared_ptr<void> enh_scenery;
+  // Enhanced (not saved): a dense grass field drawn with this tree (EnhancedGrass)
+  std::shared_ptr<void> enh_grass;
 
   void serialize(Serializer& ser);
   void memory_usage(MemoryUsageTracker* tracker) const;

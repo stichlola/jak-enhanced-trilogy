@@ -79,28 +79,34 @@ This gives us more freedom to write code how we want.
                     :options (new 'static 'boxed-array :type menu-option
                       (new 'static 'menu-sub-menu-option
                         :name (text-id progress-game-options)
-                        :offset-y 0.1
+                        :offset-y 0.05
                         :next-state 'game-options
                         )
                       (new 'static 'menu-sub-menu-option
                         :name (text-id progress-graphic-options)
-                        :offset-y 0.275
+                        :offset-y 0.2
                         :next-state 'graphic-options
                         )
                       (new 'static 'menu-sub-menu-option
                         :name (text-id progress-sound-options)
-                        :offset-y 0.45
+                        :offset-y 0.35
                         :next-state 'sound-options
                         )
                       (new 'static 'menu-sub-menu-option
                         :name (text-id progress-picture-options)
-                        :offset-y 0.625
+                        :offset-y 0.5
                         :next-state 'picture-options
                         )
                       (new 'static 'menu-sub-menu-option
                         :name (text-id progress-camera-options)
-                        :offset-y 0.8
+                        :offset-y 0.65
                         :next-state 'camera-options
+                        )
+                      ;; Enhanced: the in-game editor (paint grass, place things, lights), as F4
+                      (new 'static 'menu-sub-menu-option
+                        :name (text-id progress-enhanced-editor)
+                        :offset-y 0.8
+                        :next-state 'enhanced-editor
                         )
                       )
                     )

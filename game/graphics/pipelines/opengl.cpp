@@ -354,6 +354,11 @@ void enhanced_shortcuts(const SDL_Event& event) {
   if (ImGui::GetIO().WantTextInput || g_enhanced_menu.start_menu) {
     return;
   }
+  // F4: the in-game editor (photo mode with its tools), in and out
+  if (key == SDLK_F4 && !enhanced_light()) {
+    enhanced_editor_toggle();
+    return;
+  }
   int which = -1;
   for (int i = 0; i < EnhancedMenu::kShortcuts; i++) {
     if (g_enhanced_menu.keys[i] == key) {
@@ -369,6 +374,11 @@ void enhanced_shortcuts(const SDL_Event& event) {
       enhanced_flip_menu();
       break;
     case 1:
+      // (in the editor: asked out of it)
+      if (g_enhanced_menu.editor) {
+        enhanced_editor_toggle();
+        break;
+      }
       g_enhanced_menu.photo = !g_enhanced_menu.photo;
       g_enhanced_menu.open = false;
       break;
@@ -403,7 +413,9 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
       CommandBinding::Source::KEYBOARD,
       CommandBinding(Gfx::g_debug_settings.hide_imgui_key, [&](const SDL_Event& event) {
         if (event.type == SDL_EVENT_KEY_DOWN && event.key.repeat == 0) {
-          if (!Gfx::g_debug_settings.ignore_hide_imgui && g_enhanced_debug_toolbar) {
+          // (Enhanced: not in the editor, where Alt is Blender's: Alt+A deselects)
+          if (!Gfx::g_debug_settings.ignore_hide_imgui && g_enhanced_debug_toolbar &&
+              !g_enhanced_menu.editing()) {
             set_imgui_visible(!is_imgui_visible());
           }
         }
@@ -710,25 +722,27 @@ void GLDisplay::render() {
     // Enhanced: the pad moves through the Enhanced menu while it's open (the game doesn't get it);
     // the cursor is free to click it (the mouse camera locks it), locked again after
     const bool menu_up = g_enhanced_menu.any_open();
+    // (the editor: the mouse and keyboard are its own, the pad still moves the camera)
+    const bool editing = g_enhanced_menu.editing();
     if (menu_up) {
       io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     } else {
       io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     }
     static bool menu_was_up = false;
-    if (menu_up != menu_was_up) {
-      menu_was_up = menu_up;
+    if ((menu_up || editing) != menu_was_up) {
+      menu_was_up = menu_up || editing;
       if (m_input_manager->mouse_controls_camera()) {
-        SDL_SetWindowRelativeMouseMode(m_window, !menu_up);
+        SDL_SetWindowRelativeMouseMode(m_window, !menu_was_up);
       }
-      m_input_manager->hide_cursor(!menu_up && m_input_manager->auto_hiding_cursor());
+      m_input_manager->hide_cursor(!menu_was_up && m_input_manager->auto_hiding_cursor());
     }
-    if (io.WantCaptureKeyboard || g_enhanced_menu.start_menu) {
+    if (io.WantCaptureKeyboard || g_enhanced_menu.start_menu || editing) {
       m_input_manager->clear_keyboard_actions();
     } else {
       m_input_manager->poll_keyboard_data();
     }
-    if (io.WantCaptureMouse) {
+    if (io.WantCaptureMouse || editing) {
       m_input_manager->clear_mouse_actions();
     } else {
       m_input_manager->poll_mouse_data();
@@ -819,7 +833,7 @@ void GLDisplay::render() {
   }
 
   // render debug
-  if (is_imgui_visible()) {
+  if (is_imgui_visible() && !g_enhanced_menu.editing()) {
     auto p = scoped_prof("debug-gui");
     g_gfx_data->debug_gui.draw(g_gfx_data->dma_copier.get_last_result().stats);
   }

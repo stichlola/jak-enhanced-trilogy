@@ -14,6 +14,10 @@
 ;; leaning into it, speed effects in the renderer (logic-target.gc, target-board.gc, board-states.gc)
 (define *enhanced-board-boost* 0.0)
 
+;; how much faster the full boost is (1 + this times the boost; capped at the game's top board speed,
+;; 100 m/s: 3.0 reaches it on the flat)
+(define *enhanced-board-boost-max* 3.0)
+
 ;; +++board-tricks
 (defenum board-tricks
   :type uint32

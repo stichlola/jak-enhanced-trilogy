@@ -276,6 +276,8 @@ void OpenGlDebugGui::draw_overlord_debug_menu() {
 }
 
 namespace ImGui {
+ImFont* g_ui_font = nullptr;
+
 void applyFontStyle() {
   ImGuiIO& io = ImGui::GetIO();
   io.Fonts->ClearFonts();
@@ -306,6 +308,18 @@ void applyFontStyle() {
       custom_font = io.Fonts->AddFontFromFileTTF(font_path.c_str(), 16, nullptr, ranges);
     }
   }
+  // Enhanced: the in-game editor's font, a clear UI face as Blender's (the system's Segoe UI, else
+  // the bundled Noto Sans)
+  g_ui_font = nullptr;
+  for (const char* path : {"C:/Windows/Fonts/segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"}) {
+    if (!g_ui_font && file_util::file_exists(path)) {
+      g_ui_font = io.Fonts->AddFontFromFileTTF(path, 16);
+    }
+  }
+  if (!g_ui_font) {
+    g_ui_font = custom_font ? custom_font : default_font;
+  }
+
   io.FontDefault = Gfx::g_debug_settings.monospaced_font
                        ? default_font
                        : (custom_font ? custom_font : default_font);

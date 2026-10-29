@@ -1512,6 +1512,12 @@
       ((= (-> this name) (text-id progress-continue-without-save))
        (progress-intro-start)
        )
+      ;; Enhanced: the editor: the menu closes, photo mode comes on with the editor's tools
+      ((= (-> this name) (text-id progress-enhanced-editor))
+       (sound-play "generic-beep")
+       (pc-enhanced-photo 5)
+       (set-master-mode 'game)
+       )
       ((= (-> this next-state) 'back)
        (pop-state arg0)
        )

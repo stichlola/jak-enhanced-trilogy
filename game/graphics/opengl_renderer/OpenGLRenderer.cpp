@@ -10,6 +10,7 @@
 #include "game/graphics/opengl_renderer/BlitDisplays.h"
 #include "game/graphics/opengl_renderer/DepthCue.h"
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
+#include "game/graphics/opengl_renderer/EnhancedEditor.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
 #include "game/graphics/opengl_renderer/ProgressRenderer.h"
@@ -1128,6 +1129,7 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     m_enhanced_post->draw_menu();
   } else if (m_enhanced_post) {
     m_enhanced_post->draw_photo_hint();
+    enhanced_editor_ui();
   }
 
   m_profiler.finish();

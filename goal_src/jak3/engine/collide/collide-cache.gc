@@ -56,6 +56,24 @@ degenerate triangle collides with nothing."
   (none)
   )
 
+(defun enhanced-fill-placed ((cache collide-cache) (seg object))
+  "The objects placed in the in-game editor: their triangles into the cache, as background."
+  (let ((room (- 460 (-> cache num-tris))))
+    (when (> room 0)
+      (+! (-> cache num-tris)
+          (pc-enhanced-collide-fill
+            (the-as pointer (-> cache tris (-> cache num-tris)))
+            room
+            (-> cache collide-box)
+            seg
+            (the-as uint (new 'static 'pat-surface :material (pat-material stone)))
+            )
+          )
+      )
+    )
+  (none)
+  )
+
 ;; DECOMP BEGINS
 
 (defmethod reset ((this collide-cache))
@@ -263,6 +281,8 @@ degenerate triangle collides with nothing."
             )
           )
         )
+      ;; Enhanced: and the objects placed in the editor
+      (enhanced-fill-placed this #f)
       (let ((a0-7 (-> this num-tris)))
         (when (> a0-7 0)
           (let ((v1-22 (-> this prims))
@@ -556,6 +576,13 @@ degenerate triangle collides with nothing."
               )
             )
           )
+        )
+      ;; Enhanced: and the objects placed in the editor (near the line only)
+      (let ((seg (new 'stack-no-clear 'inline-array 'vector 2)))
+        (vector-copy! (-> seg 0) (-> arg0 start-pos))
+        (set! (-> seg 0 w) (-> arg0 radius))
+        (vector-copy! (-> seg 1) (-> arg0 move-dist))
+        (enhanced-fill-placed this seg)
         )
       (let ((a0-19 (-> this num-tris)))
         (when (> a0-19 0)

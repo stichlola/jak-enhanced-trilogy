@@ -182,6 +182,11 @@ struct EnhancedMenu {
   // a free camera, no HUD); entered_at: when it came on (the hint shows a few seconds)
   std::atomic<bool> photo = false;
   std::atomic<bool> photo_active = false;
+  // the in-game editor (F4, EnhancedEditor): photo mode with the mouse's tools on it
+  std::atomic<bool> editor = false;
+  bool editing() const { return editor && photo_active; }
+  // asked to leave it (F4, Start, the menu): it leaves at once when everything is saved, else asks
+  std::atomic<bool> editor_leave = false;
   std::atomic<double> photo_entered_at = 0.0;
   // the Enhanced shortcuts on the keyboard, SDL keycodes (the menu's Controls, saved in
   // enhanced-settings.json): the menu (\ always works too), photo mode, the nap, the next game.
@@ -206,6 +211,38 @@ struct EnhancedMenu {
   }
 };
 extern EnhancedMenu g_enhanced_menu;
+
+// the in-game editor's camera moves, applied by the game's photo mode camera (pc-enhanced-editor-cam,
+// on the game's thread): its position (4 floats) and rotation (4 rows of 4) changed in place
+void enhanced_editor_camera(float* trans, float* rot);
+// into the editor, or asked out of it (F4, the menu's button)
+void enhanced_editor_toggle();
+// the editor's ground probes (pc-enhanced-editor-probe, on the game's thread: things let fall onto
+// the game's collision). Probe i: 0 past the last, 1 to probe (out: x y z where it starts and the
+// length down, game units; id: its id), 2 already answered; then its answer by id: the share of the
+// way down to the first hit (negative: none)
+int enhanced_editor_probe(int i, float* out, int* id);
+void enhanced_editor_probe_hit(int id, float u);
+// the placed objects' collision (pc-enhanced-collide-fill, on the game's thread, as its collide cache
+// fills): their triangles touching a box (min x y z _, max x y z _, game units) and, if seg isn't
+// null, near a line (start x y z, its sphere's radius; the move x y z), written stride floats apart
+// as three x y z 1 vertices, outward the way the game's are; how many, max at most
+int enhanced_collide_tris(const float* box, const float* seg, float* out, int stride, int max);
+// the placed objects' gameplay, once a frame (pc-enhanced-gameplay, the game's thread): in io[0..3]
+// Jak's foot (game units) and w his state (+1 on the ground, +2 dead); out io[4..6] how far the
+// platform he stands on moved him, io[8..10] where to put him (a teleport, back to a checkpoint).
+// What happens: 0 nothing, 1 health, 2 dark eco, 3 light eco, 4 ammo, 6 put him at io[8..10]
+int enhanced_gameplay(float* io);
+// the editor's "Put Jak Here": where Jak goes (game units) once back in the game
+void enhanced_put_jak(const float* pos);
+
+// the terrain's pictures (custom_assets/<game>/scenery: rock_detail, ground_detail, sand_*.png):
+// how much their repeats are broken up (0..1), and a count bumped when one is replaced (read again)
+struct EnhancedTerrain {
+  std::atomic<float> anti_tile = 0.7f;
+  std::atomic<int> version = 0;
+};
+extern EnhancedTerrain g_enhanced_terrain;
 
 // Jak 3's pause map (bigmap.gc): which world map is loaded (its index in WOMAP.STR) and where its
 // image sits in the game's memory, set as the map draws (pc-enhanced-bigmap-image). The renderer

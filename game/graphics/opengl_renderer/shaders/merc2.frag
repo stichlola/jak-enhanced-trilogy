@@ -71,7 +71,9 @@ void main() {
       // (blended, not switched: a hard switch drew the lights' highlights as sharp patches)
       n = len > 0.1 ? normalize(mix(f, sn / len * sign(d), smoothstep(0.6, 0.85, abs(d)))) : f;
     }
-    enh_normal_out = flen > 0.0 ? vec4(n * 0.5 + 0.5, 1.0) : vec4(0.0);
+    // (0.45 long: a character, so the composite spares it the land's late-afternoon deepening and
+    // the sun relight's dark side; the game lights characters by its own lights)
+    enh_normal_out = flen > 0.0 ? vec4(n * 0.45 * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
   // Enhanced: a rim of the key light around the silhouette, brighter on the lit side, and a soft

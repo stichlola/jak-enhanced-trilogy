@@ -476,6 +476,59 @@
   (none)
   )
 
+;; Enhanced: in the in-game editor the regions follow its camera, not Jak (the levels around what
+;; it looks at load), running only what loads, shows or hides levels: no mission, no cutscene starts
+(define *enhanced-region-filter* #f)
+(define *enhanced-region-editing* #f)
+
+(define *enhanced-load-forms*
+  '(want-vis want-load want-sound want-display want-force-vis want-force-inside want-anim begin quote))
+
+(define-extern enhanced-load-script? (function object symbol))
+
+(defun enhanced-load-script? ((s object))
+  "Whether script s (a form, or a list of forms) only loads, shows or hides levels."
+  (cond
+    ((or (null? s) (not (pair? s))) #t)
+    ((pair? (car s))
+     (let ((l s))
+       (while (and (not (null? l)) (pair? l))
+         (if (not (enhanced-load-script? (car l)))
+             (return #f)
+             )
+         (set! l (cdr l))
+         )
+       )
+     #t
+     )
+    ((= (car s) 'quote) #t)
+    (else
+      (let ((known #f)
+            (l *enhanced-load-forms*)
+            )
+        (while (not (null? l))
+          (if (= (car l) (car s))
+              (set! known #t)
+              )
+          (set! l (cdr l))
+          )
+        (if (not known)
+            (return #f)
+            )
+        )
+      (let ((l (cdr s)))
+        (while (and (not (null? l)) (pair? l))
+          (if (not (enhanced-load-script? (car l)))
+              (return #f)
+              )
+          (set! l (cdr l))
+          )
+        )
+      #t
+      )
+    )
+  )
+
 (defun region-tree-execute ((arg0 symbol) (arg1 vector) (arg2 vector))
   (let ((sv-32 (vector-average! (new 'stack-no-clear 'vector) arg1 arg2)))
     (set! (-> sv-32 w) (* 0.5 (vector-vector-distance arg1 arg2)))
@@ -527,7 +580,8 @@
       (let* ((a2-5 (-> (scratchpad-object region-prim-area) region-enter-list gp-2))
              (s5-2 (-> a2-5 on-enter))
              )
-        (when s5-2
+        ;; Enhanced: (in the editor only what loads levels)
+        (when (and s5-2 (or (not *enhanced-region-filter*) (enhanced-load-script? s5-2)))
           ;; og:preserve-this
           (countdown (v1-47 (-> (scratchpad-object region-prim-area) region-start-count))
             (if (= a2-5 (-> (scratchpad-object region-prim-area) region-start-list v1-47))
@@ -552,7 +606,7 @@
       (let* ((a2-6 (-> (scratchpad-object region-prim-area) region-exit-list gp-3))
              (s5-3 (-> a2-6 on-exit))
              )
-        (when s5-3
+        (when (and s5-3 (or (not *enhanced-region-filter*) (enhanced-load-script? s5-3)))
           ;; og:preserve-this
           (countdown (v1-64 (-> (scratchpad-object region-prim-area) region-inside-count))
             (if (= a2-6 (-> (scratchpad-object region-prim-area) region-inside-list v1-64))
@@ -574,7 +628,7 @@
     (let* ((a2-7 (-> (scratchpad-object region-prim-area) region-inside-list gp-4))
            (s5-4 (-> a2-7 on-inside))
            )
-      (if s5-4
+      (if (and s5-4 (or (not *enhanced-region-filter*) (enhanced-load-script? s5-4)))
           (script-eval
             s5-4
             :key a2-7
@@ -589,13 +643,22 @@
   )
 
 (defun region-execute ()
-  (vector-copy! (-> *level* camera-pos 1) (-> *level* camera-pos 0))
-  (set! (-> *level* camera-pos 0 quad) (-> (camera-pos) quad))
-  (vector-copy! (-> *level* target-pos 1) (-> *level* target-pos 0))
-  (set! (-> *level* target-pos 0 quad) (-> (target-pos 0) quad))
-  (when (and *execute-regions* (-> *setting-control* user-current region-mode) (not (paused?)))
-    (region-tree-execute 'camera (-> *level* camera-pos 1) (-> *level* camera-pos 0))
-    (region-tree-execute 'target (-> *level* target-pos 1) (-> *level* target-pos 0))
+  ;; Enhanced: in the editor (the game frozen) its camera stands for Jak too; leaving it, the way
+  ;; back to Jak is run once more the same way, so his levels load again
+  (let* ((editing (pc-enhanced-editing?))
+         (back (and (not editing) *enhanced-region-editing*))
+         )
+    (set! *enhanced-region-editing* editing)
+    (vector-copy! (-> *level* camera-pos 1) (-> *level* camera-pos 0))
+    (set! (-> *level* camera-pos 0 quad) (-> (camera-pos) quad))
+    (vector-copy! (-> *level* target-pos 1) (-> *level* target-pos 0))
+    (set! (-> *level* target-pos 0 quad) (-> (if editing (camera-pos) (target-pos 0)) quad))
+    (when (and *execute-regions* (-> *setting-control* user-current region-mode) (or editing back (not (paused?))))
+      (set! *enhanced-region-filter* (or editing back))
+      (region-tree-execute 'camera (-> *level* camera-pos 1) (-> *level* camera-pos 0))
+      (region-tree-execute 'target (-> *level* target-pos 1) (-> *level* target-pos 0))
+      (set! *enhanced-region-filter* #f)
+      )
     )
   0
   (none)

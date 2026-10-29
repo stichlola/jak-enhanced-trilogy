@@ -1367,8 +1367,8 @@
       ;; (the press is used up here: it doesn't pause the game)
       (logclear! (-> *cpad-list* cpads 0 button0-abs 0) (pad-buttons start))
       (logclear! (-> *cpad-list* cpads 0 button0-rel 0) (pad-buttons start))
-      (pc-enhanced-photo 1)
-      (set! want #f)
+      ;; (in the editor it stays on: the editor asks whether to save first)
+      (set! want (nonzero? (pc-enhanced-photo 1)))
       )
     (cond
       ((and want (not *enhanced-photo*) *target* (= *master-mode* 'game) (not (movie?)))

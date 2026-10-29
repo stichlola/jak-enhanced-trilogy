@@ -334,6 +334,7 @@ add_subdirectory(third-party/draco)
 add_compile_definitions(TINYGLTF_ENABLE_DRACO)
 build_third_party_lib(tiny_gltf tiny_gltf)
 build_third_party_lib(xdelta3 xdelta3)
+build_third_party_lib(meshoptimizer meshoptimizer)
 
 # discord rich presence
 include_directories(third-party/discord-rpc/include)

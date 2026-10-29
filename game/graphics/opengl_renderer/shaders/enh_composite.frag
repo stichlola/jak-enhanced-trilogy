@@ -25,8 +25,8 @@ uniform int wake_count;         // Jak's recent path: world xyz (game units), ag
 uniform vec4 wake[16];
 uniform float wake_strength;
 uniform int print_count;        // footprints and ruts: world xyz (game units), heading (rad)
-uniform vec4 prints[48];
-uniform vec2 print_info[48];    // age (s), kind (0/1 left/right foot, 2 ruts)
+uniform vec4 prints[96];
+uniform vec2 print_info[96];    // age (s), kind (0/1 left/right foot, 2 ruts)
 uniform int splash_count;       // Jak's last steps and landings: world xyz (game units),
 uniform vec4 splash[16];         // w: age (s) + 10 * strength (1 step, 2 landing)
 uniform float prints_strength;
@@ -84,7 +84,19 @@ uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze'
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
 uniform float rock_detail_avg;  // that picture's average brightness
 uniform sampler2D tex_T10;      // the rock picture (tiling, mipmapped)
+uniform float ground_detail;    // 1: a picture of rocky ground (stone, gravel) for the rocky ground
+uniform vec3 ground_detail_avg; // its average color
+uniform sampler2D tex_T16;      // that picture (tiling, mipmapped)
 uniform float sand;             // the area's olive and dull greens pushed toward golden sand (0..1)
+uniform float sand_set;         // 1: the sand's pictures (fine rippled, coarse gravel, cracked crust)
+uniform vec3 sand_set_avg[3];   // their average colors
+uniform sampler2D tex_T17;      // fine sand (tiling, mipmapped)
+uniform sampler2D tex_T18;      // coarse sand with gravel
+uniform sampler2D tex_T19;      // a cracked crust
+uniform vec4 grass_ground;      // a dense grass field drawn: its middle x, z, radius (m), density
+uniform float grass_water;      // and its water's height (m): no grass, no darkening, below
+uniform sampler2D tex_T21;      // and how lush it is (g), lying at grass_field: corner x, z, side (m)
+uniform vec3 grass_field;
 uniform float vignette;
 
 uniform vec3 up_view;   // world up in view space
@@ -899,6 +911,11 @@ vec3 sun_color() {
   return mix(col, vec3(0.13, 0.15, 0.22), clouds.w);
 }
 
+// the desert's bright hours (0..1): noon in a hazy area, none of the late afternoon's amber
+float desert_noon() {
+  return clamp(noon * (1.0 - golden * 2.0), 0.0, 1.0) * min(sun_haze * 1.25, 1.0);
+}
+
 // our sky by day: the horizon in the fog's color (so the distance melts into it), deepening to blue
 // overhead, a glow and a disk for the sun; greyer the more overcast. Sunny: a deep summer blue.
 vec3 sky_color(vec3 dv) {
@@ -906,6 +923,11 @@ vec3 sky_color(vec3 dv) {
   float up = max(wd.y, 0.0);
   vec3 zen = mix(vec3(0.2, 0.4, 0.78), vec3(0.08, 0.32, 0.9), sunny);
   vec3 hor = mix(fog_color * 1.05, vec3(0.6, 0.8, 0.97), sunny * 0.8);
+  {
+    float nd = desert_noon();
+    zen = mix(zen, vec3(0.13, 0.36, 0.82), nd * 0.6);
+    hor = mix(hor, vec3(0.8, 0.85, 0.9), nd * 0.75);
+  }
   vec3 col = mix(hor, zen, pow(smoothstep(0.0, 0.75, up), 0.7));
   // overcast: one grey
   float over = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
@@ -993,9 +1015,11 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   // a warm hazy area (the desert): sunset clouds, gold where the sun lights them, dusty mauve
   // undersides and peach tops
   if (sun_haze > 0.0) {
-    sc *= mix(vec3(1.0), vec3(1.2, 0.86, 0.52), sun_haze * 0.75);
-    under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25 * (1.0 - clouds.w)), sun_haze * 0.55);
-    top = mix(top, vec3(0.95, 0.72, 0.55), sun_haze * 0.35);
+    // (at noon white heaps with soft grey-blue undersides: the tints are the low sun's)
+    float warm_k = sun_haze * (1.0 - 0.85 * desert_noon());
+    sc *= mix(vec3(1.0), vec3(1.2, 0.86, 0.52), warm_k * 0.75);
+    under = mix(under, vec3(0.5, 0.36, 0.38) * max(luma(under) * 2.2, 0.25 * (1.0 - clouds.w)), warm_k * 0.55);
+    top = mix(top, vec3(0.95, 0.72, 0.55), warm_k * 0.35);
     // (and late in the day their shaded undersides a deep warm brown, the sun's gold on the rims)
     // (full from half the area's golden look, as the sky)
     float gs = min(golden * 2.0, 1.0);
@@ -1562,13 +1586,45 @@ float ao_upsample(vec2 uv, float zc) {
   return sum / wsum;
 }
 
+// the terrain's pictures without their repeats showing (Inigo Quilez's "texture repetition" 3): a
+// slow noise over the picture picks one of 8 offsets of it, two neighbouring ones blended across
+// the change, where they differ least. anti_tile 0..1 (the editor's terrain window)
+uniform float anti_tile;
+float notile_noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453);
+  float b = fract(sin(dot(i + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+  float c = fract(sin(dot(i + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  float d = fract(sin(dot(i + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+vec4 notile(sampler2D s, vec2 uv, float lod) {
+  if (anti_tile <= 0.0) {
+    return textureLod(s, uv, lod);
+  }
+  float l = notile_noise(uv * 0.37) * 8.0;
+  float ia = floor(l), f = fract(l);
+  vec2 offa = sin(vec2(3.0, 7.0) * ia), offb = sin(vec2(3.0, 7.0) * (ia + 1.0));
+  vec4 a = textureLod(s, uv + offa, lod), b = textureLod(s, uv + offb, lod);
+  vec4 c = mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * dot(a.rgb - b.rgb, vec3(1.0))));
+  return anti_tile >= 0.999 ? c : mix(textureLod(s, uv, lod), c, anti_tile);
+}
+
 // the rocky ground's made-up relief (m): rounded lumps of stone (smooth noise, a half meter and
 // more); the rock picture's brightness a faint crust on them (as the main height its cracks
 // crossed into a hatching)
+// (with the ground picture: its stones and pebbles, lighter on top, the relief)
 float ground_height(vec2 xz, float glod, float plod) {
+  if (ground_detail > 0.0) {
+    vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * xz / 2.2;
+    vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * xz / 8.5 + 0.29;
+    return luma(notile(tex_T16, gq, glod).rgb) * 0.035 + luma(notile(tex_T16, pq, plod).rgb) * 0.04 +
+           gnoise(xz / 1.4 + 3.3) * 0.1;
+  }
   vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * xz / 0.7;
   vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * xz / 3.1 + 0.29;
-  return luma(textureLod(tex_T10, gq, glod).rgb) * 0.008 + luma(textureLod(tex_T10, pq, plod).rgb) * 0.015 +
+  return luma(notile(tex_T10, gq, glod).rgb) * 0.008 + luma(notile(tex_T10, pq, plod).rgb) * 0.015 +
          smoothstep(-0.2, 0.4, gnoise(xz / 0.45 + 1.9)) * 0.05 + gnoise(xz / 1.4 + 3.3) * 0.12;
 }
 
@@ -2077,6 +2133,8 @@ void main() {
   // the surface normal, once: the shadows, the wet ground, the prints, the lights and the
   // reflections all use it
   vec3 surf_n = z > 0.0 ? surface_normal(tex_coord, p) : vec3(0.0, 0.0, -1.0);
+  // how much of the sun reaches it (the shadow map's, below): the sand's glints and sheen need it
+  float sun_lit = 1.0;
   if (normal_debug != 0 && z > 0.0) {
     // the level's own normals in color, the depth-rebuilt ones in grey
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
@@ -2158,8 +2216,8 @@ void main() {
 
   // footprints and ruts (left where the game said the ground is soft): pressed into the flat ground
   // around them, not into grass, darker inside with a lighter rim of pushed-up sand, fading over
-  // half a minute
-  if (print_count > 0 && z > 0.0 && z < 40.0 * 4096.0 && wsurf == 0.0) {
+  // a minute and a half
+  if (print_count > 0 && z > 0.0 && z < 60.0 * 4096.0 && wsurf == 0.0) {
     float sandy = (1.0 - smoothstep(1.05, 1.2, c.g / max(c.r, 0.01))) *
                   smoothstep(0.08, 0.2, dot(c, vec3(0.333)));
     vec3 nn = surf_n;
@@ -2177,7 +2235,7 @@ void main() {
         vec2 f = vec2(sin(prints[i].w), cos(prints[i].w));
         float along = dot(d.xz, f);
         float side = dot(d.xz, vec2(f.y, -f.x));
-        float fade = 1.0 - smoothstep(12.0, 30.0, print_info[i].x);
+        float fade = 1.0 - smoothstep(40.0, 90.0, print_info[i].x);
         if (kind > 1.5) {
           // two tracks 1.7 m apart, each piece reaching back to the one before (2 + its length):
           // one solid track, no dashes (a little overlap at both ends hides the joins)
@@ -2207,6 +2265,7 @@ void main() {
   if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surf_n;
     float ndl = dot(nn, sun_dir.xyz);
+    sun_lit = smoothstep(0.0, 0.15, ndl);
     if (ndl > 0.0) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
@@ -2214,6 +2273,7 @@ void main() {
       if (close_up > 0.0) {
         sh *= smoothstep(0.5 * close_up, close_up, z);
       }
+      sun_lit *= 1.0 - sh;
       // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
       // and fuller (light and shadow apart)
       c *= vec3(1.0) - shadow_strength * sh * vec3(1.05, 0.97, 0.8);
@@ -2510,6 +2570,11 @@ void main() {
   if (relight > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surf_n;
     float ndl = dot(nn, sun_dir.xyz);
+    // (characters, merc2.frag's 0.45-long normals: the game shades their dark side already)
+    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if (ctag > 0.3 && ctag < 0.55) {
+      ndl = max(ndl, -0.1);
+    }
     float k = relight * (1.0 - smoothstep(150.0 * 4096.0, 300.0 * 4096.0, z));
     c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;
   }
@@ -2593,6 +2658,9 @@ void main() {
       lit = 1.0 - (1.0 - a) * (0.55 + 0.45 * toward);
     }
     vec3 hc = mix(fog_color, sun_color() * vec3(1.0, 0.76, 0.48), 0.85);
+    // (at noon a pale glare, the heat's white haze, not the evening's gold)
+    // (a little of it: more washed the noon's colors out, the mountains to a pale beige)
+    hc = mix(hc, vec3(0.9, 0.88, 0.83) * max(luma(hc) * 1.25, 0.55), desert_noon() * 0.35);
     hc *= (0.9 + (0.5 * toward * toward + 0.6 * pow(toward, 12.0)) * lit) * mix(0.62, 1.0, lit);
     float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
@@ -2612,9 +2680,9 @@ void main() {
     }
     // (the dust in a pale sand color: in the haze's own, under an afternoon sun, it laid a band of
     // bright orange over the middle distance)
-    float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.3;
+    float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
     vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
-    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75, 0.0, 1.0));
+    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.6 * desert_noon()), 0.0, 1.0));
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -3180,8 +3248,8 @@ void main() {
         }
         vec3 q = wp / size[k].x + float(k) * 0.37;
         vec3 qs = q + vec3(wander, 0.0, wander) / size[k].x;
-        float t = luma(textureLod(tex_T10, qs.zy, lod).rgb) * tw.x + luma(textureLod(tex_T10, q.xz, lod).rgb) * tw.y +
-                  luma(textureLod(tex_T10, qs.xy, lod).rgb) * tw.z;
+        float t = luma(notile(tex_T10, qs.zy, lod).rgb) * tw.x + luma(notile(tex_T10, q.xz, lod).rgb) * tw.y +
+                  luma(notile(tex_T10, qs.xy, lod).rgb) * tw.z;
         d += size[k].y * near * (t - rock_detail_avg);
       }
       // (the broad variation: a few tens of meters, gentle, it fades in as the detail fades out)
@@ -3201,23 +3269,41 @@ void main() {
         // (the grit: the rock picture small and turned, so its blocks don't line up into a grid)
         vec2 gq = mat2(0.87, 0.5, -0.5, 0.87) * wp.xz / 0.7;
         float glod = max(log2(foot * 512.0 / 0.7), 0.0);
-        float grit = glod < 8.0 ? (luma(textureLod(tex_T10, gq, glod).rgb) - rock_detail_avg) : 0.0;
+        float grit = glod < 8.0 ? (luma(notile(tex_T10, gq, glod).rgb) - rock_detail_avg) : 0.0;
         // (and crusted plates a few meters across: the same picture bigger, turned the other way)
         vec2 pq = mat2(0.6, -0.8, 0.8, 0.6) * wp.xz / 3.1 + 0.29;
         float plod = max(log2(foot * 512.0 / 3.1), 0.0);
-        float plates = plod < 8.0 ? (luma(textureLod(tex_T10, pq, plod).rgb) - rock_detail_avg) : 0.0;
+        float plates = plod < 8.0 ? (luma(notile(tex_T10, pq, plod).rgb) - rock_detail_avg) : 0.0;
         // (its dark crack lines kept faint, its light crust strong; and lumps, light and dark)
         grit = grit > 0.0 ? grit * 1.4 : grit * 0.6;
         plates = plates > 0.0 ? plates * 1.0 : plates * 0.4;
         float lumps = smoothstep(-0.15, 0.3, gnoise(wp.xz / 0.45 + 1.9)) - 0.5;
         float fine = (gnoise(wp.xz / 0.22 + 5.5) * 0.6 + grit + plates + lumps * 0.55) * close;
+        // (with the ground picture (ground_detail.png: stone, gravel, pebbles) that instead: two sizes,
+        // turned against each other, and its colors too, the grey-blue pebbles among the brown)
+        vec3 gtint = vec3(1.0);
+        if (ground_detail > 0.0) {
+          close = 1.0 - smoothstep(15.0, 50.0, dist);
+          gq = mat2(0.87, 0.5, -0.5, 0.87) * wp.xz / 2.2;
+          glod = max(log2(foot * 2048.0 / 2.2), 0.0);
+          pq = mat2(0.6, -0.8, 0.8, 0.6) * wp.xz / 8.5 + 0.29;
+          plod = max(log2(foot * 2048.0 / 8.5), 0.0);
+          float ga = luma(ground_detail_avg);
+          vec3 gc = notile(tex_T16, gq, glod).rgb;
+          vec3 pc = notile(tex_T16, pq, plod).rgb;
+          float gn = 1.0 - smoothstep(6.0, 9.0, glod);
+          fine = ((luma(gc) - ga) * 2.2 * gn + (luma(pc) - ga) * 1.2 + lumps * 0.2) * close;
+          vec3 chroma = mix(pc / max(luma(pc), 0.02), gc / max(luma(gc), 0.02), gn) / (ground_detail_avg / ga);
+          gtint = mix(vec3(1.0), clamp(chroma, vec3(0.6), vec3(1.5)), 0.8 * close);
+        }
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
         // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
         float low_light = min(golden * 2.0, 1.0);
-        c *= mix(0.78, 0.47, low_light) * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
+        c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
         // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
         // sand's made of)
-        c = mix(vec3(luma(c)), c, mix(0.92, 0.65, low_light)) * mix(vec3(1.12, 1.0, 0.86), vec3(1.1, 1.03, 1.08), low_light);
+        c = mix(vec3(luma(c)), c, mix(0.92, 0.9, low_light)) * mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light);
+        c *= gtint;
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
           const float e = 0.06;
@@ -3256,6 +3342,11 @@ void main() {
   const vec2 rip_across = vec2(0.82, 0.57);  // the crests run across the wind
   float rip_m = fwidth(dot((cam_pos.xz + world_dir(p).xz) / 4096.0, rip_across));
   if (sand > 0.0 && z > 0.0) {
+    // (the land only, by the normals' tag lengths: sand, rocky ground, rock. The palms' leaves,
+    // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
+    float land_tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.8) ||
+                 (land_tag > 0.85 && land_tag < 0.95) ? 1.0 : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
     if (ch > 1e-4) {
@@ -3266,7 +3357,7 @@ void main() {
       // olive and yellow-green fully; the dull greens of the pebbles less (strong greens stay)
       float w = smoothstep(0.07, 0.12, hue) * (1.0 - smoothstep(0.24, 0.30, hue));
       w = max(w, smoothstep(0.2, 0.26, hue) * (1.0 - smoothstep(0.42, 0.5, hue)) * (1.0 - smoothstep(0.35, 0.6, sat)) * 0.8);
-      w *= smoothstep(0.03, 0.12, sat) * sand;
+      w *= smoothstep(0.03, 0.12, sat) * sand * land;
       if (w > 0.0) {
         // (a pale, dusty beige: less saturated than the game's olive (no lighter: noon burned out); never
         // past a sand's saturation: the yellower patches went bright orange, in blotches and bands)
@@ -3278,7 +3369,7 @@ void main() {
       }
       // and its pale slopes: the game lights some near white, a little blue (any hue, barely any
       // color, bright): to a sand beige, a touch darker
-      float wp = (1.0 - smoothstep(0.08, 0.2, sat)) * smoothstep(0.45, 0.7, mx) * sand * (1.0 - w);
+      float wp = (1.0 - smoothstep(0.08, 0.2, sat)) * smoothstep(0.45, 0.7, mx) * sand * land * (1.0 - w);
       if (wp > 0.0) {
         vec3 beige = clamp(abs(mod(0.095 * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
         c = mix(c, mx * 0.92 * mix(vec3(1.0), beige, 0.27), wp);
@@ -3299,6 +3390,42 @@ void main() {
       float facing = dot(across, sun_xz) / max(length(sun_xz), 1e-3);
       // in patches: sharp in some places, smoothed out in others
       float patches = 0.35 + 0.65 * smoothstep(-0.25, 0.35, gnoise(xz * 0.11 + 3.7));
+      // the dune's sides: the one the wind climbs is combed into ripples, the sheltered one past the
+      // crest (the wind blows along +across) is smoothed by the sand falling over it
+      vec3 wn = world_dir(surf_n);
+      float lee = smoothstep(0.03, 0.2, dot(wn.xz, across));
+      float windward = smoothstep(0.03, 0.2, -dot(wn.xz, across));
+      patches *= mix(1.0, 0.3, lee) * mix(1.0, 1.25, windward);
+      // the sand's own grain, near: three pictures, by place. Coarse gravelly sand on the steeper
+      // parts and in patches (the sand thinner there over the stones), a crust in flat hollows of
+      // its own, fine rippled sand the rest. Only their detail: the game's colors stay
+      float sclose = 1.0 - smoothstep(25.0, 70.0, length(p) / 4096.0);
+      float w_coarse = 0.0, w_crust = 0.0;
+      if (sand_set > 0.0 && sclose > 0.0) {
+        float n1 = gnoise(xz / 23.0 + 4.2) * 0.7 + gnoise(xz / 7.0 + 1.1) * 0.3;
+        float n2 = gnoise(xz / 31.0 + 9.3) * 0.7 + gnoise(xz / 9.0 + 5.5) * 0.3;
+        w_coarse = clamp(smoothstep(0.12, 0.3, 1.0 - level) * 0.8 + smoothstep(0.15, 0.45, n1), 0.0, 1.0);
+        w_crust = smoothstep(0.2, 0.45, n2) * (1.0 - w_coarse) * smoothstep(0.88, 0.96, level);
+        float w_fine = max(1.0 - w_coarse - w_crust, 0.0);
+        // (each at two sizes turned against each other for the fine, so no repeat shows; mip levels
+        // from the pixel's footprint: 2048 texels a tile)
+        vec2 q1 = xz / 3.0, q2 = mat2(0.8, -0.6, 0.6, 0.8) * xz / 1.1 + 0.37;
+        vec3 fine_c = notile(tex_T17, q1, max(log2(foot * 2048.0 / 3.0), 0.0)).rgb * 0.6 +
+                      notile(tex_T17, q2, max(log2(foot * 2048.0 / 1.1), 0.0)).rgb * 0.4;
+        vec3 coarse_c = notile(tex_T18, mat2(0.6, 0.8, -0.8, 0.6) * xz / 2.0, max(log2(foot * 2048.0 / 2.0), 0.0)).rgb;
+        vec3 crust_c = notile(tex_T19, xz / 6.0 + 0.61, max(log2(foot * 2048.0 / 6.0), 0.0)).rgb;
+        vec3 ratio = w_fine * fine_c / max(sand_set_avg[0], vec3(0.02)) +
+                     w_coarse * coarse_c / max(sand_set_avg[1], vec3(0.02)) +
+                     w_crust * crust_c / max(sand_set_avg[2], vec3(0.02));
+        c *= mix(vec3(1.0), clamp(ratio, vec3(0.45), vec3(1.6)), sclose * rip * 0.85);
+        // (the ripples belong to the loose fine sand: little of them over gravel and crust)
+        patches *= 1.0 - (0.6 * w_coarse + 0.8 * w_crust) * sclose;
+      }
+      // the light's height and its run across the crests: low, each crest shades the trough behind it
+      vec3 lw = normalize(world_dir(sun_dir.xyz));
+      float l_run = dot(across, lw.xz);
+      float l_tan = lw.y / max(abs(l_run), 1e-3);  // the light's rise per meter across the crests
+      float self_sh = 0.0;
       // the same ripples at four sizes, each a copy of the smallest scaled up (its wiggles too),
       // each kept while a wave spans 2+ pixels, and their weights renormalized: where the small
       // ones fade the bigger take over at the same strength, so far off looks like up close
@@ -3328,10 +3455,33 @@ void main() {
           // (the smallest fully up close, the next ones mixed under it a little)
           float wgt = vis * (k == 0 ? 1.0 : 0.6);
           shade += wgt * whole * (0.08 * slope * facing + 0.025 * crest);
+          // (relief: marched toward the light over one wave, the crests about a fifteenth of their
+          // spacing high; where one rises over the line to the sun this spot is in its shadow.
+          // The wiggles change slowly over a wave: the phase alone)
+          if (lw.y > 0.0 && l_tan < 1.2) {
+            const float amp = 0.065;  // of the wavelength
+            float h0 = crest;
+            float dir = l_run > 0.0 ? 1.0 : -1.0;
+            float occ = 0.0;
+            for (int s = 1; s <= 6; s++) {
+              float dp = float(s) * 1.0472;  // a sixth of a wave
+              float ph = phase + dir * dp;
+              float hs = sin(ph) + 0.35 * sin(2.0 * ph);
+              // (heights in wavelengths: crest * amp; the line climbs l_tan per wavelength travelled)
+              float over = (hs - h0) * amp - l_tan * dp / 6.2832;
+              occ = max(occ, smoothstep(0.0, 0.02, over));
+            }
+            self_sh += wgt * whole * occ;
+          }
           wsum += wgt;
         }
       }
       shade *= 2.6 * min(wsum / 0.35, 1.0) / max(wsum, 1e-3);  // (the biggest fades out alone)
+      // (the crests' own shadows: only where the sun reaches at all, deepest with it low; bluish,
+      // the sky lights them)
+      self_sh *= min(wsum / 0.35, 1.0) / max(wsum, 1e-3) * sun_lit * sun_dir.w *
+                 (1.0 - smoothstep(0.35, 0.9, lw.y));
+      shade -= 0.28 * self_sh;
       // crests across the view (stripes along the horizon) read far too strong in the distance:
       // fainter there, the ones running toward the camera kept
       vec2 look = normalize(world_dir(p).xz + 1e-4);
@@ -3346,6 +3496,74 @@ void main() {
       // (and swaths tens of meters across, paler or deeper: wind-sorted sand, not one even tone)
       float swath = gnoise(xz / 38.0 + 1.3) * 0.6 + gnoise(xz / 11.0 + 4.1) * 0.4;
       c *= 1.0 + rip * swath * vec3(0.12, 0.15, 0.2);
+      // the sand's light: brighter with the sun at your back (the grains hide their own shadows:
+      // the opposition surge), a sheen looking into the low sun at a grazing angle
+      vec3 vw = -normalize(world_dir(p));  // toward the eye
+      float lit = sun_lit * sun_dir.w * (1.0 - night_dark.x);
+      float back = pow(max(dot(vw, lw), 0.0), 8.0);
+      float graze = pow(1.0 - max(dot(vw, wn), 0.0), 4.0) * pow(max(dot(-vw.xz, lw.xz), 0.0), 2.0);
+      c *= 1.0 + rip * lit * (0.18 * back + 0.22 * graze * (1.0 - 0.5 * lw.y));
+      // and glints: here and there a grain (quartz, mica) turned just so mirrors the sun. Each cell
+      // of the ground holds one, at a spot of its own and with a tilt of its own; it flashes when
+      // its tilt halves the angle between the sun and the eye (they twinkle as the camera moves).
+      // Cells never smaller than a couple of pixels; gone where those grow past a few cm
+      float cell = max(0.012, foot * 2.5);
+      float gv = 1.0 - smoothstep(0.02, 0.05, cell);
+      if (gv > 0.0 && lit > 0.0) {
+        vec2 gq = xz / cell;
+        vec2 gi = floor(gq);
+        // (an integer hash: the cells' numbers run to hundreds of thousands)
+        vec2 r1 = vec2(ihash3(vec3(gi, 1.0)), ihash3(vec3(gi, 2.0)));
+        vec2 r2 = vec2(ihash3(vec3(gi, 3.0)), ihash3(vec3(gi, 4.0)));
+        float spot = 1.0 - smoothstep(0.08, 0.3, length(fract(gq) - (0.2 + 0.6 * r1)));
+        vec3 gn = normalize(wn + vec3(r2.x * 2.0 - 1.0, 0.0, r2.y * 2.0 - 1.0) * 0.55);
+        float mirror = smoothstep(0.985, 0.997, dot(gn, normalize(lw + vw)));
+        float glint = spot * mirror * step(0.55, r1.y + r2.x * 0.3) * gv;
+        c += rip * glint * lit * vec3(1.6, 1.45, 1.2) * (0.6 + 0.6 * golden);
+      }
+      // sand on the move even without a storm: thin veils of it skimming the ground downwind, in
+      // gusts that come and go, more on the side the wind climbs (near only; the storm has its own)
+      float wt = weather.z;
+      vec2 perp = vec2(-across.y, across.x);
+      float rnear = 1.0 - smoothstep(18.0, 45.0, rdist);
+      if (rnear > 0.0 && weather.y < 0.5) {
+        float gusts = smoothstep(0.0, 0.45, gnoise(vec2(dot(xz, across) / 30.0 - wt * 0.12, dot(xz, perp) / 22.0)));
+        vec2 sq = vec2(dot(xz, across) - wt * 3.5, dot(xz, perp));
+        float streak = smoothstep(0.15, 0.55, gnoise(sq * vec2(0.45, 3.2) + 7.0)) *
+                       (0.5 + 0.5 * smoothstep(0.0, 0.5, gnoise(sq * vec2(1.6, 9.0) + 2.0)));
+        float veil = streak * gusts * rnear * mix(0.6, 1.0, windward) * (1.0 - lee * 0.6) * (1.0 - 2.0 * weather.y);
+        float dl = clamp(sky_sun.w * 2.5, 0.0, 1.0);
+        c = mix(c, c * vec3(1.18, 1.12, 1.02) + vec3(0.025, 0.02, 0.012) * dl, rip * veil * 0.5);
+      }
+      // a mirage over the far sand under a high sun: the hot air bends the light, the ground near the
+      // horizon shows the sky (and the far hills) upside down below it, in shimmering pools
+      float mir = rip * noon * sun_haze * max(1.0 - golden * 2.0, 0.0) * (1.0 - weather.x) * (1.0 - clouds.w) *
+                  smoothstep(180.0, 450.0, rdist) * (1.0 - smoothstep(0.0, 0.06, -dot(ray, up_view)));
+      if (mir > 0.0) {
+        // the horizon's height on screen here, and this pixel mirrored over it
+        vec3 hv = ray - up_view * dot(ray, up_view);
+        float hy = (hv.y / max(hv.z, 1e-3) * proj.w + 1.0) * 0.5;
+        vec2 muv = vec2(tex_coord.x, 2.0 * hy - tex_coord.y);
+        muv.x += sin(muv.y * 300.0 + wt * 7.0) * 0.0015;
+        vec3 above = texture(tex_T0, clamp(muv, vec2(0.0), vec2(1.0))).rgb;
+        float pools = smoothstep(-0.1, 0.35, gnoise(vec2(xz.x / 60.0 + wt * 0.05, xz.y / 25.0)));
+        c = mix(c, above * 0.95, clamp(mir * pools, 0.0, 1.0) * 0.55);
+      }
+    }
+  }
+
+  // the ground under a dense grass field (EnhancedGrass): dark, earthy and greenish, the gaps between
+  // the blades showing the grass's own shade instead of bright sand; fading out over the field's
+  // ragged edge (as shrub_grass.vert thins it)
+  if (grass_ground.w > 0.0 && z > 0.0) {
+    float gtag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if ((gtag > 0.85 && gtag < 0.95) || (gtag > 0.55 && gtag < 0.65)) {
+      vec3 gw = view_to_world * p / 4096.0 + cam_pos / 4096.0;
+      float lush = texture(tex_T21, (gw.xz - grass_field.xy) / grass_field.z).g - gnoise(gw.xz / 9.0) * 0.15;
+      float under = smoothstep(0.08, 0.45, lush) * grass_ground.w *
+                    smoothstep(grass_water + 0.05, grass_water + 0.3, gw.y);
+      vec3 soil = luma(c) * vec3(0.62, 0.7, 0.34) * 0.75;
+      c = mix(c, soil, under * 0.8);
     }
   }
 
@@ -3354,23 +3572,40 @@ void main() {
   // rain: colder, the colors kept (a touch richer, like the wet slums at night)
   c *= mix(vec3(1.0), vec3(0.9, 0.98, 1.1), weather.x);
   c = max(mix(vec3(luma(c)), c, 1.0 + 0.1 * weather.x), 0.0);
+  // (the flames: kept out of the daylight's corrections below, which took their orange down to a
+  // pale yellow by day: the torches' fires went out under the sun)
+  float flame_keep = 0.0;
+  for (int i = 0; i < fire_count; i++) {
+    float aa = dot(fire_axis[i], fire_axis[i]);
+    if (fire_pos[i].z < 1.0 * 4096.0 || aa <= 1e-10) {
+      continue;
+    }
+    vec2 rel = tex_coord - fire_uv[i];
+    float along = dot(rel, fire_axis[i]) / aa;
+    float across = (rel.x * fire_axis[i].y - rel.y * fire_axis[i].x) / aa;
+    flame_keep = max(flame_keep, (1.0 - smoothstep(0.7, 1.3, abs(across))) *
+                                     smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(1.6, 2.4, along)));
+  }
+  vec3 c_flame = c;
   // the desert under a high sun: the game lights its ground near white, the eye stops down (the
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
     float high = sun_haze * noon * (1.0 - clouds.w);
     // (by brightness: the near-white sand fully, the dark rocks little; stopped down alike they went black.
     // Not in the late afternoon's low light: there the shade stays deep)
-    c *= 1.0 - high * mix(mix(0.15, 0.49, smoothstep(0.2, 0.6, luma(c))), 0.49, min(golden * 2.0, 1.0));
+    c *= 1.0 - high * mix(mix(0.04, 0.3, smoothstep(0.3, 0.8, luma(c))), 0.49, min(golden * 2.0, 1.0));
     // (and the color the glare washed out of it back: sand, not chalk)
-    c = max(mix(vec3(luma(c)), c, 1.0 + 0.2 * high), 0.0);
+    c = max(mix(vec3(luma(c)), c, 1.0 + 0.35 * high), 0.0);
   }
   // the late afternoon: amber and deep, the lit parts richer, the shade darker
   if (golden > 0.0 && z > 0.0) {
     float lg = luma(c);
-    c = max(mix(vec3(lg), c, 1.0 - 0.15 * golden), 0.0);
+    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    // (the characters (merc2.frag: 0.45 long) keep their colors: the deepening is the land's)
+    float gk = golden * (tag > 0.3 && tag < 0.55 ? 0.25 : 1.0);
+    c = max(mix(vec3(lg), c, 1.0 - 0.15 * gk), 0.0);
     // (the sand stopped down; the mountains lifted, the low sun lights them face on. By the
     // normals' tag lengths, tfrag3.frag / hfrag.frag)
-    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     float rock_expo = mix(1.0, 1.12, smoothstep(15.0, 60.0, length(p) / 4096.0));
     float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
     // (the grey rock slabs in the sand: warm sandstone in this light, not ash)
@@ -3383,27 +3618,78 @@ void main() {
       c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
     }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
-    c *= 1.0 - 0.22 * golden;  // (and all of it stopped down a little: low light, deeper)
+    c *= 1.0 - 0.22 * gk;  // (and all of it stopped down a little: low light, deeper)
     // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
     if (tag > 0.7 && tag < 0.8) {
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
       // (by the low sun where its glow is: the faces toward it lit, the ones toward us backlit)
-      vec2 brg = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
-      // (turned ~57 degrees: here the glow the eye takes for the sun sits well left of the disk,
-      // and the reference lights the mountains from there)
-      brg = mat2(cos(1.0), sin(1.0), -sin(1.0), cos(1.0)) * brg;
+      vec2 brg = normalize(world_dir(sun_dir.xyz).xz + 1e-4);
       float lit = smoothstep(-0.05, 0.35, dot(world_dir(surf_n), vec3(brg.x * 0.95, 0.3, brg.y * 0.95)));
       vec3 lg3 = vec3(luma(c));
       vec3 sunny = max(mix(lg3, c, 1.35), 0.0) * vec3(1.1, 0.95, 0.78);
       vec3 shade = c * vec3(0.66, 0.6, 0.6);
       c = mix(c, mix(shade, sunny, lit), golden * far);
+      // (the rocks near: the faces the low sun reaches catch it, the rest in a cool shade)
+      float lit_near = smoothstep(-0.1, 0.55, dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0))));
+      c *= mix(vec3(1.0), mix(vec3(0.6, 0.62, 0.72), vec3(1.5, 1.28, 1.0), lit_near), golden * (1.0 - far));
       // (and, looking toward the sun, the warm haze between: backlit mountains glow amber)
       vec2 shz = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
       float toward = max(dot(normalize(world_dir(ray).xz + 1e-4), shz), 0.0);
       c += vec3(0.24, 0.12, 0.035) * pow(toward, 5.0) * golden * far;
     }
-    c *= 1.0 - 0.4 * golden * (1.0 - smoothstep(0.2, 0.55, lg));
+    c *= 1.0 - 0.4 * gk * (1.0 - smoothstep(0.2, 0.55, lg));
   }
+  // by day the same on rock: the game bakes the mountains evenly dark, so the sun's own direction
+  // lights them, the faces turned away in a cooler shade (fading out as the late afternoon's takes
+  // over)
+  if (z > 0.0 && golden < 0.5 && sun_haze > 0.0) {
+    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if (tag > 0.7 && tag < 0.8) {
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+      float lit = smoothstep(-0.05, 0.45, dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0))));
+      float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
+      vec3 relit = c * mix(vec3(0.8, 0.83, 0.92), vec3(1.5, 1.38, 1.2), lit);
+      // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
+      relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
+                  desert_noon());
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(0.55, 0.9, far) * sun_haze);
+    }
+    // (and the sand and the rocky ground: the game lights them a greyish white, stopped down above
+    // they went a dull grey. Warm golden sand instead, its brightness kept, the sun's side and
+    // the shade further apart; less far off, where the haze takes over)
+    const vec3 noon_sand = vec3(1.13, 1.0, 0.8);  // its color over its brightness: pale warm cream
+    const float noon_mix = 0.3;
+    const float noon_sunlit = 1.15;
+    if ((tag > 0.85 && tag < 0.95) || (tag > 0.55 && tag < 0.65)) {
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - weather.x);
+      float k = daylight * (1.0 - golden * 2.0) * sun_haze *
+                (1.0 - 0.6 * smoothstep(80.0, 400.0, length(p) / 4096.0));
+      // (the game's baked shadows: the light of one hour in its vertex colors, hard triangles on
+      // the sand that never move. Where the shadow map has the sun, dark ground is brought up
+      // toward the sunlit sand's brightness, its texture kept)
+      {
+        const float noon_sand_luma = 0.62;
+        float lb = luma(c);
+        float under = smoothstep(0.88, 0.55, lb / noon_sand_luma);
+        float gain = clamp(noon_sand_luma * 0.95 / max(lb, 0.02), 1.0, 1.9);
+        c *= mix(1.0, gain, under * sun_lit * k);
+      }
+      vec3 warm = luma(c) * (tag > 0.85 ? noon_sand : noon_sand * vec3(1.02, 0.97, 0.9));
+      c = mix(c, warm, k * noon_mix);
+      // (the shade under a high sun: lit by the blue sky and the bright sand around, cooler and not
+      // as deep)
+      c *= mix(vec3(1.0), mix(vec3(0.8, 0.84, 0.95), vec3(noon_sunlit), sun_lit), k);
+    }
+  }
+  // the desert at noon: the game's dusty fog and the area's warm grade made everything sepia; the
+  // light's white back (the sky's blue kept), a touch brighter
+  if (z > 0.0 && wsurf == 0.0) {
+    float nd = desert_noon() * (1.0 - weather.x);
+    // (and the noon's colors as deep as the game's: the glare and the haze above paled them)
+    c *= mix(vec3(1.0), vec3(1.03, 1.02, 1.03), nd);
+    c = max(mix(vec3(luma(c)), c, 1.0 + 0.18 * nd), 0.0);
+  }
+  c = mix(c, c_flame, flame_keep);
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);

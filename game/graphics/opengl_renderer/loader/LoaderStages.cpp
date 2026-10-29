@@ -1,3 +1,4 @@
+#include "game/graphics/opengl_renderer/EnhancedTextures.h"
 #include "LoaderStages.h"
 
 #include "EnhancedMapTextures.h"
@@ -19,7 +20,13 @@ u64 add_texture(TexturePool& pool, const tfrag3::Texture& tex, bool is_common) {
   // still sees the game's size)
   std::vector<u32> sharp;
   int hd_scale = 1;
-  if (enhanced_hd_screen_texture(tex, sharp, hd_scale)) {
+  int edit_w = 0, edit_h = 0;
+  if (!is_common && enhanced_texture_edit(tex, sharp, edit_w, edit_h)) {
+    // (the user's version of it, from the editor's Textures tool)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, edit_w, edit_h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                 sharp.data());
+    enhanced_forget_texture(gl_tex);
+  } else if (enhanced_hd_screen_texture(tex, sharp, hd_scale)) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w * hd_scale, tex.h * hd_scale, 0, GL_RGBA,
                  GL_UNSIGNED_INT_8_8_8_8_REV, sharp.data());
     enhanced_set_texel_scale(gl_tex, (float)hd_scale);

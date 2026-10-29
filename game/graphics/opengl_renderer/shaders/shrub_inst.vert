@@ -49,11 +49,14 @@ void main() {
     world.xz += vec2(0.8, 0.6) * (gust + flutter) * enh_wind * tip * tip * 0.12 * 4096.0;
   }
   if (enh_foliage > 0.0 && enh_player.w > 0.0) {
+    // (each blade by where its own foot is, not the tuft's middle: in a wide clump only the side
+    // walked through lies down)
+    vec3 foot = turn * vec3(position_in.x, enh_tip.x, position_in.z) + inst_c3.xyz;
     vec2 offset = vec2(0.0);
     float press = 0.0;
     for (int i = -1; i < enh_pusher_count; i++) {
       vec4 pusher = i < 0 ? enh_player : enh_pushers[i];
-      vec3 d = inst_c3.xyz - pusher.xyz;
+      vec3 d = foot - pusher.xyz;
       float hd = length(d.xz);
       float near = 1.0 - smoothstep(pusher.w * 0.25, pusher.w, hd);
       near *= 1.0 - smoothstep(1.5 * 4096.0, 3.0 * 4096.0, abs(d.y));
@@ -65,19 +68,22 @@ void main() {
     // where someone went through a little while ago the grass still lies (the crush map,
     // EnhancedScenery): bent away from their path, rising back over a few seconds
     if (enh_crush.w > 0.0) {
-      vec2 cuv = (inst_c3.xz - enh_crush.xy) / enh_crush.z;
+      vec2 cuv = (foot.xz - enh_crush.xy) / enh_crush.z;
       if (all(greaterThan(cuv, vec2(0.0))) && all(lessThan(cuv, vec2(1.0)))) {
         vec3 c = texture(tex_T2, cuv).xyz;  // the bend (direction x amount), the height it was made at (m)
-        float lie = length(c.xy) * (1.0 - smoothstep(1.5, 3.0, abs(c.z - inst_c3.y / 4096.0)));
+        float lie = length(c.xy) * (1.0 - smoothstep(1.5, 3.0, abs(c.z - foot.y / 4096.0)));
         if (lie > press) {
           offset = c.xy / max(length(c.xy), 1e-4) * lie;
           press = lie;
         }
       }
     }
+    // (by how tall the tuft is: a tall bush lies down as far as a short tuft, its tips near the
+    // ground)
+    float tall = enh_tip.y * length(inst_c1.xyz);
     float push = tip * tip;
-    world.xz += offset * push * 0.45 * 4096.0;
-    world.y -= press * push * 0.25 * 4096.0;
+    world.xz += offset * push * 0.75 * tall;
+    world.y -= press * push * 0.6 * tall;
   }
 
   vec3 vert = world - cam_trans.xyz;

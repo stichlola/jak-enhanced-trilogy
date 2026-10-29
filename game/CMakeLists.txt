@@ -65,6 +65,11 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/foreground/Shadow2.cpp
         graphics/opengl_renderer/loader/Loader.cpp
         graphics/opengl_renderer/loader/EnhancedRayTrace.cpp
+        graphics/opengl_renderer/loader/EnhancedGrass.cpp
+        graphics/opengl_renderer/EnhancedEditor.cpp
+        graphics/opengl_renderer/EnhancedImport.cpp
+        graphics/opengl_renderer/EnhancedTextures.cpp
+        graphics/opengl_renderer/EnhancedNotes.cpp
         graphics/opengl_renderer/loader/EnhancedScenery.cpp
         graphics/opengl_renderer/loader/EnhancedVegetation.cpp
         graphics/opengl_renderer/loader/LoaderStages.cpp
@@ -394,7 +399,7 @@ add_subdirectory(sound)
 # we build the runtime as a static library.
 add_library(runtime STATIC ${RUNTIME_SOURCE} "../third-party/glad/src/glad.c")
 
-target_link_libraries(runtime common fmt SDL3::SDL3 imgui discord-rpc sound stb_image libco libcurl)
+target_link_libraries(runtime common fmt SDL3::SDL3 imgui discord-rpc sound stb_image libco libcurl meshoptimizer tiny_gltf)
 if(WIN32)
     target_link_libraries(runtime mman)
 else()

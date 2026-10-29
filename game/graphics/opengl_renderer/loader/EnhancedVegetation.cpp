@@ -10,6 +10,8 @@
 
 #include "common/log/log.h"
 
+#include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
+
 int g_enhanced_vegetation = [] {
   const char* env = std::getenv("JAK_ENHANCED_VEGETATION");
   return env ? std::clamp(std::atoi(env), 0, 2) : 2;
@@ -264,6 +266,20 @@ struct Walls {
     }
   }
 
+  // any upright face (of any size: cliffs, the mountains' sides) within about r meters of (x, z)
+  bool rock_near(float x, float z, float r) const {
+    int n = (int)std::ceil(r * kMeter / kRockCell);
+    int cx = (int)std::floor(x / kRockCell), cz = (int)std::floor(z / kRockCell);
+    for (int dx = -n; dx <= n; dx++) {
+      for (int dz = -n; dz <= n; dz++) {
+        if (rock_cells.count(key(cx + dx, cz + dz))) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   template <typename Verts>
   void add_mesh(const Verts& verts,
                 const std::vector<u32>& indices,
@@ -274,6 +290,7 @@ struct Walls {
     auto tri = [&](u32 a, u32 b, u32 c) {
       if (a < verts.size() && b < verts.size() && c < verts.size() && a != b && b != c && a != c) {
         add(pos(a), pos(b), pos(c));
+        add_rock(pos(a), pos(b), pos(c));
       }
     };
     if (strips) {
@@ -293,10 +310,27 @@ struct Walls {
   }
 
  private:
+  // (steep faces at least a meter tall, marked on a coarse grid along their bottom edge: where
+  // rock rises out of the ground)
+  void add_rock(const Vec3& a, const Vec3& b, const Vec3& c) {
+    Vec3 n = (b - a).cross(c - a);
+    float len = n.length();
+    float lo = std::min({a.y(), b.y(), c.y()}), hi = std::max({a.y(), b.y(), c.y()});
+    if (!(len > 1.f) || std::abs(n.y()) / len > 0.6f || hi - lo < 1.f * kMeter) {
+      return;
+    }
+    for (const Vec3* v : {&a, &b, &c}) {
+      if (v->y() < lo + 0.5f * (hi - lo)) {
+        rock_cells.insert(key((int)std::floor(v->x() / kRockCell), (int)std::floor(v->z() / kRockCell)));
+      }
+    }
+  }
   static constexpr float kCell = 4.f * kMeter;
+  static constexpr float kRockCell = 6.f * kMeter;
   static int cell(float v) { return (int)std::floor(v / kCell); }
   static u64 key(int x, int z) { return ((u64)(u32)x << 32) | (u32)z; }
   std::unordered_map<u64, std::vector<u32>> cells;
+  std::unordered_set<u64> rock_cells;
 };
 
 // deterministic random in [0, 1)
@@ -390,7 +424,7 @@ u32 place(std::vector<tfrag3::ShrubGpuVertex>& verts,
 }
 
 struct Stats {
-  int plants = 0, copies = 0, tufts = 0, habitats = 0, vine_sources = 0, vines = 0;
+  int plants = 0, copies = 0, strewn = 0, tufts = 0, habitats = 0, vine_sources = 0, vines = 0;
 };
 
 void add_to_tree(tfrag3::ShrubTree& tree,
@@ -547,6 +581,106 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       tree.enh_copies.push_back({p.first_vert, p.end_vert, offset, (u8)tier, p.cx, p.cz, p.base,
                                  x, y - 0.03f * kMeter, z, yaw, scale});
       stats->copies++;
+    }
+  }
+
+  // 1b: the open desert (where there's a height field): stones strewn all over it, much thicker at
+  // the foot of cliffs and mountains and around the big rocks, and grass in loose patches here and
+  // there. A jittered 4 m grid over this tree's plants and around, one try per cell; a try copies
+  // one of the tree's own stones or plants (so their detailed models stand in for them too)
+  if (ground.hfrag) {
+    std::vector<u32> stones, grasses;
+    std::unordered_set<u64> big_cells;  // 6 m cells with a big rock in them
+    constexpr float kBigCell = 6.f * kMeter;
+    auto big_key = [&](int x, int z) { return ((u64)(u32)x << 32) | (u32)z; };
+    float x0 = 1e30f, x1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+    for (u32 g = 0; g < plants.size(); g++) {
+      const auto& p = plants[g];
+      if (!p.copy || !ground.hfrag) {
+        continue;
+      }
+      (p.stone ? stones : grasses).push_back(g);
+      if (p.stone && p.radius > 0.8f * kMeter) {
+        big_cells.insert(big_key((int)std::floor(p.cx / kBigCell), (int)std::floor(p.cz / kBigCell)));
+      }
+      x0 = std::min(x0, p.cx);
+      x1 = std::max(x1, p.cx);
+      z0 = std::min(z0, p.cz);
+      z1 = std::max(z1, p.cz);
+    }
+    auto big_near = [&](float x, float z) {
+      int cx = (int)std::floor(x / kBigCell), cz = (int)std::floor(z / kBigCell);
+      for (int dx = -2; dx <= 2; dx++) {
+        for (int dz = -2; dz <= 2; dz++) {
+          if (big_cells.count(big_key(cx + dx, cz + dz))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    constexpr float kStrewCell = 4.f * kMeter;
+    constexpr float kPad = 40.f * kMeter;
+    const int nx = stones.empty() && grasses.empty() ? 0 : (int)((x1 - x0 + 2 * kPad) / kStrewCell) + 1;
+    const int nz = nx ? (int)((z1 - z0 + 2 * kPad) / kStrewCell) + 1 : 0;
+    // (two passes: count, then thin out evenly to the budget over the whole tree)
+    float thin = 1.f;
+    for (int pass = 0; pass < 2; pass++) {
+    int candidates = 0;
+    for (int i = 0; i < nx && (u64)nx * nz < 600000; i++) {
+      for (int j = 0; j < nz; j++) {
+        u32 id = (u32)(i * nz + j);
+        float x = x0 - kPad + (i + rnd(tree_idx, id, 501)) * kStrewCell;
+        float z = z0 - kPad + (j + rnd(tree_idx, id, 502)) * kStrewCell;
+        float hy, y, y2;
+        if (!hfrag_height(*ground.hfrag, x, z, &hy) ||
+            !ground.height(x, z, hy, 0.5f * kMeter, 1.f * kMeter, &y) ||
+            !ground.height(x + 1.f * kMeter, z, y, 0.3f * kMeter, 0.3f * kMeter, &y2)) {
+          continue;  // off the desert, or an edge or a step
+        }
+        // (rockiness: 1 at the foot of rock faces and by the big rocks, a half a bit farther)
+        float rock = walls.rock_near(x, z, 10.f) || big_near(x, z) ? 1.f
+                     : walls.rock_near(x, z, 28.f)                ? 0.45f
+                                                                  : 0.f;
+        float roll = rnd(tree_idx, id, 503);
+        u32 g;
+        float scale;
+        if (!stones.empty() && roll < 0.04f + 0.5f * rock) {
+          g = stones[(u32)(rnd(tree_idx, id, 504) * stones.size()) % stones.size()];
+          scale = 0.6f + 0.7f * rnd(tree_idx, id, 505);
+          if (plants[g].radius > 1.2f * kMeter) {
+            scale *= 0.9f * kMeter / plants[g].radius;  // (a wide cluster: a little heap of it)
+          }
+        } else if (!grasses.empty() &&
+                   rnd(tree_idx, (u32)(int)std::floor(x / (22.f * kMeter)) * 7919u +
+                                     (u32)(int)std::floor(z / (22.f * kMeter)), 506) < 0.3f &&
+                   roll > 0.75f) {
+          // (patches: some 22 m squares of the desert have grass, the rest none)
+          g = grasses[(u32)(rnd(tree_idx, id, 504) * grasses.size()) % grasses.size()];
+          scale = 0.7f + 0.6f * rnd(tree_idx, id, 505);
+        } else {
+          continue;
+        }
+        if (pass == 0) {
+          candidates++;
+          continue;
+        }
+        if (rnd(tree_idx, id, 509) > thin) {
+          continue;
+        }
+        const auto& p = plants[g];
+        int tier = rnd(tree_idx, id, 507) < 0.5f ? 1 : 2;
+        float yaw = 6.2831853f * rnd(tree_idx, id, 508);
+        u32 offset = place(verts, p.first_vert, p.end_vert, p.cx, p.cz, p.base, x, y, z, yaw, scale);
+        for (const auto& [d, s] : plant_strips[g]) {
+          emit(d, tier, s, p.first_vert, offset);
+        }
+        tree.enh_copies.push_back({p.first_vert, p.end_vert, offset, (u8)tier, p.cx, p.cz, p.base, x,
+                                   y - 0.03f * kMeter, z, yaw, scale});
+        stats->strewn++;
+      }
+    }
+    thin = candidates > 20000 ? 20000.f / candidates : 1.f;
     }
   }
 
@@ -897,10 +1031,12 @@ void add_to_tree(tfrag3::ShrubTree& tree,
 
 void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
   keep_hfrag(level);
-  if (level.shrub_trees.empty()) {
+  // (a level without shrubs gets no plants, but may hold a dense grass field's floor: desoasis)
+  if (level.shrub_trees.empty() && !enhanced_grass_has_zones()) {
     return;
   }
-  Ground ground;
+  auto ground_kept = std::make_shared<Ground>();
+  Ground& ground = *ground_kept;
   ground.hfrag = current_hfrag();
   Walls walls;
   for (const auto& tree : level.tfrag_trees[0]) {
@@ -925,13 +1061,39 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
     walls.add_mesh(tree.unpacked.vertices, tree.unpacked.indices, 0, tree.unpacked.indices.size(),
                    true);
   }
+  // the dense grass fields this level covers: its floor (the level's own, the one nearest the height
+  // field's height where there's one, else the highest), else the height field
+  enhanced_prepare_grass(level, name, [&](float x, float z, float* y, bool* own) {
+    float hy;
+    const bool has_hfrag = ground.hfrag && hfrag_height(*ground.hfrag, x, z, &hy);
+    auto hfrag = ground.hfrag;
+    ground.hfrag = nullptr;
+    bool found = has_hfrag ? ground.height(x, z, hy, 6.f * kMeter, 6.f * kMeter, y)
+                           : ground.height(x, z, 1e9f, 2e9f, 0.f, y);
+    ground.hfrag = hfrag;
+    *own = found;
+    if (!found && has_hfrag) {
+      *y = hy;
+      found = true;
+    }
+    return found;
+  });
+  // (kept for the fields the editor's brush makes anywhere: the floor nearest a height)
+  if (ground.size() > 0 || ground.hfrag) {
+    enhanced_grass_keep_floor(name, [ground_kept](float x, float z, float y_ref, float* y) {
+      return ground_kept->height(x, z, y_ref, 1e9f, 1e9f, y);
+    });
+  }
+  if (level.shrub_trees.empty()) {
+    return;
+  }
   Stats stats;
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
     add_to_tree(level.shrub_trees[t], level.textures, ground, walls,
                 4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats);
   }
-  lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} tufts on {} "
+  lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} strewn, {} tufts on {} "
            "grassy floors, {} wall vines with {} copies{}",
-           name, ground.size(), stats.plants, stats.copies, stats.tufts, stats.habitats,
+           name, ground.size(), stats.plants, stats.copies, stats.strewn, stats.tufts, stats.habitats,
            stats.vine_sources, stats.vines, ground.hfrag ? " (and the height field)" : "");
 }

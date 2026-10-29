@@ -1,40 +1,76 @@
 {
   "jak3": [
     {
+      "bulb": false,
+      "color": [
+        1.0,
+        0.93,
+        0.8
+      ],
+      "flicker": false,
+      "intensity": 1.0,
+      "night": true,
       "note": "Haven industrial B: the yard by the start, pitch dark at night",
-      "pos": [966.8, 14.5, 550.7],
-      "radius": 16.0,
-      "color": [1.0, 0.93, 0.8],
-      "flicker": false,
-      "night": true,
-      "bulb": false
+      "pos": [
+        966.8,
+        14.5,
+        550.7
+      ],
+      "radius": 16.0
     },
     {
+      "bulb": false,
+      "color": [
+        1.0,
+        0.72,
+        0.42
+      ],
+      "flicker": false,
+      "intensity": 1.0,
+      "night": true,
       "note": "Haven slums: the alley's street under the lit houses",
-      "pos": [1152.7, 12.0, 178.2],
-      "radius": 13.0,
-      "color": [1.0, 0.72, 0.42],
-      "flicker": false,
-      "night": true,
-      "bulb": false
+      "pos": [
+        1152.7,
+        12.0,
+        178.2
+      ],
+      "radius": 13.0
     },
     {
+      "bulb": false,
+      "color": [
+        1.0,
+        0.75,
+        0.45
+      ],
+      "flicker": false,
+      "intensity": 1.0,
+      "night": true,
       "note": "Haven port: the dock by the start",
-      "pos": [193.0, 21.5, 1753.9],
-      "radius": 14.0,
-      "color": [1.0, 0.75, 0.45],
-      "flicker": false,
-      "night": true,
-      "bulb": false
+      "pos": [
+        193.0,
+        21.5,
+        1753.9
+      ],
+      "radius": 14.0
     },
     {
-      "note": "Haven: the walk by Samos's",
-      "pos": [383.0, 12.0, -44.6],
-      "radius": 12.0,
-      "color": [1.0, 0.75, 0.45],
+      "bulb": false,
+      "color": [
+        1.0,
+        0.75,
+        0.45
+      ],
       "flicker": false,
+      "intensity": 1.0,
       "night": true,
-      "bulb": false
+      "note": "Haven: the walk by Samos's",
+      "pos": [
+        383.0,
+        12.0,
+        -44.6
+      ],
+      "radius": 12.0
     }
   ]
 }

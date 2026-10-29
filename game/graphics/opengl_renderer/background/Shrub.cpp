@@ -4,6 +4,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 
@@ -334,6 +335,16 @@ void Shrub::render_tree(int idx,
       glUniform4fv(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_pushers"),
                    pushers, &ps.pos[0][0]);
     }
+    // and where the grass still lies after them (the crush map, as the detailed models)
+    float crush[4] = {};
+    GLuint crush_tex = g_enhanced_wind.push ? enhanced_crush_map(crush) : 0;
+    const auto sid = render_state->shaders[ShaderId::SHRUB].id();
+    glUniform4f(glGetUniformLocation(sid, "enh_crush"), crush[0], crush[1], crush[2],
+                crush_tex ? crush[3] : 0.f);
+    glUniform1i(glGetUniformLocation(sid, "tex_T4"), 4);
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, crush_tex);
+    glActiveTexture(GL_TEXTURE0);
   }
 
   {
@@ -452,6 +463,8 @@ void Shrub::render_tree(int idx,
   }
 
   enhanced_draw_scenery(*tree.source, settings, render_state, prof);
+  enhanced_draw_grass(*tree.source, settings, render_state, prof);
+  enhanced_draw_placed(*tree.source, settings, render_state, prof);
 
   glBindVertexArray(0);
   tree.perf.draw_time.add(draw_timer.getSeconds());

@@ -1,8 +1,9 @@
-﻿#include "EnhancedPost.h"
+#include "EnhancedPost.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cfloat>
@@ -16,6 +17,8 @@
 #include "common/util/json_util.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
@@ -53,6 +56,41 @@ EnhancedHeadlights g_enhanced_headlights;
 EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
 EnhancedBigmap g_enhanced_bigmap;
+
+// a tiling picture from custom_assets/<game>/scenery (repeating, mipmapped) and its average color;
+// 0 when the file isn't there
+EnhancedTerrain g_enhanced_terrain;
+
+static GLuint load_tiling_picture(const char* name, float avg[3]) {
+  const auto path = file_util::get_jak_project_dir() / "custom_assets" /
+                    game_version_names[g_game_version] / "scenery" / name;
+  int w = 0, h = 0, n = 0;
+  unsigned char* px = stbi_load(path.string().c_str(), &w, &h, &n, 4);
+  if (!px) {
+    return 0;
+  }
+  double sum[3] = {0.0, 0.0, 0.0};
+  for (int i = 0; i < w * h; i++) {
+    for (int k = 0; k < 3; k++) {
+      sum[k] += px[i * 4 + k];
+    }
+  }
+  for (int k = 0; k < 3; k++) {
+    avg[k] = (float)(sum[k] / (255.0 * w * h));
+  }
+  GLuint tex = 0;
+  glGenTextures(1, &tex);
+  glBindTexture(GL_TEXTURE_2D, tex);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  stbi_image_free(px);
+  return tex;
+}
 
 // JAK_ENHANCED_PROFILE=1: each pass waits for the GPU before and after, so the log's profile shows
 // what each one costs on the graphics card
@@ -106,7 +144,7 @@ namespace {
 // the game runs whenever it's saved (see the file for what each value does)
 struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
-  float golden = 0.f, sun_yaw = 0.f, sun_max_elev = 90.f;
+  float golden = 0.f, sun_yaw = 0.f, sun_max_elev = 90.f, light_yaw = 0.f, light_max_elev = 90.f;
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -316,6 +354,8 @@ void load_world() {
       out.golden = l.value("golden", out.golden);
       out.sun_yaw = l.value("sun_yaw", out.sun_yaw);
       out.sun_max_elev = l.value("sun_max_elev", out.sun_max_elev);
+      out.light_yaw = l.value("light_yaw", out.light_yaw);
+      out.light_max_elev = l.value("light_max_elev", out.light_max_elev);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -456,15 +496,7 @@ void load_world() {
 // lights.json: lights placed by hand where the game has none (a dark street, a camp in the
 // desert), per game. World position and radius in meters, a color, whether it flickers like a
 // fire and whether it's lit at night only. The Enhanced menu adds one where Jak stands.
-struct ManualLight {
-  std::string note;
-  float pos[3] = {};  // game units
-  float radius = 8.f * 4096.f;
-  float color[3] = {1.f, 0.7f, 0.4f};
-  bool flicker = false;
-  bool night = true;
-  bool bulb = true;  // drawn as a point of light (off: the light alone, where the scene has its lamp)
-};
+using ManualLight = EnhancedLight;
 std::vector<ManualLight> g_manual_lights[3];
 
 fs::path manual_lights_path() {
@@ -499,6 +531,7 @@ void load_manual_lights() {
         l.flicker = e.value("flicker", false);
         l.night = e.value("night", true);
         l.bulb = e.value("bulb", true);
+        l.intensity = e.value("intensity", 1.f);
         g_manual_lights[g].push_back(l);
       }
     }
@@ -514,14 +547,16 @@ void save_manual_lights() {
   for (int g = 0; g < 3; g++) {
     auto arr = nlohmann::json::array();
     for (const auto& l : g_manual_lights[g]) {
-      auto r = [](float v) { return std::round(v * 100.f) / 100.f; };
+      // (as doubles: a float written out comes back with all its binary digits)
+      auto r = [](float v) { return std::round((double)v * 100.0) / 100.0; };
       arr.push_back({{"note", l.note},
                      {"pos", {r(l.pos[0] / 4096.f), r(l.pos[1] / 4096.f), r(l.pos[2] / 4096.f)}},
                      {"radius", r(l.radius / 4096.f)},
                      {"color", {r(l.color[0]), r(l.color[1]), r(l.color[2])}},
                      {"flicker", l.flicker},
                      {"night", l.night},
-                     {"bulb", l.bulb}});
+                     {"bulb", l.bulb},
+                     {"intensity", r(l.intensity)}});
     }
     if (!arr.empty()) {
       j[games[g]] = arr;
@@ -636,18 +671,59 @@ float g_sun_yaw = 0.f;
 // how high the sun may stand (degrees): the area's "sun_max_elev" by the late afternoon's amount,
 // so the golden hour's sun is low and grazing (update_scene)
 float g_sun_max_elev = 90.f;
+// how much farther the light that falls on the scene is turned than the sun seen in the sky
+// ("light_yaw", degrees): a painter's key light, so the sun can sit behind a mountain while its
+// light still rakes the scene from the side
+float g_light_yaw = 0.f;
+// and how high that light may stand ("light_max_elev", degrees; by the late afternoon's amount as
+// the sun's): higher than a sun sitting on a mountain, so the open ground still gets its light
+float g_light_max_elev = 90.f;
 
-// the key light in world space, turned around the world's up axis by the area's sun_yaw; test
-// switch: JAK_ENHANCED_SUN_YAW=<degrees> instead
-void sun_world(float out[3]) {
+// test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
+// (tuning in one run)
+void tune_light(float* yaw, float* elev) {
+  static const char* file = std::getenv("JAK_ENHANCED_TUNE");
+  if (!file) {
+    return;
+  }
+  static float y = 0.f, e = 90.f;
+  static auto last = std::chrono::steady_clock::now() - std::chrono::seconds(2);
+  auto now = std::chrono::steady_clock::now();
+  if (now - last > std::chrono::seconds(1)) {
+    last = now;
+    if (FILE* f = std::fopen(file, "r")) {
+      float a, b;
+      if (std::fscanf(f, "%f %f", &a, &b) == 2) {
+        y = a;
+        e = b;
+      }
+      std::fclose(f);
+    }
+  }
+  *yaw = y;
+  *elev = e;
+}
+
+// the key light in world space (or with sky, the sun as seen in the sky), turned around the world's
+// up axis by the area's sun_yaw; test
+// switches: JAK_ENHANCED_SUN_YAW=<degrees> instead, JAK_ENHANCED_SUN_ELEV=<degrees> its height cap
+void sun_world(float out[3], bool sky = false) {
   static const char* env = std::getenv("JAK_ENHANCED_SUN_YAW");
-  const float yaw = (env ? (float)std::atof(env) : g_sun_yaw) * 3.14159265f / 180.f;
+  static const char* env_light = std::getenv("JAK_ENHANCED_LIGHT_YAW");
+  float light = sky ? 0.f : env_light ? (float)std::atof(env_light) : g_light_yaw;
+  float light_elev = g_light_max_elev;
+  if (!sky) {
+    tune_light(&light, &light_elev);
+  }
+  const float yaw = ((env ? (float)std::atof(env) : g_sun_yaw) + light) * 3.14159265f / 180.f;
   const float* d = g_enhanced_sun.dir;
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
   out[2] = -std::sin(yaw) * d[0] + std::cos(yaw) * d[2];
   // (lowered toward the horizon, keeping its bearing)
-  const float max_y = std::sin(g_sun_max_elev * 3.14159265f / 180.f);
+  static const char* env_elev = std::getenv("JAK_ENHANCED_SUN_ELEV");
+  const float max_elev = sky ? (env_elev ? (float)std::atof(env_elev) : g_sun_max_elev) : light_elev;
+  const float max_y = std::sin(max_elev * 3.14159265f / 180.f);
   if (out[1] > max_y) {
     const float flat = std::sqrt(out[0] * out[0] + out[2] * out[2]);
     if (flat > 1e-4f) {
@@ -1220,6 +1296,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
   const bool have_scene = m_ssao_ready;
   update_scene();
+  if (have_scene) {
+    enhanced_editor_levels(render_state->loader->get_in_use_levels());
+    enhanced_editor_frame(w, h, m_depth_fbo, cam, m_last_proj.data());
+  }
   if (have_scene && m_cine > 0.f) {
     read_focus(w, h);
   } else if (m_cine <= 0.f) {
@@ -1700,9 +1780,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (lit_already || c.pos[2] < -c.pos[3] || dist > 400.f * kMeter) {
         continue;
       }
-      // (by day next to nothing: a torch's 13 m of orange light, with every slab's shadow, laid
-      // a bright orange pool on the sunlit sand)
-      float k = (0.04f + 1.21f * fire_night) * m_settings.light_strength;
+      // (by day a warm glow around the flame, at night far more: a torch's full 13 m of orange
+      // light by day laid a bright orange pool on the sunlit sand)
+      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength;
       if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
         float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -1830,7 +1910,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     for (const auto& ml : g_manual_lights[game_index()]) {
       const float lit = ml.night ? std::max(m_night, night_darkness()) : 1.f;
       if (!on || lit <= 0.01f) {
-        break;
+        continue;
       }
       Candidate c;
       for (int col = 0; col < 3; col++) {
@@ -1867,10 +1947,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                               0.2f * std::sin(t * 37.f + 2.3f * seed));
       }
       for (int i = 0; i < 3; i++) {
-        c.color[i] = ml.color[i] * k;
+        c.color[i] = ml.color[i] * ml.intensity * k;
       }
       c.color[3] = 0.f;
-      c.score = (ml.color[0] + ml.color[1] + ml.color[2]) * c.pos[3] / (dist + c.pos[3]);
+      c.score = (ml.color[0] + ml.color[1] + ml.color[2]) * ml.intensity * c.pos[3] / (dist + c.pos[3]);
       candidates.push_back(c);
     }
     std::sort(candidates.begin(), candidates.end(),
@@ -2001,8 +2081,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     {
       // footprints where Jak walks on soft ground (the game knows the ground's material), ruts where
-      // he drives; kept 30 s
-      constexpr int kPrints = 48;
+      // he drives; kept 90 s
+      constexpr int kPrints = 96;
       const auto& pl = g_enhanced_player;
       static bool test_prints = std::getenv("JAK_ENHANCED_PRINTS_TEST") != nullptr;
       static double test_seeded = -1e9;
@@ -2082,7 +2162,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       while (!m_prints.empty() &&
-             (m_time - m_prints.front().time > 30.0 || m_prints.size() > (size_t)kPrints)) {
+             (m_time - m_prints.front().time > 90.0 || m_prints.size() > (size_t)kPrints)) {
         m_prints.erase(m_prints.begin());
       }
       float prints[kPrints * 4] = {};
@@ -2163,7 +2243,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         float dx = pl.pos[0] - m_ride_last[0], dz = pl.pos[2] - m_ride_last[2];
         float dist = std::sqrt(dx * dx + dz * dz) / kMeter;
         float v = dist / (float)(m_time - m_ride_last_time);
-        if (v < 80.f) {  // not a teleport
+        if (v < 200.f) {  // not a teleport (the boosted board does ~100 m/s)
           m_ride_speed += (v - m_ride_speed) * 0.2f;
           if (dist > 0.02f) {
             m_ride_dir[0] = dx / (dist * kMeter);
@@ -2212,10 +2292,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           // wet ground (rain, puddles): the wheels throw spray, not dust
           add_puff(back, side, board ? 0.1f : 1.3f, std::min(0.4f + sp * 0.03f, 1.6f), 1, 0.8f);
         } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
-          // (the board under its L2 boost: a bigger plume, hanging longer)
+          // (the board under its L2 boost: a bigger plume, hanging longer, starting farther back: a
+          // cloud swelling around Jak himself veiled him, he looked see-through)
           const float b = board ? g_enhanced_board_boost.load() : 0.f;
-          add_puff(back, side, board ? 0.1f : 1.4f, std::min(0.6f + sp * 0.05f, 2.4f) * (1.f + 0.8f * b), 0,
-                   2.2f * (1.f + 0.5f * b));
+          add_puff(back + 2.5f * b, side, board ? 0.1f : 1.4f,
+                   std::min(0.6f + sp * 0.05f, 2.4f) * (1.f + 0.3f * b), 0, 2.2f * (1.f + 0.5f * b));
         }
         m_puff_left = !m_puff_left;
         m_puff_time = m_time;
@@ -2562,7 +2643,18 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const float boost = have_scene && g_enhanced_player.valid ? g_enhanced_board_boost.load() : 0.f;
   glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy,
               strength * (1.f + 1.5f * boost), 0.02f * (1.f + boost));
-  glUniform2f(glGetUniformLocation(id, "motion_keep"), 10.f * kMeter, 25.f * kMeter);
+  // (sharp out past Jak: the blur takes the world as still, and Jak moves with the camera. Boosting,
+  // the camera trails him farther than 10 m and his own pixels were smeared into the ground behind:
+  // he looked see-through)
+  float keep = 10.f * kMeter;
+  if (have_scene && g_enhanced_player.valid) {
+    float d2 = 0.f;
+    for (int c = 0; c < 3; c++) {
+      d2 += (g_enhanced_player.pos[c] - cam.trans[c]) * (g_enhanced_player.pos[c] - cam.trans[c]);
+    }
+    keep = std::max(keep, std::sqrt(d2) + 4.f * kMeter);
+  }
+  glUniform2f(glGetUniformLocation(id, "motion_keep"), keep, keep + 15.f * kMeter);
 
   // the clouds first, at a quarter of the pixels (the composite then reads them)
   // (JAK_ENHANCED_CLOUDS_FULL: marched at every pixel, as before, to compare)
@@ -2854,6 +2946,8 @@ void EnhancedPost::update_scene() {
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
   want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
+  want.light_yaw = mix(day.light_yaw, night.light_yaw);
+  want.light_max_elev = mix(day.light_max_elev, night.light_max_elev);
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -3128,13 +3222,17 @@ void EnhancedPost::update_scene() {
   ease(m_grade.golden, want.golden, k_grade);
   ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
   g_sun_yaw = m_grade.sun_yaw;
+  ease(m_grade.light_yaw, want.light_yaw, k_grade);
+  g_light_yaw = m_grade.light_yaw;
+  ease(m_grade.light_max_elev, want.light_max_elev, k_grade);
   ease(m_grade.sun_max_elev, want.sun_max_elev, k_grade);
   {
-    // (by the late afternoon's amount, as the "golden" uniform)
+    // (by the late afternoon's hours; all of it from a golden of 0.5, as the shader's low light)
     auto smooth = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
     const float g = smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)) *
-                    std::min(m_grade.golden, 1.f);
+                    std::min(m_grade.golden * 2.f, 1.f);
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
+    g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
   }
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
@@ -3426,12 +3524,12 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
                              SharedRenderState* render_state,
                              ScopedProfilerNode& prof) {
   // the sun on screen: in view space the camera looks down +z (see enh_ssao.frag)
-  float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
-                        m_sun_view[2] * m_sun_view[2]);
+  float len = std::sqrt(m_sky_view[0] * m_sky_view[0] + m_sky_view[1] * m_sky_view[1] +
+                        m_sky_view[2] * m_sky_view[2]);
   if (m_settings.ssao_debug) {
     static int behind_counter = 0;
     if ((behind_counter++ % 300) == 0) {
-      lg::info("[enhanced] sun view {} {} {}", m_sun_view[0], m_sun_view[1], m_sun_view[2]);
+      lg::info("[enhanced] sun view {} {} {}", m_sky_view[0], m_sky_view[1], m_sky_view[2]);
     }
   }
   // (the desert's haze shadow runs at every quality, with the sun anywhere; the rays need it in
@@ -3441,16 +3539,16 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
   if (len < 1e-6f) {
     return;
   }
-  float side = m_sun_view[2] / len < 0.05f ? -1.f : 1.f;  // behind: toward the opposite point
+  float side = m_sky_view[2] / len < 0.05f ? -1.f : 1.f;  // behind: toward the opposite point
   if (side < 0.f) {
     rays = false;
   }
   if (!rays && !haze) {
     return;
   }
-  float sz = std::max(std::abs(m_sun_view[2]), 0.05f * len);
-  float sx = 0.5f * m_last_proj[2] * side * m_sun_view[0] / sz + 0.5f;
-  float sy = 0.5f * m_last_proj[3] * side * m_sun_view[1] / sz + 0.5f;
+  float sz = std::max(std::abs(m_sky_view[2]), 0.05f * len);
+  float sx = 0.5f * m_last_proj[2] * side * m_sky_view[0] / sz + 0.5f;
+  float sy = 0.5f * m_last_proj[3] * side * m_sky_view[1] / sz + 0.5f;
   // fade out as the sun leaves the screen
   float off = std::max(std::max(-sx, sx - 1.f), std::max(-sy, sy - 1.f));
   float fade = side > 0.f ? 1.f - std::clamp(off / 0.6f, 0.f, 1.f) : 0.f;
@@ -4281,6 +4379,17 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       }
       m_sun_view[i] = sun[i];
     }
+    // (and the sun as seen in the sky: the glow, the clouds, the god rays)
+    sun_world(world_sun, true);
+    for (int col = 0; col < 3; col++) {
+      m_sky_view[col] = 0.f;
+      for (int row = 0; row < 3; row++) {
+        m_sky_view[col] += world_sun[row] * cam.rot[row][col];
+      }
+      if (flip) {
+        m_sky_view[col] = -m_sky_view[col];
+      }
+    }
     // kept with the shadow map: characters aren't in the map, these give them their shadows
     const bool on = m_settings.sun_shadows && g_enhanced_sun.valid;
     glUniform4f(glGetUniformLocation(id, "sun"), sun[0], sun[1], sun[2],
@@ -4840,38 +4949,67 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
   }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
-  // the rock picture (custom_assets/<game>/scenery/rock_detail.png), loaded on first use
+  // the rock and ground pictures (custom_assets/<game>/scenery/rock_detail.png, ground_detail.png),
+  // loaded on first use, with their average colors
+  // (one replaced in the editor: all of them read again)
+  if (m_terrain_version != g_enhanced_terrain.version.load()) {
+    m_terrain_version = g_enhanced_terrain.version.load();
+    for (GLuint* t : {&m_rock_tex, &m_ground_tex, &m_sand_tex[0], &m_sand_tex[1], &m_sand_tex[2]}) {
+      if (*t) {
+        glDeleteTextures(1, t);
+        *t = 0;
+      }
+    }
+    m_rock_loaded = false;
+  }
+  glUniform1f(glGetUniformLocation(id, "anti_tile"), g_enhanced_terrain.anti_tile.load());
   if (!m_rock_loaded) {
     m_rock_loaded = true;
-    const auto path = file_util::get_jak_project_dir() / "custom_assets" /
-                      game_version_names[g_game_version] / "scenery" / "rock_detail.png";
-    int rw = 0, rh = 0, rn = 0;
-    unsigned char* px = stbi_load(path.string().c_str(), &rw, &rh, &rn, 4);
-    if (px) {
-      double sum = 0.0;
-      for (int i = 0; i < rw * rh; i++) {
-        sum += 0.299 * px[i * 4] + 0.587 * px[i * 4 + 1] + 0.114 * px[i * 4 + 2];
-      }
-      m_rock_avg = (float)(sum / (255.0 * rw * rh));
-      glGenTextures(1, &m_rock_tex);
-      glBindTexture(GL_TEXTURE_2D, m_rock_tex);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rw, rh, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-      glGenerateMipmap(GL_TEXTURE_2D);
-      glBindTexture(GL_TEXTURE_2D, 0);
-      stbi_image_free(px);
+    float rgb[3];
+    m_rock_tex = load_tiling_picture("rock_detail.png", rgb);
+    m_rock_avg = 0.299f * rgb[0] + 0.587f * rgb[1] + 0.114f * rgb[2];
+    m_ground_tex = load_tiling_picture("ground_detail.png", m_ground_avg);
+    // (the sand's: fine rippled, coarse with gravel, a cracked crust)
+    const char* sands[3] = {"sand_fine.png", "sand_coarse.png", "sand_crust.png"};
+    for (int i = 0; i < 3; i++) {
+      m_sand_tex[i] = load_tiling_picture(sands[i], m_sand_avg[i]);
     }
   }
   glActiveTexture(GL_TEXTURE10);
   glBindTexture(GL_TEXTURE_2D, m_rock_tex ? m_rock_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE16);
+  glBindTexture(GL_TEXTURE_2D, m_ground_tex ? m_ground_tex : m_black_tex);
+  for (int i = 0; i < 3; i++) {
+    glActiveTexture(GL_TEXTURE17 + i);
+    glBindTexture(GL_TEXTURE_2D, m_sand_tex[i] ? m_sand_tex[i] : m_black_tex);
+  }
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T10"), 10);
+  glUniform1i(glGetUniformLocation(id, "tex_T16"), 16);
+  glUniform1i(glGetUniformLocation(id, "tex_T17"), 17);
+  glUniform1i(glGetUniformLocation(id, "tex_T18"), 18);
+  glUniform1i(glGetUniformLocation(id, "tex_T19"), 19);
+  {
+    // the ground under a dense grass field drawn this frame (or the last)
+    const auto& gg = g_enhanced_grass_ground;
+    const bool on = gg.frame + 2 >= render_state->frame_idx && gg.frame > 0;
+    glUniform4f(glGetUniformLocation(id, "grass_ground"), gg.zone[0], gg.zone[1], gg.zone[2],
+                on ? gg.zone[3] : 0.f);
+    glUniform1f(glGetUniformLocation(id, "grass_water"), gg.water);
+    glUniform3f(glGetUniformLocation(id, "grass_field"), gg.field[0], gg.field[1], gg.field[2]);
+    glUniform1i(glGetUniformLocation(id, "tex_T21"), 21);
+    glActiveTexture(GL_TEXTURE21);
+    glBindTexture(GL_TEXTURE_2D, on && gg.tex ? gg.tex : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+  }
+  glUniform1f(glGetUniformLocation(id, "sand_set"),
+              m_sand_tex[0] && m_sand_tex[1] && m_sand_tex[2] ? 1.f : 0.f);
+  glUniform3fv(glGetUniformLocation(id, "sand_set_avg"), 3, &m_sand_avg[0][0]);
   glUniform1f(glGetUniformLocation(id, "rock_detail"),
               m_rock_tex && m_normals_ready ? m_grade.rock_detail : 0.f);
   glUniform1f(glGetUniformLocation(id, "rock_detail_avg"), m_rock_avg);
+  glUniform1f(glGetUniformLocation(id, "ground_detail"), m_ground_tex ? 1.f : 0.f);
+  glUniform3fv(glGetUniformLocation(id, "ground_detail_avg"), 1, m_ground_avg);
   glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   glUniform3fv(glGetUniformLocation(id, "grade_gain"), 1, m_grade.gain);
   // soft shadows: the shadow map again, read as plain depths for the blocker search
@@ -4895,14 +5033,14 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   {
     // the sun for the clouds, day or night (view space), and how high it stands (the camera's up:
     // last frame's, near enough)
-    float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
-                          m_sun_view[2] * m_sun_view[2]);
-    float up = len > 0.f ? (m_sun_view[0] * m_prev_camera.rot[1][0] +
-                            m_sun_view[1] * m_prev_camera.rot[1][1] +
-                            m_sun_view[2] * m_prev_camera.rot[1][2]) / len
+    float len = std::sqrt(m_sky_view[0] * m_sky_view[0] + m_sky_view[1] * m_sky_view[1] +
+                          m_sky_view[2] * m_sky_view[2]);
+    float up = len > 0.f ? (m_sky_view[0] * m_prev_camera.rot[1][0] +
+                            m_sky_view[1] * m_prev_camera.rot[1][1] +
+                            m_sky_view[2] * m_prev_camera.rot[1][2]) / len
                          : 0.5f;
-    float sv[3] = {len > 0.f ? m_sun_view[0] / len : 0.f, len > 0.f ? m_sun_view[1] / len : 0.f,
-                   len > 0.f ? m_sun_view[2] / len : 1.f};
+    float sv[3] = {len > 0.f ? m_sky_view[0] / len : 0.f, len > 0.f ? m_sky_view[1] / len : 0.f,
+                   len > 0.f ? m_sky_view[2] / len : 1.f};
     // test: the sun low behind the camera (the rainbow ahead)
     static const bool rainbow_test = std::getenv("JAK_ENHANCED_RAINBOW_TEST") != nullptr;
     if (rainbow_test) {
@@ -5175,7 +5313,7 @@ void EnhancedPost::draw_start_menu() {
 }
 
 void EnhancedPost::draw_photo_hint() {
-  if (!g_enhanced_menu.photo_active) {
+  if (!g_enhanced_menu.photo_active || g_enhanced_menu.editor) {
     return;
   }
   const double now =
@@ -5220,8 +5358,20 @@ void EnhancedPost::draw_menu() {
   // photo mode: in and out, and while it's on its filter
   if (!enhanced_light() &&
       ImGui::Button(g_enhanced_menu.photo ? "Leave photo mode  (F3, Start)" : "Photo mode  (F3)")) {
-    g_enhanced_menu.photo = !g_enhanced_menu.photo;
+    if (g_enhanced_menu.editor) {
+      enhanced_editor_toggle();
+    } else {
+      g_enhanced_menu.photo = !g_enhanced_menu.photo;
+    }
     if (g_enhanced_menu.photo) {
+      g_enhanced_menu.open = false;
+    }
+  }
+  // the in-game editor: photo mode with tools to paint grass, place things, light them
+  if (!enhanced_light()) {
+    ImGui::SameLine();
+    if (ImGui::Button(g_enhanced_menu.editor ? "Leave the editor  (F4)" : "Editor  (F4)")) {
+      enhanced_editor_toggle();
       g_enhanced_menu.open = false;
     }
   }
@@ -5322,8 +5472,8 @@ void EnhancedPost::draw_menu() {
     check("Sun shadows", &s.shadow_map);
     check("Character and tree shadows", &s.shadow_casters);
     check("Contact shadows", &s.sun_shadows);
-    check("Occlusione (SSAO)", &s.ssao);
-    check("Luce indiretta (SSGI)", &s.gi);
+    check("Ambient occlusion (SSAO)", &s.ssao);
+    check("Indirect light (SSGI)", &s.gi);
     check("Character lighting", &g_enhanced_merc.enabled);
     check("Bloom", &s.bloom);
     check("God rays", &s.shafts);
@@ -5333,7 +5483,7 @@ void EnhancedPost::draw_menu() {
       s.motion_blur = blur ? 0.3f : 0.f;
     }
     check("Dynamic lights", &s.lights);
-    check("Fuochi (calore, braci)", &s.fire);
+    check("Fires (heat, embers)", &s.fire);
     bool light_shadows = s.light_shadow > 0.f;
     if (check("Light shadows", &light_shadows)) {
       s.light_shadow = light_shadows ? 0.85f : 0.f;
@@ -6045,4 +6195,15 @@ void EnhancedPost::ground_puff(const float* pos, float size, float life, bool st
   f.life = snow ? life * 0.8f : life;
   f.time = m_time;
   m_puffs.push_back(f);
+}
+
+std::vector<EnhancedLight> enhanced_lights() {
+  return g_manual_lights[game_index()];
+}
+
+void enhanced_set_lights(const std::vector<EnhancedLight>& lights, bool save) {
+  g_manual_lights[game_index()] = lights;
+  if (save) {
+    save_manual_lights();
+  }
 }

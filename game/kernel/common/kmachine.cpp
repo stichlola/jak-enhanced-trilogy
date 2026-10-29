@@ -1433,14 +1433,23 @@ u64 pc_enhanced_subtitle_size() {
 }
 
 // Enhanced: photo mode. op 0: is it asked for (1/0); 1: the game left it (Start); 2: it's on in the
-// game; 3: it's off in the game; 4: ask for it (tests, from the REPL)
+// game; 3: it's off in the game; 4: ask for it (tests, from the REPL); 5: the editor (the pause menu)
 u64 pc_enhanced_photo(u32 op) {
   switch (op) {
     case 4:
       g_enhanced_menu.photo = true;
       break;
+    case 5:
+      g_enhanced_menu.editor = true;
+      g_enhanced_menu.photo = true;
+      break;
     case 1:
-      g_enhanced_menu.photo = false;
+      // (the editor's Start: it asks whether to save first, photo mode stays on meanwhile)
+      if (g_enhanced_menu.editor) {
+        g_enhanced_menu.editor_leave = true;
+      } else {
+        g_enhanced_menu.photo = false;
+      }
       break;
     case 2:
       g_enhanced_menu.photo_active = true;
@@ -1454,6 +1463,59 @@ u64 pc_enhanced_photo(u32 op) {
       break;
   }
   return g_enhanced_menu.photo ? 1 : 0;
+}
+
+// Enhanced: the in-game editor moves photo mode's camera with the mouse, as Blender does: its
+// position (a vector, game units) and its rotation (inv-camera-rot: rows, the camera's axes in the
+// world), changed in place
+// Enhanced: whether the in-game editor is on (the levels then load around its camera)
+u64 pc_enhanced_editing() {
+  return bool_to_symbol(g_enhanced_menu.editing());
+}
+
+u64 pc_enhanced_editor_cam(u32 trans, u32 rot) {
+  enhanced_editor_camera(Ptr<float>(trans).c(), Ptr<float>(rot).c());
+  return 0;
+}
+
+// Enhanced: the editor's ground probes (things let fall onto the game's collision): probe i's start
+// and length down into a vector (x y z, w the length), its id into hit's y; 0 past the last, 1 to
+// probe, 2 answered
+u64 pc_enhanced_editor_probe(u32 i, u32 vec, u32 hit) {
+  int id = 0;
+  int r = enhanced_editor_probe((int)i, Ptr<float>(vec).c(), &id);
+  Ptr<float>(hit).c()[1] = (float)id;
+  return (u64)r;
+}
+
+// and its answer: hit's x, the share of the way down to the first hit (negative: none), y its id
+u64 pc_enhanced_editor_probe_hit(u32 hit) {
+  enhanced_editor_probe_hit((int)Ptr<float>(hit).c()[1], Ptr<float>(hit).c()[0]);
+  return 0;
+}
+
+// Enhanced: the placed objects' collision into the collide cache as it fills: tris the next free
+// collide-cache-tri, room how many fit, box the query's (min, max), seg 0 or its line (start x y z
+// radius, move x y z), pat their surface. How many were added
+u64 pc_enhanced_collide_fill(u32 tris, u32 room, u32 box, u32 seg, u32 pat) {
+  float* out = Ptr<float>(tris).c();
+  const int n = enhanced_collide_tris(Ptr<float>(box).c(), seg ? Ptr<float>(seg).c() : nullptr, out, 16,
+                                      (int)room);
+  for (int i = 0; i < n; i++) {
+    // (as hfrag's: the surface, no shape behind it, the background's prim)
+    u32* extra = (u32*)(out + i * 16 + 12);
+    extra[0] = pat;
+    extra[1] = (u32)bool_to_symbol(false);
+    extra[2] = 0;
+    extra[3] = 0;
+  }
+  return (u64)n;
+}
+
+// Enhanced: the placed objects' gameplay, once a frame: three vectors (Jak's foot and state in; the
+// platform's carry and where to put him out), what happens (enhanced_gameplay)
+u64 pc_enhanced_gameplay(u32 io) {
+  return (u64)enhanced_gameplay(Ptr<float>(io).c());
 }
 
 // Enhanced: the minimap's size on screen, percent of the PS2's (the Enhanced menu)
@@ -1642,6 +1704,12 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-bed", (void*)pc_enhanced_bed);
   make_func_symbol_func("pc-enhanced-hint-once", (void*)pc_enhanced_hint_once);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);
+  make_func_symbol_func("pc-enhanced-editor-cam", (void*)pc_enhanced_editor_cam);
+  make_func_symbol_func("pc-enhanced-editing?", (void*)pc_enhanced_editing);
+  make_func_symbol_func("pc-enhanced-editor-probe", (void*)pc_enhanced_editor_probe);
+  make_func_symbol_func("pc-enhanced-editor-probe-hit", (void*)pc_enhanced_editor_probe_hit);
+  make_func_symbol_func("pc-enhanced-collide-fill", (void*)pc_enhanced_collide_fill);
+  make_func_symbol_func("pc-enhanced-gameplay", (void*)pc_enhanced_gameplay);
   make_func_symbol_func("pc-enhanced-switch-game", (void*)pc_enhanced_switch_game);
   make_func_symbol_func("pc-enhanced-switch-restore", (void*)pc_enhanced_switch_restore);
   make_func_symbol_func("pc-enhanced-bigmap-image", (void*)pc_enhanced_bigmap_image);

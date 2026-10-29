@@ -26,6 +26,24 @@ struct EnhancedCamera {
 };
 extern EnhancedCamera g_enhanced_camera;
 
+// a light placed by hand (lights.json; the Enhanced menu, the in-game editor): world position and
+// radius (game units), color, how bright, whether it flickers like a fire, whether it's lit at
+// night only, whether it's drawn as a point of light (off: the light alone, where the scene has
+// its lamp)
+struct EnhancedLight {
+  std::string note;
+  float pos[3] = {};
+  float radius = 8.f * 4096.f;
+  float color[3] = {1.f, 0.7f, 0.4f};
+  float intensity = 1.f;
+  bool flicker = false;
+  bool night = true;
+  bool bulb = true;
+};
+// this game's lights placed by hand; set them (and save lights.json)
+std::vector<EnhancedLight> enhanced_lights();
+void enhanced_set_lights(const std::vector<EnhancedLight>& lights, bool save);
+
 // Enhanced: the game's framebuffer has a second color target for the level geometry's world
 // normals (computed at load, see compute_vertex_normals). fbo = that framebuffer (0 = none).
 struct EnhancedNormals {
@@ -318,7 +336,12 @@ class EnhancedPost {
   GLuint m_black_tex = 0;
   GLuint m_rock_tex = 0;  // rock_detail.png: a tiling rock picture over rock surfaces
   float m_rock_avg = 0.5f;
+  GLuint m_ground_tex = 0;  // ground_detail.png: a tiling picture of rocky ground (stone, gravel)
+  float m_ground_avg[3] = {0.5f, 0.5f, 0.5f};
+  GLuint m_sand_tex[3] = {0, 0, 0};  // sand_fine/coarse/crust.png: the sand's tiling pictures
+  float m_sand_avg[3][3] = {};
   bool m_rock_loaded = false;
+  int m_terrain_version = 0;  // g_enhanced_terrain.version read last
   // the start menu's portraits, the games set up, the one picked
   GLuint m_start_tex[3] = {0, 0, 0};
   GLuint m_start_text[4] = {0, 0, 0, 0};  // the lettering: the title, the three names
@@ -460,7 +483,8 @@ class EnhancedPost {
   int m_gi_w = 0;
   int m_gi_h = 0;
   bool m_gi_ready = false;
-  float m_sun_view[3] = {0, 0, 0};
+  float m_sun_view[3] = {0, 0, 0};  // the key light (view space)
+  float m_sky_view[3] = {0, 0, 0};  // the sun as seen in the sky (view space)
 
   // sun shadow map: the static geometry of the loaded levels (tfrag, tie) drawn from the sun
   void do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof);
@@ -542,6 +566,8 @@ class EnhancedPost {
     float golden = 0.f;               // the late afternoon's amber look (0..1)
     float sun_yaw = 0.f;              // the sun's path turned around the up axis (degrees)
     float sun_max_elev = 90.f;        // in the late afternoon, the sun no higher than (degrees)
+    float light_yaw = 0.f;            // the light on the scene turned farther than the sun (degrees)
+    float light_max_elev = 90.f;      // in the late afternoon, that light no higher than (degrees)
   };
   void update_scene();
   Grade m_grade;

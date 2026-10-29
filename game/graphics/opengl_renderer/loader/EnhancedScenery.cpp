@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <future>
 #include <map>
 #include <mutex>
 #include <unordered_map>
@@ -22,6 +23,7 @@
 #include "game/graphics/pipelines/opengl.h"
 #include "game/runtime.h"
 
+#include "third-party/meshoptimizer/meshoptimizer.h"
 #include "third-party/stb_image/stb_image.h"
 
 float g_enhanced_scenery_dist = [] {
@@ -1112,5 +1114,835 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     prof.add_draw_call();
     prof.add_tri(2 * copies.size());
   }
+  glBindVertexArray(0);
+}
+
+GLuint enhanced_crush_map(float out[4]) {
+  auto& lib = library();
+  update_crush(lib);
+  const auto& cr = lib.crush;
+  const float cell = Crush::kCell * kMeter;
+  out[0] = cr.ox * cell;
+  out[1] = cr.oz * cell;
+  out[2] = Crush::kCells * cell;
+  out[3] = cr.on && cr.tex ? 1.f : 0.f;
+  return cr.on ? cr.tex : 0;
+}
+
+namespace {
+// the objects placed by hand (enhanced_set_placed), drawn by the first shrub tree near the camera
+struct PlacedSet {
+  std::vector<EnhancedPlaced> list;
+  std::unordered_map<std::string, int> mesh_of;  // model -> its mesh in the library (-1: broken)
+  std::unordered_map<std::string, std::shared_future<std::shared_ptr<Mesh>>> loading;
+  u64 drawn_frame = 0;
+  // each object's light: the nearest vertex of the tree drawing it (its time of day color, its
+  // baked light), worked out again when the tree or the place changes
+  struct Lit {
+    const tfrag3::ShrubTree* tree = nullptr;
+    float pos[3] = {0, 0, 0};
+    u16 tod = 0;
+    float base = 0.5f;
+  };
+  std::vector<Lit> lit;
+  // the trees' bounds (x, z, game units): whether one is near the camera
+  std::unordered_map<const tfrag3::ShrubTree*, std::array<float, 4>> tree_bounds;
+  // per mesh, per look (tint and light): the copies
+  struct Group {
+    int mesh = -1;
+    float rgb[3] = {0.5f, 0.5f, 0.5f};
+    std::vector<GpuInstance> copies;
+  };
+  std::vector<Group> groups;
+};
+PlacedSet g_placed;
+std::mutex g_placed_mutex;  // the list (set by the editor, read by the renderer)
+
+// the library's mesh for a model, loaded on a worker the first time it's asked for (the library
+// locked): -1 while loading or broken
+int placed_mesh(Library& lib, const std::string& model) {
+  auto& p = g_placed;
+  auto found = p.mesh_of.find(model);
+  if (found != p.mesh_of.end()) {
+    return found->second;
+  }
+  auto& job = p.loading[model];
+  if (!job.valid()) {
+    job = std::async(std::launch::async,
+                     [model] {
+                       auto mesh = std::make_shared<Mesh>();
+                       mesh->file = model;
+                       mesh->ok = load_mesh(*mesh);
+                       return mesh;
+                     })
+              .share();
+  }
+  if (job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+    return -1;
+  }
+  auto mesh = job.get();
+  int idx = -1;
+  if (mesh->ok) {
+    idx = (int)lib.meshes.size();
+    lib.meshes.push_back(std::move(*mesh));
+  }
+  p.mesh_of[model] = idx;
+  p.loading.erase(model);
+  return idx;
+}
+}  // namespace
+
+std::vector<std::string> enhanced_scenery_models() {
+  std::vector<std::string> out;
+  std::error_code ec;
+  for (const auto& e : fs::directory_iterator(scenery_dir(), ec)) {
+    const auto name = e.path().filename().string();
+    if (e.path().extension() == ".glb" && name.find("_lod") == std::string::npos) {
+      out.push_back(name);
+    }
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+namespace {
+u64 g_placed_version = 0;  // counts the lists set (the collision built again when it changes)
+
+// the gameplay's clock, seconds
+double play_time() {
+  static const auto start = std::chrono::steady_clock::now();
+  return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+// a moving object's place at time t: its offset (game units) and turn about the vertical (radians);
+// still while editing (false)
+bool placed_motion(const EnhancedPlaced& o, double t, float off[3], float* yaw) {
+  off[0] = off[1] = off[2] = 0.f;
+  *yaw = 0.f;
+  if (!o.motion || g_enhanced_menu.editing()) {
+    return false;
+  }
+  constexpr double kTau = 6.283185307179586;
+  const double ph = kTau * t / std::max(o.period, 0.1f);
+  switch (o.motion) {
+    case kMotionMove: {
+      const float s = (float)(0.5 - 0.5 * std::cos(ph));
+      for (int k = 0; k < 3; k++) {
+        off[k] = o.move[k] * s;
+      }
+      break;
+    }
+    case kMotionBob: {
+      const float s = (float)std::sin(ph);
+      for (int k = 0; k < 3; k++) {
+        off[k] = o.move[k] * s;
+      }
+      break;
+    }
+    case kMotionSpin:
+      *yaw = (float)std::fmod(ph, kTau);
+      break;
+    default:
+      return false;
+  }
+  return true;
+}
+
+// a point of an object at rest where it is when moved (yaw about its foot, then the offset)
+void moved_point(const float pos[3], const float off[3], float yaw, const float in[3], float out[3]) {
+  const float x = in[0] - pos[0], z = in[2] - pos[2];
+  const float c = std::cos(yaw), s = std::sin(yaw);
+  out[0] = pos[0] + c * x + s * z + off[0];
+  out[1] = in[1] + off[1];
+  out[2] = pos[2] - s * x + c * z + off[2];
+}
+
+// the gameplay's own state: what's taken (back when), cooldowns, the checkpoint
+struct PlayState {
+  u64 version = ~0ull;
+  std::unordered_map<size_t, double> hidden_until, cool_until;
+  bool was_dead = false;
+  bool have_put = false;  // the editor's "Put Jak Here", done when back in the game
+  float put[3] = {0, 0, 0};
+  bool have_checkpoint = false;
+  float checkpoint[3] = {0, 0, 0};
+  double last_t = 0;
+};
+PlayState g_play;
+}
+
+void enhanced_set_placed(const std::vector<EnhancedPlaced>& placed) {
+  std::lock_guard<std::mutex> lock(g_placed_mutex);
+  g_placed.list = placed;
+  g_placed_version++;
+}
+
+bool enhanced_model_bounds(const std::string& model, float lo[3], float hi[3]) {
+  auto& lib = library();
+  std::unique_lock<std::mutex> lock(lib.mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return false;
+  }
+  std::lock_guard<std::mutex> plock(g_placed_mutex);
+  int m = placed_mesh(lib, model);
+  if (m < 0) {
+    return false;
+  }
+  const auto& mesh = lib.meshes[m];
+  // (around its foot: the middle of its bottom)
+  const float cx = (mesh.lo.x() + mesh.hi.x()) * 0.5f, cz = (mesh.lo.z() + mesh.hi.z()) * 0.5f;
+  lo[0] = mesh.lo.x() - cx;
+  lo[1] = mesh.lo.y() - mesh.foot_y;
+  lo[2] = mesh.lo.z() - cz;
+  hi[0] = mesh.hi.x() - cx;
+  hi[1] = mesh.hi.y() - mesh.foot_y;
+  hi[2] = mesh.hi.z() - cz;
+  return true;
+}
+
+namespace {
+// ---- the placed objects' collision: each model's shape (its triangles, fewer), the world's (all
+// the solid objects' triangles where they stand), built again when the list changes
+constexpr int kCollideTris = 300;            // a model's shape at most
+constexpr float kCollideMinSize = 0.5f;      // m: smaller than this, not solid on its own (pebbles)
+
+struct CollideShape {
+  bool ok = false;
+  bool solid = false;  // on its own (collide -1): no see-through texture
+  float size = 0.f;    // its biggest side, game units
+  std::vector<Vec3> tris;  // around its foot, unscaled, three a triangle
+};
+std::unordered_map<int, CollideShape> g_shapes;  // by library mesh (the library locked)
+
+struct CollideWorld {
+  struct Obj {
+    float lo[3], hi[3];  // (a moving one: all the places it goes)
+    u32 first = 0, count = 0;
+    EnhancedPlaced moving;  // its motion (motion 0: still)
+  };
+  std::vector<Obj> objs;
+  std::vector<float> tris;   // 9 floats a triangle, game units
+  std::vector<float> boxes;  // 6 a triangle: its bounds
+  u64 version = ~0ull;
+  bool pending = false;  // some models still loading: built again a little later
+  std::chrono::steady_clock::time_point tried;
+};
+CollideWorld g_cworld;
+std::mutex g_cworld_mutex;
+
+const CollideShape& collide_shape(const Library& lib, int m) {
+  auto& s = g_shapes[m];
+  if (s.ok) {
+    return s;
+  }
+  s.ok = true;
+  const auto& mesh = lib.meshes[m];
+  const Vec3 foot((mesh.lo.x() + mesh.hi.x()) * 0.5f, mesh.foot_y, (mesh.lo.z() + mesh.hi.z()) * 0.5f);
+  const Vec3 ext = mesh.hi - mesh.lo;
+  s.size = std::max({ext.x(), ext.y(), ext.z()});
+  s.solid = !mesh.cutout;
+  // (its positions only, the same ones joined: then fewer triangles, the shape kept)
+  std::vector<float> pos(mesh.verts.size() * 3);
+  for (size_t i = 0; i < mesh.verts.size(); i++) {
+    pos[i * 3] = mesh.verts[i].x - foot.x();
+    pos[i * 3 + 1] = mesh.verts[i].y - foot.y();
+    pos[i * 3 + 2] = mesh.verts[i].z - foot.z();
+  }
+  std::vector<u32> remap(mesh.verts.size());
+  const size_t nv = meshopt_generateVertexRemap(remap.data(), mesh.indices.data(), mesh.indices.size(),
+                                                pos.data(), mesh.verts.size(), sizeof(float) * 3);
+  std::vector<float> wpos(nv * 3);
+  meshopt_remapVertexBuffer(wpos.data(), pos.data(), mesh.verts.size(), sizeof(float) * 3, remap.data());
+  std::vector<u32> idx(mesh.indices.size());
+  meshopt_remapIndexBuffer(idx.data(), mesh.indices.data(), mesh.indices.size(), remap.data());
+  if (idx.size() > kCollideTris * 3) {
+    std::vector<u32> out(idx.size());
+    float err = 0.f;
+    size_t n = meshopt_simplify(out.data(), idx.data(), idx.size(), wpos.data(), nv, sizeof(float) * 3,
+                                kCollideTris * 3, 0.05f, meshopt_SimplifyPrune, &err);
+    if (n > kCollideTris * 3 * 2 || n < 3) {
+      n = meshopt_simplifySloppy(out.data(), idx.data(), idx.size(), wpos.data(), nv, sizeof(float) * 3,
+                                 kCollideTris * 3, 0.05f, &err);
+    }
+    if (n >= 3) {
+      out.resize(n);
+      idx = std::move(out);
+    }
+  }
+  auto at = [&](u32 i) { return Vec3(wpos[i * 3], wpos[i * 3 + 1], wpos[i * 3 + 2]); };
+  // outward as the game's are, (v1 - v0) x (v2 - v0): the volume they close is positive that way
+  double vol = 0;
+  for (size_t t = 0; t + 2 < idx.size(); t += 3) {
+    const Vec3 a = at(idx[t]), b = at(idx[t + 1]), c = at(idx[t + 2]);
+    vol += (b - a).cross(c - a).dot(a);
+  }
+  const bool flip = vol < 0;
+  for (size_t t = 0; t + 2 < idx.size(); t += 3) {
+    s.tris.push_back(at(idx[t]));
+    s.tris.push_back(at(idx[flip ? t + 2 : t + 1]));
+    s.tris.push_back(at(idx[flip ? t + 1 : t + 2]));
+  }
+  lg::info("[enhanced] collision: {} ({} triangles)", mesh.file, s.tris.size() / 3);
+  return s;
+}
+
+// the world's collision built again from the list (both locks held)
+void build_collide_world(Library& lib, CollideWorld& w) {
+  w.objs.clear();
+  w.tris.clear();
+  w.boxes.clear();
+  w.pending = false;
+  for (const auto& o : g_placed.list) {
+    if (o.collide == 0 || o.ghost) {
+      continue;
+    }
+    const int m = placed_mesh(lib, o.model);
+    if (m < 0) {
+      w.pending |= g_placed.mesh_of.find(o.model) == g_placed.mesh_of.end();
+      continue;
+    }
+    const auto& s = collide_shape(lib, m);
+    const float scale = std::max({std::abs(o.scale[0]), std::abs(o.scale[1]), std::abs(o.scale[2])});
+    if (o.collide < 0 && (!s.solid || s.size * scale < kCollideMinSize * kMeter)) {
+      continue;
+    }
+    float cols[3][3];
+    enhanced_placed_axes(o, cols);
+    // (a mirroring scale turns the triangles inside out: back the right way)
+    const float det = cols[0][0] * (cols[1][1] * cols[2][2] - cols[2][1] * cols[1][2]) -
+                      cols[1][0] * (cols[0][1] * cols[2][2] - cols[2][1] * cols[0][2]) +
+                      cols[2][0] * (cols[0][1] * cols[1][2] - cols[1][1] * cols[0][2]);
+    CollideWorld::Obj obj;
+    obj.first = (u32)(w.tris.size() / 9);
+    for (int k = 0; k < 3; k++) {
+      obj.lo[k] = 1e30f;
+      obj.hi[k] = -1e30f;
+    }
+    for (size_t t = 0; t + 2 < s.tris.size(); t += 3) {
+      float v[3][3];
+      for (int j = 0; j < 3; j++) {
+        const Vec3& l = s.tris[t + (det < 0 && j ? 3 - j : j)];
+        for (int r = 0; r < 3; r++) {
+          v[j][r] = o.pos[r] + cols[0][r] * l.x() + cols[1][r] * l.y() + cols[2][r] * l.z();
+        }
+      }
+      float lo[3], hi[3];
+      for (int r = 0; r < 3; r++) {
+        lo[r] = std::min({v[0][r], v[1][r], v[2][r]});
+        hi[r] = std::max({v[0][r], v[1][r], v[2][r]});
+        obj.lo[r] = std::min(obj.lo[r], lo[r]);
+        obj.hi[r] = std::max(obj.hi[r], hi[r]);
+      }
+      for (int j = 0; j < 3; j++) {
+        w.tris.insert(w.tris.end(), v[j], v[j] + 3);
+      }
+      w.boxes.insert(w.boxes.end(), {lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]});
+    }
+    obj.count = (u32)(w.tris.size() / 9) - obj.first;
+    if (o.motion) {
+      // (its box over all the places it goes)
+      obj.moving.motion = o.motion;
+      std::copy(o.move, o.move + 3, obj.moving.move);
+      std::copy(o.pos, o.pos + 3, obj.moving.pos);
+      obj.moving.period = o.period;
+      float reach = 0.f;
+      if (o.motion == kMotionSpin) {
+        for (int c = 0; c < 4; c++) {
+          const float x = (c & 1 ? obj.hi[0] : obj.lo[0]) - o.pos[0], z = (c & 2 ? obj.hi[2] : obj.lo[2]) - o.pos[2];
+          reach = std::max(reach, std::sqrt(x * x + z * z));
+        }
+        obj.lo[0] = o.pos[0] - reach;
+        obj.hi[0] = o.pos[0] + reach;
+        obj.lo[2] = o.pos[2] - reach;
+        obj.hi[2] = o.pos[2] + reach;
+      } else {
+        for (int k = 0; k < 3; k++) {
+          const float a = o.motion == kMotionBob ? -std::abs(o.move[k]) : std::min(0.f, o.move[k]);
+          const float b = o.motion == kMotionBob ? std::abs(o.move[k]) : std::max(0.f, o.move[k]);
+          obj.lo[k] += a;
+          obj.hi[k] += b;
+        }
+      }
+    }
+    if (obj.count) {
+      w.objs.push_back(obj);
+    }
+  }
+}
+
+// does a line (from p, by d) come within r of a box?
+bool line_near_box(const float* p, const float* d, float r, const float* lo, const float* hi) {
+  float t0 = 0.f, t1 = 1.f;
+  for (int k = 0; k < 3; k++) {
+    const float a = lo[k] - r, b = hi[k] + r;
+    if (std::abs(d[k]) < 1e-6f) {
+      if (p[k] < a || p[k] > b) {
+        return false;
+      }
+      continue;
+    }
+    float u0 = (a - p[k]) / d[k], u1 = (b - p[k]) / d[k];
+    if (u0 > u1) {
+      std::swap(u0, u1);
+    }
+    t0 = std::max(t0, u0);
+    t1 = std::min(t1, u1);
+    if (t0 > t1) {
+      return false;
+    }
+  }
+  return true;
+}
+}  // namespace
+
+int enhanced_collide_tris(const float* box, const float* seg, float* out, int stride, int max) {
+  auto& w = g_cworld;
+  {
+    // (built again when the list changed, or a little later while models still load; the library
+    // busy: the old one this time)
+    u64 version;
+    {
+      std::lock_guard<std::mutex> plock(g_placed_mutex);
+      version = g_placed_version;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> clock(g_cworld_mutex);
+    if (version != w.version || (w.pending && now - w.tried > std::chrono::milliseconds(250))) {
+      auto& lib = library();
+      std::unique_lock<std::mutex> lock(lib.mutex, std::try_to_lock);
+      if (lock.owns_lock()) {
+        std::lock_guard<std::mutex> plock(g_placed_mutex);
+        w.version = g_placed_version;
+        w.tried = now;
+        build_collide_world(lib, w);
+      }
+    }
+  }
+  std::lock_guard<std::mutex> clock(g_cworld_mutex);
+  const float* lo = box;
+  const float* hi = box + 4;
+  int n = 0;
+  for (const auto& o : w.objs) {
+    if (o.hi[0] < lo[0] || o.lo[0] > hi[0] || o.hi[1] < lo[1] || o.lo[1] > hi[1] || o.hi[2] < lo[2] ||
+        o.lo[2] > hi[2]) {
+      continue;
+    }
+    if (seg && !line_near_box(seg, seg + 4, seg[3], o.lo, o.hi)) {
+      continue;
+    }
+    float off[3], yaw;
+    if (o.moving.motion && placed_motion(o.moving, play_time(), off, &yaw)) {
+      // (moving: each triangle where it is now)
+      for (u32 t = o.first; t < o.first + o.count && n < max; t++) {
+        float v[3][3], b[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
+        for (int j = 0; j < 3; j++) {
+          moved_point(o.moving.pos, off, yaw, &w.tris[t * 9 + j * 3], v[j]);
+          for (int r = 0; r < 3; r++) {
+            b[r] = std::min(b[r], v[j][r]);
+            b[r + 3] = std::max(b[r + 3], v[j][r]);
+          }
+        }
+        if (b[3] < lo[0] || b[0] > hi[0] || b[4] < lo[1] || b[1] > hi[1] || b[5] < lo[2] || b[2] > hi[2] ||
+            (seg && !line_near_box(seg, seg + 4, seg[3], b, b + 3))) {
+          continue;
+        }
+        float* dst = out + (size_t)n * stride;
+        for (int j = 0; j < 3; j++) {
+          dst[j * 4] = v[j][0];
+          dst[j * 4 + 1] = v[j][1];
+          dst[j * 4 + 2] = v[j][2];
+          dst[j * 4 + 3] = 1.f;
+        }
+        n++;
+      }
+      continue;
+    }
+    for (u32 t = o.first; t < o.first + o.count; t++) {
+      const float* b = &w.boxes[t * 6];
+      if (b[3] < lo[0] || b[0] > hi[0] || b[4] < lo[1] || b[1] > hi[1] || b[5] < lo[2] || b[2] > hi[2]) {
+        continue;
+      }
+      if (seg && !line_near_box(seg, seg + 4, seg[3], b, b + 3)) {
+        continue;
+      }
+      if (n >= max) {
+        return n;
+      }
+      float* dst = out + (size_t)n * stride;
+      for (int j = 0; j < 3; j++) {
+        dst[j * 4] = w.tris[t * 9 + j * 3];
+        dst[j * 4 + 1] = w.tris[t * 9 + j * 3 + 1];
+        dst[j * 4 + 2] = w.tris[t * 9 + j * 3 + 2];
+        dst[j * 4 + 3] = 1.f;
+      }
+      n++;
+    }
+  }
+  return n;
+}
+
+void enhanced_put_jak(const float* pos) {
+  std::lock_guard<std::mutex> plock(g_placed_mutex);
+  g_play.have_put = true;
+  std::copy(pos, pos + 3, g_play.put);
+}
+
+int enhanced_gameplay(float* io) {
+  float* carry = io + 4;
+  float* put = io + 8;
+  carry[0] = carry[1] = carry[2] = 0.f;
+  if (g_enhanced_menu.editing()) {
+    return 0;
+  }
+  const double now = play_time();
+  const float jak[3] = {io[0], io[1], io[2]};
+  const int state = (int)io[3];
+  const bool ground = state & 1, dead = state & 2;
+  int event = 0;
+  {
+    // (the platform under him: how far its point under his feet went since the last frame)
+    std::lock_guard<std::mutex> clock(g_cworld_mutex);
+    if (ground && g_play.last_t > 0) {
+      for (const auto& o : g_cworld.objs) {
+        if (!o.moving.motion || jak[0] < o.lo[0] || jak[0] > o.hi[0] || jak[2] < o.lo[2] || jak[2] > o.hi[2] ||
+            jak[1] < o.lo[1] - 0.5f * kMeter || jak[1] > o.hi[1] + 0.5f * kMeter) {
+          continue;
+        }
+        float off0[3], yaw0, off1[3], yaw1;
+        placed_motion(o.moving, g_play.last_t, off0, &yaw0);
+        placed_motion(o.moving, now, off1, &yaw1);
+        // (where his foot is on it at rest: back from where it was)
+        const float* c = o.moving.pos;
+        const float x = jak[0] - c[0] - off0[0], z = jak[2] - c[2] - off0[2];
+        const float rest[3] = {c[0] + std::cos(-yaw0) * x + std::sin(-yaw0) * z, jak[1] - off0[1],
+                               c[2] - std::sin(-yaw0) * x + std::cos(-yaw0) * z};
+        // (it must be on it now: over its triangles, near their top)
+        float lo_y = 1e30f, hi_y = -1e30f;
+        bool over = false;
+        for (u32 t = o.first; t < o.first + o.count && !over; t++) {
+          const float* b = &g_cworld.boxes[t * 6];
+          over = rest[0] >= b[0] - 0.2f * kMeter && rest[0] <= b[3] + 0.2f * kMeter && rest[2] >= b[2] - 0.2f * kMeter &&
+                 rest[2] <= b[5] + 0.2f * kMeter && rest[1] >= b[1] - 0.3f * kMeter && rest[1] <= b[4] + 0.5f * kMeter;
+          lo_y = std::min(lo_y, b[1]);
+          hi_y = std::max(hi_y, b[4]);
+        }
+        if (!over) {
+          continue;
+        }
+        float now_p[3];
+        moved_point(c, off1, yaw1, rest, now_p);
+        for (int k = 0; k < 3; k++) {
+          carry[k] = now_p[k] - jak[k];
+        }
+        break;
+      }
+    }
+  }
+  std::lock_guard<std::mutex> plock(g_placed_mutex);
+  auto& ps = g_play;
+  if (ps.version != g_placed_version) {
+    ps.version = g_placed_version;
+    ps.hidden_until.clear();
+    ps.cool_until.clear();
+  }
+  ps.last_t = now;
+  if (ps.have_put) {
+    ps.have_put = false;
+    std::copy(ps.put, ps.put + 3, put);
+    return 6;
+  }
+  // (back from dying: at the last checkpoint)
+  if (ps.was_dead && !dead && ps.have_checkpoint) {
+    std::copy(ps.checkpoint, ps.checkpoint + 3, put);
+    event = 6;
+  }
+  ps.was_dead = dead;
+  if (dead || event) {
+    return event;
+  }
+  const auto& list = g_placed.list;
+  for (size_t i = 0; i < list.size(); i++) {
+    const auto& o = list[i];
+    if (!o.action) {
+      continue;
+    }
+    float off[3], yaw;
+    placed_motion(o, now, off, &yaw);
+    const float at[3] = {o.pos[0] + off[0], o.pos[1] + off[1] + 0.5f * kMeter, o.pos[2] + off[2]};
+    const float dx = jak[0] - at[0], dy = jak[1] + 0.5f * kMeter - at[1], dz = jak[2] - at[2];
+    const float reach = (o.action == kActionTeleport || o.action == kActionVent ? 1.6f : 1.2f) * kMeter *
+                        std::max({o.scale[0], o.scale[2], 1.f});
+    if (dx * dx + dz * dz > reach * reach || std::abs(dy) > 2.f * kMeter) {
+      continue;
+    }
+    auto cool = ps.cool_until.find(i);
+    if (cool != ps.cool_until.end() && cool->second > now) {
+      continue;
+    }
+    auto hid = ps.hidden_until.find(i);
+    if (hid != ps.hidden_until.end() && hid->second > now) {
+      continue;
+    }
+    switch (o.action) {
+      case kActionHealth:
+      case kActionDarkEco:
+      case kActionLightEco:
+      case kActionAmmo:
+        // (taken: back in half a minute)
+        ps.hidden_until[i] = now + 30.0;
+        return o.action;
+      case kActionVent:
+        ps.cool_until[i] = now + 0.5;
+        return kActionDarkEco;
+      case kActionCheckpoint:
+        if (!ps.have_checkpoint || ps.checkpoint[0] != at[0] || ps.checkpoint[2] != at[2]) {
+          lg::info("[enhanced] checkpoint");
+        }
+        ps.have_checkpoint = true;
+        std::copy(at, at + 3, ps.checkpoint);
+        ps.cool_until[i] = now + 1.0;
+        break;
+      case kActionTeleport:
+        for (size_t j = 0; j < list.size(); j++) {
+          if (j != i && list[j].action == kActionTeleport && list[j].link == o.link) {
+            float off2[3], yaw2;
+            placed_motion(list[j], now, off2, &yaw2);
+            put[0] = list[j].pos[0] + off2[0];
+            put[1] = list[j].pos[1] + off2[1] + 0.5f * kMeter;
+            put[2] = list[j].pos[2] + off2[2];
+            // (not straight back: both rest a while)
+            ps.cool_until[i] = ps.cool_until[j] = now + 2.5;
+            return 6;
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return 0;
+}
+
+void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
+                          const TfragRenderSettings& settings,
+                          SharedRenderState* render_state,
+                          ScopedProfilerNode& prof) {
+  auto& p = g_placed;
+  if (p.drawn_frame == render_state->frame_idx || tree.unpacked.vertices.empty() ||
+      tree.static_draws.empty()) {
+    return;
+  }
+  const auto& cam = settings.camera.trans;
+  // (only a tree near the camera lights them: its time of day colors are the area's)
+  auto tb = p.tree_bounds.find(&tree);
+  if (tb == p.tree_bounds.end()) {
+    std::array<float, 4> b = {1e30f, 1e30f, -1e30f, -1e30f};
+    for (const auto& v : tree.unpacked.vertices) {
+      b[0] = std::min(b[0], v.x);
+      b[1] = std::min(b[1], v.z);
+      b[2] = std::max(b[2], v.x);
+      b[3] = std::max(b[3], v.z);
+    }
+    tb = p.tree_bounds.emplace(&tree, b).first;
+  }
+  const auto& b = tb->second;
+  const float reach = 150.f * kMeter;
+  if (cam.x() < b[0] - reach || cam.x() > b[2] + reach || cam.z() < b[1] - reach ||
+      cam.z() > b[3] + reach) {
+    return;
+  }
+  auto& lib = library();
+  std::unique_lock<std::mutex> lock(lib.mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    return;
+  }
+  std::lock_guard<std::mutex> plock(g_placed_mutex);
+  p.drawn_frame = render_state->frame_idx;
+  if (p.list.empty()) {
+    return;
+  }
+  p.lit.resize(p.list.size());
+
+  // each object's copy, grouped by mesh and look
+  for (auto& g : p.groups) {
+    g.copies.clear();
+  }
+  bool any = false;
+  const auto& verts = tree.unpacked.vertices;
+  for (size_t i = 0; i < p.list.size(); i++) {
+    const auto& o = p.list[i];
+    int m = placed_mesh(lib, o.model);
+    if (m < 0) {
+      continue;
+    }
+    const auto& mesh = lib.meshes[m];
+    Vec3 pos(o.pos[0], o.pos[1], o.pos[2]);
+    float cols[3][3];
+    enhanced_placed_axes(o, cols);
+    // (gameplay: moved, turned; taken, not drawn until it's back)
+    if (o.action && !g_enhanced_menu.editing()) {
+      auto h = g_play.hidden_until.find(i);
+      if (h != g_play.hidden_until.end() && h->second > play_time()) {
+        continue;
+      }
+    }
+    {
+      float off[3], yaw;
+      if (placed_motion(o, play_time(), off, &yaw)) {
+        pos = pos + Vec3(off[0], off[1], off[2]);
+        const float c = std::cos(yaw), s = std::sin(yaw);
+        for (auto& col : cols) {
+          const float x = col[0], z = col[2];
+          col[0] = c * x + s * z;
+          col[2] = -s * x + c * z;
+        }
+      }
+    }
+    Affine full = {{Vec3(cols[0][0], cols[0][1], cols[0][2]), Vec3(cols[1][0], cols[1][1], cols[1][2]),
+                    Vec3(cols[2][0], cols[2][1], cols[2][2])},
+                   Vec3(0, 0, 0)};
+    const float s = std::max({std::abs(o.scale[0]), std::abs(o.scale[1]), std::abs(o.scale[2]), 0.01f});
+    Vec3 center = pos + full.turn(Vec3((mesh.lo.x() + mesh.hi.x()) * 0.5f, (mesh.hi.y() + mesh.foot_y) * 0.5f,
+                                       (mesh.lo.z() + mesh.hi.z()) * 0.5f) -
+                                  Vec3((mesh.lo.x() + mesh.hi.x()) * 0.5f, mesh.foot_y,
+                                       (mesh.lo.z() + mesh.hi.z()) * 0.5f));
+    float radius = s * (mesh.hi - mesh.lo).length() * 0.5f;
+    float dx = center.x() - cam.x(), dy = center.y() - cam.y(), dz = center.z() - cam.z();
+    float far_end = 400.f * kMeter + radius;
+    if (dx * dx + dy * dy + dz * dz > far_end * far_end ||
+        !sphere_in_view_ref(math::Vector4f(center.x(), center.y(), center.z(), radius),
+                            settings.camera.planes)) {
+      continue;
+    }
+    auto& lt = p.lit[i];
+    if (lt.tree != &tree || lt.pos[0] != o.pos[0] || lt.pos[1] != o.pos[1] || lt.pos[2] != o.pos[2]) {
+      lt.tree = &tree;
+      std::copy(o.pos, o.pos + 3, lt.pos);
+      float best = 1e30f;
+      for (size_t v = 0; v < verts.size(); v += 3) {
+        float ex = verts[v].x - pos.x(), ez = verts[v].z - pos.z();
+        float d = ex * ex + ez * ez;
+        if (d < best) {
+          best = d;
+          lt.tod = verts[v].color_index;
+          // (its brightness only: the bush's hue isn't the ground's)
+          lt.base = (0.3f * verts[v].rgba_base[0] + 0.59f * verts[v].rgba_base[1] +
+                     0.11f * verts[v].rgba_base[2]) /
+                    255.f;
+        }
+      }
+    }
+    full.t = pos - full.turn(Vec3((mesh.lo.x() + mesh.hi.x()) * 0.5f, mesh.foot_y,
+                                  (mesh.lo.z() + mesh.hi.z()) * 0.5f));
+    GpuInstance inst;
+    for (int c = 0; c < 3; c++) {
+      inst.col[c][0] = full.c[c].x();
+      inst.col[c][1] = full.c[c].y();
+      inst.col[c][2] = full.c[c].z();
+      inst.col[c][3] = 0;
+    }
+    inst.col[0][3] = lt.tod;
+    inst.col[3][0] = full.t.x();
+    inst.col[3][1] = full.t.y();
+    inst.col[3][2] = full.t.z();
+    inst.col[3][3] = 1;
+    // (the look rounded, so near alike objects share a draw)
+    float rgb[3];
+    for (int c = 0; c < 3; c++) {
+      rgb[c] = std::round(lt.base * o.tint[c] * 32.f) / 32.f;
+    }
+    PlacedSet::Group* group = nullptr;
+    for (auto& g : p.groups) {
+      if (g.mesh == m && g.rgb[0] == rgb[0] && g.rgb[1] == rgb[1] && g.rgb[2] == rgb[2]) {
+        group = &g;
+        break;
+      }
+    }
+    if (!group) {
+      group = &p.groups.emplace_back();
+      group->mesh = m;
+      std::copy(rgb, rgb + 3, group->rgb);
+    }
+    group->copies.push_back(inst);
+    any = true;
+  }
+  // (the looks no longer used)
+  p.groups.erase(std::remove_if(p.groups.begin(), p.groups.end(),
+                                [](const PlacedSet::Group& g) { return g.copies.empty(); }),
+                 p.groups.end());
+  if (!any) {
+    return;
+  }
+
+  // the draw settings: a cutout one for blades and leaves, a solid one for stones
+  DrawMode cut = tree.static_draws[0].mode, solid = tree.static_draws[0].mode;
+  bool have_cut = false, have_solid = false;
+  for (const auto& d : tree.static_draws) {
+    if (d.mode.get_at_enable() && !have_cut) {
+      cut = d.mode;
+      have_cut = true;
+    } else if (!d.mode.get_at_enable() && !have_solid) {
+      solid = d.mode;
+      have_solid = true;
+    }
+  }
+  if (!have_solid) {
+    solid.disable_at();
+  }
+  using clock = std::chrono::steady_clock;
+  static const auto start = clock::now();
+  const float now = std::chrono::duration<float>(clock::now() - start).count();
+  auto& sh = render_state->shaders[ShaderId::SHRUB_INST];
+  first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_INST);
+  glUniform2f(glGetUniformLocation(sh.id(), "enh_lod"), 0.f, 0.f);
+  glUniform1f(glGetUniformLocation(sh.id(), "enh_wet"), g_enhanced_wind.wet);
+  glUniform1i(glGetUniformLocation(sh.id(), "tex_T10"), 10);
+  glUniform1f(glGetUniformLocation(sh.id(), "enh_time"), now);
+  const auto& pl = g_enhanced_player;
+  glUniform4f(glGetUniformLocation(sh.id(), "enh_player"), pl.pos[0], pl.pos[1], pl.pos[2],
+              pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * kMeter : 0.f);
+  const auto& ps = g_enhanced_pushers;
+  int pushers = g_enhanced_wind.push ? ps.count : 0;
+  glUniform1i(glGetUniformLocation(sh.id(), "enh_pusher_count"), pushers);
+  if (pushers > 0) {
+    glUniform4fv(glGetUniformLocation(sh.id(), "enh_pushers"), pushers, &ps.pos[0][0]);
+  }
+  update_crush(lib);
+  const auto& cr = lib.crush;
+  const float cell = Crush::kCell * kMeter;
+  glUniform4f(glGetUniformLocation(sh.id(), "enh_crush"), cr.ox * cell, cr.oz * cell,
+              Crush::kCells * cell, cr.on && cr.tex ? 1.f : 0.f);
+  glUniform1i(glGetUniformLocation(sh.id(), "tex_T2"), 2);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, cr.tex);
+  glActiveTexture(GL_TEXTURE0);
+  glDisable(GL_PRIMITIVE_RESTART);
+  for (auto& g : p.groups) {
+    auto& mesh = lib.meshes[g.mesh];
+    if (!mesh.vao) {
+      make_gl(mesh, lib);
+    }
+    glUniform3f(glGetUniformLocation(sh.id(), "enh_base_rgb"), g.rgb[0], g.rgb[1], g.rgb[2]);
+    glUniform3f(glGetUniformLocation(sh.id(), "enh_model_avg"), mesh.avg.x(), mesh.avg.y(),
+                mesh.avg.z());
+    glUniform2f(glGetUniformLocation(sh.id(), "enh_tip"), mesh.lo.y(),
+                std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
+    glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), mesh.cutout ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), mesh.cutout ? 0.f : 1.f);
+    glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
+                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+    setup_tfrag_shader(render_state, mesh.cutout ? cut : solid, ShaderId::SHRUB_INST);
+    glBindVertexArray(mesh.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
+    glBufferData(GL_ARRAY_BUFFER, g.copies.size() * sizeof(GpuInstance), g.copies.data(),
+                 GL_STREAM_DRAW);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mesh.tex);
+    glDrawElementsInstanced(GL_TRIANGLES, mesh.indices.size(), GL_UNSIGNED_INT, nullptr,
+                            g.copies.size());
+    prof.add_draw_call();
+    prof.add_tri(mesh.indices.size() / 3 * g.copies.size());
+  }
+  glEnable(GL_PRIMITIVE_RESTART);
   glBindVertexArray(0);
 }
