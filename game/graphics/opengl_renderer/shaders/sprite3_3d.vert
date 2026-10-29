@@ -182,9 +182,16 @@ void main() {
       vec3 d = position - enh_light_pos[i].xyz;
       float r = enh_light_pos[i].w;
       float k = max(1.0 - dot(d, d) / (r * r), 0.0);
+      // (not the fire's own flames, at its heart: lit by it too, they burned past full, pale and
+      // tinted by the lamp's color)
+      k *= smoothstep(0.06, 0.16, length(d) / r);
       added += enh_light_color[i].rgb * (k * k);
     }
-    fragment_color.rgb *= 1.0 + min(added, vec3(2.0)) * enh_smoke;
+    // (the smoke, grey: not the fire's own flames, strongly colored, which it lit too, burning them
+    // past full to a pale yellow-green)
+    float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
+    float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
+    fragment_color.rgb *= 1.0 + min(added, vec3(2.0)) * enh_smoke * (1.0 - smoothstep(0.2, 0.45, sat));
   }
 
   fragment_color *= 2;

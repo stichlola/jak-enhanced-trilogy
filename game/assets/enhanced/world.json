@@ -118,7 +118,7 @@
     "desert": {
       "day": {"lift": [0.004, 0.0, -0.006], "gain": [1.03, 1.0, 0.95], "saturation": 1.05, "contrast": 0.24, "warmth": 0.02, "clouds": 0.42, "sand": 0.85, "sun_haze": 0.8, "rock_detail": 0.5, "golden": 0.5, "sun_yaw": 105, "sun_max_elev": 9, "light_max_elev": 18},
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25, "sand": 0.4, "rock_detail": 0.5},
-      "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.4, "light_amount": 0.2}, "game_dust": true,
+      "weather": {"fog": {"period": 480, "clear": 0.25, "light": 0.65, "light_amount": 0.25}, "game_dust": true,
                   "spells": {"period": 360, "fair": 0.55, "overcast": 0.04, "sandstorm": 0.32, "shower": 0.02, "thunder": 0.02, "fog": 0.05}},
       "ambience": {"wind_night": 1.0, "wind": 0.15}
     },

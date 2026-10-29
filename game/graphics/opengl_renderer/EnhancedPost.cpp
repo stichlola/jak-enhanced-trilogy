@@ -1748,7 +1748,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // a placed fire close by also gets the embers and hot air (a torch's flame is often too
       // small a glow to be told a fire by its light)
-      if (kind == EnhancedFires::FIRE && dist < 45.f * kMeter && c.pos[2] > -1.f * kMeter) {
+      if (kind == EnhancedFires::FIRE && dist < 100.f * kMeter && c.pos[2] > -1.f * kMeter) {
         Fire v;
         std::memcpy(v.pos, c.pos, sizeof(float) * 3);
         v.pos[3] = 0.45f * kMeter;

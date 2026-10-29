@@ -1743,7 +1743,9 @@ void main() {
     vec2 rel = tex_coord - fire_uv[i];
     float along = dot(rel, a) / aa;                      // flame sizes up
     float across = (rel.x * a.y - rel.y * a.x) / aa;     // and sideways
-    float column = exp(-across * across * 1.2) * smoothstep(-0.3, 0.6, along) *
+    // (from the flame's top up: over the flame itself it bent the flame away, see-through and
+    // tinted by what's behind it)
+    float column = exp(-across * across * 1.2) * smoothstep(1.0, 1.8, along) *
                    (1.0 - smoothstep(1.5, 4.5, along));
     // only what's behind the fire
     if (column > 0.0 && (z == 0.0 || z > fp.z - fs)) {
@@ -1752,6 +1754,35 @@ void main() {
                       cos(along * 7.0 - t * 8.0 + across * 5.0));
       uv += wob * length(a) * fire.x * column;
     }
+  }
+
+  // (the flames' place on screen: kept out of the daylight's corrections and the highlights'
+  // bleaching further down, which took their orange to a pale yellow, green and blue by day)
+  float flame_keep = 0.0;
+  for (int i = 0; i < fire_count; i++) {
+    float aa = dot(fire_axis[i], fire_axis[i]);
+    if (fire_pos[i].z < 1.0 * 4096.0 || aa <= 1e-10) {
+      continue;
+    }
+    vec2 rel = tex_coord - fire_uv[i];
+    float along = dot(rel, fire_axis[i]) / aa;
+    float across = (rel.x * fire_axis[i].y - rel.y * fire_axis[i].x) / aa;
+    flame_keep = max(flame_keep, (1.0 - smoothstep(0.7, 1.3, abs(across))) *
+                                     smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(1.6, 2.4, along)));
+  }  // (the flame's own pixels only, by the game's colors: a sprite with no depth of its own, it was
+  // shaded as the trunk or the wall behind it, in its shadow: green-blue and dim)
+  vec3 flame_raw = texture(tex_T0, tex_coord).rgb;
+  flame_keep *= smoothstep(0.3, 0.5, luma(flame_raw));
+  // (and the fires the game doesn't report (the desert's torches aren't particle spawners): by
+  // their color, yellow to white hot and brighter than anything sunlit (red at its full: the
+  // brightest grass in the noon sun stops short of it). Not over the land: the sand's sunlit patches are as pale; in front of a trunk
+  // or a wall the flame took its depth, its shadow and its occlusion)
+  {
+    float ft = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float over_land = (ft > 0.4 && ft < 0.95) ? 1.0 : 0.0;
+    flame_keep = max(flame_keep, smoothstep(0.85, 0.92, luma(flame_raw)) * smoothstep(0.94, 0.985, flame_raw.r) * (1.0 - over_land) *
+                                     step(flame_raw.b, flame_raw.g + 0.02) * step(flame_raw.g, flame_raw.r + 0.02) *
+                                     step(0.9 * flame_raw.r, flame_raw.g));
   }
 
   // the water's world position and pixel footprint, here in uniform control flow (derivatives)
@@ -2124,6 +2155,9 @@ void main() {
 
   // ambient occlusion and sun shadows
   float ao = wsurf > 0.0 ? 1.0 : ao_upsample(tex_coord, z);
+  // (not on the flames: sprites with no depth of their own, they took the occlusion of the trunk or
+  // wall behind them, its dark cool tint, and burned green-blue and dim)
+  ao = mix(ao, 1.0, flame_keep);
   if (ao_debug != 0) {
     // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
     float lm = z > 0.0 ? log(z / 4096.0) / log(10.0) / 4.0 : -1.0;
@@ -2660,7 +2694,7 @@ void main() {
     vec3 hc = mix(fog_color, sun_color() * vec3(1.0, 0.76, 0.48), 0.85);
     // (at noon a pale glare, the heat's white haze, not the evening's gold)
     // (a little of it: more washed the noon's colors out, the mountains to a pale beige)
-    hc = mix(hc, vec3(0.9, 0.88, 0.83) * max(luma(hc) * 1.25, 0.55), desert_noon() * 0.35);
+    hc = mix(hc, vec3(0.9, 0.88, 0.83) * max(luma(hc) * 1.25, 0.55), desert_noon() * 0.5);
     hc *= (0.9 + (0.5 * toward * toward + 0.6 * pow(toward, 12.0)) * lit) * mix(0.62, 1.0, lit);
     float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
@@ -2682,7 +2716,7 @@ void main() {
     // bright orange over the middle distance)
     float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
     vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
-    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.6 * desert_noon()), 0.0, 1.0));
+    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.3 * desert_noon()), 0.0, 1.0));
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -3187,9 +3221,9 @@ void main() {
     // a strongly colored light past full (a red lamp on a wall) bleaches toward white as film and
     // eyes see it, instead of flattening into one pure, detail-less color
     float mx = max(c.r, max(c.g, c.b));
-    c = mix(c, vec3(mx), clamp((mx - 1.0) * 0.35, 0.0, 0.45));
+    c = mix(c, vec3(mx), clamp((mx - 1.0) * 0.35, 0.0, 0.45) * (1.0 - flame_keep));
     float hl = luma(c);
-    if (hl > 0.7) {
+    if (hl > 0.7 && flame_keep < 0.99) {
       float over = hl - 0.7;
       c *= (0.7 + over / (1.0 + over * 2.2)) / hl;
     }
@@ -3346,7 +3380,7 @@ void main() {
     // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
     float land_tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.8) ||
-                 (land_tag > 0.85 && land_tag < 0.95) ? 1.0 : 0.0;
+                 (land_tag > 0.85 && land_tag < 0.95) ? 1.0 - flame_keep : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
     if (ch > 1e-4) {
@@ -3379,7 +3413,7 @@ void main() {
     // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
     // By the mark only, not the color: the warm haze turns the far sand orange
     float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
-    float dune = step(0.85, nl) * step(nl, 0.95);
+    float dune = step(0.85, nl) * step(nl, 0.95) * (1.0 - flame_keep);
     float level = dot(surf_n, up_view);
     float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
     float rip = dune * smoothstep(0.4, 0.75, level);
@@ -3572,21 +3606,6 @@ void main() {
   // rain: colder, the colors kept (a touch richer, like the wet slums at night)
   c *= mix(vec3(1.0), vec3(0.9, 0.98, 1.1), weather.x);
   c = max(mix(vec3(luma(c)), c, 1.0 + 0.1 * weather.x), 0.0);
-  // (the flames: kept out of the daylight's corrections below, which took their orange down to a
-  // pale yellow by day: the torches' fires went out under the sun)
-  float flame_keep = 0.0;
-  for (int i = 0; i < fire_count; i++) {
-    float aa = dot(fire_axis[i], fire_axis[i]);
-    if (fire_pos[i].z < 1.0 * 4096.0 || aa <= 1e-10) {
-      continue;
-    }
-    vec2 rel = tex_coord - fire_uv[i];
-    float along = dot(rel, fire_axis[i]) / aa;
-    float across = (rel.x * fire_axis[i].y - rel.y * fire_axis[i].x) / aa;
-    flame_keep = max(flame_keep, (1.0 - smoothstep(0.7, 1.3, abs(across))) *
-                                     smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(1.6, 2.4, along)));
-  }
-  vec3 c_flame = c;
   // the desert under a high sun: the game lights its ground near white, the eye stops down (the
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
@@ -3689,11 +3708,13 @@ void main() {
     c *= mix(vec3(1.0), vec3(1.03, 1.02, 1.03), nd);
     c = max(mix(vec3(luma(c)), c, 1.0 + 0.18 * nd), 0.0);
   }
-  c = mix(c, c_flame, flame_keep);
   c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
-  vec3 curve = c * c * (3.0 - 2.0 * c);
+  // (on 0..1, what's over it kept: past 1 the curve falls back to 0, the flames' bright red cores
+  // went green and blue)
+  vec3 cc = clamp(c, 0.0, 1.0);
+  vec3 curve = cc * cc * (3.0 - 2.0 * cc) + (c - cc);
   c = mix(c, curve, contrast);
   // (less in the brightest parts: they'd go yellow)
   c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35) * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
@@ -3711,9 +3732,13 @@ void main() {
       tone = max(mix(vec3(to), tone, 1.35), 0.0);  // (some of the saturation back)
       float k = smoothstep(0.75, 0.95, ls);        // (the whiter, the more toward sand)
       tone = mix(tone, to * vec3(1.2, 0.98, 0.7), 0.7 * k);
-      c = mix(c, tone, min(sun_haze * 1.25, 1.0));
+      c = mix(c, tone, min(sun_haze * 1.25, 1.0) * (1.0 - flame_keep));
     }
   }
+
+  // (the flames as the game drew them: a sprite with no depth of its own, everything above shaded
+  // it as what's behind it, the palm's trunk in its shadow: dim, green-blue)
+  c = mix(c, flame_raw, flame_keep);
 
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky
