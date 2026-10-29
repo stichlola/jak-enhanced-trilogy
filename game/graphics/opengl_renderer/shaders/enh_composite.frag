@@ -1003,7 +1003,7 @@ vec3 sky_color(vec3 dv) {
     // (a pink band above the horizon toward the sun)
     mcol = mix(mcol, vec3(1.0, 0.7, 0.72), exp(-up * 7.0) * pow(az, 3.0) * 0.45 * pink);
     float glow = pow(max(sd, 0.0), 8.0) * 0.6 + pow(max(sd, 0.0), 64.0) * 0.8;
-    mcol += vec3(1.0, 0.86, 0.6) * glow;
+    mcol += vec3(1.0, 0.86, 0.6) * glow * pink;
     // (and wide and low on the sun's side: the yellow-peach glow along the horizon)
     mcol = mix(mcol, vec3(1.0, 0.82, 0.55), clamp(pow(az, 6.0) * exp(-up * 3.5) * 0.85 * pink, 0.0, 1.0));
     col = mix(col, mcol, day_look * (1.0 - over));
@@ -1135,7 +1135,7 @@ vec4 cloud_fetch(vec2 uv) {
     ivec2 o = ivec2(k & 1, k >> 1);
     vec4 s = texelFetch(tex_T15, clamp(i0 + o, ivec2(0), ivec2(size) - 1), 0);
     float w = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
-    if (s.a >= 0.0 && w > 0.0) {
+    if (s.a >= 0.0 && w > 0.0 && !any(isnan(s)) && !any(isinf(s))) {
       sum += s * w;
       wsum += w;
     }
@@ -1195,6 +1195,11 @@ vec4 cloud_march() {
         cl = mix(cl, h, keep);
       }
     }
+  }
+  // (a NaN marched once, looking straight at the sun, stayed in the history and spread a black
+  // block over the sky as the camera turned: never keep one)
+  if (any(isnan(cl)) || any(isinf(cl))) {
+    cl = vec4(0.0, 0.0, 0.0, -1.0);
   }
   return cl;
 }
@@ -3831,7 +3836,7 @@ void main() {
     // plain at the sunset (the game's own light there near black))
     if (mtag > 0.85 && mtag < 0.95) {
       float lsh = luma(g);
-      vec3 lifted = g * clamp(0.3 / max(lsh, 0.02), 1.0, 3.0) * vec3(0.94, 0.95, 1.1);
+      vec3 lifted = g * clamp(0.2 / max(lsh, 0.02), 1.0, 2.0) * vec3(0.97, 0.97, 1.05);
       g = mix(g, lifted, 1.0 - far_m);
     }
     float hl = smoothstep(0.72, 0.95, luma(g));
