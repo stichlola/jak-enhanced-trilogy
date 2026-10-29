@@ -77,7 +77,8 @@ void main() {
   if (dot(n, enh_imp_view) < 0.0) {
     n = -n;
   }
-  enh_normal_out = vec4(normalize(enh_imp_turn * n) * (enh_stone > 0.5 ? 0.75 : 1.0) * 0.5 + 0.5, 1.0);
+  // (0.97 long as shrub.frag's: not taken for a flame)
+  enh_normal_out = vec4(normalize(enh_imp_turn * n) * (enh_stone > 0.5 ? 0.75 : 0.97) * 0.5 + 0.5, 1.0);
 
   color = fragment_color * T0;
   // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each

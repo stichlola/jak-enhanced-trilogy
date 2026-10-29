@@ -5003,11 +5003,17 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     auto ease = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
     // the morning (7-10, eased in from 6 and out by 11:30), where the area has a golden look: a
     // clear sky, pink toward the low sun, cream sand (the bright hours wait for it)
-    const float morning = ease(hr - 6.f) * (1.f - ease((hr - 10.f) / 1.5f)) *
+    // (from the dawn: its sky the morning's, pink toward the sun)
+    const float morning = ease(hr - 5.f) * (1.f - ease((hr - 10.f) / 1.5f)) *
                           std::min(m_grade.golden * 2.f, 1.f);
     const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f)) * (1.f - morning);
     glUniform1f(glGetUniformLocation(id, "noon"), noon);
     glUniform1f(glGetUniformLocation(id, "morning"), morning);
+    // the desert's day (from the dawn at 5, half of it still at the sunset at 18): the morning's
+    // colors, its blue sky, warm sand and lit rock, all day long; the pink and peach the morning's own
+    const float day_look = ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) *
+                           std::min(m_grade.golden * 2.f, 1.f);
+    glUniform1f(glGetUniformLocation(id, "day_look"), day_look);
     // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);

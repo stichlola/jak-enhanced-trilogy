@@ -48,7 +48,8 @@ vec4 enh_pack_normal(vec3 n) {
   } else {
     return vec4(0.0);
   }
-  return vec4(n * (enh_stone > 0.5 ? 0.75 : 1.0) * 0.5 + 0.5, 1.0);
+  // (grass and bushes 0.97 long: their pale sunlit tips aren't taken for a torch's flame)
+  return vec4(n * (enh_stone > 0.5 ? 0.75 : 0.97) * 0.5 + 0.5, 1.0);
 }
 
 // a 4x4 ordered dither threshold for the pixel (fixed: shifted each frame it shimmered, the
