@@ -1,7 +1,9 @@
 #version 410 core
 
 
-out vec4 color;
+layout (location = 0) out vec4 color;
+layout (location = 1) out vec4 enh_normal_out;  // Enhanced: only the cloth writes it (the 0.52 tag)
+uniform int enh_cloth;
 in vec2 tex_coord;
 
 uniform float alpha_reject;
@@ -76,6 +78,8 @@ void main() {
   if (color.a < alpha_reject) {
     discard;
   }
+  // Enhanced: Jak 3's cloth: a 0.52 long normal marks it (its direction unused)
+  enh_normal_out = enh_cloth != 0 ? vec4(0.5, 0.5 + 0.26, 0.5, 1.0) : vec4(0.0);
   if ((tex_info.y & 4u) != 0) {
     color.xyz = mix(color.xyz, fog_color.rgb, clamp(fog_color.a * fog, 0, 1));
   }

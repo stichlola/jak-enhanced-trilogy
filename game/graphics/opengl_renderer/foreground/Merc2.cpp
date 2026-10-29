@@ -1402,6 +1402,16 @@ void Merc2::do_draws(const Draw* draw_array,
       ASSERT(draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_DST_DST);
     }
 
+    // Enhanced: see-through cloth (Jak's tunic and scarf: one-sided, alpha-blended or not
+    // depth-writing) writes its normal where it isn't cut out (a = 1 there), marked as cloth: the
+    // composite shows it as the game draws it. Without it the post lit the legs behind it, their
+    // shape showing through the cloth
+    const bool cloth = normals.on() && !set_fade && !(draw.flags & DrawFlags::IGNORE_ALPHA) &&
+                       ((draw.mode.get_ab_enable() &&
+                         draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) ||
+                        !draw.mode.get_depth_write_enable());
+    glUniform1i(uniforms.enh_cloth, cloth ? 1 : 0);
+
     if (m_lights_buffer[draw.light_idx].w1 && !set_fade) {
       DrawMode mode = draw.mode;
       mode.set_alpha_blend(DrawMode::AlphaBlend::SRC_DST_SRC_DST);
@@ -1430,15 +1440,8 @@ void Merc2::do_draws(const Draw* draw_array,
 
     } else {
       setup_opengl_from_draw_mode(draw.mode, GL_TEXTURE0, use_mipmaps_for_filtering);
-      // Enhanced: see-through cloth (Jak's tunic, alpha-blended) writes its normal too where it
-      // isn't cut out (a = 1 there): without it the post lit the legs' normals behind it, their
-      // shape showing through the cloth
-      // (and marked as cloth: the composite shows it as the game draws it)
-      const bool cloth = normals.on() && draw.mode.get_ab_enable() &&
-                         draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST;
       if (cloth) {
         glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-        glUniform1i(uniforms.enh_cloth, 1);
       }
       prof.add_draw_call();
       prof.add_tri(draw.num_triangles);
@@ -1446,9 +1449,9 @@ void Merc2::do_draws(const Draw* draw_array,
                         sizeof(math::Vector4f) * draw.first_bone, 128 * sizeof(ShaderMercMat));
       glDrawElements(draw.no_strip ? GL_TRIANGLES : GL_TRIANGLE_STRIP, draw.index_count,
                      GL_UNSIGNED_INT, (void*)(sizeof(u32) * draw.first_index));
-      if (cloth) {
-        glUniform1i(uniforms.enh_cloth, 0);
-      }
+    }
+    if (cloth) {
+      glUniform1i(uniforms.enh_cloth, 0);
     }
   }
 

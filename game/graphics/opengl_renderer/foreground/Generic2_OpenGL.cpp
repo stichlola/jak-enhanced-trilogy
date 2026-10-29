@@ -77,6 +77,7 @@ void Generic2::opengl_setup(ShaderLibrary& shaders) {
   m_ogl.warp_sample_mode = glGetUniformLocation(id, "warp_sample_mode");
   m_ogl.use_full_matrix = glGetUniformLocation(id, "use_full_matrix");
   m_ogl.full_matrix = glGetUniformLocation(id, "full_matrix");
+  m_ogl.enh_cloth = glGetUniformLocation(id, "enh_cloth");
 }
 
 void Generic2::opengl_cleanup() {
@@ -197,9 +198,22 @@ void Generic2::setup_opengl_for_draw_mode(const DrawMode& draw_mode,
 
   // Enhanced: see-through effects (a gun's blast fan, flashes, trails) don't write depth: the post
   // pass would take them for a surface, shade it, and let it shadow what's behind it
+  // (not SRC_SRC_SRC_SRC: blended but opaque (Cs - Cs) * As + Cs. Jak 3's simulated tunic and
+  // scarf, prim strips, are drawn so: without their depth the post took them for the legs behind
+  // them, and the scarf went behind the tunic)
+  const bool normals_on = g_enhanced_normals.enabled && g_enhanced_normals.fbo;
+  const bool opaque_blend = draw_mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_SRC_SRC_SRC;
   const bool see_through = draw_mode.get_ab_enable() &&
                            draw_mode.get_alpha_blend() != DrawMode::AlphaBlend::DISABLED &&
-                           g_enhanced_normals.enabled && g_enhanced_normals.fbo;
+                           normals_on && !opaque_blend;
+  // the cloth marks itself in the normal target (the composite shows it as the game draws it, one
+  // face seen from both sides); the rest of generic leaves the normals alone
+  const bool cloth = normals_on && m_enh_mode == Mode::PRIM && opaque_blend &&
+                     draw_mode.get_depth_write_enable();
+  glUniform1i(m_ogl.enh_cloth, cloth ? 1 : 0);
+  if (normals_on) {
+    glColorMaski(1, cloth, cloth, cloth, cloth);
+  }
   if (draw_mode.get_depth_write_enable() && !see_through) {
     glDepthMask(GL_TRUE);
   } else {
@@ -304,6 +318,8 @@ void Generic2::do_hud_draws(SharedRenderState* render_state, ScopedProfilerNode&
 }
 
 void Generic2::do_draws(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  // Enhanced: the normal target bound, for the cloth's mark (the other draws leave it alone)
+  EnhancedNormalTarget normals;
   glBindVertexArray(m_ogl.vao);
   glBindBuffer(GL_ARRAY_BUFFER, m_ogl.vertex_buffer);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ogl.index_buffer);

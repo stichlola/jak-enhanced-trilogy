@@ -73,6 +73,8 @@ class Generic2 {
     u32 stcycl;
   } m_dma_unpack;
 
+  Mode m_enh_mode = Mode::NORMAL;  // Enhanced: the bucket being drawn (its cloth keeps its depth)
+
   struct DrawingConfig {
     bool zmsk = false;
     // horizontal, vertical, depth, fog offsets.
@@ -205,6 +207,7 @@ class Generic2 {
         hvdf_offset, use_full_matrix, full_matrix;
     GLuint gfx_hack_no_tex;
     GLuint warp_sample_mode;
+    GLuint enh_cloth;
   } m_ogl;
 
   bool m_empty = false;

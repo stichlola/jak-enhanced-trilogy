@@ -54,6 +54,7 @@ void Generic2::render_in_mode(DmaFollower& dma,
                               SharedRenderState* render_state,
                               ScopedProfilerNode& prof,
                               Mode mode) {
+  m_enh_mode = mode;
   // Generic2 has 3 passes.
   {
     // our first pass is to go over the DMA chain from the game and extract the data into buffers
