@@ -3364,10 +3364,12 @@ void main() {
     // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
     if (tag > 0.7 && tag < 0.8) {
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
-      float lit = smoothstep(-0.05, 0.35, dot(surf_n, sun_dir.xyz));
+      // (by the low sun where its glow is: the faces toward it lit, the ones toward us backlit)
+      vec2 brg = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+      float lit = smoothstep(-0.05, 0.35, dot(world_dir(surf_n), vec3(brg.x * 0.95, 0.3, brg.y * 0.95)));
       vec3 lg3 = vec3(luma(c));
       vec3 sunny = max(mix(lg3, c, 1.35), 0.0) * vec3(1.1, 0.95, 0.78);
-      vec3 shade = c * vec3(0.84, 0.76, 0.7);
+      vec3 shade = c * vec3(0.66, 0.6, 0.6);
       c = mix(c, mix(shade, sunny, lit), golden * far);
       // (and, looking toward the sun, the warm haze between: backlit mountains glow amber)
       vec2 shz = normalize(world_dir(sky_sun.xyz).xz + 1e-4);

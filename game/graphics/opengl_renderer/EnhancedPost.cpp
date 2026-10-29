@@ -4888,9 +4888,11 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform4f(glGetUniformLocation(id, "sky_sun"), sv[0], sv[1], sv[2], up);
   }
   // (no sky, clouds or weather without a 3D scene: loading screens, menus)
+  // (test switch: JAK_ENHANCED_CLOUD_TIME=<s> holds the clouds still, shots compare alike)
+  static const char* cloud_time = std::getenv("JAK_ENHANCED_CLOUD_TIME");
   glUniform4f(glGetUniformLocation(id, "clouds"),
               m_settings.clouds && m_ssao_ready ? m_settings.cloud_amount : 0.f, m_grade.clouds,
-              (float)std::fmod(m_time, 10000.0), m_night);
+              cloud_time ? (float)std::atof(cloud_time) : (float)std::fmod(m_time, 10000.0), m_night);
   const float on = m_ssao_ready ? 1.f : 0.f;
   glUniform1f(glGetUniformLocation(id, "city_glow"), m_city ? m_night * on : 0.f);
   glUniform4f(glGetUniformLocation(id, "weather"), m_rain * on, m_dust * on,
