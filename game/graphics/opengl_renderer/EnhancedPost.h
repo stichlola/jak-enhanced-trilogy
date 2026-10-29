@@ -513,6 +513,11 @@ class EnhancedPost {
   int m_shadow_res = 0;
   bool m_shadow_ready = false;
   float m_light_mvp[16] = {};  // world (game units) -> shadow map clip space, row-major
+  GLuint m_shadow_far_fbo = 0;  // the far map (the mountains' long shadows), the same kind
+  GLuint m_shadow_far_tex = 0;
+  bool m_shadow_far_ready = false;
+  u32 m_shadow_far_frame = 0;
+  float m_light_mvp_far[16] = {};
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes

@@ -995,6 +995,11 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(2, m_cloud_fbo);
     glDeleteTextures(2, m_cloud_tex);
   }
+  if (m_shadow_far_fbo) {
+    glDeleteFramebuffers(1, &m_shadow_far_fbo);
+    glDeleteTextures(1, &m_shadow_far_tex);
+    m_shadow_far_fbo = m_shadow_far_tex = 0;
+  }
   if (m_shadow_fbo) {
     glDeleteFramebuffers(1, &m_shadow_fbo);
     glDeleteTextures(1, &m_shadow_tex);
@@ -3229,7 +3234,9 @@ void EnhancedPost::update_scene() {
   {
     // (by the late afternoon's hours; all of it from a golden of 0.5, as the shader's low light)
     auto smooth = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
-    const float g = smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)) *
+    // (and the morning's: the sun as low, long shadows)
+    const float g = std::max(smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)),
+                             smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f))) *
                     std::min(m_grade.golden * 2.f, 1.f);
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
@@ -3695,6 +3702,9 @@ void EnhancedPost::do_gi(GLuint scene_tex,
 namespace {
 // texture alpha under this doesn't cast a shadow (leaf cards, cutouts)
 constexpr float kShadowAlphaRef = 0.25f;
+// the far shadow map: half its side and its depth span, meters
+constexpr float kShadowFarRange = 1200.f;
+constexpr float kShadowFarDepth = 3000.f;
 }  // namespace
 
 void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof) {
@@ -3728,6 +3738,24 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     glReadBuffer(GL_NONE);
     glBindTexture(GL_TEXTURE_2D, 0);
     glGenVertexArrays(1, &m_shadow_vao);
+    // the far map, the same kind
+    glGenFramebuffers(1, &m_shadow_far_fbo);
+    glGenTextures(1, &m_shadow_far_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_far_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_far_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_far_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_shadow_far_ready = false;
   }
 
   // what to draw: geometry 0 (the most detailed) of every tfrag and tie tree of the levels in use;
@@ -3849,36 +3877,38 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   float up[3] = {f[1] * right[2] - f[2] * right[1], f[2] * right[0] - f[0] * right[2],
                  f[0] * right[1] - f[1] * right[0]};
-  const float range = m_settings.shadow_range * kMeter;
-  const float depth = 300.f * kMeter;
-  float center[3];
-  for (int i = 0; i < 3; i++) {
-    // the camera looks down view +z: its forward in world is column 2 of the rotation
-    center[i] = cam.trans[i] + cam.rot[i][2] * range * 0.5f;
-  }
-  const float texel = 2.f * range / kRes;
-  float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
-  float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
-  float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
-  cr = std::floor(cr / texel) * texel;
-  cu = std::floor(cu / texel) * texel;
-  const float rows[3][4] = {{right[0] / range, right[1] / range, right[2] / range, -cr / range},
-                            {up[0] / range, up[1] / range, up[2] / range, -cu / range},
-                            {f[0] / depth, f[1] / depth, f[2] / depth, -cf / depth}};
-  for (int r = 0; r < 3; r++) {
-    for (int c = 0; c < 4; c++) {
-      m_light_mvp[r * 4 + c] = rows[r][c];
+  auto make_mvp = [&](float range, float depth, float* mvp) {
+    float center[3];
+    for (int i = 0; i < 3; i++) {
+      // the camera looks down view +z: its forward in world is column 2 of the rotation
+      center[i] = cam.trans[i] + cam.rot[i][2] * range * 0.5f;
     }
-  }
-  m_light_mvp[12] = m_light_mvp[13] = m_light_mvp[14] = 0.f;
-  m_light_mvp[15] = 1.f;
+    const float texel = 2.f * range / kRes;
+    float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
+    float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
+    float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
+    cr = std::floor(cr / texel) * texel;
+    cu = std::floor(cu / texel) * texel;
+    const float rows[3][4] = {{right[0] / range, right[1] / range, right[2] / range, -cr / range},
+                              {up[0] / range, up[1] / range, up[2] / range, -cu / range},
+                              {f[0] / depth, f[1] / depth, f[2] / depth, -cf / depth}};
+    for (int r = 0; r < 3; r++) {
+      for (int c = 0; c < 4; c++) {
+        mvp[r * 4 + c] = rows[r][c];
+      }
+    }
+    mvp[12] = mvp[13] = mvp[14] = 0.f;
+    mvp[15] = 1.f;
+  };
+  make_mvp(m_settings.shadow_range * kMeter, 300.f * kMeter, m_light_mvp);
+  // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
+  // there (the near map is 2 x 80 m)
+  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, m_light_mvp_far);
 
   GLfloat old_clear_depth = 0.f;
   GLint old_depth_func = GL_GEQUAL;
   glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
   glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
-  glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_fbo);
-  glViewport(0, 0, kRes, kRes);
   glDisable(GL_BLEND);
   glDisable(GL_STENCIL_TEST);
   glDisable(GL_CULL_FACE);
@@ -3886,7 +3916,6 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   glDepthFunc(GL_LESS);
   glDepthMask(GL_TRUE);
   glClearDepth(1.0);
-  glClear(GL_DEPTH_BUFFER_BIT);
   glEnable(GL_POLYGON_OFFSET_FILL);
   glPolygonOffset(1.5f, 3.f);
   glEnable(GL_PRIMITIVE_RESTART);
@@ -3895,44 +3924,56 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   auto& shader = render_state->shaders[ShaderId::ENH_SHADOW];
   shader.activate();
   auto id = shader.id();
-  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   GLint u_cut = glGetUniformLocation(id, "enh_cut");
   GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE0);
-  glBindVertexArray(m_shadow_vao);
-  glEnableVertexAttribArray(0);
-  for (auto& [lid, draws] : m_shadow_draws) {
-    for (auto& d : draws) {
-      if (d.wind && !m_settings.shadow_casters) {
-        continue;
+  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind) {
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, kRes, kRes);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp);
+    glBindVertexArray(m_shadow_vao);
+    glEnableVertexAttribArray(0);
+    for (auto& [lid, draws] : m_shadow_draws) {
+      for (auto& d : draws) {
+        if (d.wind && (!m_settings.shadow_casters || !wind)) {
+          continue;
+        }
+        glUniform1i(u_cut, d.cut);
+        glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+        if (d.own_vertices || d.wind) {
+          // x, y, z, s, t
+          glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+          glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                                (void*)(3 * sizeof(float)));
+          glEnableVertexAttribArray(1);
+        } else {
+          glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                (void*)0);
+          glDisableVertexAttribArray(1);
+        }
+        glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
+        if (d.tex) {
+          glBindTexture(GL_TEXTURE_2D, d.tex);
+        }
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+        glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, (void*)(d.first * sizeof(u32)));
+        prof.add_draw_call();
       }
-      glUniform1i(u_cut, d.cut);
-      glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
-      if (d.own_vertices || d.wind) {
-        // x, y, z, s, t
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
-                              (void*)(3 * sizeof(float)));
-        glEnableVertexAttribArray(1);
-      } else {
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex), (void*)0);
-        glDisableVertexAttribArray(1);
-      }
-      glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
-      if (d.tex) {
-        glBindTexture(GL_TEXTURE_2D, d.tex);
-      }
-      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
-      glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, (void*)(d.first * sizeof(u32)));
-      prof.add_draw_call();
     }
+  };
+  // (the far one every other frame: the sun barely moves, the camera's moves are snapped)
+  if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
+    draw_levels(m_shadow_far_fbo, m_light_mvp_far, true);
+    m_shadow_far_ready = true;
   }
-  glDisableVertexAttribArray(1);
+  draw_levels(m_shadow_fbo, m_light_mvp, true);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);  glDisableVertexAttribArray(1);
   glBindVertexArray(0);
-  // characters only with the sun (or moon) above ~20 degrees: lower, a 2 m character casts a band
+  // characters only with the sun (or moon) above ~7 degrees: lower, a 2 m character casts a band
   // tens of meters long that follows it around (the game's own short shadow stays)
-  if (m_settings.shadow_casters && sun[1] / len > 0.34f) {
+  if (m_settings.shadow_casters && sun[1] / len > 0.12f) {
     draw_shadow_casters(render_state, prof);
   }
   glDisable(GL_POLYGON_OFFSET_FILL);
@@ -4942,8 +4983,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     // or the afternoon than at noon
     const float hr = m_last_hour < 0.f ? 12.f : m_last_hour;
     auto ease = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
-    const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f));
+    // the morning (7-10, eased in from 6 and out by 11:30), where the area has a golden look: a
+    // clear sky, pink toward the low sun, cream sand (the bright hours wait for it)
+    const float morning = ease(hr - 6.f) * (1.f - ease((hr - 10.f) / 1.5f)) *
+                          std::min(m_grade.golden * 2.f, 1.f);
+    const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f)) * (1.f - morning);
     glUniform1f(glGetUniformLocation(id, "noon"), noon);
+    glUniform1f(glGetUniformLocation(id, "morning"), morning);
     // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
@@ -5026,6 +5072,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindSampler(13, m_shadow_raw_sampler);
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T13"), 13);
+  // the far map (unit 22): where the near one ends
+  glActiveTexture(GL_TEXTURE22);
+  glBindTexture(GL_TEXTURE_2D, m_shadow_ready && m_shadow_far_ready ? m_shadow_far_tex : m_no_shadow_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T22"), 22);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp_far"), 1, GL_TRUE, m_light_mvp_far);
+  glUniform1f(glGetUniformLocation(id, "shadow_far_on"), m_shadow_ready && m_shadow_far_ready ? 1.f : 0.f);
   // the map's depth spans 2 x 300 m (do_shadow_map), its side 2 x range
   glUniform4f(glGetUniformLocation(id, "shadow_params"), 600.f, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,

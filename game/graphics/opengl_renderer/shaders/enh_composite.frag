@@ -16,6 +16,9 @@ uniform int volume;
 uniform sampler2DShadow tex_T9;  // sun shadow map
 uniform float shadow_strength;   // 0 = no shadow map this frame
 uniform mat4 light_mvp;          // world (game units) -> shadow map
+uniform sampler2DShadow tex_T22;  // the far sun shadow map (2 x 1.2 km: mountains, big rocks)
+uniform mat4 light_mvp_far;
+uniform float shadow_far_on;
 uniform mat3 view_to_world;
 uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
@@ -80,6 +83,7 @@ uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
 uniform float golden;           // the late afternoon's amber look (0..1, the area's times the hour)
 uniform float noon;             // the hours around noon (0..1)
+uniform float morning;          // the desert's morning (0..1): clear blue sky, peach toward the low sun
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
 uniform float rock_detail_avg;  // that picture's average brightness
@@ -490,15 +494,38 @@ vec2 vogel(int i, int n, float rot) {
   return r * vec2(cos(a), sin(a));
 }
 
+// the far map: past the near one, the long shadows of the mountains, big rocks and trees (0.6 m
+// texels: a 3x3 filter, no penumbra search)
+float sun_shadow_far(vec3 w) {
+  if (shadow_far_on <= 0.0) {
+    return 0.0;
+  }
+  vec3 s = (light_mvp_far * vec4(w, 1.0)).xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return 0.0;
+  }
+  vec2 e = abs(s.xy * 2.0 - 1.0);
+  float fade = 1.0 - smoothstep(0.85, 1.0, max(e.x, e.y));
+  vec2 t = vec2(1.0 / 4096.0);
+  float lit = 0.0;
+  for (int y = -1; y <= 1; y++) {
+    for (int x = -1; x <= 1; x++) {
+      lit += texture(tex_T22, vec3(s.xy + vec2(x, y) * t, s.z - 0.00025));
+    }
+  }
+  return (1.0 - lit / 9.0) * fade;
+}
+
 float sun_shadow(vec3 w) {
   vec4 l = light_mvp * vec4(w, 1.0);
   vec3 s = l.xyz * 0.5 + 0.5;
   if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
-    return 0.0;
+    return sun_shadow_far(w);
   }
-  // fade out toward the edge of the map
+  // fade out toward the edge of the map, into the far one
   vec2 e = abs(s.xy * 2.0 - 1.0);
   float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
+  float far = fade < 1.0 ? sun_shadow_far(w) : 0.0;
   if (shadow_params.w > 0.0) {
     // soft shadows (PCSS): how far above this point the things in the way are (the blockers'
     // average depth, 12 taps over 1.5 m) sets how wide the penumbra is: sharp where a wall meets
@@ -515,7 +542,7 @@ float sun_shadow(vec3 w) {
       }
     }
     if (found == 0.0) {
-      return 0.0;
+      return far * (1.0 - fade);
     }
     float gap_m = (s.z - blockers / found) * shadow_params.x;
     float penumbra_m = clamp(gap_m * shadow_params.z, 0.05, 1.2);
@@ -526,7 +553,7 @@ float sun_shadow(vec3 w) {
     for (int i = 0; i < 16; i++) {
       lit += texture(tex_T9, vec3(s.xy + vogel(i, 16, rot + 1.3) * r, s.z - bias));
     }
-    return (1.0 - lit / 16.0) * fade;
+    return mix(far, 1.0 - lit / 16.0, fade);
   }
   vec2 t = vec2(1.0 / 4096.0);
   float lit = 0.0;
@@ -535,7 +562,7 @@ float sun_shadow(vec3 w) {
       lit += texture(tex_T9, vec3(s.xy + (vec2(x, y) - 0.5) * t, s.z - 0.00012));
     }
   }
-  return (1.0 - lit / 16.0) * fade;
+  return mix(far, 1.0 - lit / 16.0, fade);
 }
 
 // a view direction (view space) in world axes (y up)
@@ -962,7 +989,21 @@ vec3 sky_color(vec3 dv) {
     col += vec3(1.0, 0.6, 0.3) * glow * gs * 0.2 * (1.0 - over * 0.7);
     col += sc * pow(sd, 16.0) * 0.3 * gs * (1.0 - over * 0.7);
   }
-  col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
+  // the desert's morning: a clear blue overhead, the low sky pink-peach toward the sun and a pale
+  // lilac away from it, a warm yellow-white glow around the sun
+  if (morning > 0.0) {
+    vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+    float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), sh);
+    vec3 zen_m = vec3(0.5, 0.71, 0.92);
+    vec3 hor_m = mix(vec3(0.8, 0.8, 0.92), vec3(1.0, 0.76, 0.66), pow(az, 1.5));
+    vec3 mcol = mix(hor_m, zen_m, pow(smoothstep(0.0, 0.55, up), 0.75));
+    // (a pink band above the horizon toward the sun)
+    mcol = mix(mcol, vec3(1.0, 0.7, 0.72), exp(-up * 7.0) * pow(az, 3.0) * 0.45);
+    float glow = pow(max(sd, 0.0), 8.0) * 0.6 + pow(max(sd, 0.0), 64.0) * 0.8;
+    mcol += vec3(1.0, 0.86, 0.6) * glow;
+    col = mix(col, mcol, morning * (1.0 - over));
+  }
+  col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * morning);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
   return col;
 }
@@ -1004,7 +1045,7 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     return vec4(0.0, 0.0, 0.0, 1.0);
   }
   // (the late afternoon's heaps fewer over the desert: apart, with clear sky between)
-  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze;
+  float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze + 0.13 * morning;
   vec3 sw = world_dir(sky_sun.xyz);
   vec3 sc = sun_color() * (1.0 - 0.6 * weather2.x);
   float cosang = dot(wd, sw);
@@ -1027,6 +1068,10 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     top = mix(top, vec3(0.56, 0.46, 0.44), gs * 0.6);
     // (the sunlit sides a soft gold, not lit up: the bodies stay grey-brown against the sky)
     sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.85, gs);
+    // (the morning's: small pink heaps, lilac-grey bellies, lit soft peach)
+    under = mix(under, vec3(0.78, 0.62, 0.72), morning * 0.85);
+    top = mix(top, vec3(1.0, 0.8, 0.82), morning * 0.8);
+    sc = mix(sc, vec3(1.15, 0.85, 0.75), morning * 0.7);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -2631,16 +2676,18 @@ void main() {
     vec3 c0 = c;
     if (clouds.x > 0.0) {
       vec3 sky = sky_color(ray);
-      c = mix(c, sky, clouds.x * (1.0 - clouds.w));
+      // (the desert's morning: ours, not the game's brown dawn sky)
+      float game_w = clouds.w * (1.0 - morning);
+      c = mix(c, sky, clouds.x * (1.0 - game_w));
       // the game's own sky by night, dawn and dusk: its painted cloud cards (far geometry, here as
       // sky at any hour) smoothed away: sharp dark cut-outs drifting across it; its colors and its
       // gradient kept, ours are the clouds
-      if (clouds.w > 0.0) {
-        c = mix(c, game_sky_around(uv, c, vec2(0.3, 0.035)), clouds.x * clouds.w);
+      if (game_w > 0.0) {
+        c = mix(c, game_sky_around(uv, c, vec2(0.3, 0.035)), clouds.x * game_w);
       }
       vec4 cl = cloud_info.x > 0.0 ? cloud_fetch(uv) : vec4(0.0, 0.0, 0.0, -1.0);
       if (cl.a < 0.0) {
-        cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, clouds.w));
+        cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, game_w));
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
       if (bolt.w > 0.0 && strike.w == 0.0) {
@@ -3744,6 +3791,17 @@ void main() {
 
   // (the flames as the game drew them: a sprite with no depth of its own, everything above shaded
   // it as what's behind it, the palm's trunk in its shadow: dim, green-blue)
+  // the desert's morning on the ground: warm peach-orange sand and rock (the game's grade leaves
+  // them a pale yellow-beige), the far rock richer (the haze greyed it to mauve)
+  if (morning > 0.0 && z > 0.0 && wsurf == 0.0) {
+    float mtag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ground = (mtag > 0.3 && mtag < 0.55) ? 0.25 : 1.0;  // (characters a little)
+    float far_m = smoothstep(80.0, 400.0, length(p) / 4096.0);
+    vec3 g = c * mix(vec3(1.02, 0.91, 0.89), vec3(1.05, 0.9, 0.78), far_m);
+    g = mix(vec3(luma(g)), g, 1.04 + 0.15 * far_m);
+    g *= mix(1.0, 1.08, far_m);
+    c = mix(c, g, morning * ground);
+  }
   c = mix(c, flame_raw, flame_keep);
   // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
   // and shade made it look transparent
