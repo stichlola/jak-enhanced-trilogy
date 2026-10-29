@@ -928,14 +928,14 @@ vec3 sky_color(vec3 dv) {
   // low under the sun (full from half the area's golden look: a softer ground keeps the sky)
   if (golden > 0.0) {
     float gs = min(golden * 2.0, 1.0);
-    vec3 lilac = mix(vec3(0.76, 0.5, 0.3), vec3(0.66, 0.6, 0.7), smoothstep(0.03, 0.35, up));
+    vec3 lilac = mix(vec3(0.76, 0.5, 0.3), vec3(0.6, 0.58, 0.74), smoothstep(0.02, 0.28, up));
     col = mix(col, lilac, gs * 0.8 * (1.0 - over));
-    col *= 1.0 - 0.15 * gs * (1.0 - over);
+    col *= 1.0 - 0.25 * gs * (1.0 - over);
     // (the glow low on the horizon under the sun, wherever it stands: the light across the valley)
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = max(dot(normalize(wd.xz + 1e-4), sh), 0.0);
     float glow = 0.9 * pow(az, 6.0) * exp(-up * 6.0) + 0.6 * pow(az, 24.0) * exp(-up * 2.5);
-    col += vec3(1.0, 0.6, 0.3) * glow * gs * 0.4 * (1.0 - over * 0.7);
+    col += vec3(1.0, 0.6, 0.3) * glow * gs * 0.2 * (1.0 - over * 0.7);
     col += sc * pow(sd, 16.0) * 0.3 * gs * (1.0 - over * 0.7);
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7);
@@ -995,8 +995,9 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     // (full from half the area's golden look, as the sky)
     float gs = min(golden * 2.0, 1.0);
     under = mix(under, vec3(0.3, 0.2, 0.15), gs * 0.9);
-    top = mix(top, vec3(0.7, 0.52, 0.4), gs * 0.5);
-    sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58), gs);
+    top = mix(top, vec3(0.56, 0.46, 0.44), gs * 0.6);
+    // (the sunlit sides a soft gold, not lit up: the bodies stay grey-brown against the sky)
+    sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.6, gs);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
@@ -1016,6 +1017,8 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
       float powder = 1.0 - exp(-d * 4.0);
       float h = (p.y - 1100.0) / 900.0;
       vec3 light = sc * lit * phase * (0.5 + 0.5 * powder) * 1.15 + mix(under, top, h) + flash * (1.0 - h * 0.5);
+      // (the late afternoon's heaps darker than the sky behind them, as the low sun leaves them)
+      light *= 1.0 - 0.3 * min(golden * 2.0, 1.0) * sun_haze;
       // (thinner by night: under the moon they read as dark cut-out slabs over the dim sky)
       // (the late afternoon's heaps solid: dark bellies, not veils)
       float a = 1.0 - exp(-d * 0.022 * (1.0 + 1.2 * min(golden * 2.0, 1.0)) * dt * (1.0 - 0.45 * max(clouds.w, 1.0 - smoothstep(0.08, 0.3, luma(sky)))));
@@ -3357,6 +3360,7 @@ void main() {
       c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
     }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
+    c *= 1.0 - 0.22 * golden;  // (and all of it stopped down a little: low light, deeper)
     // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
     if (tag > 0.7 && tag < 0.8) {
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
