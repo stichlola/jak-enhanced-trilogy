@@ -82,6 +82,7 @@ struct Batch {
   int mesh = -1;
   DrawMode mode;
   bool foliage = false;
+  bool stone = false;  // a stone's model: tagged rock for the post pass (its detail and light)
   float base_rgb[3] = {0.5f, 0.5f, 0.5f};
   float tint[3] = {1, 1, 1};  // the model's texture brought to the proto's colors
   std::vector<GpuInstance> instances;
@@ -503,6 +504,12 @@ void prepare_tree(tfrag3::ShrubTree& tree,
       b.mode = draw.mode;
       // (a solid model, a stone, stays put even standing in for an alpha-tested proto)
       b.foliage = draw.mode.get_at_enable() && mesh.cutout;
+      {
+        const auto name = proto_key(tree.proto_names[proto]);
+        b.stone = !mesh.cutout && (name.find("pebble") != std::string::npos ||
+                                   name.find("rock") != std::string::npos ||
+                                   name.find("stone") != std::string::npos);
+      }
       // the proto's own vertex color (baked light), averaged
       const auto& grp = groups[g];
       float sum[3] = {0, 0, 0};
@@ -1033,6 +1040,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     glUniform2f(glGetUniformLocation(sh.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), b.stone ? 1.f : 0.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
                 b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_INST);
@@ -1087,6 +1095,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     glUniform4f(glGetUniformLocation(ish.id(), "enh_imp"), center.x(), center.y(), center.z(),
                 (mesh.hi - mesh.lo).length() * 0.5f);
     glUniform1f(glGetUniformLocation(ish.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_stone"), b.stone ? 1.f : 0.f);
     glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),

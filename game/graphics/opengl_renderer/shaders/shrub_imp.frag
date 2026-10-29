@@ -28,6 +28,7 @@ uniform float alpha_min;
 uniform float alpha_max;
 uniform vec4 fog_color;
 uniform float enh_foliage;
+uniform float enh_stone;  // 1 on a stone's (tagged rock: a normal 0.75 long)
 uniform float enh_wet;
 
 float noise() {
@@ -76,7 +77,7 @@ void main() {
   if (dot(n, enh_imp_view) < 0.0) {
     n = -n;
   }
-  enh_normal_out = vec4(normalize(enh_imp_turn * n) * 0.5 + 0.5, 1.0);
+  enh_normal_out = vec4(normalize(enh_imp_turn * n) * (enh_stone > 0.5 ? 0.75 : 1.0) * 0.5 + 0.5, 1.0);
 
   color = fragment_color * T0;
   // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each

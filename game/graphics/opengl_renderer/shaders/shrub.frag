@@ -24,6 +24,7 @@ uniform vec4 fog_color;
 
 uniform int gfx_hack_no_tex;
 uniform float enh_foliage;  // Enhanced: 1 on grass and leaves (cutout draws)
+uniform float enh_stone;    // Enhanced: 1 on a stone's detailed model (tagged rock: a normal 0.75 long)
 uniform float enh_wet;      // Enhanced: how soaked they are (rain), 0..1
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
@@ -47,7 +48,7 @@ vec4 enh_pack_normal(vec3 n) {
   } else {
     return vec4(0.0);
   }
-  return vec4(n * 0.5 + 0.5, 1.0);
+  return vec4(n * (enh_stone > 0.5 ? 0.75 : 1.0) * 0.5 + 0.5, 1.0);
 }
 
 // a 4x4 ordered dither threshold for the pixel (fixed: shifted each frame it shimmered, the
