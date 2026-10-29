@@ -1429,6 +1429,13 @@ void Merc2::do_draws(const Draw* draw_array,
 
     } else {
       setup_opengl_from_draw_mode(draw.mode, GL_TEXTURE0, use_mipmaps_for_filtering);
+      // Enhanced: see-through cloth (Jak's tunic, alpha-blended) writes its normal too where it
+      // isn't cut out (a = 1 there): without it the post lit the legs' normals behind it, their
+      // shape showing through the cloth
+      if (normals.on() && draw.mode.get_ab_enable() &&
+          draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) {
+        glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      }
       prof.add_draw_call();
       prof.add_tri(draw.num_triangles);
       glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_bones_buffer,
