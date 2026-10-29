@@ -751,6 +751,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->fog_color = glGetUniformLocation(id, "fog_color");
   uniforms->perspective_matrix = glGetUniformLocation(id, "perspective_matrix");
   uniforms->ignore_alpha = glGetUniformLocation(id, "ignore_alpha");
+  uniforms->enh_solid_cut = glGetUniformLocation(id, "enh_solid_cut");
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
 }
@@ -1435,6 +1436,26 @@ void Merc2::do_draws(const Draw* draw_array,
                         sizeof(math::Vector4f) * draw.first_bone, 128 * sizeof(ShaderMercMat));
       glDrawElements(draw.no_strip ? GL_TRIANGLES : GL_TRIANGLE_STRIP, draw.index_count,
                      GL_UNSIGNED_INT, (void*)(sizeof(u32) * draw.first_index));
+    }
+
+    // Enhanced: a see-through piece (Jak's cloth tunic: alpha-blended, no depth), its solid part
+    // again into the depth and the normals only: the post pass took it for what's behind it (the
+    // legs' occlusion and shadow showed through the cloth)
+    if (normals.on() && !set_fade && draw.mode.get_ab_enable() &&
+        draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST &&
+        !(draw.flags & DrawFlags::IGNORE_ALPHA)) {
+      DrawMode solid = draw.mode;
+      solid.set_ab(false);
+      solid.enable_depth_write();
+      setup_opengl_from_draw_mode(solid, GL_TEXTURE0, use_mipmaps_for_filtering);
+      glColorMaski(0, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+      glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      glUniform1f(uniforms.enh_solid_cut, 0.5f);
+      glDrawElements(draw.no_strip ? GL_TRIANGLES : GL_TRIANGLE_STRIP, draw.index_count,
+                     GL_UNSIGNED_INT, (void*)(sizeof(u32) * draw.first_index));
+      glUniform1f(uniforms.enh_solid_cut, 0.f);
+      glColorMaski(0, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      prof.add_draw_call();
     }
   }
 

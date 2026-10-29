@@ -26,6 +26,7 @@ in vec3 enh_pos;
 uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
 uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
+uniform float enh_solid_cut;  // Enhanced: the depth-only pass of a see-through piece: its solid part
 
 void main() {
   if (gfx_hack_no_tex == 0) {
@@ -54,7 +55,7 @@ void main() {
   }
 
 
-  if (ignore_alpha == 0 && color.w < 0.128) {
+  if (ignore_alpha == 0 && color.w < max(0.128, enh_solid_cut)) {
     discard;
   }
   // Enhanced: the normal for the post pass (world), as the levels write it: the smooth one (view

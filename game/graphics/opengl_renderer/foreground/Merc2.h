@@ -135,6 +135,7 @@ class Merc2 {
     GLuint gfx_hack_no_tex;
 
     GLuint fade;
+    GLuint enh_solid_cut;
   };
 
   Uniforms m_merc_uniforms, m_emerc_uniforms;
