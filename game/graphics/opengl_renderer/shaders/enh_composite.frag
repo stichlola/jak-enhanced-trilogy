@@ -965,7 +965,9 @@ float cloud_density(vec3 p, float lo, int octaves) {
   // flat bottoms, heaped tops
   float shape = smoothstep(0.0, 0.12, h) * (1.0 - smoothstep(0.35, 1.0, h));
   // (the late afternoon's heaps with crisper edges: cumulus, clear sky between)
-  return clamp((n * shape - lo) * (4.0 + 4.0 * min(golden * 2.0, 1.0)), 0.0, 1.0);
+  float gsd = min(golden * 2.0, 1.0);
+  n += (vnoise3(q * 4.1 + 11.0) - 0.5) * 0.14 * gsd;
+  return clamp((n * shape - lo) * (4.0 + 6.0 * gsd), 0.0, 1.0);
 }
 
 vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
