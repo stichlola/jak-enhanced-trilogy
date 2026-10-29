@@ -994,13 +994,15 @@ vec3 sky_color(vec3 dv) {
   if (morning > 0.0) {
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), sh);
-    vec3 zen_m = vec3(0.5, 0.71, 0.92);
-    vec3 hor_m = mix(vec3(0.8, 0.8, 0.92), vec3(1.0, 0.76, 0.66), pow(az, 1.5));
+    vec3 zen_m = vec3(0.6, 0.8, 1.0);
+    vec3 hor_m = mix(vec3(0.68, 0.82, 0.98), vec3(1.0, 0.76, 0.66), pow(az, 2.5));
     vec3 mcol = mix(hor_m, zen_m, pow(smoothstep(0.0, 0.55, up), 0.75));
     // (a pink band above the horizon toward the sun)
     mcol = mix(mcol, vec3(1.0, 0.7, 0.72), exp(-up * 7.0) * pow(az, 3.0) * 0.45);
     float glow = pow(max(sd, 0.0), 8.0) * 0.6 + pow(max(sd, 0.0), 64.0) * 0.8;
     mcol += vec3(1.0, 0.86, 0.6) * glow;
+    // (and wide and low on the sun's side: the yellow-peach glow along the horizon)
+    mcol = mix(mcol, vec3(1.0, 0.82, 0.55), clamp(pow(az, 6.0) * exp(-up * 3.5) * 0.85, 0.0, 1.0));
     col = mix(col, mcol, morning * (1.0 - over));
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * morning);
@@ -1069,8 +1071,10 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
     // (the sunlit sides a soft gold, not lit up: the bodies stay grey-brown against the sky)
     sc *= mix(vec3(1.0), vec3(1.4, 0.92, 0.58) * 0.85, gs);
     // (the morning's: small pink heaps, lilac-grey bellies, lit soft peach)
-    under = mix(under, vec3(0.78, 0.62, 0.72), morning * 0.85);
-    top = mix(top, vec3(1.0, 0.8, 0.82), morning * 0.8);
+    // (pink toward the sun, white-lilac away from it)
+    float tw = smoothstep(-0.3, 0.9, cosang);
+    under = mix(under, mix(vec3(0.74, 0.74, 0.84), vec3(0.8, 0.62, 0.7), tw), morning * 0.85);
+    top = mix(top, mix(vec3(0.95, 0.94, 0.98), vec3(1.0, 0.8, 0.82), tw), morning * 0.8);
     sc = mix(sc, vec3(1.15, 0.85, 0.75), morning * 0.7);
   }
   float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
@@ -2732,7 +2736,7 @@ void main() {
   if (sun_haze > 0.0 && wsurf == 0.0) {
     float dist = z > 0.0 ? length(p) / 4096.0 : 5000.0;
     float up = max(world_dir(ray).y, 0.0);
-    float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+    float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - morning)) * (1.0 - weather.x);
     float toward = max(dot(ray, sky_sun.xyz), 0.0);
     // the mountains' shadows in the haze (the god rays pass, alpha), stronger toward the sun
     float lit = 1.0;
@@ -2748,12 +2752,19 @@ void main() {
     // (at noon a pale glare, the heat's white haze, not the evening's gold)
     // (a little of it: more washed the noon's colors out, the mountains to a pale beige)
     hc = mix(hc, vec3(0.9, 0.88, 0.83) * max(luma(hc) * 1.25, 0.55), desert_noon() * 0.5);
+    // (the morning's air: warm toward the sun, a pale blue-white away from it; not the game's pink dawn fog)
+    {
+      vec2 shm = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
+      float azm = 0.5 + 0.5 * dot(normalize(world_dir(ray).xz + 1e-4), shm);
+      hc = mix(hc, mix(vec3(0.76, 0.85, 0.96), vec3(1.0, 0.84, 0.64), azm * azm), morning);
+    }
     hc *= (0.9 + (0.5 * toward * toward + 0.6 * pow(toward, 12.0)) * lit) * mix(0.62, 1.0, lit);
     float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
     // fade into it, their tops stand out (height over the camera's, m)
     float rel = z > 0.0 ? world_dir(p).y / 4096.0 : 0.0;
-    c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75, 0.0, 1.0));
+    // (the morning's sky clear: half the haze over it)
+    c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75 * (z > 0.0 ? 1.0 : 1.0 - 0.5 * morning), 0.0, 1.0));
     // the late afternoon: the air toward the sun's side of the horizon glows, the far mountains and
     // dunes there melt into a bright gold (by the sun's bearing, not its height: it can stand high)
     if (golden > 0.0) {
@@ -3717,10 +3728,14 @@ void main() {
   if (z > 0.0 && golden < 0.5 && sun_haze > 0.0) {
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     if (tag > 0.7 && tag < 0.8) {
-      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+      // (the morning isn't dawn here: the sun is up and lights the rock)
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - morning)) * (1.0 - weather.x);
       float lit = smoothstep(-0.05, 0.45, dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0))));
       float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
-      vec3 relit = c * mix(vec3(0.8, 0.83, 0.92), vec3(1.5, 1.38, 1.2), lit);
+      // (in the morning the faces away from the low sun deep and lilac-brown, the lit ones warm)
+      vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.56, 0.5, 0.6), morning);
+      vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.55, 1.3, 1.0), morning);
+      vec3 relit = c * mix(shade_k, lit_k, lit);
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());

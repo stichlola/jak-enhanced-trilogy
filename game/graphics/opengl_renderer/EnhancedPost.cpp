@@ -145,6 +145,7 @@ namespace {
 struct ZoneLook {
   float lift[3], gain[3], saturation, contrast, warmth, clouds, sand, sun_haze, rock_detail;
   float golden = 0.f, sun_yaw = 0.f, sun_max_elev = 90.f, light_yaw = 0.f, light_max_elev = 90.f;
+  float morning_yaw = 0.f;  // the sun's path turned further in the morning (degrees)
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -353,6 +354,7 @@ void load_world() {
       // (as the day's unless the night says otherwise)
       out.golden = l.value("golden", out.golden);
       out.sun_yaw = l.value("sun_yaw", out.sun_yaw);
+    out.morning_yaw = l.value("morning_yaw", out.morning_yaw);
       out.sun_max_elev = l.value("sun_max_elev", out.sun_max_elev);
       out.light_yaw = l.value("light_yaw", out.light_yaw);
       out.light_max_elev = l.value("light_max_elev", out.light_max_elev);
@@ -668,6 +670,10 @@ constexpr float kMeter = 4096.f;
 
 // the area's turn of the sun's path ("sun_yaw" in world.json, degrees), eased (update_scene)
 float g_sun_yaw = 0.f;
+// and in the morning further by the area's "morning_yaw", by the morning's amount (update_scene)
+float g_morning_yaw = 0.f;
+// JAK_ENHANCED_TUNE's third number: the morning's turn instead of the area's (NAN: none)
+float g_tune_morning_yaw = NAN;
 // how high the sun may stand (degrees): the area's "sun_max_elev" by the late afternoon's amount,
 // so the golden hour's sun is low and grazing (update_scene)
 float g_sun_max_elev = 90.f;
@@ -692,11 +698,13 @@ void tune_light(float* yaw, float* elev) {
   if (now - last > std::chrono::seconds(1)) {
     last = now;
     if (FILE* f = std::fopen(file, "r")) {
-      float a, b;
-      if (std::fscanf(f, "%f %f", &a, &b) == 2) {
+      float a, b, m;
+      const int n = std::fscanf(f, "%f %f %f", &a, &b, &m);
+      if (n >= 2) {
         y = a;
         e = b;
       }
+      g_tune_morning_yaw = n == 3 ? m : NAN;
       std::fclose(f);
     }
   }
@@ -715,7 +723,8 @@ void sun_world(float out[3], bool sky = false) {
   if (!sky) {
     tune_light(&light, &light_elev);
   }
-  const float yaw = ((env ? (float)std::atof(env) : g_sun_yaw) + light) * 3.14159265f / 180.f;
+  const float yaw =
+      ((env ? (float)std::atof(env) : g_sun_yaw) + g_morning_yaw + light) * 3.14159265f / 180.f;
   const float* d = g_enhanced_sun.dir;
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
@@ -2950,6 +2959,7 @@ void EnhancedPost::update_scene() {
   want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
   want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
+  want.morning_yaw = mix(day.morning_yaw, night.morning_yaw);
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
   want.light_yaw = mix(day.light_yaw, night.light_yaw);
   want.light_max_elev = mix(day.light_max_elev, night.light_max_elev);
@@ -3226,6 +3236,7 @@ void EnhancedPost::update_scene() {
   ease(m_grade.rock_detail, want.rock_detail, k_grade);
   ease(m_grade.golden, want.golden, k_grade);
   ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
+  ease(m_grade.morning_yaw, want.morning_yaw, k_grade);
   g_sun_yaw = m_grade.sun_yaw;
   ease(m_grade.light_yaw, want.light_yaw, k_grade);
   g_light_yaw = m_grade.light_yaw;
@@ -3240,6 +3251,9 @@ void EnhancedPost::update_scene() {
                     std::min(m_grade.golden * 2.f, 1.f);
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
+    const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) *
+                          std::min(m_grade.golden * 2.f, 1.f);
+    g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
   }
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
