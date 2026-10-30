@@ -2298,6 +2298,22 @@ void main() {
     return;
   }
   c *= ao;
+  // bounced light: where the surroundings hide the sky (the occluded corners, crevices, the foot of
+  // a wall) the light comes from them instead, tinted by their color (an orange canyon's shadows go
+  // warm, a lawn's corners green). Six taps about a meter around, on the scene as drawn
+  if (z > 0.0 && wsurf == 0.0 && ao < 0.98) {
+    float rad = clamp(0.9 * 4096.0 * proj.z / z * 0.5, 4.0 * texel.x, 0.08);
+    vec3 nb = vec3(0.0);
+    for (int i = 0; i < 6; i++) {
+      float a = float(i) * 1.0472 + 0.4;
+      nb += texture(tex_T0, uv + vec2(cos(a), sin(a) * texel.y / texel.x) * rad).rgb;
+    }
+    nb /= 6.0;
+    float nl = dot(nb, vec3(0.3, 0.59, 0.11));
+    vec3 tint = clamp(nb / max(nl, 1e-3), 0.0, 2.0);
+    float occ = (1.0 - ao) * smoothstep(1200.0 * 4096.0, 200.0 * 4096.0, z);
+    c = c * mix(vec3(1.0), tint, 0.45 * occ) + nb * 0.1 * occ;
+  }
 
   // rain: everything darkens a little as it soaks, level ground more (it gets the puddles and
   // reflections further down)
