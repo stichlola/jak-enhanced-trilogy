@@ -327,7 +327,7 @@ void Shrub::render_tree(int idx,
                 pl.pos[0], pl.pos[1], pl.pos[2],
                 pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * 4096.f : 0.f);
     // and the enemies, passers-by and vehicles around him
-    const auto& ps = g_enhanced_pushers;
+    const auto ps = enhanced_pushers_now();
     int pushers = g_enhanced_wind.push ? ps.count : 0;
     glUniform1i(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_pusher_count"),
                 pushers);

@@ -780,7 +780,7 @@ void update_crush(Library& lib) {
     }
   };
   stamp(pl.pos, g_enhanced_wind.push_radius * kMeter);
-  const auto& ps = g_enhanced_pushers;
+  const auto ps = enhanced_pushers_now();
   for (int i = 0; i < ps.count; i++) {
     stamp(ps.pos[i], ps.pos[i][3]);
   }
@@ -1013,7 +1013,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
       const auto& pl = g_enhanced_player;
       glUniform4f(glGetUniformLocation(sh.id(), "enh_player"), pl.pos[0], pl.pos[1], pl.pos[2],
                   pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * kMeter : 0.f);
-      const auto& ps = g_enhanced_pushers;
+      const auto ps = enhanced_pushers_now();
       int pushers = g_enhanced_wind.push ? ps.count : 0;
       glUniform1i(glGetUniformLocation(sh.id(), "enh_pusher_count"), pushers);
       if (pushers > 0) {
@@ -1901,7 +1901,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   const auto& pl = g_enhanced_player;
   glUniform4f(glGetUniformLocation(sh.id(), "enh_player"), pl.pos[0], pl.pos[1], pl.pos[2],
               pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * kMeter : 0.f);
-  const auto& ps = g_enhanced_pushers;
+  const auto ps = enhanced_pushers_now();
   int pushers = g_enhanced_wind.push ? ps.count : 0;
   glUniform1i(glGetUniformLocation(sh.id(), "enh_pusher_count"), pushers);
   if (pushers > 0) {

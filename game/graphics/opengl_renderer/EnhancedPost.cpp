@@ -46,6 +46,7 @@ std::atomic<bool> g_enhanced_balance{false};
 EnhancedBeds g_enhanced_beds;
 std::atomic<int> g_enhanced_thunder{0};
 EnhancedPushers g_enhanced_pushers;
+EnhancedBlastPush g_enhanced_blast_push;
 EnhancedSmokeLights g_enhanced_smoke_lights;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
@@ -1653,6 +1654,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                     return m_time - b.start > life;
                                   }),
                    m_blasts.end());
+    // an explosion's wave through the grass: it spreads for a third of a second, then the grass
+    // rises back
+    g_enhanced_blast_push.count = 0;
+    for (const auto& b : m_blasts) {
+      const float age = (float)(m_time - b.start);
+      if (b.kind != 0 || !on || age > 1.1f || g_enhanced_blast_push.count >= EnhancedBlastPush::kMax) {
+        continue;
+      }
+      const float r = std::clamp(b.radius * 2.f, 8.f * kMeter, 20.f * kMeter);
+      float* out = g_enhanced_blast_push.pos[g_enhanced_blast_push.count++];
+      out[0] = b.pos[0];
+      out[1] = b.pos[1];
+      out[2] = b.pos[2];
+      out[3] = std::max(r * std::min(age / 0.3f, 1.f) * std::clamp((1.1f - age) / 0.6f, 0.f, 1.f), 1.f);
+    }
     for (const auto& b : m_blasts) {
       if (!on || m_settings.blast <= 0.f) {
         break;
@@ -3276,6 +3292,9 @@ void EnhancedPost::update_scene() {
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
+    // the morning's low fog in the areas under open sky (not the desert's dry air), gone by mid-morning
+    m_dawn_fog = smooth(hour - 5.f) * (1.f - smooth((hour - 7.5f) / 2.f)) * m_grade.day_sky *
+                 std::max(0.f, 1.f - m_grade.golden * 2.f) * s.dawn_fog;
   }
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
@@ -3515,6 +3534,13 @@ void EnhancedPost::update_scene() {
   ease(m_cine, movie && s.cine_dof ? 1.f : (aim && s.cine_dof ? 0.3f : 0.f),
        1.f - std::exp(-dt / (aim ? 0.25f : 0.4f)));
   ease(m_movie, movie ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
+  {
+    // Jak's own state: wet out of the water, a jolt of split colors on a hit, a little as Dark Jak
+    const int fx = g_enhanced_player.valid && !movie ? g_enhanced_player.flags : 0;
+    m_jak_wet = (fx & 1) ? 1.f : std::max(0.f, m_jak_wet - dt / 14.f);
+    const float want = ((fx & 4) ? 1.f : (fx & 2) ? 0.35f : 0.f) * s.hit_chroma;
+    ease(m_chroma, want, 1.f - std::exp(-dt / (want > m_chroma ? 0.04f : 0.35f)));
+  }
 }
 
 // cutscene autofocus: nine depth samples around the middle of the screen go into a pixel buffer;
@@ -5399,6 +5425,19 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform4f(glGetUniformLocation(id, "strike"), st[0], st[1], st[2], st[3] * on);
   }
   glUniform1f(glGetUniformLocation(id, "eye_adapt"), m_adapt);
+  glUniform1f(glGetUniformLocation(id, "chroma"), m_chroma);
+  glUniform1f(glGetUniformLocation(id, "dawn_fog"), m_dawn_fog);
+  glUniform1f(glGetUniformLocation(id, "cloud_rays"), m_settings.cloud_rays);
+  {
+    // Jak in view space (last frame's camera: close enough for "the pixels around him")
+    float jv[3] = {0.f, 0.f, 0.f};
+    for (int col = 0; col < 3; col++) {
+      for (int row = 0; row < 3; row++) {
+        jv[col] += (g_enhanced_player.pos[row] - m_prev_camera.trans[row]) * m_prev_camera.rot[row][col];
+      }
+    }
+    glUniform4f(glGetUniformLocation(id, "jak_fx"), jv[0], jv[1], jv[2], m_jak_wet);
+  }
   glUniform1f(glGetUniformLocation(id, "lens_drops"), m_movie > 0.5f ? 0.f : m_settings.lens_drops);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
@@ -6138,6 +6177,9 @@ std::string EnhancedPost::menu_settings_json() const {
   j["photo_filter"] = s.photo_filter;
   j["photo_vignette"] = s.photo_vignette;
   j["eye_adapt"] = s.eye_adapt;
+  j["hit_chroma"] = s.hit_chroma;
+  j["dawn_fog"] = s.dawn_fog;
+  j["cloud_rays"] = s.cloud_rays;
   j["lens_drops"] = s.lens_drops;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
@@ -6225,6 +6267,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("photo_filter", s.photo_filter);
   get("photo_vignette", s.photo_vignette);
   get("eye_adapt", s.eye_adapt);
+  get("hit_chroma", s.hit_chroma);
+  get("dawn_fog", s.dawn_fog);
+  get("cloud_rays", s.cloud_rays);
   get("lens_drops", s.lens_drops);
   s.season = std::clamp(s.season, 0, 4);
   get("vivid", s.vivid);
@@ -6464,6 +6509,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Warmth", &m_settings.warmth, -0.2f, 0.2f);
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Eye adaptation", &m_settings.eye_adapt, 0.f, 1.f);
+    ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
+    ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
+    ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);
     ImGui::SliderFloat("Drops on the lens", &m_settings.lens_drops, 0.f, 1.f);
     ImGui::SliderFloat("Sharpen", &m_settings.sharpen, 0.f, 1.f);
     ImGui::Checkbox("Grade per area", &m_settings.area_grading);

@@ -1896,6 +1896,17 @@
                                 )
         )
 
+;; Enhanced balance: from the wings, the ground pound's button dives on what's below, from any height
+(defbehavior enhanced-wings-dive target ()
+  (if (and (pc-enhanced-balance?)
+           (cpad-pressed? (-> self control cpad number) square)
+           (< 8192.0 (target-height-above-ground))
+           )
+      (go target-flop 65502.96 -163840.0 0.0 'flop)
+      )
+  (none)
+  )
+
 (defstate target-lightjak-swoop (target)
   :event target-jump-event-handler
   :enter (behavior ((arg0 float))
@@ -1963,6 +1974,7 @@
         (set-time! (-> self control sliding-start-time))
         (set! (-> self control unknown-word04) (the-as uint #f))
         )
+    (enhanced-wings-dive)
     (when (time-elapsed? (-> self control sliding-start-time) (seconds 0.2))
       (set! (-> self control dynam gravity-max) (-> self control standard-dynamics gravity-max))
       (set! (-> self control dynam gravity-length) (-> self control standard-dynamics gravity-length))
@@ -2119,6 +2131,7 @@
     )
   :exit (-> target-lightjak-swoop exit)
   :trans (behavior ()
+    (enhanced-wings-dive)
     (if (and (cpad-pressed? (-> self control cpad number) x)
              (not (and (< (target-height-above-ground) 8192.0)
                        (or (= (-> self control gspot-pat-surfce mode) (pat-mode ground))

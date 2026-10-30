@@ -29,6 +29,7 @@ struct EnhancedPlayer {
   // the air
   int state = 0;
   int lamp_toggles = 0;  // how many times the player switched Jak's lantern (mod 64)
+  int flags = 0;         // 1 Jak touches water, 2 he is Dark Jak, 4 he has just been hit
   bool valid = false;
 };
 extern EnhancedPlayer g_enhanced_player;
@@ -106,6 +107,32 @@ struct EnhancedPushers {
   int count = 0;
 };
 extern EnhancedPushers g_enhanced_pushers;
+
+// The explosions' waves through the grass, same layout (written by the renderer each frame)
+struct EnhancedBlastPush {
+  static constexpr int kMax = 3;
+  float pos[kMax][4] = {};
+  int count = 0;
+};
+extern EnhancedBlastPush g_enhanced_blast_push;
+
+// what bends the grass now: the blasts, then those the game sent
+inline EnhancedPushers enhanced_pushers_now() {
+  EnhancedPushers out;
+  for (int i = 0; i < g_enhanced_blast_push.count && out.count < EnhancedPushers::kMax; i++) {
+    for (int k = 0; k < 4; k++) {
+      out.pos[out.count][k] = g_enhanced_blast_push.pos[i][k];
+    }
+    out.count++;
+  }
+  for (int i = 0; i < g_enhanced_pushers.count && out.count < EnhancedPushers::kMax; i++) {
+    for (int k = 0; k < 4; k++) {
+      out.pos[out.count][k] = g_enhanced_pushers.pos[i][k];
+    }
+    out.count++;
+  }
+  return out;
+}
 
 // The strongest dynamic lights of the last frame (world, game units; w: radius / strength), for the
 // smoke and dust particles they light (Sprite3)

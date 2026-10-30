@@ -222,6 +222,32 @@ void main() {
 
   float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
 
+  // and a wider one, a few times the radius: rooms, alleys and the undersides of bridges darken
+  // softly, not only the tight corners (gentler, and never below 0.6)
+  {
+    const int WIDE = 8;
+    const float wide_k = 4.0;
+    vec2 w_uv = r_uv * wide_k;
+    float w_scale = min(1.0, 0.25 / max(w_uv.x, 1e-6));
+    w_uv *= w_scale;
+    float w_r2 = r2 * wide_k * wide_k * w_scale * w_scale;
+    float w_sum = 0.0;
+    for (int i = 0; i < WIDE; i++) {
+      float t = (float(i) + 0.5) / float(WIDE);
+      float angle = t * 3.0 * 6.2831853 + spin + 1.3;
+      vec2 suv = uv + w_uv * sqrt(t) * vec2(cos(angle), sin(angle));
+      float sd = texture(tex_T0, suv).r;
+      if (sd <= 1e-7) {
+        continue;
+      }
+      vec3 v = view_pos(suv, sd) - p;
+      float vv = dot(v, v);
+      float falloff = 1.0 - smoothstep(0.5 * w_r2, w_r2, vv);
+      w_sum += falloff * max(0.0, dot(v, n) - 0.004 * dist) / (vv + 0.02 * w_r2) * sqrt(w_r2);
+    }
+    ao *= max(0.6, 1.0 - 0.9 * intensity * w_sum / float(WIDE));
+  }
+
   // traced through the levels: corners and alleys darken from what's really there, on or off the
   // screen (the screen-space one still gives the characters, which aren't traced, their contact)
   if (rt_levels > 0 && dist < rt_ao.z) {

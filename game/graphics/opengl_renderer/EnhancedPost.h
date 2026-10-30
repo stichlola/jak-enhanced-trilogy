@@ -217,6 +217,9 @@ class EnhancedPost {
     float warmth = 0.0f;     // shifts toward warm highlights / cool shadows
     float vignette = 0.18f;
     float eye_adapt = 1.f;         // the eye's adaptation to dark and bright (0 = off)
+    float hit_chroma = 1.f;        // colors split on a hit and as Dark Jak (0 = off)
+    float dawn_fog = 1.f;          // the morning's low fog (0 = off)
+    float cloud_rays = 1.f;        // the low sun's rays through the gaps in the clouds (0 = off)
     float lens_drops = 0.5f;       // raindrops on the lens in a downpour (0 = off)
     float sharpen = 0.25f;
     bool area_grading = true;      // a color grade per area (Haven, desert, forest...), day and night
@@ -676,6 +679,9 @@ class EnhancedPost {
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
   float m_adapt = 1.f;
+  float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
+  float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak
+  float m_dawn_fog = 0.f;  // the low fog of the morning (outdoor areas)
   double m_adapt_time = 0.0;
   // the shadow map read as plain depths (soft shadows' blocker search), not compared
   GLuint m_shadow_raw_sampler = 0;

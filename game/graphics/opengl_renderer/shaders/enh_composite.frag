@@ -161,6 +161,10 @@ uniform vec4 beacon_color[24];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform float lens_drops;       // raindrops on the lens in a downpour (0 = off)
+uniform float chroma;           // colors split at the screen's edges: a hit, Dark Jak (0..1)
+uniform float dawn_fog;         // the morning's low fog
+uniform float cloud_rays;       // the low sun's rays through the gaps in the clouds
+uniform vec4 jak_fx;            // Jak in view space; w: how wet he is (0..1)
 uniform float eye_adapt;        // the eye's adaptation: the picture lifted in the dark, lowered in glare
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
@@ -1976,6 +1980,13 @@ void main() {
   if (blur == 0.0) {
     c = fxaa != 0 ? fxaa_at(uv) : texture(tex_T0, uv).rgb;
   }
+  // a hit (and, faintly, Dark Jak): the colors part toward the screen's edges
+  if (chroma > 0.002 && wsurf == 0.0) {
+    vec2 from_mid = uv - 0.5;
+    vec2 off = from_mid * dot(from_mid, from_mid) * 4.0 * chroma * 0.012;
+    c.r = texture(tex_T0, uv + off).r;
+    c.b = texture(tex_T0, uv - off).b;
+  }
 
   // water: our own shading over the game's, the same for the near and far sea (drawn by two
   // renderers with different colors), with reflections, sun glints, clearer shallows and foam
@@ -2902,8 +2913,34 @@ void main() {
     grey *= 1.0 - 0.85 * night_dark.x;
     c = mix(c, grey, (1.0 - exp(-z / 4096.0 * (0.007 + 0.006 * weather2.x))) * (0.22 + 0.12 * weather2.x) * weather.x);
   }
+  // rays through the gaps in the clouds, when the sun is low: looking back along the line to it,
+  // how much open sky lies between here and it (sky pixels with little cloud)
+  if (cloud_rays > 0.0 && clouds.x > 0.0 && cloud_info.x > 0.0 && sky_sun.w > 0.0 && sky_sun.w < 0.45 &&
+      sky_sun.z > 0.1 && wsurf == 0.0 && weather.x < 0.5) {
+    float toward = pow(max(dot(ray, sky_sun.xyz), 0.0), 3.0);
+    float cover = smoothstep(0.1, 0.35, clouds.y) * (1.0 - smoothstep(0.75, 1.0, clouds.y));
+    if (toward * cover > 0.01) {
+      vec2 suv = vec2(sky_sun.x * proj.z, sky_sun.y * proj.w) / sky_sun.z * 0.5 + 0.5;
+      vec2 to_sun = suv - tex_coord;
+      ivec2 csize = textureSize(tex_T15, 0);
+      float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+      float lit = 0.0;
+      for (int i = 0; i < 10; i++) {
+        vec2 q = tex_coord + to_sun * (float(i) + jit) / 10.0;
+        if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0 || texture(tex_T3, q).r > 1e-7) {
+          continue;
+        }
+        vec4 cl = texelFetch(tex_T15, ivec2(q * vec2(csize)), 0);
+        if (cl.a >= 0.0 && !isnan(cl.a)) {
+          lit += cl.a * cl.a;
+        }
+      }
+      c += sun_color() * lit / 10.0 * toward * cover * cloud_rays * 0.22 *
+           (1.0 - smoothstep(0.25, 0.45, sky_sun.w));
+    }
+  }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
-  float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w);
+  float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w) + 0.3 * dawn_fog * (1.0 - clouds.w);
   if (low_fog > 0.0) {
     float dist = z > 0.0 ? length(p) / 4096.0 : 2500.0;
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w);
@@ -3856,6 +3893,20 @@ void main() {
       }
     }
     c *= 1.0 - 0.2 * (1.0 - smoothstep(0.05, 1.1, h)) * (1.0 - smoothstep(30.0, 60.0, length(p) / 4096.0));
+  }
+  // Jak out of the water: dark and shining for some seconds, as he dries (the pixels around him,
+  // characters' tag)
+  if (jak_fx.w > 0.0 && z > 0.0 && wsurf == 0.0) {
+    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float jd = length(p - jak_fx.xyz) / 4096.0;
+    if (ctag > 0.4 && ctag < 0.56 && jd < 2.5) {
+      float wetk = jak_fx.w * (1.0 - smoothstep(1.8, 2.5, jd));
+      vec3 vd = normalize(p);
+      float glint = pow(max(dot(reflect(vd, surf_n), sun_dir.xyz), 0.0), 30.0) * sun_dir.w * (1.0 - clouds.w);
+      float sheen = pow(1.0 - clamp(dot(surf_n, -vd), 0.0, 1.0), 4.0);
+      c *= 1.0 - 0.18 * wetk;
+      c += wetk * (sun_color() * glint * 0.6 + vec3(0.6, 0.7, 0.8) * sheen * 0.12);
+    }
   }
   // characters lit from behind by the sun: a thin bright rim along their outline, so they stand out
   // from the scenery (by day, outdoors: the areas with a day sky)

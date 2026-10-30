@@ -191,7 +191,7 @@
     // Jak 1's rock village: under attack, the boulders burning, a grey sky (the game's own, not our
     // clear one)
     "rock-village": {
-      "day": {"lift": [0.006, 0.006, 0.01], "gain": [1.04, 1.02, 1.0], "saturation": 0.98, "contrast": 0.03, "warmth": 0.02, "clouds": 0.6, "rock_sun": 0.3},
+      "day": {"lift": [0.016, 0.016, 0.02], "gain": [1.26, 1.24, 1.2], "saturation": 0.98, "contrast": 0.0, "warmth": 0.02, "clouds": 0.6, "rock_sun": 0.3},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.6},
       "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.3},
                   "spells": {"period": 600, "fair": 0.4, "overcast": 0.3, "shower": 0.2, "thunder": 0.1}},

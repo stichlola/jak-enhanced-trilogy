@@ -1108,7 +1108,9 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   g_enhanced_player.pos[2] = v[2];
   // w: the state, plus 8 x the count of lantern switches (holding triangle), mod 64
   g_enhanced_player.state = (int)v[3] & 7;
-  g_enhanced_player.lamp_toggles = (int)v[3] >> 3;
+  g_enhanced_player.lamp_toggles = ((int)v[3] >> 3) & 63;
+  // (+ 512 x the flags: in water, Dark Jak, just hit)
+  g_enhanced_player.flags = (int)v[3] >> 9;
   // jak 3: the jetboard's throttle (a second vector after it): in v[4] the boost the game made of
   // it (0..1), for the speed effects; out v[5] the pad's left trigger as pressed (0..1). Its own
   // kernel function would be simpler, but one more C function symbol crashes jak3 on boot
