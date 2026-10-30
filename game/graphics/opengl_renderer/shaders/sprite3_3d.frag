@@ -29,7 +29,7 @@ void enhanced_sprite() {
   vec3 dom = vec3(enh_q * 0.22, 0.0) + enh_cen.xyz;
   // (the noise climbs through the sprite, whichever way the camera leans)
   vec2 flow = texture(enh_noise, dom + vec3(-enh_rise * t, t * 0.31)).rg - 0.5;
-  float fine = texture(enh_noise, dom * 2.7 + vec3(flow * 0.25 - enh_rise * t * 1.9, t * 0.57)).r - 0.5;
+  float fine = texture(enh_noise, dom * 3.0 + vec3(flow * 0.25 - enh_rise * t * 1.9, t * 0.57)).r - 0.5;
   float e = flow.x + fine * 0.7;
 
   vec2 st = tex_coord.xy;

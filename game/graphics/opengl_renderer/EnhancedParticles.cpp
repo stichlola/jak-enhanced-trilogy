@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -247,6 +248,61 @@ void EnhancedSpriteFx::set_bucket(SharedRenderState* render_state,
   }
 }
 
+namespace {
+struct Decal {
+  float pos[3];
+  float radius;
+  int kind;
+  float time;
+};
+std::vector<Decal> g_decals;
+constexpr int kMaxScorches = 12, kMaxMarks = 16;
+}  // namespace
+
+void enhanced_add_decal(const float* pos, float radius, int kind, float time) {
+  // full: the oldest of its sort goes (rapid fire doesn't wipe the scorch marks)
+  const int most = kind == 0 ? kMaxScorches : kMaxMarks;
+  int count = 0;
+  int oldest = -1;
+  for (int i = 0; i < (int)g_decals.size(); i++) {
+    if ((g_decals[i].kind == 0) == (kind == 0)) {
+      count++;
+      if (oldest < 0) {
+        oldest = i;
+      }
+    }
+  }
+  if (count >= most) {
+    g_decals.erase(g_decals.begin() + oldest);
+  }
+  g_decals.push_back({{pos[0], pos[1], pos[2]}, radius, kind, time});
+}
+
+void enhanced_upload_decals(u64 shader, const float* cam_pos, float time, bool on) {
+  constexpr int kMax = kMaxScorches + kMaxMarks;
+  std::erase_if(g_decals,
+                [&](const Decal& d) { return time - d.time > (d.kind == 0 ? 60.f : 25.f); });
+  float decal[kMax * 4] = {};
+  float info[kMax * 2] = {};
+  int count = 0;
+  for (const auto& d : g_decals) {
+    // (the composite looks no further than 110 m)
+    if (!on || count == kMax ||
+        std::hypot(d.pos[0] - cam_pos[0], d.pos[1] - cam_pos[1], d.pos[2] - cam_pos[2]) >
+            120.f * kMeter) {
+      continue;
+    }
+    std::memcpy(decal + count * 4, d.pos, sizeof(d.pos));
+    decal[count * 4 + 3] = d.radius;
+    info[count * 2] = time - d.time;
+    info[count * 2 + 1] = (float)d.kind;
+    count++;
+  }
+  glUniform1i(glGetUniformLocation(shader, "decal_count"), count);
+  glUniform4fv(glGetUniformLocation(shader, "decal"), kMax, decal);
+  glUniform2fv(glGetUniformLocation(shader, "decal_info"), kMax, info);
+}
+
 int EnhancedGroundProbe::ask(const float* pos,
                              const EnhancedCamera& cam,
                              const std::array<float, 4>& proj,
@@ -392,6 +448,12 @@ void EnhancedPost::update_blast_fx(const EnhancedCamera& cam, bool on, int w, in
     }
     if (found) {
       b.ground = y;
+      // (not for one going off high in the air)
+      if (b.pos[1] - y < std::max(2.5f * kMeter, b.radius * 0.8f)) {
+        const float at[3] = {b.pos[0], y, b.pos[2]};
+        enhanced_add_decal(at, std::clamp(b.radius * 0.55f, 1.f * kMeter, 5.5f * kMeter), 0,
+                           (float)m_time);
+      }
     }
     // what stays behind: a few columns of smoke drifting off, sized by the blast
     if (m_settings.blast_sparks > 0.f) {
@@ -496,7 +558,11 @@ void shot_seen(int id, int kind, const float* pos, float now) {
   p.time = now;
 }
 
-void shot_hit(int kind, const float* pos, float now) {
+void shot_hit(int kind, const float* pos, float now, bool mark) {
+  if (mark) {
+    static constexpr float kMarks[5] = {0.3f, 0.5f, 0.25f, 0.3f, 0.55f};
+    enhanced_add_decal(pos, kMarks[kind] * kMeter, kind, now);
+  }
   const int n = kind == 2 ? 6 : 9;
   for (int i = 0; i < n && g_sparks.size() < 64; i++) {
     ShotSpark s;
@@ -546,7 +612,7 @@ void shot_test(float now) {
     shot_seen(id, kind, p, now);
   } else if (hit_at != start) {
     hit_at = start;
-    shot_hit(kind, p, now);
+    shot_hit(kind, p, now, true);
   }
 }
 
@@ -662,7 +728,7 @@ void enhanced_draw_shots(SharedRenderState* render_state,
       if (e.id >= 0) {
         shot_seen(e.id, e.kind, e.pos, now);
       } else {
-        shot_hit(e.kind, e.pos, now);
+        shot_hit(e.kind, e.pos, now, e.id == -1);
       }
     }
     g_enhanced_shots.count = 0;

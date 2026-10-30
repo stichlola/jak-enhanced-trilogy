@@ -2442,6 +2442,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1fv(glGetUniformLocation(id, "blast_ground"), kBlasts, blast_ground);
       glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
+      enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
     }
     // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
     // city), dry and calm, a few dozen meters around Jak, each wandering on its own

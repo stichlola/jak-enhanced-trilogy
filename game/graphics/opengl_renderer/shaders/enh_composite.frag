@@ -182,6 +182,9 @@ uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float blast_seed[4];
 uniform float blast_ground[4];  // the ground under it, along up from the blast (<= 0; > 0: not known)
 uniform float fx_detail;        // richer explosions, shots and marks (0 = off)
+uniform int decal_count;        // lasting marks: world xyz, radius (game units)
+uniform vec4 decal[28];
+uniform vec2 decal_info[28];    // age (s), kind (0 an explosion's scorch, 1..4 a shot's hit: red, blue, yellow, dark)
 uniform vec4 blast_dir[4];      // gun blasts: where it's fired (view space), w: kind (0 explosion,
                                 // 1 red gun, 2 red gun charging: only sparks on the gun, 3 a
                                 // charged shot: wide, red going fuchsia at its edges)
@@ -2633,6 +2636,42 @@ void main() {
       c = mix(c, min(c, vec3(1.0)), clamp(dent + rim, 0.0, 1.0) * k);
       c *= 1.0 - k * (0.35 * dent - 0.06 * rim * (1.0 - dent));
     }
+  }
+
+  // lasting marks: a scorch where an explosion hit flat ground, a small burn where a shot hit
+  // anything; black with a broken edge, glowing for a moment, fading away
+  if (decal_count > 0 && z > 0.0 && z < 110.0 * 4096.0 && wsurf == 0.0) {
+    vec3 w = view_to_world * p + cam_pos;
+    float level = smoothstep(0.6, 0.85, dot(surf_n, up_view));
+    float soot = 0.0;
+    vec3 hot = vec3(0.0);
+    for (int i = 0; i < decal_count; i++) {
+      vec3 d = (w - decal[i].xyz) / 4096.0;  // meters
+      float r = decal[i].w / 4096.0;
+      float age = decal_info[i].x;
+      int kind = int(decal_info[i].y + 0.5);
+      float rr;
+      if (kind == 0) {
+        if (level <= 0.0 || abs(d.y) > 0.6 + r * 0.12) {
+          continue;
+        }
+        rr = length(d.xz) / r;
+      } else {
+        rr = length(d) / r;
+      }
+      if (rr >= 1.3) {
+        continue;
+      }
+      float n = vnoise3(d * (kind == 0 ? 1.4 : 6.0) + float(i) * 1.7);
+      float edge = rr + (n - 0.5) * 0.5;
+      float fade = kind == 0 ? 1.0 - smoothstep(20.0, 60.0, age) : 1.0 - smoothstep(10.0, 25.0, age);
+      soot = max(soot, (1.0 - smoothstep(0.45, 1.0, edge)) * fade * (kind == 0 ? level : 1.0));
+      vec3 tint = kind == 2 ? vec3(0.3, 0.6, 1.0) : kind == 3 ? vec3(1.0, 0.7, 0.2) :
+                  kind == 4 ? vec3(0.7, 0.2, 1.0) : vec3(1.0, 0.3, 0.05);
+      hot += tint * (1.0 - smoothstep(0.2, 0.8, edge)) * exp(-age * (kind == 0 ? 0.9 : 3.0));
+    }
+    float k = min(fx_detail * 2.0, 1.0);
+    c = mix(c, vec3(luma(c)), soot * 0.5 * k) * (1.0 - soot * 0.78 * k) + hot * k;
   }
 
   // sun shadow map: surfaces facing the sun but blocked from it lose some light (the game's light is

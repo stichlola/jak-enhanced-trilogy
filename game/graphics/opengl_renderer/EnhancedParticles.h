@@ -89,3 +89,9 @@ void enhanced_draw_shots(SharedRenderState* render_state,
                          const float* camera,
                          const float* hvdf_offset,
                          float pfog0);
+
+// Lasting marks, drawn by the composite: kind 0 an explosion's scorch on flat ground, fading over a
+// minute; 1..4 where a gun's shot hit (any surface, 25 s). World position and radius, game units
+void enhanced_add_decal(const float* pos, float radius, int kind, float time);
+// the composite's uniforms (on = false: none)
+void enhanced_upload_decals(u64 shader, const float* cam_pos, float time, bool on);
