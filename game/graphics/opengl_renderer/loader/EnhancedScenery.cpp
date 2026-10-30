@@ -41,6 +41,9 @@ constexpr float kImpReach = 500.f;  // m: the impostors (past the far versions) 
 constexpr float kThinKeep = 0.5f;  // the share of impostors left at kImpReach (thinned from half way)
 constexpr int kImpGrid = 8;  // impostor atlas: views per side (tools/blender/grass_variants.py)
 constexpr float kFarReach = 1.f + kFarLods;  // so they reach this many times the detailed distance
+constexpr int kImp = kFarLods + 1;  // the version that's the impostor
+constexpr float kPlacedReach = 400.f;  // m: how far the objects placed by hand are drawn
+constexpr float kPlacedSize = 4.f;  // m: placed objects wider than this keep each version for longer
 
 using Vec3 = math::Vector3f;
 
@@ -260,6 +263,52 @@ bool load_mesh(Mesh& mesh) {
   return true;
 }
 
+// its impostor, if it has one (<file>_imp.png, <file>_nrm.png)
+void load_impostor(Mesh& mesh) {
+  const auto stem = fs::path(mesh.file).stem().string();
+  auto imp_path = scenery_dir() / (stem + "_imp.png");
+  if (!mesh.ok || !fs::exists(imp_path)) {
+    return;
+  }
+  int w = 0, h = 0;
+  u8* px = stbi_load(imp_path.string().c_str(), &w, &h, nullptr, 4);
+  if (!px) {
+    return;
+  }
+  mesh.imp_w = w;
+  mesh.imp_h = h;
+  mesh.imp_rgba.assign(px, px + (size_t)w * h * 4);
+  stbi_image_free(px);
+  auto nrm_path = scenery_dir() / (stem + "_nrm.png");
+  int nw = 0, nh = 0;
+  u8* npx = fs::exists(nrm_path) ? stbi_load(nrm_path.string().c_str(), &nw, &nh, nullptr, 4) : nullptr;
+  if (npx && nw == w && nh == h) {
+    mesh.imp_nrm.assign(npx, npx + (size_t)w * h * 4);
+  }
+  if (npx) {
+    stbi_image_free(npx);
+  }
+}
+
+// its far versions, nearest first: <file>_lod1.glb, _lod2.glb ...
+std::vector<Mesh> load_far_versions(const std::string& file) {
+  std::vector<Mesh> out;
+  for (int k = 1; k <= kFarLods; k++) {
+    auto far_file = fmt::format("{}_lod{}.glb", fs::path(file).stem().string(), k);
+    if (!fs::exists(scenery_dir() / far_file)) {
+      break;
+    }
+    Mesh lod;
+    lod.file = far_file;
+    lod.ok = load_mesh(lod);
+    if (!lod.ok) {
+      break;
+    }
+    out.push_back(std::move(lod));
+  }
+  return out;
+}
+
 // scenery.json, once (the loader thread holds the library's lock)
 void load_config(Library& lib) {
   if (lib.loaded_config) {
@@ -289,46 +338,15 @@ void load_config(Library& lib) {
           mesh.ok = load_mesh(mesh);
           it = by_file.emplace(file, (int)lib.meshes.size()).first;
           lib.meshes.push_back(std::move(mesh));
-          // its impostor
-          auto imp_path = scenery_dir() / (fs::path(file).stem().string() + "_imp.png");
-          if (lib.meshes[it->second].ok && fs::exists(imp_path)) {
-            int w = 0, h = 0;
-            u8* px = stbi_load(imp_path.string().c_str(), &w, &h, nullptr, 4);
-            if (px) {
-              auto& mesh = lib.meshes[it->second];
-              mesh.imp_w = w;
-              mesh.imp_h = h;
-              mesh.imp_rgba.assign(px, px + (size_t)w * h * 4);
-              stbi_image_free(px);
-              auto nrm_path = scenery_dir() / (fs::path(file).stem().string() + "_nrm.png");
-              int nw = 0, nh = 0;
-              u8* npx = fs::exists(nrm_path)
-                            ? stbi_load(nrm_path.string().c_str(), &nw, &nh, nullptr, 4)
-                            : nullptr;
-              if (npx && nw == w && nh == h) {
-                mesh.imp_nrm.assign(npx, npx + (size_t)w * h * 4);
-              }
-              if (npx) {
-                stbi_image_free(npx);
-              }
+          load_impostor(lib.meshes[it->second]);
+          // its far versions, a chain
+          if (lib.meshes[it->second].ok) {
+            int prev = it->second;
+            for (auto& lod : load_far_versions(file)) {
+              lib.meshes[prev].far_lod = (int)lib.meshes.size();
+              prev = (int)lib.meshes.size();
+              lib.meshes.push_back(std::move(lod));
             }
-          }
-          // its far versions, a chain: <file>_lod1.glb, _lod2.glb ...
-          int prev = it->second;
-          for (int k = 1; k <= kFarLods && lib.meshes[prev].ok; k++) {
-            auto far_file = fmt::format("{}_lod{}.glb", fs::path(file).stem().string(), k);
-            if (!fs::exists(scenery_dir() / far_file)) {
-              break;
-            }
-            Mesh lod;
-            lod.file = far_file;
-            lod.ok = load_mesh(lod);
-            if (!lod.ok) {
-              break;
-            }
-            lib.meshes[prev].far_lod = (int)lib.meshes.size();
-            prev = (int)lib.meshes.size();
-            lib.meshes.push_back(std::move(lod));
           }
         }
         if (lib.meshes[it->second].ok) {
@@ -1119,6 +1137,20 @@ void enhanced_draw_scenery(const tfrag3::TieTree& tree,
 }
 
 namespace {
+// the last version a model has: its impostor (if it may use it), else its last far version
+int last_version(const Library& lib, int m, bool impostor = true) {
+  const auto& mesh = lib.meshes[m];
+  if (impostor && (!mesh.imp_rgba.empty() || mesh.imp_tex)) {
+    return kImp;
+  }
+  int last = 0;
+  for (int k = 0; k < kFarLods && lib.meshes[m].far_lod >= 0; k++) {
+    m = lib.meshes[m].far_lod;
+    last = k + 1;
+  }
+  return last;
+}
+
 void draw_scenery(const std::shared_ptr<void>& scenery,
                   const std::vector<u8>* proto_vis,
                   const TfragRenderSettings& settings,
@@ -1147,7 +1179,6 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
   const float now = std::chrono::duration<float>(clock::now() - start).count();
 
   // the copies to draw: per batch, per version (the far versions, then the impostor last)
-  constexpr int kImp = kFarLods + 1;
   lib.copies.resize(data.batches.size());
   bool any = false;
   for (size_t bi = 0; bi < data.batches.size(); bi++) {
@@ -1160,14 +1191,7 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
     if (proto_vis && b.proto >= 0 && !(*proto_vis)[b.proto]) {
       continue;  // (the game has hidden this proto just now, as it's done with the level's own)
     }
-    // the last version this model has: its impostor, else its last far version
-    int last = mesh.imp_rgba.empty() && !mesh.imp_tex ? 0 : kImp;
-    if (!last) {
-      for (int k = 0, m = b.mesh; k < kFarLods && lib.meshes[m].far_lod >= 0; k++) {
-        m = lib.meshes[m].far_lod;
-        last = k + 1;
-      }
-    }
+    const int last = last_version(lib, b.mesh);
     for (size_t i = 0; i < b.instances.size(); i++) {
       const auto& s = b.spheres[i];
       float dx = s.x() - cam.x(), dy = s.y() - cam.y(), dz = s.z() - cam.z();
@@ -1367,7 +1391,8 @@ namespace {
 struct PlacedSet {
   std::vector<EnhancedPlaced> list;
   std::unordered_map<std::string, int> mesh_of;  // model -> its mesh in the library (-1: broken)
-  std::unordered_map<std::string, std::shared_future<std::shared_ptr<Mesh>>> loading;
+  // (the model, then its far versions)
+  std::unordered_map<std::string, std::shared_future<std::shared_ptr<std::vector<Mesh>>>> loading;
   u64 drawn_frame = 0;
   // each object's light: the nearest vertex of the tree drawing it (its time of day color, its
   // baked light), worked out again when the tree or the place changes
@@ -1380,9 +1405,10 @@ struct PlacedSet {
   std::vector<Lit> lit;
   // the trees' bounds (x, z, game units): whether one is near the camera
   std::unordered_map<const tfrag3::ShrubTree*, std::array<float, 4>> tree_bounds;
-  // per mesh, per look (tint and light): the copies
+  // per mesh, per version, per look (tint and light): the copies
   struct Group {
     int mesh = -1;
+    int version = 0;  // 0 the model, then its far versions, kImp its impostor
     float rgb[3] = {0.5f, 0.5f, 0.5f};
     std::vector<GpuInstance> copies;
   };
@@ -1403,21 +1429,32 @@ int placed_mesh(Library& lib, const std::string& model) {
   if (!job.valid()) {
     job = std::async(std::launch::async,
                      [model] {
-                       auto mesh = std::make_shared<Mesh>();
-                       mesh->file = model;
-                       mesh->ok = load_mesh(*mesh);
-                       return mesh;
+                       auto chain = std::make_shared<std::vector<Mesh>>(1);
+                       auto& mesh = chain->front();
+                       mesh.file = model;
+                       mesh.ok = load_mesh(mesh);
+                       load_impostor(mesh);
+                       if (mesh.ok) {
+                         auto lods = load_far_versions(model);
+                         std::move(lods.begin(), lods.end(), std::back_inserter(*chain));
+                       }
+                       return chain;
                      })
               .share();
   }
   if (job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
     return -1;
   }
-  auto mesh = job.get();
+  auto chain = job.get();
   int idx = -1;
-  if (mesh->ok) {
+  if (chain->front().ok) {
     idx = (int)lib.meshes.size();
-    lib.meshes.push_back(std::move(*mesh));
+    for (size_t k = 0; k < chain->size(); k++) {
+      if (k + 1 < chain->size()) {
+        (*chain)[k].far_lod = idx + (int)k + 1;
+      }
+      lib.meshes.push_back(std::move((*chain)[k]));
+    }
   }
   p.mesh_of[model] = idx;
   p.loading.erase(model);
@@ -2000,7 +2037,13 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   }
   p.lit.resize(p.list.size());
 
-  // each object's copy, grouped by mesh and look
+  // each object's copy, grouped by mesh, version and look. As the scenery's: each version reaches
+  // one detailed distance further, a copy near the end of its reach swaps to the next (both drawn),
+  // and far out fewer impostors. Bigger objects count as nearer: they still fill the screen
+  const float step = (g_enhanced_scenery_dist > 0.f ? g_enhanced_scenery_dist : 60.f) *
+                     g_enhanced_scenery_scale * kMeter;
+  const float swap = step * 0.2f;
+  const float thin_from = std::max(kPlacedReach * kMeter * 0.5f, (kFarLods + 1.5f) * step);
   for (auto& g : p.groups) {
     g.copies.clear();
   }
@@ -2045,8 +2088,9 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
                                        (mesh.lo.z() + mesh.hi.z()) * 0.5f));
     float radius = s * (mesh.hi - mesh.lo).length() * 0.5f;
     float dx = center.x() - cam.x(), dy = center.y() - cam.y(), dz = center.z() - cam.z();
-    float far_end = 400.f * kMeter + radius;
-    if (dx * dx + dy * dy + dz * dz > far_end * far_end ||
+    float far_end = kPlacedReach * kMeter + radius;
+    float d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > far_end * far_end ||
         !sphere_in_view_ref(math::Vector4f(center.x(), center.y(), center.z(), radius),
                             settings.camera.planes)) {
       continue;
@@ -2088,20 +2132,51 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     for (int c = 0; c < 3; c++) {
       rgb[c] = std::round(lt.base * o.tint[c] * 32.f) / 32.f;
     }
-    PlacedSet::Group* group = nullptr;
-    for (auto& g : p.groups) {
-      if (g.mesh == m && g.rgb[0] == rgb[0] && g.rgb[1] == rgb[1] && g.rgb[2] == rgb[2]) {
-        group = &g;
-        break;
+    auto add = [&](int version, const GpuInstance& copy) {
+      PlacedSet::Group* group = nullptr;
+      for (auto& g : p.groups) {
+        if (g.mesh == m && g.version == version && g.rgb[0] == rgb[0] && g.rgb[1] == rgb[1] &&
+            g.rgb[2] == rgb[2]) {
+          group = &g;
+          break;
+        }
       }
+      if (!group) {
+        group = &p.groups.emplace_back();
+        group->mesh = m;
+        group->version = version;
+        std::copy(rgb, rgb + 3, group->rgb);
+      }
+      group->copies.push_back(copy);
+      any = true;
+    };
+    // (the impostor's pictures see it from above only: turned over or mirrored, it stays a model)
+    const bool upright = full.c[1].y() > 0.7f * full.c[1].length() && o.scale[0] > 0.f &&
+                         o.scale[1] > 0.f && o.scale[2] > 0.f;
+    const int last = last_version(lib, m, upright);
+    const float d = std::sqrt(d2) * std::min(kPlacedSize * kMeter / std::max(radius, 1.f), 1.f);
+    const int k = std::min((int)(d / step), last);
+    const float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
+    if (k < last && into > 0.f) {
+      inst.col[1][3] = std::min(into / swap, 1.f);
+      inst.col[2][3] = -1.f;
+      add(k, inst);
+      inst.col[2][3] = 1.f;
+      add(k + 1, inst);
+    } else if (k == kImp && d > thin_from && !o.action) {
+      const float keep = 1.f - (1.f - kThinKeep) * std::min((d - thin_from) / (kPlacedReach * kMeter - thin_from), 1.f);
+      const float shown = std::clamp(
+          (keep - hash01((u32)(s64)o.pos[0], (u32)(s64)o.pos[2], 7)) / 0.1f, 0.f, 1.f);
+      if (shown > 0.f) {
+        if (shown < 1.f) {
+          inst.col[1][3] = 1.f - shown;
+          inst.col[2][3] = -1.f;
+        }
+        add(k, inst);
+      }
+    } else {
+      add(k, inst);
     }
-    if (!group) {
-      group = &p.groups.emplace_back();
-      group->mesh = m;
-      std::copy(rgb, rgb + 3, group->rgb);
-    }
-    group->copies.push_back(inst);
-    any = true;
   }
   // (the looks no longer used)
   p.groups.erase(std::remove_if(p.groups.begin(), p.groups.end(),
@@ -2155,9 +2230,18 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   glActiveTexture(GL_TEXTURE0);
   glDisable(GL_PRIMITIVE_RESTART);
   for (auto& g : p.groups) {
+    if (g.version == kImp) {
+      continue;
+    }
     auto& mesh = lib.meshes[g.mesh];
-    if (!mesh.vao) {
-      make_gl(mesh, lib);
+    // the version to draw (the last one stands in for any missing)
+    int drawn = g.mesh;
+    for (int k = 0; k < g.version && lib.meshes[drawn].far_lod >= 0; k++) {
+      drawn = lib.meshes[drawn].far_lod;
+    }
+    auto& version = lib.meshes[drawn];
+    if (!version.vao) {
+      make_gl(version, lib);
     }
     glUniform3f(glGetUniformLocation(sh.id(), "enh_base_rgb"), g.rgb[0], g.rgb[1], g.rgb[2]);
     glUniform3f(glGetUniformLocation(sh.id(), "enh_model_avg"), mesh.avg.x(), mesh.avg.y(),
@@ -2169,17 +2253,72 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
                 mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
     setup_tfrag_shader(render_state, mesh.cutout ? cut : solid, ShaderId::SHRUB_INST);
-    glBindVertexArray(mesh.vao);
+    glBindVertexArray(version.vao);
     glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
     glBufferData(GL_ARRAY_BUFFER, g.copies.size() * sizeof(GpuInstance), g.copies.data(),
                  GL_STREAM_DRAW);
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mesh.tex);
-    glDrawElementsInstanced(GL_TRIANGLES, mesh.indices.size(), GL_UNSIGNED_INT, nullptr,
+    glBindTexture(GL_TEXTURE_2D, version.tex);
+    glDrawElementsInstanced(GL_TRIANGLES, version.indices.size(), GL_UNSIGNED_INT, nullptr,
                             g.copies.size());
     prof.add_draw_call();
-    prof.add_tri(mesh.indices.size() / 3 * g.copies.size());
+    prof.add_tri(version.indices.size() / 3 * g.copies.size());
   }
   glEnable(GL_PRIMITIVE_RESTART);
+
+  // the impostors: one quad a copy (always cut out, stones too: the pictures have holes)
+  DrawMode imp_mode = cut;
+  if (!have_cut) {
+    imp_mode.enable_at();
+    imp_mode.set_alpha_test(DrawMode::AlphaTest::GEQUAL);
+    imp_mode.set_aref(38);
+  }
+  bool imp_setup = false;
+  auto& ish = render_state->shaders[ShaderId::SHRUB_IMP];
+  for (auto& g : p.groups) {
+    if (g.version != kImp) {
+      continue;
+    }
+    auto& mesh = lib.meshes[g.mesh];
+    if (!mesh.imp_tex) {
+      make_imp_gl(mesh, lib);
+    }
+    if (!imp_setup) {
+      imp_setup = true;
+      first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_IMP);
+      glUniform2f(glGetUniformLocation(ish.id(), "enh_lod"), 0.f, 0.f);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_wet"), g_enhanced_wind.wet);
+      glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)kImpGrid);
+      glUniform1i(glGetUniformLocation(ish.id(), "tex_T1"), 1);
+    }
+    glUniform3f(glGetUniformLocation(ish.id(), "enh_base_rgb"), g.rgb[0], g.rgb[1], g.rgb[2]);
+    Vec3 center = (mesh.lo + mesh.hi) * 0.5f;
+    glUniform4f(glGetUniformLocation(ish.id(), "enh_imp"), center.x(), center.y(), center.z(),
+                (mesh.hi - mesh.lo).length() * 0.5f);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_foliage"), mesh.cutout ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_stone"), mesh.cutout ? 0.f : 1.f);
+    glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
+                std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
+                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+    glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
+    setup_tfrag_shader(render_state, imp_mode, ShaderId::SHRUB_IMP);
+
+    glBindVertexArray(lib.imp_vao);
+    glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
+    glBufferData(GL_ARRAY_BUFFER, g.copies.size() * sizeof(GpuInstance), g.copies.data(),
+                 GL_STREAM_DRAW);
+    if (mesh.imp_nrm_tex) {
+      glActiveTexture(GL_TEXTURE1);
+      glBindTexture(GL_TEXTURE_2D, mesh.imp_nrm_tex);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
+    glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, g.copies.size());
+    prof.add_draw_call();
+    prof.add_tri(2 * g.copies.size());
+  }
   glBindVertexArray(0);
 }
