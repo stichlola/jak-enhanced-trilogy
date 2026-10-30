@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -18,6 +20,7 @@
 
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
+#include "common/util/compress.h"
 #include "common/util/dialogs.h"
 #include "common/util/json_util.h"
 #include "common/versions/versions.h"
@@ -179,6 +182,15 @@ struct State {
   std::vector<EnhancedLight> lights;
   std::vector<V3> lush, edge;  // the grass painting: x, z, the brush's radius (m)
   float fade = 12.f;
+};
+
+// where Jak starts a private level; from across the world: by this continue point, until he's in
+// this level
+struct LevelStart {
+  bool have = false;
+  V3 pos = {0, 0, 0};  // m
+  float yaw = 0.f;     // degrees
+  std::string scene, cont;
 };
 
 // the library: categories (the tabs), each of kinds (its groups). A model's kind is the tag in its
@@ -404,6 +416,21 @@ struct Editor {
   // Ctrl+C / Ctrl+V: objects around their middle
   std::vector<EnhancedPlaced> clip;
   bool show_help = false;
+
+  // the private level on (none: the main world, kept here meanwhile)
+  bool in_level = false;
+  std::string level, level_name;
+  LevelStart start;
+  State world;
+  std::string level_wait;  // on the way to its start: Jak's to get into this level
+  double level_wait_t = 0;
+  int level_ask = 0;       // the File menu's window to open: 1 new, 2 save as, 3 delete
+  bool level_popup = false;
+  char level_field[64] = {};
+  bool level_copy = false;
+  std::string level_msg;
+  std::future<std::string> level_pick;
+  bool level_pick_export = false;
 };
 Editor g_ed;
 
@@ -607,8 +634,477 @@ void restore(Editor& e, const State& st) {
   commit(e, true, true, grass);
 }
 
-// Save: everything on disk
+// ---- private levels (EnhancedEditor.h)
+fs::path levels_dir() {
+  return file_util::get_user_settings_dir(g_game_version) / "levels";
+}
+
+fs::path scenery_files_dir() {
+  return file_util::get_jak_project_dir() / "custom_assets" / game_version_names[g_game_version] / "scenery";
+}
+
+// (a file name from a level, maybe someone else's: nothing that could lead out of its folder)
+bool safe_file_name(const std::string& n) {
+  if (n.empty() || n.size() > 128 || n[0] == '.' || n.find("..") != std::string::npos) {
+    return false;
+  }
+  return std::all_of(n.begin(), n.end(), [](unsigned char c) {
+    return std::isalnum(c) || c == '_' || c == '-' || c == '.';
+  });
+}
+
+// a new folder's name for a level called this
+std::string new_level_id(const std::string& name) {
+  std::string id;
+  for (unsigned char c : name) {
+    if (std::isalnum(c)) {
+      id += (char)std::tolower(c);
+    } else if (!id.empty() && id.back() != '-') {
+      id += '-';
+    }
+  }
+  id = id.substr(0, 40);
+  while (!id.empty() && id.back() == '-') {
+    id.pop_back();
+  }
+  if (id.empty()) {
+    id = "level";
+  }
+  std::string out = id;
+  for (int i = 2; fs::exists(levels_dir() / out); i++) {
+    out = fmt::format("{}-{}", id, i);
+  }
+  return out;
+}
+
+nlohmann::json level_json(const Editor& e) {
+  auto objects = nlohmann::json::array();
+  for (const auto& p : e.s.objects) {
+    objects.push_back(placed_json(p));
+  }
+  auto lights = nlohmann::json::array();
+  for (const auto& l : e.s.lights) {
+    lights.push_back({{"note", l.note},
+                      {"pos", {l.pos[0] / kMeter, l.pos[1] / kMeter, l.pos[2] / kMeter}},
+                      {"radius", l.radius / kMeter},
+                      {"color", {l.color[0], l.color[1], l.color[2]}},
+                      {"intensity", l.intensity},
+                      {"flicker", l.flicker},
+                      {"night", l.night},
+                      {"bulb", l.bulb}});
+  }
+  nlohmann::json grass = nlohmann::json::object();
+  grass["lush"] = e.s.lush;
+  grass["edge"] = e.s.edge;
+  grass["fade"] = e.s.fade;
+  nlohmann::json j = nlohmann::json::object();
+  j["version"] = 1;
+  j["game"] = game_version_names[g_game_version];
+  j["name"] = e.level_name;
+  j["objects"] = objects;
+  j["lights"] = lights;
+  j["grass"] = grass;
+  if (e.start.have) {
+    nlohmann::json start = nlohmann::json::object();
+    start["pos"] = e.start.pos;
+    start["yaw"] = e.start.yaw;
+    start["scene"] = e.start.scene;
+    start["continue"] = e.start.cont;
+    j["start"] = start;
+  }
+  return j;
+}
+
+struct LevelFile {
+  std::string name;
+  LevelStart start;
+  State st;
+};
+
+// a level's file; false if it isn't one of this game's
+bool read_level(const nlohmann::json& j, LevelFile* out) {
+  try {
+    if (j.value("game", std::string()) != game_version_names[g_game_version]) {
+      return false;
+    }
+    out->name = j.value("name", std::string("Level"));
+    for (const auto& o : j.at("objects")) {
+      auto p = placed_from_json(o);
+      if (safe_file_name(p.model)) {
+        out->st.objects.push_back(p);
+      }
+    }
+    for (const auto& o : j.at("lights")) {
+      EnhancedLight l;
+      l.note = o.value("note", std::string());
+      for (int k = 0; k < 3; k++) {
+        l.pos[k] = o.at("pos")[k].get<float>() * kMeter;
+        l.color[k] = o.at("color")[k].get<float>();
+      }
+      l.radius = o.value("radius", 8.f) * kMeter;
+      l.intensity = o.value("intensity", 1.f);
+      l.flicker = o.value("flicker", false);
+      l.night = o.value("night", true);
+      l.bulb = o.value("bulb", true);
+      out->st.lights.push_back(l);
+    }
+    const auto& g = j.at("grass");
+    out->st.lush = g.at("lush").get<std::vector<V3>>();
+    out->st.edge = g.at("edge").get<std::vector<V3>>();
+    out->st.fade = g.value("fade", 12.f);
+    if (j.contains("start")) {
+      const auto& s = j["start"];
+      out->start.have = true;
+      out->start.pos = s.at("pos").get<V3>();
+      out->start.yaw = s.value("yaw", 0.f);
+      out->start.scene = s.value("scene", std::string());
+      out->start.cont = s.value("continue", std::string());
+    }
+    return true;
+  } catch (const std::exception& ex) {
+    lg::error("[enhanced] level: {}", ex.what());
+    return false;
+  }
+}
+
+void save_level(const Editor& e) {
+  try {
+    file_util::create_dir_if_needed(levels_dir() / e.level);
+    file_util::write_text_file(levels_dir() / e.level / "level.json", level_json(e).dump(1));
+    lg::info("[enhanced] level {}: saved ({} objects, {} lights)", e.level, e.s.objects.size(), e.s.lights.size());
+  } catch (const std::exception& ex) {
+    lg::error("[enhanced] level {}: {}", e.level, ex.what());
+  }
+}
+
+// these on the screen, as they are on disk
+void show_state(Editor& e, const State& st) {
+  e.s = st;
+  e.saved = st;
+  e.sel.clear();
+  e.falls.clear();
+  e.undo.clear();
+  e.redo.clear();
+  e.dirty = false;
+  push_objects(e);
+  enhanced_set_lights(e.s.lights, false);
+  push_grass(e);
+}
+
+// (leaving the main world: what it has on disk, its lights and grass as the renderer has them)
+void keep_world(Editor& e) {
+  if (e.in_level) {
+    return;
+  }
+  if (e.dirty) {
+    e.world = e.saved;
+    return;
+  }
+  e.world = e.s;
+  e.world.lights = enhanced_lights();
+  std::vector<std::array<float, 3>> lush, edge;
+  if (enhanced_grass_painted(&lush, &edge, &e.world.fade)) {
+    e.world.lush.assign(lush.begin(), lush.end());
+    e.world.edge.assign(edge.begin(), edge.end());
+  }
+}
+
+void set_level_start(Editor& e, const V3& at_m) {
+  e.start.have = true;
+  e.start.pos = at_m;
+  std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+  e.start.scene = g_enhanced_scene.level;
+  e.start.cont = g_enhanced_scene.continue_point;
+}
+
+void ask_jak_to_start(const Editor& e) {
+  g_enhanced_menu.ask(3, fmt::format("{:.2f},{:.2f},{:.2f},{:.1f}", e.start.pos[0], e.start.pos[1], e.start.pos[2],
+                                     e.start.yaw));
+}
+
+void go_to_level_start(Editor& e) {
+  if (!e.start.have) {
+    return;
+  }
+  std::string scene;
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+    scene = g_enhanced_scene.level;
+  }
+  if (scene != e.start.scene && !e.start.cont.empty()) {
+    g_enhanced_menu.ask(2, e.start.cont);
+    e.level_wait = e.start.scene;
+    e.level_wait_t = ImGui::GetTime();
+    return;
+  }
+  ask_jak_to_start(e);
+}
+
+// on the way to a level's start: once Jak's in its level (or it's been long), the last step
+void level_wait_update(Editor& e) {
+  if (e.level_wait.empty()) {
+    return;
+  }
+  std::string scene;
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+    scene = g_enhanced_scene.level;
+  }
+  const double waited = ImGui::GetTime() - e.level_wait_t;
+  if ((scene == e.level_wait && waited > 1.5) || waited > 20.0) {
+    e.level_wait.clear();
+    ask_jak_to_start(e);
+  }
+}
+
+// false: it isn't there or isn't a level
+bool open_level(Editor& e, const std::string& id) {
+  LevelFile f;
+  try {
+    const auto file = levels_dir() / id / "level.json";
+    if (!safe_file_name(id) || !fs::exists(file) ||
+        !read_level(parse_commented_json(file_util::read_text_file(file), "level.json"), &f)) {
+      return false;
+    }
+  } catch (const std::exception& ex) {
+    lg::error("[enhanced] level {}: {}", id, ex.what());
+    return false;
+  }
+  keep_world(e);
+  e.in_level = true;
+  g_enhanced_lights_private = true;
+  e.level = id;
+  e.level_name = f.name;
+  e.start = f.start;
+  // (grass painted where the world has no field for it yet: one made, the brush's own way)
+  for (const auto& q : f.st.lush) {
+    if (!enhanced_grass_field_at(q[0], q[1], 0.f)) {
+      enhanced_grass_add_zone(q[0], e.start.pos[1], q[1]);
+    }
+  }
+  show_state(e, f.st);
+  // (the game's own models come from your copy of the game: they never travel in an export)
+  int missing = 0;
+  for (const auto& p : f.st.objects) {
+    missing += !fs::exists(scenery_files_dir() / p.model);
+  }
+  e.level_msg = missing ? fmt::format("{} objects use models you don't have yet: File > Import Model", missing) : "";
+  lg::info("[enhanced] level {}: {} objects, {} missing", id, f.st.objects.size(), missing);
+  return true;
+}
+
+void leave_level(Editor& e) {
+  if (!e.in_level) {
+    return;
+  }
+  e.in_level = false;
+  g_enhanced_lights_private = false;
+  e.level.clear();
+  e.level_name.clear();
+  e.start = LevelStart();
+  e.level_wait.clear();
+  e.level_msg.clear();
+  show_state(e, e.world);
+}
+
+// what's on the screen becomes a new level called this; or, with empty, a new one with nothing
+void make_level(Editor& e, const std::string& name, bool empty) {
+  keep_world(e);
+  const State st = empty ? State() : e.s;
+  e.in_level = true;
+  g_enhanced_lights_private = true;
+  e.level = new_level_id(name);
+  e.level_name = name;
+  e.start = LevelStart();
+  e.level_msg.clear();
+  // (Jak starts where the view looks, J moves it)
+  if (e.center_ok) {
+    set_level_start(e, e.center * (1.f / kMeter));
+  }
+  show_state(e, st);
+  save_level(e);
+}
+
+// ---- a level as one file to give to someone: JAKLEVEL1, then, zstd: for each file its name's
+// length, its name, its size, its bytes (u32s)
+constexpr char kLevelMagic[] = "JAKLEVEL1";
+constexpr size_t kLevelMagicLen = 9;
+constexpr size_t kLevelMaxSize = 2048ull * 1024 * 1024;
+
+// a model's files: its own, its far versions, its impostor and the impostor's normals
+std::vector<std::string> model_files(const std::string& model) {
+  std::vector<std::string> out = {model};
+  const auto stem = fs::path(model).stem().string();
+  for (int k = 1; k < 10; k++) {
+    const auto far_file = fmt::format("{}_lod{}.glb", stem, k);
+    if (!fs::exists(scenery_files_dir() / far_file)) {
+      break;
+    }
+    out.push_back(far_file);
+  }
+  for (const char* tail : {"_imp.png", "_nrm.png"}) {
+    if (fs::exists(scenery_files_dir() / (stem + tail))) {
+      out.push_back(stem + tail);
+    }
+  }
+  return out;
+}
+
+void export_level(Editor& e, const std::string& path) {
+  if (!e.in_level) {
+    return;
+  }
+  try {
+    std::vector<u8> data;
+    auto put_u32 = [&](u32 v) {
+      const u8* b = (const u8*)&v;
+      data.insert(data.end(), b, b + 4);
+    };
+    auto put_file = [&](const std::string& name, const void* bytes, size_t size) {
+      put_u32((u32)name.size());
+      data.insert(data.end(), name.begin(), name.end());
+      put_u32((u32)size);
+      const u8* b = (const u8*)bytes;
+      data.insert(data.end(), b, b + size);
+    };
+    const std::string json = level_json(e).dump(1);
+    put_file("level.json", json.data(), json.size());
+    std::vector<std::string> done;
+    int game_models = 0;
+    for (const auto& p : e.s.objects) {
+      if (std::find(done.begin(), done.end(), p.model) != done.end()) {
+        continue;
+      }
+      done.push_back(p.model);
+      // (the game's own models stay out: they're in everyone's own copy of the game)
+      if (p.model.rfind("game_", 0) == 0) {
+        game_models++;
+        continue;
+      }
+      for (const auto& f : model_files(p.model)) {
+        if (fs::exists(scenery_files_dir() / f)) {
+          const auto bytes = file_util::read_binary_file(scenery_files_dir() / f);
+          put_file(f, bytes.data(), bytes.size());
+        }
+      }
+    }
+    const auto packed = compression::compress_zstd(data.data(), data.size());
+    std::vector<u8> file(kLevelMagic, kLevelMagic + kLevelMagicLen);
+    file.insert(file.end(), packed.begin(), packed.end());
+    file_util::write_binary_file(fs::path(path), file.data(), file.size());
+    e.level_msg = fmt::format("Exported: {} ({:.1f} MB)", fs::path(path).filename().string(), file.size() / 1048576.0);
+    if (game_models) {
+      e.level_msg += fmt::format(", without its {} models from the game", game_models);
+    }
+    lg::info("[enhanced] level {}: exported to {}", e.level, path);
+  } catch (const std::exception& ex) {
+    e.level_msg = "The export failed";
+    lg::error("[enhanced] level export: {}", ex.what());
+  }
+}
+
+// a level from a file, maybe someone else's: only what a level needs is taken from it, and none of
+// the file's names are trusted. Returns its id; empty: it failed, the reason in level_msg
+std::string import_level(Editor& e, const std::string& path) {
+  try {
+    const auto file = file_util::read_binary_file(fs::path(path));
+    std::vector<u8> data;
+    if (file.size() < kLevelMagicLen || memcmp(file.data(), kLevelMagic, kLevelMagicLen) != 0 ||
+        !compression::try_decompress_zstd(file.data() + kLevelMagicLen, file.size() - kLevelMagicLen, kLevelMaxSize,
+                                          &data)) {
+      e.level_msg = "That isn't a level file, or it's damaged";
+      return "";
+    }
+    std::unordered_map<std::string, std::pair<size_t, size_t>> files;  // name: where, how long
+    for (size_t at = 0; data.size() - at >= 4;) {
+      u32 len = 0, size = 0;
+      memcpy(&len, data.data() + at, 4);
+      at += 4;
+      if (len > data.size() - at) {
+        break;
+      }
+      const std::string name((const char*)data.data() + at, len);
+      at += len;
+      if (data.size() - at < 4) {
+        break;
+      }
+      memcpy(&size, data.data() + at, 4);
+      at += 4;
+      if (size > data.size() - at) {
+        break;
+      }
+      files[name] = {at, size};
+      at += size;
+    }
+    if (!files.count("level.json")) {
+      e.level_msg = "That isn't a level file, or it's damaged";
+      return "";
+    }
+    const auto lj = files["level.json"];
+    auto j = nlohmann::json::parse(std::string((const char*)data.data() + lj.first, lj.second));
+    LevelFile f;
+    if (!read_level(j, &f)) {
+      e.level_msg = "That level is for another game, or it's damaged";
+      return "";
+    }
+    // its models: into the library; one of the same name that's different, under another name
+    const std::string id = new_level_id(f.name);
+    std::unordered_map<std::string, std::string> renamed;
+    for (const auto& p : f.st.objects) {
+      if (renamed.count(p.model) || !files.count(p.model) || p.model.rfind("game_", 0) == 0 ||
+          fs::path(p.model).extension() != ".glb") {
+        continue;
+      }
+      const auto stem = fs::path(p.model).stem().string();
+      std::string new_stem = stem;
+      const auto mine = files[p.model];
+      const auto have = scenery_files_dir() / p.model;
+      if (fs::exists(have)) {
+        const auto bytes = file_util::read_binary_file(have);
+        if (bytes.size() != mine.second || memcmp(bytes.data(), data.data() + mine.first, mine.second) != 0) {
+          new_stem = fmt::format("{}_{}", stem, id);
+        }
+      }
+      renamed[p.model] = new_stem + ".glb";
+      for (const auto& [name, where] : files) {
+        if (!safe_file_name(name) || name.rfind(stem, 0) != 0) {
+          continue;
+        }
+        const std::string tail = name.substr(stem.size());
+        const bool wanted = tail == ".glb" || tail == "_imp.png" || tail == "_nrm.png" ||
+                            (tail.rfind("_lod", 0) == 0 && tail.size() == 9 && tail.substr(5) == ".glb");
+        const auto out = scenery_files_dir() / (new_stem + tail);
+        if (wanted && !fs::exists(out)) {
+          file_util::write_binary_file(out, data.data() + where.first, where.second);
+        }
+      }
+    }
+    for (auto& o : j["objects"]) {
+      const auto it = renamed.find(o.value("model", std::string()));
+      if (it != renamed.end()) {
+        o["model"] = it->second;
+      }
+    }
+    file_util::create_dir_if_needed(levels_dir() / id);
+    file_util::write_text_file(levels_dir() / id / "level.json", j.dump(1));
+    e.models = enhanced_scenery_models();
+    lg::info("[enhanced] level {}: imported, {} models", id, renamed.size());
+    return id;
+  } catch (const std::exception& ex) {
+    e.level_msg = "The import failed";
+    lg::error("[enhanced] level import: {}", ex.what());
+    return "";
+  }
+}
+
+// Save: everything on disk (a private level in its own file, the main world's left alone)
 void save_all(Editor& e) {
+  if (e.in_level) {
+    save_level(e);
+    e.saved = e.s;
+    e.dirty = false;
+    return;
+  }
   save_objects(e);
   enhanced_set_lights(e.s.lights, true);
   std::vector<std::array<float, 3>> lush(e.s.lush.begin(), e.s.lush.end());
@@ -1527,6 +2023,11 @@ void put_jak_here(Editor& e) {
   e.have_jak_at = true;
   const float at[3] = {e.jak_at[0], e.jak_at[1] + 0.3f * kMeter, e.jak_at[2]};
   enhanced_put_jak(at);
+  // (a private level starts him there)
+  if (e.in_level) {
+    set_level_start(e, V3{at[0] / kMeter, at[1] / kMeter, at[2] / kMeter});
+    e.dirty = true;
+  }
 }
 
 void delete_selected(Editor& e) {
@@ -4005,6 +4506,58 @@ void topbar(Editor& e) {
       discard_all(e);
     }
     ImGui::Separator();
+    // (your own levels: to go from one to another with nothing unsaved)
+    const auto levels = enhanced_levels();
+    if (ImGui::MenuItem("New Level...", nullptr, false, !e.dirty)) {
+      e.level_ask = 1;
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip(e.dirty ? "Save first"
+                                : "Your own objects, lights and grass over the game's world, kept apart from it, "
+                                  "on this PC only");
+    }
+    if (ImGui::BeginMenu("Open Level", !e.dirty && !levels.empty())) {
+      for (const auto& l : levels) {
+        if (ImGui::MenuItem(l.name.c_str(), nullptr, l.id == e.level)) {
+          open_level(e, l.id);
+        }
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Save as New Level...")) {
+      e.level_ask = 2;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("What you see now, in a level of its own");
+    }
+    if (ImGui::MenuItem("Import Level...", nullptr, false, !e.dirty && !e.level_pick.valid())) {
+      e.level_pick_export = false;
+      e.level_pick = std::async(std::launch::async, [] {
+        const char* filters[] = {"*.jaklevel"};
+        const char* r = tinyfd_openFileDialog("Import a level", "", 1, filters, "Jak Enhanced levels", 0);
+        return std::string(r ? r : "");
+      });
+    }
+    if (ImGui::MenuItem("Export Level...", nullptr, false, e.in_level && !e.dirty && !e.level_pick.valid())) {
+      e.level_pick_export = true;
+      const std::string name = e.level + ".jaklevel";
+      e.level_pick = std::async(std::launch::async, [name] {
+        const char* filters[] = {"*.jaklevel"};
+        const char* r = tinyfd_saveFileDialog("Export the level", name.c_str(), 1, filters, "Jak Enhanced levels");
+        return std::string(r ? r : "");
+      });
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+      ImGui::SetTooltip(!e.in_level ? "Open a level first"
+                                    : e.dirty ? "Save first" : "One file with its models, to give to someone");
+    }
+    if (ImGui::MenuItem("Delete This Level...", nullptr, false, e.in_level)) {
+      e.level_ask = 3;
+    }
+    if (ImGui::MenuItem("Back to the Main World", nullptr, false, e.in_level && !e.dirty)) {
+      leave_level(e);
+    }
+    ImGui::Separator();
     if (ImGui::MenuItem("Import Model...")) {
       e.imp.open = true;
     }
@@ -4112,6 +4665,18 @@ void topbar(Editor& e) {
   if (ImGui::BeginMenu("Help")) {
     ImGui::MenuItem("Keymap", "?", &e.show_help);
     ImGui::EndMenu();
+  }
+
+  // (where the changes go)
+  ImGui::Separator();
+  if (e.in_level) {
+    ImGui::TextColored(kBlueHi, "Level: %s", e.level_name.c_str());
+  } else {
+    ImGui::TextColored(grey(0.6f), "Main world");
+  }
+  if (!e.level_msg.empty()) {
+    ImGui::SameLine(0.f, 18.f * k);
+    ImGui::TextColored(ImVec4(1.f, 0.75f, 0.35f, 1.f), "%s", e.level_msg.c_str());
   }
 
   // (the right side, measured)
@@ -4456,6 +5021,93 @@ void hint_bar(const Editor& e) {
 }
 
 // Shift+A: add a model or a light where the cursor is
+// the File menu's level windows, and the file dialogs' answers
+void level_popups(Editor& e) {
+  if (e.level_pick.valid() && e.level_pick.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    const std::string path = e.level_pick.get();
+    if (!path.empty() && e.level_pick_export) {
+      export_level(e, path);
+    } else if (!path.empty()) {
+      const std::string id = import_level(e, path);
+      if (!id.empty()) {
+        open_level(e, id);
+      }
+    }
+  }
+  if (e.level_ask) {
+    if (e.level_ask != 3) {
+      e.level_field[0] = 0;
+      e.level_copy = e.level_ask == 2;
+    }
+    ImGui::OpenPopup(e.level_ask == 3 ? "Delete this level?" : e.level_ask == 1 ? "New level" : "Save as a new level");
+    e.level_popup = true;
+    e.level_ask = 0;
+  }
+  const ImVec2 size = ImGui::GetIO().DisplaySize;
+  const auto flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove;
+  bool open_any = false;
+  for (const char* title : {"New level", "Save as a new level"}) {
+    ImGui::SetNextWindowPos(ImVec2(size.x * 0.5f, size.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal(title, nullptr, flags)) {
+      continue;
+    }
+    open_any = true;
+    if (ImGui::IsWindowAppearing()) {
+      ImGui::SetKeyboardFocusHere();
+    }
+    ImGui::SetNextItemWidth(360.f * ui_k());
+    const bool enter = ImGui::InputTextWithHint("##levelname", "The level's name", e.level_field, sizeof(e.level_field),
+                                                ImGuiInputTextFlags_EnterReturnsTrue);
+    if (std::strcmp(title, "New level") == 0) {
+      ImGui::Checkbox("Start from what's here now", &e.level_copy);
+    }
+    ImGui::TextDisabled("Kept on this PC only. The main world doesn't change.");
+    ImGui::Spacing();
+    const bool named = e.level_field[0] != 0;
+    ImGui::BeginDisabled(!named);
+    if ((ImGui::Button("Make It  (Enter)", ImVec2(180.f * ui_k(), 36.f * ui_k())) || enter) && named) {
+      make_level(e, e.level_field, !e.level_copy);
+      e.level_popup = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel  (Esc)", ImVec2(160.f * ui_k(), 36.f * ui_k())) ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+      e.level_popup = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::SetNextWindowPos(ImVec2(size.x * 0.5f, size.y * 0.4f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  if (ImGui::BeginPopupModal("Delete this level?", nullptr, flags)) {
+    open_any = true;
+    ImGui::Text("\"%s\" will be gone for good. Its models stay in the library.", e.level_name.c_str());
+    ImGui::Spacing();
+    if (ImGui::Button("Delete It", ImVec2(160.f * ui_k(), 36.f * ui_k()))) {
+      const std::string id = e.level;
+      e.dirty = false;
+      leave_level(e);
+      std::error_code ec;
+      if (safe_file_name(id)) {
+        fs::remove_all(levels_dir() / id, ec);
+      }
+      e.level_popup = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Keep It  (Esc)", ImVec2(160.f * ui_k(), 36.f * ui_k())) ||
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+      e.level_popup = false;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  if (!open_any) {
+    e.level_popup = false;
+  }
+}
+
 void add_menu(Editor& e) {
   if (e.add_menu) {
     ImGui::OpenPopup("Add##add");
@@ -5337,7 +5989,192 @@ void pad_test() {
   }
 }
 
+// test switch: JAK_ENHANCED_EDITOR_SCRIPT=<file> plays the mouse and keys from it once, with no real
+// mouse (a cursor is drawn; to test and to film the editor, the desktop free meanwhile). Lines:
+//   wait <s> | move <x> <y> <s> (0..1 of the window, eased) | press l|m|r | release l|m|r
+//   key <imgui key name> | hold <name> | drop <name> | text <what to type> | editor (F4)
+//   wheel <clicks> | play <level id> | world | menu | export <file> | import <file> (past the file dialogs)
+void script_test() {
+  static const char* file = std::getenv("JAK_ENHANCED_EDITOR_SCRIPT");
+  if (!file) {
+    return;
+  }
+  struct Line {
+    std::string verb, arg;
+    float x = 0, y = 0, s = 0;
+  };
+  static std::vector<Line> lines;
+  static bool read = false;
+  static size_t at = 0;
+  static double step_t = 0;
+  static ImVec2 from(0.5f, 0.5f), to(0.5f, 0.5f);
+  auto& io = ImGui::GetIO();
+  const double now = ImGui::GetTime();
+  // (it waits for the file: it can be written when the game's ready)
+  if (!read) {
+    static double checked = 0;
+    if (now - checked < 0.25) {
+      return;
+    }
+    checked = now;
+    if (!fs::exists(file)) {
+      return;
+    }
+    read = true;
+    std::istringstream in(file_util::read_text_file(fs::path(file)));
+    for (std::string t; std::getline(in, t);) {
+      if (!t.empty() && t.back() == '\r') {
+        t.pop_back();
+      }
+      std::istringstream ls(t);
+      Line l;
+      ls >> l.verb;
+      if (l.verb == "move") {
+        ls >> l.x >> l.y >> l.s;
+      } else if (l.verb == "wait") {
+        ls >> l.s;
+      } else {
+        std::getline(ls, l.arg);
+        if (!l.arg.empty() && l.arg[0] == ' ') {
+          l.arg.erase(0, 1);
+        }
+      }
+      if (!l.verb.empty() && l.verb[0] != '#') {
+        lines.push_back(l);
+      }
+    }
+    step_t = now;
+  }
+  auto named_key = [](const std::string& name) {
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; k++) {
+      if (name == ImGui::GetKeyName((ImGuiKey)k)) {
+        return (ImGuiKey)k;
+      }
+    }
+    return ImGuiKey_None;
+  };
+  auto button = [](const std::string& b) { return b == "r" ? 1 : b == "m" ? 2 : 0; };
+  static ImGuiKey tap = ImGuiKey_None;
+  if (tap != ImGuiKey_None) {
+    io.AddKeyEvent(tap, false);
+    tap = ImGuiKey_None;
+  }
+  // (the real cursor stays out of it, wherever it is)
+  if (at < lines.size()) {
+    io.AddMousePosEvent(from.x * io.DisplaySize.x, from.y * io.DisplaySize.y);
+  }
+  while (at < lines.size()) {
+    const auto& l = lines[at];
+    if (l.verb == "wait") {
+      if (now - step_t < l.s) {
+        break;
+      }
+    } else if (l.verb == "move") {
+      const float k = l.s > 0.f ? std::clamp((float)((now - step_t) / l.s), 0.f, 1.f) : 1.f;
+      const float eased = k * k * (3.f - 2.f * k);
+      to = ImVec2(l.x, l.y);
+      io.AddMousePosEvent((from.x + (to.x - from.x) * eased) * io.DisplaySize.x,
+                          (from.y + (to.y - from.y) * eased) * io.DisplaySize.y);
+      if (k < 1.f) {
+        break;
+      }
+      from = to;
+    } else if (l.verb == "press" || l.verb == "release") {
+      io.AddMouseButtonEvent(button(l.arg), l.verb == "press");
+    } else if (l.verb == "key") {
+      tap = named_key(l.arg);
+      io.AddKeyEvent(tap, true);
+    } else if (l.verb == "hold" || l.verb == "drop") {
+      const ImGuiKey k = named_key(l.arg);
+      io.AddKeyEvent(k, l.verb == "hold");
+      if (k == ImGuiKey_LeftShift) {
+        io.AddKeyEvent(ImGuiMod_Shift, l.verb == "hold");
+      } else if (k == ImGuiKey_LeftCtrl) {
+        io.AddKeyEvent(ImGuiMod_Ctrl, l.verb == "hold");
+      } else if (k == ImGuiKey_LeftAlt) {
+        io.AddKeyEvent(ImGuiMod_Alt, l.verb == "hold");
+      }
+    } else if (l.verb == "text") {
+      io.AddInputCharactersUTF8(l.arg.c_str());
+    } else if (l.verb == "editor") {
+      enhanced_editor_toggle();
+    } else if (l.verb == "play") {
+      enhanced_level_play(l.arg);
+    } else if (l.verb == "world") {
+      enhanced_level_leave();
+    } else if (l.verb == "menu") {
+      g_enhanced_menu.open = !g_enhanced_menu.open;
+    } else if (l.verb == "wheel") {
+      io.AddMouseWheelEvent(0.f, (float)std::atof(l.arg.c_str()));
+    } else if (l.verb == "export") {
+      export_level(g_ed, l.arg);
+    } else if (l.verb == "import") {
+      const std::string id = import_level(g_ed, l.arg);
+      if (!id.empty()) {
+        open_level(g_ed, id);
+      }
+    }
+    const bool own_frame = l.verb != "wait" && l.verb != "move";
+    at++;
+    step_t = now;
+    // (a press takes its own frame: the UI needs to see the cursor over the thing first)
+    if (own_frame) {
+      break;
+    }
+  }
+  // (the cursor, seen only while the script runs)
+  if (at < lines.size()) {
+    const ImVec2 p = io.MousePos;
+    const float s = 22.f * std::max(io.DisplaySize.y / 1080.f, 0.6f);
+    auto* dl = ImGui::GetForegroundDrawList();
+    dl->AddTriangleFilled(p, ImVec2(p.x, p.y + s), ImVec2(p.x + s * 0.72f, p.y + s * 0.72f), IM_COL32(255, 255, 255, 255));
+    dl->AddTriangle(p, ImVec2(p.x, p.y + s), ImVec2(p.x + s * 0.72f, p.y + s * 0.72f), IM_COL32(0, 0, 0, 255), 1.5f);
+  }
+}
+
+// asked from the Enhanced menu (carried out in the editor's frame)
+std::mutex g_level_ask_mutex;
+int g_level_ask = 0;  // 1 play, 2 back to the main world
+std::string g_level_ask_id;
+
 }  // namespace
+
+std::vector<EnhancedLevelInfo> enhanced_levels() {
+  std::vector<EnhancedLevelInfo> out;
+  std::error_code ec;
+  for (const auto& d : fs::directory_iterator(levels_dir(), ec)) {
+    const auto file = d.path() / "level.json";
+    if (!fs::exists(file)) {
+      continue;
+    }
+    try {
+      const auto j = parse_commented_json(file_util::read_text_file(file), "level.json");
+      if (j.value("game", std::string()) == game_version_names[g_game_version]) {
+        out.push_back({d.path().filename().string(), j.value("name", std::string("Level")),
+                       j.contains("objects") ? (int)j["objects"].size() : 0});
+      }
+    } catch (const std::exception& ex) {
+      lg::error("[enhanced] {}: {}", file.string(), ex.what());
+    }
+  }
+  std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.name < b.name; });
+  return out;
+}
+
+std::string enhanced_level_active() {
+  return g_ed.level;
+}
+
+void enhanced_level_play(const std::string& id) {
+  std::lock_guard<std::mutex> lock(g_level_ask_mutex);
+  g_level_ask = 1;
+  g_level_ask_id = id;
+}
+
+void enhanced_level_leave() {
+  std::lock_guard<std::mutex> lock(g_level_ask_mutex);
+  g_level_ask = 2;
+}
 
 void enhanced_editor_toggle() {
   if (!g_enhanced_menu.editor) {
@@ -5511,6 +6348,10 @@ void enhanced_editor_frame(int w, int h, GLuint depth_fbo, const EnhancedCamera&
   e.cur = prev;
 }
 
+void enhanced_editor_script_test() {
+  script_test();
+}
+
 void enhanced_editor_ui() {
   auto& e = g_ed;
   if (!e.loaded) {
@@ -5518,6 +6359,20 @@ void enhanced_editor_ui() {
     load_objects(e);
     load_settings(e);
     enhanced_set_placed(e.s.objects);
+  }
+  script_test();
+  level_wait_update(e);
+  {
+    std::lock_guard<std::mutex> lock(g_level_ask_mutex);
+    // (unsaved changes aren't thrown away: nothing happens until they're saved or dropped)
+    if (g_level_ask && !e.dirty) {
+      if (g_level_ask == 1 && open_level(e, g_level_ask_id)) {
+        go_to_level_start(e);
+      } else if (g_level_ask == 2) {
+        leave_level(e);
+      }
+    }
+    g_level_ask = 0;
   }
   // (photo mode left some other way: the editor too, its changes kept in memory, unsaved)
   if (g_enhanced_menu.editor && !g_enhanced_menu.photo) {
@@ -5576,7 +6431,7 @@ void enhanced_editor_ui() {
   std::erase_if(e.sel, [&](const Pick& p) {
     return p.idx < 0 || p.idx >= (int)(p.kind == 0 ? e.s.objects.size() : e.s.lights.size());
   });
-  if (e.ask_leave) {
+  if (e.ask_leave || e.level_popup) {
     // (the question's up: nothing else)
   } else if (e.tool != kNote) {
     handle_input(e);
@@ -5606,6 +6461,7 @@ void enhanced_editor_ui() {
   import_window(e);
   terrain_window(e);
   leave_popup(e);
+  level_popups(e);
   ImGui::PopFont();
   ImGui::GetStyle() = game_style;
 }

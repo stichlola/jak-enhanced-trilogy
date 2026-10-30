@@ -44,6 +44,8 @@ struct EnhancedLight {
 // this game's lights placed by hand; set them (and save lights.json)
 std::vector<EnhancedLight> enhanced_lights();
 void enhanced_set_lights(const std::vector<EnhancedLight>& lights, bool save);
+// a private level is on: its lights are its own, lights.json keeps the main world's
+extern bool g_enhanced_lights_private;
 
 // Enhanced: the game's framebuffer has a second color target for the level geometry's world
 // normals (computed at load, see compute_vertex_normals). fbo = that framebuffer (0 = none).

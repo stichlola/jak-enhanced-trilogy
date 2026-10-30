@@ -513,6 +513,9 @@ void load_world() {
 // fire and whether it's lit at night only. The Enhanced menu adds one where Jak stands.
 using ManualLight = EnhancedLight;
 std::vector<ManualLight> g_manual_lights[3];
+}  // namespace
+bool g_enhanced_lights_private = false;
+namespace {
 
 fs::path manual_lights_path() {
   return file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "lights.json";
@@ -557,6 +560,9 @@ void load_manual_lights() {
 }
 
 void save_manual_lights() {
+  if (g_enhanced_lights_private) {
+    return;
+  }
   nlohmann::json j = nlohmann::json::object();
   const char* games[3] = {"jak1", "jak2", "jak3"};
   for (int g = 0; g < 3; g++) {
@@ -6153,6 +6159,36 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::TextDisabled("Pad: Select opens the nap window, Select + R3 this menu.");
     ImGui::TextDisabled("The game's own buttons: its Options menu.");
+  }
+  if (ImGui::CollapsingHeader("My Levels", ImGuiTreeNodeFlags_DefaultOpen)) {
+    // (read again now and then: the editor or an import may have changed them)
+    static std::vector<EnhancedLevelInfo> levels;
+    static double levels_read = -100.0;
+    if (m_time - levels_read > 2.0) {
+      levels_read = m_time;
+      levels = enhanced_levels();
+    }
+    const std::string active = enhanced_level_active();
+    if (levels.empty()) {
+      ImGui::TextDisabled("None yet: in the editor (F4), File > New Level.");
+    }
+    for (const auto& l : levels) {
+      ImGui::PushID(l.id.c_str());
+      ImGui::BeginDisabled(l.id == active);
+      if (ImGui::Button(l.id == active ? "Playing" : "Play", ImVec2(90, 0))) {
+        enhanced_level_play(l.id);
+        g_enhanced_menu.open = false;
+      }
+      ImGui::EndDisabled();
+      ImGui::SameLine();
+      ImGui::Text("%s", l.name.c_str());
+      ImGui::SameLine();
+      ImGui::TextDisabled("%d objects", l.objects);
+      ImGui::PopID();
+    }
+    if (!active.empty() && ImGui::Button("Back to the main world", ImVec2(240, 0))) {
+      enhanced_level_leave();
+    }
   }
   if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Place {

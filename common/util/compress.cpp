@@ -47,6 +47,21 @@ std::vector<u8> decompress_zstd(const void* data, size_t size) {
   return result;
 }
 
+bool try_decompress_zstd(const void* data, size_t size, size_t max_size, std::vector<u8>* out) {
+  size_t decompressed_size = 0;
+  if (size < sizeof(size_t)) {
+    return false;
+  }
+  memcpy(&decompressed_size, data, sizeof(size_t));
+  if (decompressed_size > max_size) {
+    return false;
+  }
+  out->resize(decompressed_size);
+  auto decomp_size = ZSTD_decompress(out->data(), decompressed_size, (const u8*)data + sizeof(size_t),
+                                     size - sizeof(size_t));
+  return !ZSTD_isError(decomp_size) && decomp_size == decompressed_size;
+}
+
 std::vector<u8> compress_zstd_no_header(const void* data, size_t size) {
   size_t max_compressed = ZSTD_compressBound(size);
   std::vector<u8> result(max_compressed);

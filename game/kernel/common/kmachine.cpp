@@ -1134,6 +1134,12 @@ void pc_enhanced_set_scene(u32 name, u32 hour, u32 movie) {
   g_enhanced_scene.valid = true;
 }
 
+// Enhanced: the game's current continue point
+void pc_enhanced_set_continue(u32 name) {
+  std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+  g_enhanced_scene.continue_point = Ptr<String>(name).c()->data();
+}
+
 // Enhanced: the game's sandstorm this frame (intensity, wind direction xz, wind speed)
 void pc_enhanced_set_dust(u32 intensity, u32 wind_x, u32 wind_z, u32 vel) {
   auto f = [](u32 v) {
@@ -1702,6 +1708,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-sun", (void*)pc_enhanced_set_sun);
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
   make_func_symbol_func("pc-enhanced-set-scene", (void*)pc_enhanced_set_scene);
+  make_func_symbol_func("pc-enhanced-set-continue", (void*)pc_enhanced_set_continue);
   make_func_symbol_func("pc-enhanced-set-dust", (void*)pc_enhanced_set_dust);
   make_func_symbol_func("pc-enhanced-thunder", (void*)pc_enhanced_thunder);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);

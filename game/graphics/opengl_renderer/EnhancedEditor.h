@@ -1,5 +1,8 @@
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/pipelines/opengl.h"
 
@@ -37,3 +40,20 @@ void enhanced_editor_levels(const std::vector<LevelData*>& levels);
 // in the ImGui pass, every frame (loads the placed objects the first time): the editor's input,
 // its marks over the picture, its panels
 void enhanced_editor_ui();
+// (the test switch's script goes on while the Enhanced menu's open: enhanced_editor_ui isn't called then)
+void enhanced_editor_script_test();
+
+// Private levels: your own objects, lights, painted grass and Jak's start over the game's world, no
+// loading. Each is kept in <the game's settings>/levels/<id>/level.json, on this PC only, the main
+// world's files untouched; File > Export Level makes one .jaklevel file with its models to give to
+// someone, File > Import Level takes one in.
+struct EnhancedLevelInfo {
+  std::string id, name;
+  int objects = 0;
+};
+std::vector<EnhancedLevelInfo> enhanced_levels();
+// the level on now ("": the main world)
+std::string enhanced_level_active();
+// its objects shown and Jak taken to its start (carried out in the next enhanced_editor_ui)
+void enhanced_level_play(const std::string& id);
+void enhanced_level_leave();

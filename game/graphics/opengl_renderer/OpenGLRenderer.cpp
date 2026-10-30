@@ -1127,6 +1127,7 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     // (drawn by the display every frame: draw_start_menu)
   } else if (g_enhanced_menu.open && m_enhanced_post) {
     m_enhanced_post->draw_menu();
+    enhanced_editor_script_test();
   } else if (m_enhanced_post) {
     m_enhanced_post->draw_photo_hint();
     enhanced_editor_ui();

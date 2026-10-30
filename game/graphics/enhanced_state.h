@@ -55,6 +55,7 @@ extern bool g_enhanced_debug_toolbar;
 // pc-enhanced-set-scene: grading per area, weather, cutscene depth of field
 struct EnhancedScene {
   std::string level;
+  std::string continue_point;  // the game's current one (Jak 3: a private level's way back to its start)
   float hour = 12.f;
   bool movie = false;
   bool valid = false;

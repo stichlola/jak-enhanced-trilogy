@@ -516,6 +516,12 @@
                            (-> ctx time)
                            (movie?))
     )
+  ;; (a private level keeps it, its way back to its start from across the world)
+  (let ((cp (-> *game-info* current-continue)))
+    (if cp
+        (pc-enhanced-set-continue (-> cp name))
+        )
+    )
   (enhanced-thunder)
   (none)
   )
