@@ -145,6 +145,14 @@ struct EnhancedSmokeLights {
 };
 extern EnhancedSmokeLights g_enhanced_smoke_lights;
 
+// What the sprite renderer needs for the richer smoke and flames (EnhancedParticles): how much (the
+// fx_detail setting, 0 = today's look), and the post pass's clock
+struct EnhancedFx {
+  float detail = 0.f;
+  float time = 0.f;
+};
+extern EnhancedFx g_enhanced_fx;
+
 // Light sources of the current frame: the game's glow sprites (lamps, torches, shots,
 // explosions), recorded by the sprite renderer (Sprite3_Glow.cpp), used as point lights by the
 // post pass. World positions in game units, colors 0..~2.

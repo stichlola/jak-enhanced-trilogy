@@ -9,6 +9,7 @@
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
+#include "game/graphics/opengl_renderer/EnhancedParticles.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
 #include "game/graphics/opengl_renderer/sprite/GlowRenderer.h"
 #include "game/graphics/opengl_renderer/sprite/sprite_common.h"
@@ -67,6 +68,7 @@ class Sprite3 : public BucketRenderer {
 
   void flush_sprites(SharedRenderState* render_state, ScopedProfilerNode& prof, bool double_draw);
 
+  EnhancedSpriteFx m_enhanced_fx;
   GlowRenderer m_glow_renderer;
   void glow_dma_and_draw(DmaFollower& dma,
                          SharedRenderState* render_state,

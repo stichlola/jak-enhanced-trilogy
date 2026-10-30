@@ -606,6 +606,9 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_offset * sizeof(u32), m_index_buffer_data.data(),
                GL_STREAM_DRAW);
 
+  // (Enhanced: not the HUD, drawn double)
+  m_enhanced_fx.begin_flush(render_state, !double_draw);
+
   // now do draws!
   for (const auto bucket : m_bucket_list) {
     u32 tbp = bucket->key >> 32;
@@ -644,6 +647,11 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
         glUniform1f(glGetUniformLocation(shader, "enh_smoke"), sl.strength);
       }
     }
+
+    m_enhanced_fx.set_bucket(render_state, tbp, *tex,
+                             mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST,
+                             mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_SRC_DST ||
+                                 mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_FIX_DST);
 
     prof.add_draw_call();
     prof.add_tri(2 * (bucket->ids.size() / 5));

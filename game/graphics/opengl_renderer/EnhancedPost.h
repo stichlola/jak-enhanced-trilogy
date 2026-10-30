@@ -217,6 +217,7 @@ class EnhancedPost {
     float warmth = 0.0f;     // shifts toward warm highlights / cool shadows
     float vignette = 0.18f;
     float eye_adapt = 1.f;         // the eye's adaptation to dark and bright (0 = off)
+    float fx_detail = 1.f;         // richer smoke, fire, explosions, shots and scorch marks (0 = off)
     float hit_chroma = 1.f;        // colors split on a hit and as Dark Jak (0 = off)
     float dawn_fog = 1.f;          // the morning's low fog (0 = off)
     float cloud_rays = 1.f;        // the low sun's rays through the gaps in the clouds (0 = off)

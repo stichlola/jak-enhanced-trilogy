@@ -92,6 +92,7 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/SkyBlendCPU.cpp
         graphics/opengl_renderer/SkyBlendGPU.cpp
         graphics/opengl_renderer/SkyRenderer.cpp
+        graphics/opengl_renderer/EnhancedParticles.cpp
         graphics/opengl_renderer/EnhancedPost.cpp
         graphics/opengl_renderer/loader/EnhancedMapTextures.cpp
         graphics/opengl_renderer/SlowTimeEffect.cpp

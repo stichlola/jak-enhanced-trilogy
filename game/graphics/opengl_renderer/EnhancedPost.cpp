@@ -939,6 +939,9 @@ EnhancedPost::EnhancedPost() {
   if (const char* sparks = std::getenv("JAK_ENHANCED_SPARKS")) {
     m_settings.blast_sparks = (float)std::atof(sparks);
   }
+  if (const char* fx = std::getenv("JAK_ENHANCED_FX_DETAIL")) {
+    m_settings.fx_detail = (float)std::atof(fx);
+  }
   if (const char* motes = std::getenv("JAK_ENHANCED_MOTES")) {
     // fireflies and pollen: 0 off, else their amount; "force" shows them anywhere (screenshots)
     m_settings.motes = std::strcmp(motes, "force") == 0 ? 1.f : (float)std::atof(motes);
@@ -1160,6 +1163,8 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
   update_auto_quality();
+  g_enhanced_fx.detail = m_settings.enabled ? m_settings.fx_detail : 0.f;
+  g_enhanced_fx.time = (float)m_time;
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
@@ -6179,6 +6184,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["photo_filter"] = s.photo_filter;
   j["photo_vignette"] = s.photo_vignette;
   j["eye_adapt"] = s.eye_adapt;
+  j["fx_detail"] = s.fx_detail;
   j["hit_chroma"] = s.hit_chroma;
   j["dawn_fog"] = s.dawn_fog;
   j["cloud_rays"] = s.cloud_rays;
@@ -6269,6 +6275,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("photo_filter", s.photo_filter);
   get("photo_vignette", s.photo_vignette);
   get("eye_adapt", s.eye_adapt);
+  get("fx_detail", s.fx_detail);
   get("hit_chroma", s.hit_chroma);
   get("dawn_fog", s.dawn_fog);
   get("cloud_rays", s.cloud_rays);
@@ -6374,6 +6381,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.area_grading = d.area_grading;
   s.clouds = d.clouds;
   s.blast_sparks = d.blast_sparks;
+  s.fx_detail = d.fx_detail;
   s.motes = d.motes;
   s.weather = d.weather;
   s.weather_mix = d.weather_mix;
@@ -6511,6 +6519,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Warmth", &m_settings.warmth, -0.2f, 0.2f);
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Eye adaptation", &m_settings.eye_adapt, 0.f, 1.f);
+    ImGui::SliderFloat("Effects detail", &m_settings.fx_detail, 0.f, 1.f);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
     ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
     ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);
