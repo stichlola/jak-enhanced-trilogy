@@ -190,6 +190,8 @@ uniform vec4 blast_dir[4];      // gun blasts: where it's fired (view space), w:
                                 // charged shot: wide, red going fuchsia at its edges)
 
 in vec2 tex_coord;
+flat in float flare_vis;     // (enh_composite.vert: once a frame)
+flat in vec3 white_balance;
 out vec4 color;
 
 // x squared (pow() of a negative base is undefined in GLSL: NaN on some drivers)
@@ -221,15 +223,15 @@ float gnoise(vec2 x) {
 // water height (m) at a world point (m): four octaves moving in different directions, each
 // faded out when its waves get smaller than a pixel (foot: meters per pixel) so nothing aliases
 float water_height(vec2 w, float t, float foot) {
-  const float freq[4] = float[](0.12, 0.35, 0.95, 2.6);
-  const float amp[4] = float[](0.045, 0.016, 0.0055, 0.0018);
-  const vec2 drift[4] = vec2[](vec2(0.35, 0.2), vec2(-0.25, 0.4), vec2(0.5, -0.3), vec2(-0.6, -0.45));
   float h = 0.0;
   mat2 turn = mat2(0.8, -0.6, 0.6, 0.8);
   vec2 q = w;
   for (int i = 0; i < 4; i++) {
-    float fade = 1.0 - smoothstep(0.25, 0.7, foot * freq[i]);
-    h += amp[i] * fade * gnoise(q * freq[i] + drift[i] * t * freq[i] * 2.0 + float(i) * 17.3);
+    float freq = i == 0 ? 0.12 : i == 1 ? 0.35 : i == 2 ? 0.95 : 2.6;
+    float amp = i == 0 ? 0.045 : i == 1 ? 0.016 : i == 2 ? 0.0055 : 0.0018;
+    vec2 drift = i == 0 ? vec2(0.35, 0.2) : i == 1 ? vec2(-0.25, 0.4) : i == 2 ? vec2(0.5, -0.3) : vec2(-0.6, -0.45);
+    float fade = 1.0 - smoothstep(0.25, 0.7, foot * freq);
+    h += amp * fade * gnoise(q * freq + drift * t * freq * 2.0 + float(i) * 17.3);
     q = turn * q;
   }
   return h;
@@ -1916,6 +1918,24 @@ float ground_height(vec2 xz, float glod, float plod) {
          smoothstep(-0.2, 0.4, gnoise(xz / 0.45 + 1.9)) * 0.05 + gnoise(xz / 1.4 + 3.3) * 0.12;
 }
 
+// (no const arrays in this shader: one of them, indexed in a loop, slows the whole shader on
+// NVIDIA's driver, even when that code doesn't run)
+// a fire's place on screen, in uv, and the flame's up there, one flame size long
+vec2 fire_uv(int i) {
+  vec3 fp = fire_pos[i].xyz;
+  return vec2(fp.x * proj.z / fp.z, fp.y * proj.w / fp.z) * 0.5 + 0.5;
+}
+
+vec2 fire_axis(int i) {
+  vec3 top = fire_pos[i].xyz + up_view * fire_pos[i].w;
+  return vec2(top.x * proj.z / top.z, top.y * proj.w / top.z) * 0.5 + 0.5 - fire_uv(i);
+}
+
+float flare_ghost(vec2 at, float aspect, float rad) {
+  float d = length((tex_coord - at) * vec2(aspect, 1.0));
+  return (1.0 - smoothstep(rad * 0.5, rad, d)) * 0.07;
+}
+
 void main() {
   if (cloud_pass == 1) {
     color = cloud_march();
@@ -2015,20 +2035,16 @@ void main() {
   }
 
   // fires: the hot air over each flame bends what's seen through it
-  vec2 fire_axis[4];  // the flame's up in uv, one flame size long
-  vec2 fire_uv[4];
   for (int i = 0; i < fire_count; i++) {
     vec3 fp = fire_pos[i].xyz;
     float fs = fire_pos[i].w;
     vec3 top = fp + up_view * fs;
-    fire_uv[i] = vec2(fp.x * proj.z / fp.z, fp.y * proj.w / fp.z) * 0.5 + 0.5;
-    fire_axis[i] = vec2(top.x * proj.z / top.z, top.y * proj.w / top.z) * 0.5 + 0.5 - fire_uv[i];
     if (fp.z < 0.5 * 4096.0 || top.z < 0.5 * 4096.0 || fire.x <= 0.0) {
       continue;
     }
-    vec2 a = fire_axis[i];
+    vec2 a = fire_axis(i);
     float aa = max(dot(a, a), 1e-10);
-    vec2 rel = tex_coord - fire_uv[i];
+    vec2 rel = tex_coord - fire_uv(i);
     float along = dot(rel, a) / aa;                      // flame sizes up
     float across = (rel.x * a.y - rel.y * a.x) / aa;     // and sideways
     // (from the flame's top up: over the flame itself it bent the flame away, see-through and
@@ -2074,13 +2090,13 @@ void main() {
   // bleaching further down, which took their orange to a pale yellow, green and blue by day)
   float flame_keep = 0.0;
   for (int i = 0; i < fire_count; i++) {
-    float aa = dot(fire_axis[i], fire_axis[i]);
+    float aa = dot(fire_axis(i), fire_axis(i));
     if (fire_pos[i].z < 1.0 * 4096.0 || aa <= 1e-10) {
       continue;
     }
-    vec2 rel = tex_coord - fire_uv[i];
-    float along = dot(rel, fire_axis[i]) / aa;
-    float across = (rel.x * fire_axis[i].y - rel.y * fire_axis[i].x) / aa;
+    vec2 rel = tex_coord - fire_uv(i);
+    float along = dot(rel, fire_axis(i)) / aa;
+    float across = (rel.x * fire_axis(i).y - rel.y * fire_axis(i).x) / aa;
     flame_keep = max(flame_keep, (1.0 - smoothstep(0.7, 1.3, abs(across))) *
                                      smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(1.6, 2.4, along)));
   }  // (the flame's own pixels only, by the game's colors: a sprite with no depth of its own, it was
@@ -2091,8 +2107,11 @@ void main() {
   // their color, yellow to white hot and brighter than anything sunlit (red at its full: the
   // brightest grass in the noon sun stops short of it). Not over the land: the sand's sunlit patches are as pale; in front of a trunk
   // or a wall the flame took its depth, its shadow and its occlusion)
+  // (this pixel's normal and the length its material wrote it at, for everything below: read once)
+  vec4 pix_normal = texture(tex_T11, tex_coord);
+  float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
   {
-    float ft = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ft = pix_tag;
     // (nor over grass and bushes, shrub.frag's 0.97: noon burns the grass's pale tips as white)
     float over_land = ((ft > 0.4 && ft < 0.95) || (ft > 0.955 && ft < 0.983)) ? 1.0 : 0.0;
     flame_keep = max(flame_keep, smoothstep(0.85, 0.92, luma(flame_raw)) * smoothstep(0.94, 0.985, flame_raw.r) * (1.0 - over_land) *
@@ -2442,14 +2461,10 @@ void main() {
   if (dof.z > 0.0 && cine_dof.z == 0.0 && z > 0.0 && wsurf == 0.0) {
     float coc = smoothstep(dof.x, dof.y, z) * dof.z;
     if (coc > 0.25) {
-      const vec2 disk[12] = vec2[](vec2(-0.326, -0.406), vec2(-0.840, -0.074), vec2(-0.696, 0.457),
-                                   vec2(-0.203, 0.621), vec2(0.962, -0.195), vec2(0.473, -0.480),
-                                   vec2(0.519, 0.767), vec2(0.185, -0.893), vec2(0.507, 0.064),
-                                   vec2(0.896, 0.412), vec2(-0.322, -0.933), vec2(-0.792, -0.598));
       vec3 sum = c;
       float wsum = 1.0;
       for (int i = 0; i < 12; i++) {
-        vec2 suv = uv + disk[i] * coc * texel;
+        vec2 suv = uv + vogel(i, 12, 0.0) * coc * texel;
         float sd = texture(tex_T3, suv).r;
         float sz = sd > 1e-7 ? view_z(sd) : 1e12;
         float w = sz > z * 0.85 ? 1.0 : 0.0;
@@ -2483,7 +2498,7 @@ void main() {
   // (not on the characters: their see-through cloth (Jak's tunic, scarf) has no depth of its own, it took
   // the occlusion of the legs and arm behind it and looked transparent)
   {
-    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ctag = pix_tag;
     ao = mix(ao, 1.0, (ctag > 0.4 && ctag < 0.535) ? 1.0 : 0.0);  // (and their cloth, the 0.52 tag)
   }
   if (ao_debug != 0) {
@@ -2502,7 +2517,7 @@ void main() {
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
     // depth-rebuilt ones in color, to compare
     vec3 nn = surf_n;
-    bool own = texture(tex_T11, tex_coord).a > 0.17;
+    bool own = pix_normal.a > 0.17;
     if (tex_coord.x > 0.5) {
       vec3 pr = view_pos(tex_coord + vec2(texel.x, 0), texture(tex_T3, tex_coord + vec2(texel.x, 0)).r);
       vec3 pu = view_pos(tex_coord + vec2(0, texel.y), texture(tex_T3, tex_coord + vec2(0, texel.y)).r);
@@ -2541,7 +2556,7 @@ void main() {
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
     {
-      vec4 wg = texture(tex_T11, tex_coord);
+      vec4 wg = pix_normal;
       float wl = length(wg.rgb * 2.0 - 1.0);
       if (wg.a > 0.83 && wl > 0.985 && wl <= 0.9975) {
         wet_gloss = wl > 0.9925 ? 0.35 : 0.6;
@@ -2854,10 +2869,10 @@ void main() {
   // tinted by its own color with a broad highlight; glass, marble and tiles reflect them untinted
   // at grazing angles with a tight highlight
   if (materials < 0.0 && z > 0.0) {
-    float ga = texture(tex_T11, tex_coord).a;
+    float ga = pix_normal.a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
     // (and the finer classes: rusty orange, painted pink, tile cyan, wood brown, walls green)
-    float ml = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ml = pix_tag;
     int mf = ml > 0.9975 || ml <= 0.985 ? 0 : (ml > 0.9925 ? 1 : 2);
     c = mat == 1 ? (mf == 1 ? vec3(1.0, 0.5, 0.05) : (mf == 2 ? vec3(1.0, 0.3, 0.8) : vec3(1.0, 0.1, 0.1)))
                  : (mat == 2 ? (mf == 1 ? vec3(0.1, 0.9, 0.9) : vec3(0.1, 0.3, 1.0))
@@ -2865,12 +2880,12 @@ void main() {
   }
   float mk = materials > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : materials;
   if (mk > 0.0 && z > 0.0 && z < 120.0 * 4096.0 && wsurf == 0.0) {
-    float ga = texture(tex_T11, tex_coord).a;
+    float ga = pix_normal.a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
     if (mat != 0) {
       // the finer class (tfrag3.frag), the normal's length a step under 1.0: metal 1 rusty, 2
       // painted; glossy 1 tile
-      float mlen = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+      float mlen = pix_tag;
       int mfine = mlen > 0.9975 || mlen <= 0.985 ? 0 : (mlen > 0.9925 ? 1 : 2);
       vec3 nn = surf_n;
       vec3 vdir = normalize(p);
@@ -3031,7 +3046,7 @@ void main() {
     vec3 nn = surf_n;
     float ndl = dot(nn, sun_dir.xyz);
     // (characters, merc2.frag's 0.45-long normals: the game shades their dark side already)
-    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ctag = pix_tag;
     if (ctag > 0.3 && ctag < 0.55) {
       ndl = max(ndl, -0.1);
     }
@@ -3282,8 +3297,8 @@ void main() {
       continue;
     }
     // skip fires far from this pixel on screen (embers rise up to ~5 flame sizes)
-    vec2 rel = tex_coord - fire_uv[i];
-    if (dot(rel, rel) > dot(fire_axis[i], fire_axis[i]) * 36.0) {
+    vec2 rel = tex_coord - fire_uv(i);
+    if (dot(rel, rel) > dot(fire_axis(i), fire_axis(i)) * 36.0) {
       continue;
     }
     for (int j = 0; j < 24; j++) {
@@ -3660,32 +3675,20 @@ void main() {
   // lens flare: looking toward the sun, the lens's glass throws ghosts of it along the line through
   // the middle of the picture, a faint halo ring and a short streak. Only as much as the sun itself
   // shows (the sky around its disk, not hidden behind a wall or the clouds).
-  if (lens_flare > 0.0 && sky_sun.z > 0.0 && sky_sun.w > 0.0 && clouds.w < 0.5) {
+  if (flare_vis > 0.0) {
     vec2 suv = 0.5 * vec2(proj.z * sky_sun.x, proj.w * sky_sun.y) / sky_sun.z + 0.5;
-    if (all(greaterThan(suv, vec2(-0.3))) && all(lessThan(suv, vec2(1.3)))) {
-      float vis = 0.0;
-      for (int i = 0; i < 12; i++) {
-        vec2 q = suv + vogel(i, 12, 0.0) * vec2(texel.x / texel.y, 1.0) * 0.012;
-        if (all(greaterThan(q, vec2(0.0))) && all(lessThan(q, vec2(1.0))) &&
-            texture(tex_T3, q).r <= 1e-7) {
-          vis += smoothstep(0.55, 0.95, luma(texture(tex_T0, q).rgb));
-        }
-      }
-      vis /= 12.0;
-      if (vis > 0.0) {
+    {
+      float vis = flare_vis;
+      {
         float aspect = texel.y / texel.x;
         vec2 axis = vec2(0.5) - suv;
         vec3 fl = vec3(0.0);
         // ghosts: discs of a few sizes and tints, some behind the middle, one past it
-        const float at[5] = float[](0.45, 0.8, 1.25, 1.55, 2.1);
-        const float rad[5] = float[](0.025, 0.05, 0.018, 0.08, 0.035);
-        const vec3 tint[5] = vec3[](vec3(1.0, 0.75, 0.4), vec3(0.4, 0.8, 0.6), vec3(0.9, 0.5, 0.9),
-                                    vec3(0.35, 0.5, 1.0), vec3(1.0, 0.85, 0.5));
-        for (int k = 0; k < 5; k++) {
-          vec2 gp = suv + axis * at[k];
-          float d = length((tex_coord - gp) * vec2(aspect, 1.0));
-          fl += tint[k] * (1.0 - smoothstep(rad[k] * 0.5, rad[k], d)) * 0.07;
-        }
+        fl += flare_ghost(suv + axis * 0.45, aspect, 0.025) * vec3(1.0, 0.75, 0.4);
+        fl += flare_ghost(suv + axis * 0.8, aspect, 0.05) * vec3(0.4, 0.8, 0.6);
+        fl += flare_ghost(suv + axis * 1.25, aspect, 0.018) * vec3(0.9, 0.5, 0.9);
+        fl += flare_ghost(suv + axis * 1.55, aspect, 0.08) * vec3(0.35, 0.5, 1.0);
+        fl += flare_ghost(suv + axis * 2.1, aspect, 0.035) * vec3(1.0, 0.85, 0.5);
         // the halo ring around the middle of the picture, toward the sun
         vec2 dv = (tex_coord - vec2(0.5)) * vec2(aspect, 1.0);
         float ring = exp(-sq((length(dv) - 0.42) / 0.025)) *
@@ -3717,15 +3720,7 @@ void main() {
   // by day, a white balance: the scene's average color (a few points of it) brought part of the
   // way to grey, so a strong cast (the desert's yellow afternoons) doesn't tint everything
   if (clouds.w < 0.99) {
-    vec3 avg = vec3(0.0);
-    for (int j = 0; j < 4; j++) {
-      for (int i = 0; i < 5; i++) {
-        avg += texture(tex_T0, vec2((float(i) + 0.5) / 5.0, (float(j) + 0.5) / 4.0)).rgb;
-      }
-    }
-    avg = max(avg / 20.0, vec3(1e-3));
-    vec3 wb = clamp(vec3(luma(avg)) / avg, vec3(0.8), vec3(1.25));
-    c *= mix(vec3(1.0), wb, 0.35 * (1.0 - clouds.w));
+    c *= mix(vec3(1.0), white_balance, 0.35 * (1.0 - clouds.w));
   }
 
   // rock and cliffs (normals written 0.75 long: tfrag3.frag): the game's textures are a blur up
@@ -3734,13 +3729,15 @@ void main() {
   // game's colors kept). Each read at the mip level of the pixel's size (no derivatives in here):
   // too small for the pixels, a size averages out by itself
   if (rock_detail > 0.0 && z > 0.0) {
-    float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float nl = pix_tag;
     if (nl > 0.55 && nl < 0.8) {
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
       // (sharp: the view from above, its strata lines, stays off steep faces, where they ran down
       // the rock)
+      // (a plane that barely shows isn't read at all: most pixels need only one of the three)
       vec3 tw = pow(abs(wn), vec3(8.0));
+      tw = max(tw / (tw.x + tw.y + tw.z) - 0.03, vec3(0.0));
       tw /= tw.x + tw.y + tw.z;
       float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, surf_n)), 0.1);  // m per pixel
       float d = 0.0;
@@ -3751,25 +3748,33 @@ void main() {
       // fights their own texture)
       // (and in the late afternoon a third, mountain-sized: the low sun rakes the far faces, their
       // cracks and blocks show out to the mountains)
-      const vec4 size[3] = vec4[](vec4(1.6, 0.5, 15.0, 45.0), vec4(7.0, 0.85, 60.0, 160.0), vec4(60.0, 0.8, 900.0, 1600.0));  // (tile m, strength, fade from, to)
       // (the picture: cracked blocky rock; its blocks shift a little from place to place, and it
       // comes and goes: strong in some places, fainter in others)
       float wander = gnoise(wp.xz / 9.0 + vec2(0.0, wp.y / 25.0) + 1.3) * 0.8;
       float bands = 0.5 + 0.5 * smoothstep(-0.35, 0.35, gnoise(vec2(wp.x + wp.z, wp.y) / 30.0 + 5.3));
       for (int k = 0; k < 3; k++) {
-        float lod = max(log2(foot * 1024.0 / size[k].x), 0.0);
-        float near = 1.0 - smoothstep(size[k].z, size[k].w, dist);
+        vec4 size_k = k == 0 ? vec4(1.6, 0.5, 15.0, 45.0) : k == 1 ? vec4(7.0, 0.85, 60.0, 160.0) : vec4(60.0, 0.8, 900.0, 1600.0);  // (tile m, strength, fade from, to)
+        float lod = max(log2(foot * 1024.0 / size_k.x), 0.0);
+        float near = 1.0 - smoothstep(size_k.z, size_k.w, dist);
         if (k == 2) {
           near *= golden * smoothstep(60.0, 160.0, dist);
         }
         if (lod > 9.0 || near <= 0.0) {
           continue;  // (one texel over the pixel, or past its reach: nothing to add)
         }
-        vec3 q = wp / size[k].x + float(k) * 0.37;
-        vec3 qs = q + vec3(wander, 0.0, wander) / size[k].x;
-        float t = luma(notile(tex_T10, qs.zy, lod).rgb) * tw.x + luma(notile(tex_T10, q.xz, lod).rgb) * tw.y +
-                  luma(notile(tex_T10, qs.xy, lod).rgb) * tw.z;
-        d += size[k].y * near * (t - rock_detail_avg);
+        vec3 q = wp / size_k.x + float(k) * 0.37;
+        vec3 qs = q + vec3(wander, 0.0, wander) / size_k.x;
+        float t = 0.0;
+        if (tw.x > 0.0) {
+          t += luma(notile(tex_T10, qs.zy, lod).rgb) * tw.x;
+        }
+        if (tw.y > 0.0) {
+          t += luma(notile(tex_T10, q.xz, lod).rgb) * tw.y;
+        }
+        if (tw.z > 0.0) {
+          t += luma(notile(tex_T10, qs.xy, lod).rgb) * tw.z;
+        }
+        d += size_k.y * near * (t - rock_detail_avg);
       }
       // (the broad variation: a few tens of meters, gentle, it fades in as the detail fades out)
       float macro = gnoise(vec2(wp.x + wp.y * 0.6, wp.z - wp.y * 0.4) / 45.0 + 2.1) * 0.6 +
@@ -3863,7 +3868,7 @@ void main() {
   if (sand > 0.0 && z > 0.0) {
     // (the land only, by the normals' tag lengths: sand, rocky ground, rock. The palms' leaves,
     // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
-    float land_tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float land_tag = pix_tag;
     float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.8) ||
                  (land_tag > 0.85 && land_tag < 0.95) ? 1.0 - flame_keep : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
@@ -3897,7 +3902,7 @@ void main() {
     // on the sand (its normals written 0.9 long: tfrag3.frag, hfrag.frag): the wind's ripples,
     // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
     // By the mark only, not the color: the warm haze turns the far sand orange
-    float nl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float nl = pix_tag;
     float dune = step(0.85, nl) * step(nl, 0.95) * (1.0 - flame_keep);
     float level = dot(surf_n, up_view);
     float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
@@ -3950,9 +3955,8 @@ void main() {
       // ones fade the bigger take over at the same strength, so far off looks like up close
       // (the waves' spacing on screen stays about the same, as perspective shrinks them)
       float shade = 0.0, wsum = 0.0;
-      const float octave[4] = float[](0.24, 0.9, 3.4, 12.0);  // wavelength, m
       for (int k = 0; k < 4; k++) {
-        float wl = octave[k];
+        float wl = k == 0 ? 0.24 : k == 1 ? 0.9 : k == 2 ? 3.4 : 12.0;  // wavelength, m
         // (while a wave spans ~2 pixels across the crests; the depth's edges give a huge
         // derivative: there the pixel's own size)
         float m = rip_m < foot * 3.0 ? rip_m : foot;
@@ -3965,8 +3969,10 @@ void main() {
           float wk = gnoise(xz * 0.35 * sc + o) * 2.2 + gnoise(xz * 1.3 * sc + o.yx) * 0.6 +
                      gnoise(xz * 0.03 * sc + o * 0.3) * 9.0;
           float phase = dot(xz, across) * 6.2832 / wl + wk * 6.2832;
-          float crest = sin(phase) + 0.35 * sin(2.0 * phase);
-          float slope = cos(phase) + 0.7 * cos(2.0 * phase);
+          float sp = sin(phase), cp = cos(phase);
+          float sp2 = 2.0 * sp * cp, cp2 = 1.0 - 2.0 * sp * sp;  // (of the double angle)
+          float crest = sp + 0.35 * sp2;
+          float slope = cp + 0.7 * cp2;
           // crests broken off here and there (noise long along them, short across): ends and gaps
           // instead of endless parallel lines
           vec2 cr = vec2(dot(xz, vec2(-across.y, across.x)) / (wl * 7.0), dot(xz, across) / (wl * 1.8));
@@ -3982,10 +3988,16 @@ void main() {
             float h0 = crest;
             float dir = l_run > 0.0 ? 1.0 : -1.0;
             float occ = 0.0;
+            // (each step turns the sine and cosine on by a sixth of a wave, and those of the double
+            // angle by a third: no trigonometry in the loop. No table of those numbers either: const
+            // arrays indexed in a loop cost NVIDIA's compiled shader 6 ms here)
+            vec2 r1 = vec2(sp, cp), r2 = vec2(sp2, cp2);
+            const vec2 turn1 = vec2(0.5, 0.8660), turn2 = vec2(-0.5, 0.8660);
             for (int s = 1; s <= 6; s++) {
               float dp = float(s) * 1.0472;  // a sixth of a wave
-              float ph = phase + dir * dp;
-              float hs = sin(ph) + 0.35 * sin(2.0 * ph);
+              r1 = vec2(r1.x * turn1.x + dir * r1.y * turn1.y, r1.y * turn1.x - dir * r1.x * turn1.y);
+              r2 = vec2(r2.x * turn2.x + dir * r2.y * turn2.y, r2.y * turn2.x - dir * r2.x * turn2.y);
+              float hs = r1.x + 0.35 * r2.x;
               // (heights in wavelengths: crest * amp; the line climbs l_tan per wavelength travelled)
               float over = (hs - h0) * amp - l_tan * dp / 6.2832;
               occ = max(occ, smoothstep(0.0, 0.02, over));
@@ -4075,7 +4087,7 @@ void main() {
   // the blades showing the grass's own shade instead of bright sand; fading out over the field's
   // ragged edge (as shrub_grass.vert thins it)
   if (grass_ground.w > 0.0 && z > 0.0) {
-    float gtag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float gtag = pix_tag;
     if ((gtag > 0.85 && gtag < 0.95) || (gtag > 0.55 && gtag < 0.65)) {
       vec3 gw = view_to_world * p / 4096.0 + cam_pos / 4096.0;
       float lush = texture(tex_T21, (gw.xz - grass_field.xy) / grass_field.z).g - gnoise(gw.xz / 9.0) * 0.15;
@@ -4104,7 +4116,7 @@ void main() {
   // the late afternoon: amber and deep, the lit parts richer, the shade darker
   if (golden > 0.0 && z > 0.0) {
     float lg = luma(c);
-    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float tag = pix_tag;
     // (the characters (merc2.frag: 0.45 long) keep their colors: the deepening is the land's)
     float gk = golden * (tag > 0.3 && tag < 0.55 ? 0.25 : 1.0);
     c = max(mix(vec3(lg), c, 1.0 - 0.15 * gk), 0.0);
@@ -4149,7 +4161,7 @@ void main() {
   // dust and grime gathered at the foot of the walls: a wall's lowest meter a little darker where it
   // stands on a floor (found a few steps below on screen: the first point lower down that faces up)
   if (z > 0.0 && wsurf == 0.0 && abs(world_dir(surf_n).y) < 0.35 && length(p) < 60.0 * 4096.0 &&
-      length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0) > 0.985) {
+      pix_tag > 0.985) {
     float h = 1e9;
     for (int k = 1; k <= 4; k++) {
       vec2 uq = tex_coord - vec2(0.0, texel.y * float(k * k) * 5.0);
@@ -4167,7 +4179,7 @@ void main() {
   // Jak out of the water: dark and shining for some seconds, as he dries (the pixels around him,
   // characters' tag)
   if (jak_fx.w > 0.0 && z > 0.0 && wsurf == 0.0) {
-    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ctag = pix_tag;
     float jd = length(p - jak_fx.xyz) / 4096.0;
     if (ctag > 0.4 && ctag < 0.56 && jd < 2.5) {
       float wetk = jak_fx.w * (1.0 - smoothstep(1.8, 2.5, jd));
@@ -4181,7 +4193,7 @@ void main() {
   // characters lit from behind by the sun: a thin bright rim along their outline, so they stand out
   // from the scenery (by day, outdoors: the areas with a day sky)
   if (z > 0.0 && sky_day > 0.0 && wsurf == 0.0) {
-    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float ctag = pix_tag;
     if (ctag > 0.4 && ctag < 0.56) {
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
       vec3 vd = normalize(-p);
@@ -4212,7 +4224,7 @@ void main() {
     c = mix(c, c * air, far_k * 0.6);
   }
   if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
-    float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float tag = pix_tag;
     if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - sky_day)) * (1.0 - weather.x);
@@ -4311,7 +4323,7 @@ void main() {
   // the desert's morning on the ground: warm peach-orange sand and rock (the game's grade leaves
   // them a pale yellow-beige), the far rock richer (the haze greyed it to mauve)
   if (day_look > 0.0 && z > 0.0 && wsurf == 0.0) {
-    float mtag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float mtag = pix_tag;
     float ground = (mtag > 0.3 && mtag < 0.55) ? 0.25 : 1.0;  // (characters a little)
     float far_m = smoothstep(80.0, 400.0, length(p) / 4096.0);
     vec3 g = c * mix(vec3(1.02, 0.91, 0.89), vec3(1.05, 0.9, 0.78), far_m);
@@ -4333,7 +4345,7 @@ void main() {
   // sand outside the desert (Sandover's beach): in the shade never darker than the open sky
   // lights it, a soft grey-blue (the game's own morning light there near black)
   if (sky_day > 0.0 && sun_haze == 0.0 && z > 0.0 && wsurf == 0.0) {
-    float stag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float stag = pix_tag;
     if (stag > 0.85 && stag < 0.95) {
       float lsh = luma(c);
       vec3 lifted = c * clamp(0.34 / max(lsh, 0.02), 1.0, 2.4) * vec3(1.02, 1.0, 0.97);
@@ -4344,7 +4356,7 @@ void main() {
   // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
   // and shade made it look transparent
   {
-    float cl = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    float cl = pix_tag;
     c = mix(c, texture(tex_T0, tex_coord).rgb, (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
   }
 

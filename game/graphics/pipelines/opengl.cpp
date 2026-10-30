@@ -845,7 +845,12 @@ void GLDisplay::render() {
 
   // actual vsync
   g_gfx_data->debug_gui.finish_frame();
-  if (Gfx::g_global_settings.framelimiter) {
+  // Enhanced: test switch JAK_ENHANCED_UNCAPPED=1: no limiter and no vsync, so the cost of the
+  // effects can be timed at full clocks even when a frame takes less than 1/60 s
+  static const bool uncapped = std::getenv("JAK_ENHANCED_UNCAPPED") != nullptr;
+  if (uncapped) {
+    SDL_GL_SetSwapInterval(0);
+  } else if (Gfx::g_global_settings.framelimiter) {
     auto p = scoped_prof("frame-limiter");
     g_gfx_data->frame_limiter.run(
         Gfx::g_global_settings.target_fps, Gfx::g_global_settings.experimental_accurate_lag,
@@ -863,7 +868,7 @@ void GLDisplay::render() {
   }
 
   // switch vsync modes, if requested
-  if (Gfx::g_global_settings.vsync != Gfx::g_global_settings.old_vsync) {
+  if (!uncapped && Gfx::g_global_settings.vsync != Gfx::g_global_settings.old_vsync) {
     Gfx::g_global_settings.old_vsync = Gfx::g_global_settings.vsync;
     // NOTE - -1 can be used for adaptive vsync, maybe useful for Jak 2+?
     // https://wiki.libsdl.org/SDL3/SDL_GL_SetSwapInterval
