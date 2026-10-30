@@ -216,6 +216,8 @@ class EnhancedPost {
     float contrast = 0.10f;  // 0 = linear, 1 = full S-curve
     float warmth = 0.0f;     // shifts toward warm highlights / cool shadows
     float vignette = 0.18f;
+    float eye_adapt = 1.f;         // the eye's adaptation to dark and bright (0 = off)
+    float lens_drops = 0.5f;       // raindrops on the lens in a downpour (0 = off)
     float sharpen = 0.25f;
     bool area_grading = true;      // a color grade per area (Haven, desert, forest...), day and night
     bool soft_shadows = true;      // sun shadows sharp at the contact, softer further from the caster
@@ -667,6 +669,14 @@ class EnhancedPost {
   int m_focus_cur = 0;
   bool m_focus_pending[2] = {false, false};
   float m_focus = 0.f;  // view z (game units), 0 = none yet
+  // the eye's adaptation: 48 scene pixels read back a frame later (as the focus), their mean
+  // brightness eases the picture up in the dark and down in the glare, over a second or two
+  void read_exposure(int w, int h);
+  GLuint m_adapt_pbo[2] = {0, 0};
+  int m_adapt_cur = 0;
+  bool m_adapt_pending[2] = {false, false};
+  float m_adapt = 1.f;
+  double m_adapt_time = 0.0;
   // the shadow map read as plain depths (soft shadows' blocker search), not compared
   GLuint m_shadow_raw_sampler = 0;
 

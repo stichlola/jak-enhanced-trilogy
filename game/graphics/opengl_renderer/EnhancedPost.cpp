@@ -978,6 +978,10 @@ EnhancedPost::~EnhancedPost() {
     glDeleteBuffers(1, &c.buffer);
   }
   g_enhanced_casters = EnhancedCasters();
+  if (m_adapt_pbo[0]) {
+    glDeleteBuffers(2, m_adapt_pbo);
+    m_adapt_pbo[0] = m_adapt_pbo[1] = 0;
+  }
   if (m_focus_pbo[0]) {
     glDeleteBuffers(2, m_focus_pbo);
   }
@@ -1321,6 +1325,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (have_scene) {
     enhanced_editor_levels(render_state->loader->get_in_use_levels());
     enhanced_editor_frame(w, h, m_depth_fbo, cam, m_last_proj.data());
+  }
+  if (have_scene) {
+    read_exposure(w, h);
   }
   if (have_scene && m_cine > 0.f) {
     read_focus(w, h);
@@ -3558,6 +3565,56 @@ void EnhancedPost::read_focus(int w, int h) {
   m_focus_cur = prev;
 }
 
+// the eye's adaptation: an 8x6 grid of the scene's pixels into a pixel buffer, read the frame
+// after (no stall); their mean brightness (geometric) sets how far the picture is lifted or
+// lowered: part of the way toward a mid grey (at most -13%..+33%). Faster into the light than out of it
+void EnhancedPost::read_exposure(int w, int h) {
+  constexpr int kN = 48;
+  if (!m_adapt_pbo[0]) {
+    glGenBuffers(2, m_adapt_pbo);
+    for (int i = 0; i < 2; i++) {
+      glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[i]);
+      glBufferData(GL_PIXEL_PACK_BUFFER, kN * 4, nullptr, GL_STREAM_READ);
+    }
+  }
+  const float dt = m_adapt_time > 0.0 ? (float)std::clamp(m_time - m_adapt_time, 0.0, 0.2) : 0.f;
+  m_adapt_time = m_time;
+  const int prev = 1 - m_adapt_cur;
+  if (m_adapt_pending[prev]) {
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[prev]);
+    if (auto* d = (const uint8_t*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, kN * 4,
+                                                   GL_MAP_READ_BIT)) {
+      float sum = 0.f;
+      for (int i = 0; i < kN; i++) {
+        const float l = (0.3f * d[i * 4] + 0.59f * d[i * 4 + 1] + 0.11f * d[i * 4 + 2]) / 255.f;
+        sum += std::log(std::max(l, 0.02f));
+      }
+      glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+      const float mean = std::exp(sum / kN);
+      const float want = m_settings.eye_adapt > 0.f
+                             ? std::pow(std::clamp(0.36f / mean, 0.8f, 1.6f), m_settings.eye_adapt * 0.6f)
+                             : 1.f;
+      const float tau = want < m_adapt ? 0.7f : 2.f;
+      m_adapt += (want - m_adapt) * (1.f - std::exp(-dt / tau));
+    } else {
+      glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    m_adapt_pending[prev] = false;
+  }
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
+  int i = 0;
+  for (int y = 0; y < 6; y++) {
+    for (int x = 0; x < 8; x++) {
+      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
+                   (void*)(intptr_t)(i++ * 4));
+    }
+  }
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  m_adapt_pending[m_adapt_cur] = true;
+  m_adapt_cur = prev;
+}
+
 void EnhancedPost::do_shafts(GLuint scene_tex,
                              GLuint screen_vao,
                              SharedRenderState* render_state,
@@ -5341,6 +5398,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     }
     glUniform4f(glGetUniformLocation(id, "strike"), st[0], st[1], st[2], st[3] * on);
   }
+  glUniform1f(glGetUniformLocation(id, "eye_adapt"), m_adapt);
+  glUniform1f(glGetUniformLocation(id, "lens_drops"), m_movie > 0.5f ? 0.f : m_settings.lens_drops);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
@@ -6078,6 +6137,8 @@ std::string EnhancedPost::menu_settings_json() const {
   j["season"] = s.season;
   j["photo_filter"] = s.photo_filter;
   j["photo_vignette"] = s.photo_vignette;
+  j["eye_adapt"] = s.eye_adapt;
+  j["lens_drops"] = s.lens_drops;
   j["vivid"] = s.vivid;
   j["population"] = m_population;
   j["fov"] = g_enhanced_menu.fov.load();
@@ -6163,6 +6224,8 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("season", s.season);
   get("photo_filter", s.photo_filter);
   get("photo_vignette", s.photo_vignette);
+  get("eye_adapt", s.eye_adapt);
+  get("lens_drops", s.lens_drops);
   s.season = std::clamp(s.season, 0, 4);
   get("vivid", s.vivid);
   get("population", m_population);
@@ -6400,6 +6463,8 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Contrast", &m_settings.contrast, 0.f, 1.f);
     ImGui::SliderFloat("Warmth", &m_settings.warmth, -0.2f, 0.2f);
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
+    ImGui::SliderFloat("Eye adaptation", &m_settings.eye_adapt, 0.f, 1.f);
+    ImGui::SliderFloat("Drops on the lens", &m_settings.lens_drops, 0.f, 1.f);
     ImGui::SliderFloat("Sharpen", &m_settings.sharpen, 0.f, 1.f);
     ImGui::Checkbox("Grade per area", &m_settings.area_grading);
     ImGui::Text("area %s, night %.2f, rain %.2f, dust %.2f, focus %.1f m", g_world.zones[m_zone].name.c_str(), m_night, m_rain,

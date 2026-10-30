@@ -160,6 +160,8 @@ uniform vec4 beacon_pos[24];
 uniform vec4 beacon_color[24];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
+uniform float lens_drops;       // raindrops on the lens in a downpour (0 = off)
+uniform float eye_adapt;        // the eye's adaptation: the picture lifted in the dark, lowered in glare
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
@@ -1860,6 +1862,32 @@ void main() {
     }
   }
 
+  // drops on the lens in a downpour: beads land now and then, slide down a little and dry; each
+  // bends what's behind it like a small lens, upside down (two sizes, cells across the screen)
+  if (lens_drops > 0.0 && weather.x > 0.25) {
+    float amt = lens_drops * smoothstep(0.25, 0.7, weather.x);
+    float aspect = texel.y / texel.x;
+    for (int layer = 0; layer < 2; layer++) {
+      float cell = layer == 0 ? 0.12 : 0.07;
+      vec2 s = vec2(tex_coord.x * aspect, tex_coord.y) / cell + float(layer) * 7.3;
+      vec2 id = floor(s);
+      vec2 f = fract(s);
+      vec2 h = hash2(id + 17.0 * float(layer)) * 0.5 + 0.5;
+      float age = fract(weather.z / (3.0 + 3.0 * h.y) + h.x);
+      if (fract(h.x * 13.7 + floor(weather.z / (3.0 + 3.0 * h.y) + h.x) * 0.618) > 0.45 * amt) {
+        continue;
+      }
+      vec2 ctr = vec2(0.3 + 0.4 * h.y, 0.75 - 0.5 * age * age * age);
+      float r = (0.1 + 0.12 * h.x) * (1.0 - age * age * age * age);
+      vec2 d = (f - ctr) * vec2(1.0, 1.25);  // (a little taller than wide, as it slides)
+      float dl = length(d);
+      if (dl < r) {
+        float k = 1.0 - dl / r;
+        uv -= d / vec2(aspect, 1.0) * cell * (1.6 + 1.2 * k) * smoothstep(0.0, 0.25, k);
+      }
+    }
+  }
+
   // (the flames' place on screen: kept out of the daylight's corrections and the highlights'
   // bleaching further down, which took their orange to a pale yellow, green and blue by day)
   float flame_keep = 0.0;
@@ -2433,6 +2461,15 @@ void main() {
       float sh = sun_shadow(w) * smoothstep(0.0, 0.3, ndl);
       if (close_up > 0.0) {
         sh *= smoothstep(0.5 * close_up, close_up, z);
+      }
+      // contact shadows: the shadow map is too coarse for a foot on the ground, a hand on a hip, a
+      // crate's edge; a short march toward the sun through the depth buffer finds them (60 cm)
+      if (z < 30.0 * 4096.0) {
+        vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
+        float cs = light_blocked_by(from, from + sun_dir.xyz * 40960.0, hash1(gl_FragCoord.xy),
+                                    0.6 * 4096.0, 8);
+        sh = max(sh, cs * 0.85 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) *
+                         smoothstep(0.0, 0.3, ndl));
       }
       sun_lit *= 1.0 - sh;
       // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
@@ -3833,6 +3870,16 @@ void main() {
       c += vec3(1.0, 0.86, 0.66) * edge * behind * side * daylight * sky_day * 0.35 *
            (1.0 - smoothstep(15.0, 40.0, length(p) / 4096.0));
     }
+    // leaves against the sun: thin, the light shines through them, a luminous yellow-green (or
+    // gold for autumn leaves) instead of a dark cut-out (foliage: green or orange-dominant plain
+    // scenery, looking toward the sun)
+    if (ctag > 0.95) {
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+      float toward = smoothstep(0.3, 0.95, dot(normalize(p), sun_dir.xyz));
+      float leafy = smoothstep(0.03, 0.12, c.g - c.b) * smoothstep(0.0, 0.08, max(c.g, c.r) - c.b - 0.02);
+      float k = toward * leafy * daylight * sky_day * (1.0 - smoothstep(60.0, 200.0, length(p) / 4096.0));
+      c += c * vec3(0.9, 1.0, 0.45) * k * 0.6;
+    }
   }
   // the far air takes the sky's color: warm toward the sun, cool and bluer away from it, so the
   // distance reads deeper (by day; the desert has its own haze)
@@ -3989,6 +4036,8 @@ void main() {
     c += cold * sheet * ((z == 0.0 ? 0.22 : 0.035) + c * 0.4);
     c += cold * bolt_light * 2.2;
   }
+
+  c *= eye_adapt;
 
   // vignette
   vec2 v = tex_coord - 0.5;
