@@ -180,6 +180,11 @@ uniform vec4 blast_dir[4];      // gun blasts: where it's fired (view space), w:
 in vec2 tex_coord;
 out vec4 color;
 
+// x squared (pow() of a negative base is undefined in GLSL: NaN on some drivers)
+float sq(float x) {
+  return x * x;
+}
+
 float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
 }
@@ -819,11 +824,11 @@ float lightning_bolt(vec3 ray_view, float px) {
   // over time: the dim leader with a bright tip, the return stroke, two restrikes, fading
   float bright;
   if (a < 0.09) {
-    bright = 0.3 + 2.0 * exp(-pow((u - lead) / 0.03, 2.0));
+    bright = 0.3 + 2.0 * exp(-sq((u - lead) / 0.03));
   } else {
     float t = a - 0.09;
-    bright = 1.6 * exp(-t * 25.0) + 1.1 * exp(-pow((t - 0.08) * 60.0, 2.0)) +
-             0.7 * exp(-pow((t - 0.18) * 60.0, 2.0));
+    bright = 1.6 * exp(-t * 25.0) + 1.1 * exp(-sq((t - 0.08) * 60.0)) +
+             0.7 * exp(-sq((t - 0.18) * 60.0));
     bright *= 1.0 - smoothstep(0.25, 0.33, t);
   }
   // out of the clouds at the top
@@ -997,7 +1002,7 @@ vec3 sky_color(vec3 dv) {
   // lilac away from it, a warm yellow-white glow around the sun
   // (the same blue all day, deeper overhead as the sun climbs; the pink and peach the morning's)
   if (sky_day > 0.0) {
-    float pink = clamp(sky_morning / sky_day, 0.0, 1.0);
+    float pink = clamp(sky_morning / max(sky_day, 1e-4), 0.0, 1.0);  // (0/0 outside day_sky zones and at night)
     vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
     float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), sh);
     vec3 zen_m = mix(vec3(0.42, 0.65, 0.98), vec3(0.6, 0.8, 1.0), pink);
@@ -1080,12 +1085,14 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   // the day sky's (any outdoor area): small pink heaps in the morning, lilac-grey bellies, lit
   // soft peach; pink toward the sun, white-lilac away from it; by day the same heaps white
   if (sky_day > 0.0) {
-    float tw = smoothstep(-0.3, 0.9, cosang) * clamp(sky_morning / sky_day, 0.0, 1.0);
+    float tw = smoothstep(-0.3, 0.9, cosang) * clamp(sky_morning / max(sky_day, 1e-4), 0.0, 1.0);  // (0/0 outside day_sky zones and at night)
     under = mix(under, mix(vec3(0.74, 0.74, 0.84), vec3(0.8, 0.62, 0.7), tw), sky_day * 0.85);
     top = mix(top, mix(vec3(0.95, 0.94, 0.98), vec3(1.0, 0.8, 0.82), tw), sky_day * 0.8);
     sc = mix(sc, vec3(1.15, 0.85, 0.75), sky_morning * 0.7);
   }
-  float near_bolt = exp(-pow(mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159, 2.0) / 0.2);
+  // (squared by hand: pow() of a negative base is undefined in GLSL and gave NaN on some drivers)
+  float bolt_da = mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159;
+  float near_bolt = exp(-bolt_da * bolt_da / 0.2);
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
   // more steps toward the horizon, where the ray crosses kilometers of slab: long steps there
   // left a per-pixel grain (the jitter) the TAA couldn't smooth, drawn as fine diagonal hatching
@@ -1756,7 +1763,7 @@ void main() {
     vec2 size = abs(vec2(proj.z, proj.w)) * 0.5 * ring / bp.z;  // the ring's radii in uv
     vec2 rel = tex_coord - cuv;
     float r = length(rel / size);
-    float band = exp(-pow((r - 1.0) / 0.12, 2.0)) * (1.0 - smoothstep(0.1, 0.5, age));
+    float band = exp(-sq((r - 1.0) / 0.12)) * (1.0 - smoothstep(0.1, 0.5, age));
     // a gun's blast: only the arc in front of the muzzle (as seen on screen; all round when it's
     // fired toward or away from the camera)
     if (blast_dir[i].w > 0.5) {
@@ -2634,7 +2641,7 @@ void main() {
           float dd = length(ww.xz - ctr);
           float rad = 0.015 + ph * 0.07;
           float life = 1.0 - smoothstep(0.0, 0.12, ph * 0.45);
-          spl += exp(-pow((dd - rad) / 0.01, 2.0)) * life + exp(-dd * dd / 0.0002) * life * 0.6;
+          spl += exp(-sq((dd - rad) / 0.01)) * life + exp(-dd * dd / 0.0002) * life * 0.6;
         }
       }
       float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
@@ -3222,8 +3229,8 @@ void main() {
     float vis = (ld <= 1e-7 || view_z(ld) > lp.z - 0.3 * 4096.0) ? 1.0 : 0.0;
     float bulb = exp(-r * r / (core_px * core_px)) * 2.2 * vis;
     // its casing: a thin dark band with a bright edge where the bulb's light catches the metal
-    float band = exp(-pow((r - core_px * 1.7) / (core_px * 0.35), 2.0)) * vis;
-    float edge = exp(-pow((r - core_px * 2.05) / (core_px * 0.18), 2.0)) * vis *
+    float band = exp(-sq((r - core_px * 1.7) / (core_px * 0.35))) * vis;
+    float edge = exp(-sq((r - core_px * 2.05) / (core_px * 0.18))) * vis *
                  (0.6 + 0.4 * dpx.y / max(r, 1e-3));
     float halo = exp(-r / (core_px * 4.0)) * 0.6 + exp(-r / (core_px * 16.0)) * 0.2;
     c *= 1.0 - 0.55 * band * lantern.w;
@@ -3286,7 +3293,7 @@ void main() {
         }
         // the halo ring around the middle of the picture, toward the sun
         vec2 dv = (tex_coord - vec2(0.5)) * vec2(aspect, 1.0);
-        float ring = exp(-pow((length(dv) - 0.42) / 0.025, 2.0)) *
+        float ring = exp(-sq((length(dv) - 0.42) / 0.025)) *
                      max(dot(normalize(dv + 1e-5), normalize(-axis * vec2(aspect, 1.0) + 1e-5)), 0.0);
         fl += vec3(0.9, 0.75, 1.0) * ring * 0.025;
         // a short horizontal streak through the sun
