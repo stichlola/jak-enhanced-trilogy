@@ -6,6 +6,7 @@
 
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -119,6 +120,7 @@ void Tie3::load_from_fr3_data(const LevelData* loader_data) {
       lod_tree[l_tree].index_buffer = loader_data->tie_data[l_geo][l_tree].index_buffer;
       lod_tree[l_tree].category_draw_indices = tree.category_draw_indices;
       lod_tree[l_tree].draw_mode = tree.use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      lod_tree[l_tree].source = &tree;
 
       // set up vertex attributes
       glBindBuffer(GL_ARRAY_BUFFER, lod_tree[l_tree].vertex_buffer);
@@ -571,6 +573,15 @@ void Tie3::draw_matching_draws_for_tree(int idx,
   glEnable(GL_PRIMITIVE_RESTART);
   glPrimitiveRestartIndex(UINT32_MAX);
 
+  // Enhanced: the crossfade to the detailed models near the camera (the shader is tfrag's too, so
+  // set back below)
+  const bool scenery_fade = !use_envmap && tree.source->enh_scenery;
+  if (scenery_fade) {
+    auto fade = enhanced_scenery_fade(*tree.source);
+    glUniform2f(glGetUniformLocation(render_state->shaders[ShaderId::TFRAG3].id(), "enh_lod"),
+                fade.x(), fade.y());
+  }
+
   int last_texture = -1;
   for (size_t draw_idx = tree.category_draw_indices[(int)category];
        draw_idx < tree.category_draw_indices[(int)category + 1]; draw_idx++) {
@@ -642,9 +653,20 @@ void Tie3::draw_matching_draws_for_tree(int idx,
     }
   }
 
+  if (scenery_fade) {
+    glUniform2f(glGetUniformLocation(render_state->shaders[ShaderId::TFRAG3].id(), "enh_lod"), 0.f,
+                0.f);
+  }
+
   if (!m_hide_wind && category == tfrag3::TieCategory::NORMAL) {
     auto wind_prof = prof.make_scoped_child("wind");
     render_tree_wind(idx, geom, settings, render_state, wind_prof);
+  }
+
+  if (category == tfrag3::TieCategory::NORMAL && tree.source->enh_scenery) {
+    enhanced_draw_scenery(*tree.source,
+                          tree.has_proto_visibility ? &tree.proto_visibility.vis_flags : nullptr,
+                          settings, render_state, prof);
   }
 
   glBindVertexArray(0);

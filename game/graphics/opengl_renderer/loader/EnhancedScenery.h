@@ -20,6 +20,10 @@ struct SharedRenderState;
  *
  * scenery.json: { "<proto>": ["a.glb", "b.glb"], ... } (each copy picks one of them); the model is
  * fitted into the proto's own height, its foot on the proto's foot, and turned at random.
+ *
+ * TIE protos (crates, barrels, lamps, small rocks) go in the same json: fitted the same way but in
+ * the proto's own turn, so the model should face as the proto does (+y up). Not for protos in the
+ * wind or with an environment map. The collision and the sun's shadows stay the game's proto's.
  */
 
 // called by the loader on its thread, after the vegetation: finds the copies of the listed protos
@@ -31,8 +35,18 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
                            SharedRenderState* render_state,
                            ScopedProfilerNode& prof);
 
+// the same for a TIE tree, called by Tie3 after its normal draws (its time of day texture still
+// bound); proto_vis: which protos the game shows now (per proto, null: all)
+void enhanced_draw_scenery(const tfrag3::TieTree& tree,
+                           const std::vector<u8>* proto_vis,
+                           const TfragRenderSettings& settings,
+                           SharedRenderState* render_state,
+                           ScopedProfilerNode& prof);
+
 // the shrub shader's crossfade band for a tree, game units from the camera (0, 0 = off)
 math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree);
+// (tfrag3's enh_lod for a TIE tree)
+math::Vector2f enhanced_scenery_fade(const tfrag3::TieTree& tree);
 
 // the crush map (where the grass still lies after someone went through), updated once a frame:
 // its texture (0: none), and in out its corner x, z, its size (game units), on

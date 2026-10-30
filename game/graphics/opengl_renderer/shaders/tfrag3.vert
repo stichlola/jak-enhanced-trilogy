@@ -20,6 +20,7 @@ out vec3 tex_coord;
 out float fogginess;
 out vec3 enh_normal;
 out vec3 enh_pos;
+flat out int enh_lod_kind;  // Enhanced: 1 = a detailed model stands in near the camera (TIE only)
 
 void main() {
   // old system:
@@ -66,4 +67,5 @@ void main() {
   tex_coord = tex_coord_in;
   enh_normal = normal_in.xyz;
   enh_pos = vert;
+  enh_lod_kind = normal_in.w > 0.5 ? 1 : 0;
 }

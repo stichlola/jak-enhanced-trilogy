@@ -132,6 +132,7 @@ class Tie3 : public BucketRenderer {
     std::vector<GLsizei> multidraw_count_buffer;
     std::vector<void*> multidraw_index_offset_buffer;
     u64 draw_mode = 0;  // strip or not, GL enum
+    const tfrag3::TieTree* source = nullptr;  // Enhanced: for its detailed models (EnhancedScenery)
   };
 
   void envmap_second_pass_draw(const Tree& tree,

@@ -440,6 +440,9 @@ struct TieTree {
     std::vector<u32> indices;
   } unpacked;
 
+  // Enhanced (not saved): the detailed models standing in for this tree's protos (EnhancedScenery)
+  std::shared_ptr<void> enh_scenery;
+
   void serialize(Serializer& ser);
   void memory_usage(MemoryUsageTracker* tracker) const;
   void unpack();
