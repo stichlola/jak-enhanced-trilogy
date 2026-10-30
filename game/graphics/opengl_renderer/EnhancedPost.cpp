@@ -1165,6 +1165,15 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   update_auto_quality();
   g_enhanced_fx.detail = m_settings.enabled ? m_settings.fx_detail : 0.f;
   g_enhanced_fx.time = (float)m_time;
+  {
+    const float* d = g_enhanced_sun.dir;
+    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const bool up = g_enhanced_sun.valid && len > 1e-6f && d[1] / len > 0.02f;
+    for (int k = 0; k < 3 && up; k++) {
+      g_enhanced_fx.sun[k] = d[k] / len;
+    }
+    g_enhanced_fx.sun[3] = up ? 1.f - std::max(m_night, night_darkness()) : 0.f;
+  }
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();

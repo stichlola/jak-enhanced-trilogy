@@ -15,7 +15,8 @@ class EnhancedSpriteFx {
  public:
   // once per flush_sprites: the shader's samplers (always: a sampler2D and a sampler3D left on the
   // same unit fail every draw) and the frame's uniforms. on = false: every bucket stays untouched
-  void begin_flush(SharedRenderState* render_state, bool on);
+  // (camera: the sprites' world -> screen matrix, 16 floats)
+  void begin_flush(SharedRenderState* render_state, bool on, const float* camera);
   // once per bucket, before its draw
   void set_bucket(SharedRenderState* render_state,
                   u32 tbp,
@@ -29,6 +30,15 @@ class EnhancedSpriteFx {
                u64 gl_texture,
                bool alpha_blended,
                bool additive);
+
+  void copy_depth(SharedRenderState* render_state);
+
+  // the scene's depth as it stands when the sprites draw: their soft edges read it, and the depth
+  // buffer they test against can't be read at the same time (the post pass's copy comes later)
+  u32 m_depth_fbo = 0;
+  u32 m_depth_tex = 0;
+  int m_depth_w = 0, m_depth_h = 0;
+  u64 m_depth_frame = 0;
 
   bool m_on = false;
   int m_class_loc = -1;

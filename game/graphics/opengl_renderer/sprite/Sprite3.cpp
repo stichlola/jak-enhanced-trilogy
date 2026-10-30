@@ -607,7 +607,7 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
                GL_STREAM_DRAW);
 
   // (Enhanced: not the HUD, drawn double)
-  m_enhanced_fx.begin_flush(render_state, !double_draw);
+  m_enhanced_fx.begin_flush(render_state, !double_draw, m_3d_matrix_data.camera.data());
 
   // now do draws!
   for (const auto bucket : m_bucket_list) {

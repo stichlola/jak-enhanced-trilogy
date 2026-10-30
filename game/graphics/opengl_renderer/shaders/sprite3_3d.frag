@@ -13,6 +13,10 @@ uniform sampler2D tex_T0;
 uniform float alpha_min;
 uniform float alpha_max;
 uniform sampler3D enh_noise;
+uniform sampler2D enh_depth;  // the scene's depth, copied before the sprites draw
+uniform vec2 enh_depth_ab;    // ndc z = a + b / distance (b = 0: not known)
+uniform vec4 enh_sun;      // toward the sun: along the screen's x and y, toward the camera; w: strength
+uniform vec2 enh_rise;     // world up along the screen's x and y
 uniform vec2 enh_fx;       // the clock (s), how much of this (fx_detail)
 uniform int enh_fx_debug;  // JAK_ENHANCED_FX_DEBUG: paints the classified sprites
 
@@ -23,9 +27,9 @@ void enhanced_sprite() {
   bool flame = enh_kind >= 2;
   float t = enh_fx.x * (flame ? 0.7 : 0.13);
   vec3 dom = vec3(enh_q * 0.22, 0.0) + enh_cen.xyz;
-  // (scrolling along the screen's y: up in the flames' case, unless the camera is on its side)
-  vec2 flow = texture(enh_noise, dom + vec3(0.0, -t, t * 0.31)).rg - 0.5;
-  float fine = texture(enh_noise, dom * 2.7 + vec3(flow * 0.25, 0.0) + vec3(0.0, -t * 1.9, t * 0.57)).r - 0.5;
+  // (the noise climbs through the sprite, whichever way the camera leans)
+  vec2 flow = texture(enh_noise, dom + vec3(-enh_rise * t, t * 0.31)).rg - 0.5;
+  float fine = texture(enh_noise, dom * 2.7 + vec3(flow * 0.25 - enh_rise * t * 1.9, t * 0.57)).r - 0.5;
   float e = flow.x + fine * 0.7;
 
   vec2 st = tex_coord.xy;
@@ -48,6 +52,32 @@ void enhanced_sprite() {
   }
   // hotter and cooler parts in a flame, thicker and thinner in smoke
   color.rgb *= 1.0 + e * (flame ? 0.6 : 0.25) * enh_fx.y;
+
+  // smoke is lit by the sun as a ball would be: a normal from where in the sprite this is (bumped by
+  // the same noise), a bit of light always getting through
+  if (!flame) {
+    vec3 n = normalize(vec3(enh_q + flow * 1.5, 0.75));
+    float lit = dot(n, enh_sun.xyz) * 0.5 + 0.5;
+    color.rgb *= mix(1.0, 0.7 + 0.52 * lit, enh_sun.w * enh_fx.y);
+  }
+
+  // soft: it fades where it meets a wall or the ground, over a third of its size, instead of being
+  // cut along a hard line
+  if (enh_depth_ab.y != 0.0) {
+    float sd = texelFetch(enh_depth, ivec2(gl_FragCoord.xy), 0).r;
+    if (sd > 1e-7) {  // (0: the sky)
+      float scene = abs(enh_depth_ab.y / (sd * 2.0 - 1.0 - enh_depth_ab.x));
+      float own = abs(enh_depth_ab.y / (gl_FragCoord.z * 2.0 - 1.0 - enh_depth_ab.x));
+      float reach = clamp(enh_cen.w * 0.35, 0.25 * 4096.0, 3.0 * 4096.0);
+      float soft = smoothstep(0.0, 1.0, (scene - own) / reach);
+      soft = mix(1.0, soft, min(enh_fx.y * 2.0, 1.0));
+      if (enh_kind == 3) {
+        color.rgb *= soft;
+      } else {
+        color.a *= soft;
+      }
+    }
+  }
 
   if (enh_fx_debug != 0) {
     color.rgb = flame ? vec3(1.0, 0.1, 0.05) : vec3(0.1, 1.0, 0.2);

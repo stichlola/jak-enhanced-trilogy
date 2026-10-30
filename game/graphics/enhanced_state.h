@@ -150,6 +150,7 @@ extern EnhancedSmokeLights g_enhanced_smoke_lights;
 struct EnhancedFx {
   float detail = 0.f;
   float time = 0.f;
+  float sun[4] = {0.f, 1.f, 0.f, 0.f};  // toward the sun (world), how much it lights them (0: night)
 };
 extern EnhancedFx g_enhanced_fx;
 
