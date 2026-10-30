@@ -93,7 +93,10 @@ it.Desktop=Crea un collegamento sul desktop
 Name: "desktopicon"; Description: "{cm:Desktop}"
 
 [Files]
-Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "\data\game\assets\enhanced\placed.json,\data\game\assets\enhanced\grass_paint"; Flags: ignoreversion recursesubdirs createallsubdirs
+; the main world the player edits: only if they have none
+Source: "{#Src}\data\game\assets\enhanced\placed.json"; DestDir: "{app}\data\game\assets\enhanced"; Flags: onlyifdoesntexist
+Source: "{#Src}\data\game\assets\enhanced\grass_paint\*"; DestDir: "{app}\data\game\assets\enhanced\grass_paint"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"

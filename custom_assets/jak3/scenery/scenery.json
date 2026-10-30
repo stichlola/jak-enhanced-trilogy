@@ -1,0 +1,22 @@
+// detailed models standing in for shrub protos near the camera (EnhancedScenery.h)
+// tufts and stones from tools/blender/grass_variants.py (jak3-ue5; stones: --rocks, from the
+// kit_rocks sheet; ledges: the kit_slabs sheet; pebbles: the nine stones of kit_pebbles, mixed); old/ holds the earlier sheet's tufts. The game picks, per copy, among a proto's
+// models those nearest its shape. "own_colors": protos whose models get their own colors, the
+// average (rgb) they're brought to (else their proto texture's)
+{
+  "own_colors": {"des-pebbles-01": [0.55, 0.42, 0.31], "des-rock-cluster-01": [0.52, 0.4, 0.3],
+                 "des-stone-shrub-01": [0.34, 0.27, 0.2],
+                 "des-sand-grass-01": [0.52, 0.41, 0.24], "des-sand-grass-02": [0.52, 0.41, 0.24],
+                 "des-sand-grass-side-01": [0.52, 0.41, 0.24]},
+  "des-pebbles-01": ["desert_pebble_scatter.glb", "desert_pebble_b_scatter.glb", "desert_pebble_heap.glb",
+                     "desert_pebble_b_heap.glb", "desert_boulder_scatter.glb"],
+  "des-rock-cluster-01": ["desert_boulder_heap.glb", "desert_pebble_pair.glb", "desert_pebble_b_pair.glb",
+                          "desert_pebble_b_heap.glb"],
+  "des-stone-shrub-01": ["desert_boulder_single.glb", "desert_boulder_pair.glb", "desert_ledge_a_single.glb",
+                         "desert_ledge_b_single.glb", "desert_ledge_a_flat.glb", "desert_ledge_b_pair.glb"],
+  "des-sand-grass-01": ["desert_grass_fine_single.glb", "desert_grass_fine_pair.glb", "desert_grass_fine_trio.glb",
+                        "desert_grass_fine_bush.glb", "desert_grass_blades_single.glb", "desert_grass_blades_pair.glb"],
+  "des-sand-grass-side-01": ["desert_grass_fine_low.glb", "desert_grass_blades_low.glb"],
+  "des-sand-grass-02": ["desert_grass_blades_tall.glb", "desert_grass_blades_trio.glb", "desert_grass_blades_bush.glb",
+                        "desert_grass_fine_tall.glb"]
+}

@@ -64,6 +64,9 @@ custom_assets/jak2/texture_replacements/*
 custom_assets/jak3/texture_replacements/*
 custom_assets/*/texture_remade/
 
+# models taken from the disc by the editor's import (the player makes their own)
+custom_assets/*/scenery/game_*
+
 # merc replacements
 custom_assets/jak1/merc_replacements/*
 custom_assets/jak2/merc_replacements/*

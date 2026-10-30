@@ -17,7 +17,7 @@ try {
   New-Item -ItemType Directory $work | Out-Null
   $zip = Join-Path $work "$name-$Tag.zip"
   $url = "https://github.com/stichlola/jak-enhanced-trilogy/releases/download/$Tag/$name-$Tag.zip"
-  Write-Host "Downloading Jak Enhanced Trilogy $Tag (about 120 MB)..."
+  Write-Host "Downloading Jak Enhanced Trilogy $Tag (about 400 MB)..."
   Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
   Write-Host "Unpacking..."
   Expand-Archive -Path $zip -DestinationPath (Join-Path $work 'new') -Force
@@ -25,7 +25,13 @@ try {
   if (-not (Test-Path (Join-Path $new 'gk.exe'))) { throw "the download has no gk.exe" }
   Write-Host "Installing over $Root..."
   # /E every folder, files replaced, nothing of the player's deleted; robocopy's codes below 8 are success
-  & robocopy $new $Root /E /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+  # (the main world the player edits only if they have none: /XC /XN /XO leaves files already there)
+  & robocopy $new $Root /E /XF placed.json /XD grass_paint /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "copying the new files failed (robocopy $LASTEXITCODE)" }
+  $assets = 'data\game\assets\enhanced'
+  & robocopy (Join-Path $new $assets) (Join-Path $Root $assets) placed.json /XC /XN /XO /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
+  if ($LASTEXITCODE -ge 8) { throw "copying the new files failed (robocopy $LASTEXITCODE)" }
+  & robocopy (Join-Path $new "$assets\grass_paint") (Join-Path $Root "$assets\grass_paint") /E /XC /XN /XO /R:3 /W:2 /NFL /NDL /NJH /NJS /NP | Out-Null
   if ($LASTEXITCODE -ge 8) { throw "copying the new files failed (robocopy $LASTEXITCODE)" }
   Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue
   Write-Host "Updated to $Tag."

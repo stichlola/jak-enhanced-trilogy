@@ -116,7 +116,7 @@ The button pictures and names in the games are an Xbox pad's (A B X Y, LB RB LT 
   affiliated with them: please don't report Enhanced bugs to them.
 - **Naughty Dog**, for the trilogy; **Ratchet & Clank Enhanced**, the inspiration.
 - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) (HD textures), [Dear ImGui](https://github.com/ocornut/imgui)
-  (menu), [Tripo](https://www.tripo3d.ai) (minimap icons, desert sand), [ElevenLabs](https://elevenlabs.io)
+  (menu), [Tripo](https://www.tripo3d.ai) (minimap icons, desert sand, rocks and grass), [ElevenLabs](https://elevenlabs.io)
   (ambient sounds).
 
 ## Legal

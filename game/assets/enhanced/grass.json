@@ -1,0 +1,13 @@
+﻿// Dense grass fields (EnhancedGrass): per game, a list of zones.
+//   x, z: the middle (meters, the game's world), radius (m), water: no grass below this height (m),
+//   density: 0..1, level: only the level with this name bakes it (else any level with floor there),
+//   floor: "heightfield" when the ground there is the height field under everything (no level's own;
+//   then give the level that bakes it)
+{
+  "jak3": [
+    // the desert's oasis (Ashelin and her Hellcat stand by the water): the dunes' height field,
+    // baked with desertc (loaded there)
+    {"x": 600.0, "z": 2534.0, "radius": 85.0, "water": -1000.0, "density": 1.0, "level": "desertc",
+     "floor": "heightfield"}
+  ]
+}
