@@ -2384,9 +2384,17 @@ void main() {
   // reflections further down)
   float wet = 0.0;
   float wet_flat = 0.0;  // level ground, where puddles stay after the rest has dried
+  float wet_gloss = 1.0;  // how much of a sheen the rain gives it (wood and walls drink it, tfrag3.frag)
   vec3 wet_n = vec3(0.0);
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
+    {
+      vec4 wg = texture(tex_T11, tex_coord);
+      float wl = length(wg.rgb * 2.0 - 1.0);
+      if (wg.a > 0.83 && wl > 0.985 && wl <= 0.9975) {
+        wet_gloss = wl > 0.9925 ? 0.35 : 0.6;
+      }
+    }
     // (out to the horizon: far away the ground still reads soaked, only the puddles' detail goes)
     wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view));
     wet = weather.w * wet_flat;
@@ -2402,7 +2410,7 @@ void main() {
       c *= 1.0 - (0.22 + 0.18 * runs) * wet_side;
       vec3 vd = normalize(p);
       float graze = pow(1.0 - clamp(abs(dot(-vd, wet_n)), 0.0, 1.0), 4.0);
-      c += (fog_color * 0.35 + 0.04) * graze * wet_side;
+      c += (fog_color * 0.35 + 0.04) * graze * wet_side * wet_gloss;
       if (z < 25.0 * 4096.0) {
         vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
         float drop = smoothstep(0.86, 0.97, vnoise3(wp * 38.0)) *
@@ -2644,7 +2652,7 @@ void main() {
     } else {
       c += (c + 0.12) * added * ao;
     }
-    c += glints * wet * 1.6 * (1.0 + night_dark.x);
+    c += glints * wet * 1.6 * (1.0 + night_dark.x) * wet_gloss;
   }
 
   // indirect light: what the surroundings send, tinted by this surface's own color
@@ -2660,19 +2668,29 @@ void main() {
   if (materials < 0.0 && z > 0.0) {
     float ga = texture(tex_T11, tex_coord).a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
-    c = mat == 1 ? vec3(1.0, 0.1, 0.1) : (mat == 2 ? vec3(0.1, 0.3, 1.0) : c * 0.4);
+    // (and the finer classes: rusty orange, painted pink, tile cyan, wood brown, walls green)
+    float ml = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    int mf = ml > 0.9975 || ml <= 0.985 ? 0 : (ml > 0.9925 ? 1 : 2);
+    c = mat == 1 ? (mf == 1 ? vec3(1.0, 0.5, 0.05) : (mf == 2 ? vec3(1.0, 0.3, 0.8) : vec3(1.0, 0.1, 0.1)))
+                 : (mat == 2 ? (mf == 1 ? vec3(0.1, 0.9, 0.9) : vec3(0.1, 0.3, 1.0))
+                             : (mf == 1 ? vec3(0.45, 0.25, 0.1) : (mf == 2 ? vec3(0.2, 0.7, 0.2) : c * 0.4)));
   }
   float mk = materials > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : materials;
   if (mk > 0.0 && z > 0.0 && z < 120.0 * 4096.0 && wsurf == 0.0) {
     float ga = texture(tex_T11, tex_coord).a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
     if (mat != 0) {
+      // the finer class (tfrag3.frag), the normal's length a step under 1.0: metal 1 rusty, 2
+      // painted; glossy 1 tile
+      float mlen = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+      int mfine = mlen > 0.9975 || mlen <= 0.985 ? 0 : (mlen > 0.9925 ? 1 : 2);
       vec3 nn = surf_n;
       vec3 vdir = normalize(p);
       vec3 r = reflect(vdir, nn);
       float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
       float hit;
-      vec3 refl = trace_reflection(p, r, z, hit);
+      // (rust reflects nothing: no trace)
+      vec3 refl = mat == 1 && mfine == 1 ? c : trace_reflection(p, r, z, hit);
       float fade = 1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z);
       // the sun's highlight, where the sun reaches
       float sunlit = 0.0;
@@ -2685,11 +2703,24 @@ void main() {
       }
       float sr = max(dot(r, sun_dir.xyz), 0.0);
       float lum = max(dot(c, vec3(0.3, 0.59, 0.11)), 0.02);
-      if (mat == 1) {
+      if (mat == 1 && mfine == 1) {
+        // rust: only a dull, wide sheen in its own color
+        c += c * (clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5) * pow(sr, 6.0) * 0.25 * sunlit * mk;
+      } else if (mat == 1 && mfine == 2) {
+        // paint: a coat over the color: the surroundings only at grazing angles, untinted
+        float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
+        c = mix(c, refl, clamp(f * 0.5 + 0.05, 0.0, 1.0) * mk * fade);
+        c += vec3(1.0, 0.97, 0.92) * (pow(sr, 120.0) * 0.7 + pow(sr, 20.0) * 0.06) * sunlit * mk;
+      } else if (mat == 1) {
         vec3 tint = clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5;
         float f = 0.5 + 0.5 * pow(1.0 - facing, 5.0);
         c = mix(c, refl * tint * (0.5 + lum), f * 0.55 * mk * fade);
         c += c * tint * (pow(sr, 64.0) * 2.0 + pow(sr, 12.0) * 0.45) * sunlit * mk;
+      } else if (mfine == 1) {
+        // tile: glazed, softer than glass
+        float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
+        c = mix(c, refl, clamp(f * 0.35 + 0.03, 0.0, 1.0) * mk * fade);
+        c += vec3(1.0, 0.95, 0.85) * pow(sr, 150.0) * sunlit * mk;
       } else {
         float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
         c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
@@ -2704,8 +2735,9 @@ void main() {
         if (rr < 1.6) {
           float lr = max(dot(r, tl / max(d, 1.0)), 0.0);
           float near = 1.0 - smoothstep(0.5, 1.6, rr);
-          vec3 tint = mat == 1 ? clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5 : vec3(1.0);
-          float sp = mat == 1 ? pow(lr, 40.0) * 0.9 : pow(lr, 150.0) * 1.6;
+          vec3 tint = mat == 1 && mfine != 2 ? clamp(c / lum, 0.0, 2.0) * 0.5 + 0.5 : vec3(1.0);
+          float sp = mat == 1 ? (mfine == 1 ? pow(lr, 8.0) * 0.25 : (mfine == 2 ? pow(lr, 80.0) * 0.8 : pow(lr, 40.0) * 0.9))
+                              : (mfine == 1 ? pow(lr, 120.0) : pow(lr, 150.0) * 1.6);
           c += light_color[i].rgb * tint * sp * near * mk * fade * (1.0 + night_dark.x);
         }
       }
@@ -2749,7 +2781,8 @@ void main() {
     vec3 refl = trace_reflection(p, r, z, hit);
     // a sheen, not a mirror: the ground's own color stays, dimmer reflections outside the puddles
     refl = mix(refl, c, 0.25 * (1.0 - puddle));
-    float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0);
+    float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0) *
+                   mix(wet_gloss, 1.0, puddle);
     c = mix(c, refl, amount);
     // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
     if (weather.x > 0.0 && z < 15.0 * 4096.0) {

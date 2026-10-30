@@ -15,9 +15,26 @@
 // the normal target's alpha (2 bits): 1 plain, 2/3 metal, 1/3 glossy, 0 no normal; sand is plain
 // with its normal written 0.9 long (the composite draws the wind's ripples on it), rock 0.75 (a
 // tiling rock picture laid over it), rocky ground 0.6 (rock, and darker: the game paints it as pale
-// as the sand). Brick and stone walls are plain to the post pass; here they tell the background
-// shaders what may take the relief.
-enum EnhancedMaterial : u8 { kPlain = 0, kMetal = 1, kGlossy = 2, kSand = 3, kRock = 4, kGround = 5, kWall = 6 };
+// as the sand). The rougher classes stay what they were to everything else: a normal 0.995 or 0.99
+// long, above the 0.985 the composite's plain-scenery tests use, 10 bits tell them apart (a length
+// is off by 0.0017 at most, the msaa's averaged edges aside): in the plain alpha wood 0.995 (no
+// wet sheen), walls 0.99 (little; here they also tell the background shaders what may take the
+// relief); in the metal alpha rusty 0.995 (no reflection, a dull wide sheen), painted 0.99 (a coat
+// over its color); in the glossy alpha tile 0.995 (softer than glass).
+enum EnhancedMaterial : u8 {
+  kPlain = 0,
+  kMetal = 1,
+  kGlossy = 2,
+  kSand = 3,
+  kRock = 4,
+  kGround = 5,
+  kWall = 6,
+  kWood = 7,
+  kRustyMetal = 8,
+  kPaintedMetal = 9,
+  kTile = 10,
+  kEnhMaterialCount = 11
+};
 constexpr u8 kEnhMaterialMask = 0x0f;
 constexpr u8 kEnhMatHoles = 0x10;  // the texture has see-through texels (the level's list only)
 
@@ -73,11 +90,23 @@ inline u8 enhanced_material(std::string name) {
       !has({"brick", "tile", "shrub"})) {
     return kRock;
   }
+  if (has({"wood", "plank", "timber", "bark"}) && !has({"metal"})) {
+    return kWood;
+  }
+  // (thrusters, frustums and crusts aren't rusty)
+  if (has({"rust"}) && !has({"thrust", "frust", "crust", "trust"})) {
+    return kRustyMetal;
+  }
+  // (roof tiles are fired clay: a rough wall; the sages' tiles glow)
+  if (has({"tile"}) && !has({"projectile", "lightning", "sage", "glow"})) {
+    return has({"roof"}) ? kWall : kTile;
+  }
   // brick, masonry, stone: the walls and floors the relief suits (bars, lamps, grilles and glass set
   // in a wall aren't: their brightness isn't their shape); walls of a named metal are metal, below
   if (has({"brick", "stone", "wall", "cobble", "masonry", "concrete", "stucco"}) &&
       !has({"metal", "steel", "rust", "grill", "glass", "glow", "vent", "lamp", "light", "pipe", "door",
-            "window", "sign", "decal", "stain", "screen", "shrub", "grass", "marble", "crystal", "shiny"})) {
+            "window", "sign", "decal", "stain", "screen", "shrub", "grass", "marble", "crystal", "shiny",
+            "tech", "canister", "tentacle", "scaffold", "train", "frame", "env"})) {
     return kWall;
   }
   // rusty, old or dirty: rough, whatever it's made of
@@ -90,7 +119,8 @@ inline u8 enhanced_material(std::string name) {
   }
   if (has({"metal", "steel", "pipe", "chrome", "iron", "grate", "gold", "copper", "brass", "bolt",
            "rivet", "silver", "alum", "tank"})) {
-    return kMetal;
+    return has({"paint", "-red", "_red", "redmetal", "blue", "yellow", "orange", "green", "white"}) ? kPaintedMetal
+                                                                                                     : kMetal;
   }
   return kPlain;
 }
@@ -100,7 +130,7 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
   auto& m = lev->enh_materials;
   if (m.size() != lev->level->textures.size()) {
     m.clear();
-    int count[7] = {0, 0, 0, 0, 0, 0, 0};
+    int count[kEnhMaterialCount] = {};
     // (JAK_ENHANCED_MATERIAL_NAMES=1: each texture's name and material in the log)
     static const bool names = std::getenv("JAK_ENHANCED_MATERIAL_NAMES") != nullptr;
     for (const auto& tex : lev->level->textures) {
@@ -125,9 +155,12 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     }
     // (in the log: a level whose rock or sand isn't named so misses the sun on the rock, the
     // sand's ripples and grade)
-    lg::info("[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} glossy, {} wall, {} plain",
-             lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
-             count[kGlossy], count[kWall], count[kPlain]);
+    lg::info(
+        "[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} rusty, {} painted, "
+        "{} glossy, {} tile, {} wall, {} wood, {} plain",
+        lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
+        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kTile], count[kWall],
+        count[kWood], count[kPlain]);
   }
   return m;
 }
