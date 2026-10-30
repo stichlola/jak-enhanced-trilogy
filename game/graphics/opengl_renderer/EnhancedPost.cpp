@@ -51,6 +51,7 @@ EnhancedSmokeLights g_enhanced_smoke_lights;
 EnhancedMerc g_enhanced_merc;
 EnhancedWind g_enhanced_wind;
 float g_enhanced_parallax = 0.f;  // (see EnhancedMaterials.h)
+bool g_enhanced_wall_notile = false;
 EnhancedCasters g_enhanced_casters;
 EnhancedLights g_enhanced_lights;
 EnhancedGameLights g_enhanced_game_lights;
@@ -846,6 +847,10 @@ EnhancedPost::EnhancedPost() {
   if (const char* px = std::getenv("JAK_ENHANCED_PARALLAX")) {
     // the relief on rock and walls near the camera, 0 = off
     m_settings.parallax = (float)std::atof(px);
+  }
+  if (const char* nt = std::getenv("JAK_ENHANCED_WALL_NOTILE")) {
+    // walls that repeat breaking their repeats up, 0 = off
+    m_settings.wall_notile = std::atoi(nt) != 0;
   }
   if (const char* mat = std::getenv("JAK_ENHANCED_MATERIALS")) {
     // metal and glossy surfaces' reflections and highlights, 0 = off
@@ -3316,6 +3321,7 @@ void EnhancedPost::update_scene() {
   ease(m_wet, wet, 1.f - std::exp(-dt / (wet > m_wet ? 5.f : 40.f)));
   g_enhanced_wind.wet = m_settings.enabled ? m_wet : 0.f;
   g_enhanced_parallax = m_settings.enabled ? m_settings.parallax : 0.f;
+  g_enhanced_wall_notile = m_settings.enabled && m_settings.wall_notile;
   // snow lies: it builds up over ~6 minutes of heavy snow, melts in ~4 after (in a minute in the
   // rain). JAK_ENHANCED_SNOW_COVER=<0..1> holds it (screenshots)
   {
@@ -6186,6 +6192,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["photo_vignette"] = s.photo_vignette;
   j["eye_adapt"] = s.eye_adapt;
   j["parallax"] = s.parallax;
+  j["wall_notile"] = s.wall_notile;
   j["hit_chroma"] = s.hit_chroma;
   j["dawn_fog"] = s.dawn_fog;
   j["cloud_rays"] = s.cloud_rays;
@@ -6277,6 +6284,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("photo_vignette", s.photo_vignette);
   get("eye_adapt", s.eye_adapt);
   get("parallax", s.parallax);
+  get("wall_notile", s.wall_notile);
   get("hit_chroma", s.hit_chroma);
   get("dawn_fog", s.dawn_fog);
   get("cloud_rays", s.cloud_rays);
@@ -6341,6 +6349,7 @@ void EnhancedPost::apply_preset(int preset) {
     s.cloud_shadows = false;
     s.relief = 0.f;
     s.parallax = 0.f;
+    s.wall_notile = false;
     g_enhanced_vegetation = 0;
     return;
   }
@@ -6367,6 +6376,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.materials = d.materials;
   s.relief = d.relief;
   s.parallax = d.parallax;
+  s.wall_notile = d.wall_notile;
   s.ray_traced = all_on(preset) ? d.ray_traced : 0;
   s.rt_ao = all_on(preset) && d.rt_ao;
   s.water_reflections = d.water_reflections;
@@ -6522,6 +6532,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Eye adaptation", &m_settings.eye_adapt, 0.f, 1.f);
     ImGui::SliderFloat("Relief (parallax)", &m_settings.parallax, 0.f, 2.f);
+    ImGui::Checkbox("Walls repeat less", &m_settings.wall_notile);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
     ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
     ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);

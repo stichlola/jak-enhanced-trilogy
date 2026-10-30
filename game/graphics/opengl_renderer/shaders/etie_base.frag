@@ -56,6 +56,23 @@ vec4 enh_pack_normal(vec3 n) {
 // walls only, never a cutout, a blended draw or a decal
 uniform float enh_parallax;  // the relief's height, game units (0 = off)
 
+// the walls' repeats broken up where they show (the composite's notile() can't: it only has the
+// finished picture, the texture's own repeat is gone by then). A slow noise over the picture picks
+// one of 8 offsets of it, two neighbouring ones blended where they differ least. The offsets in
+// quarters of a tile, so mortar lines and courses mostly stay in line; only along the axes where
+// the texture does repeat, per draw (EnhancedMaterials.h)
+uniform vec2 enh_notile;
+
+float enh_notile_noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = fract(sin(dot(i, vec2(127.1, 311.7))) * 43758.5453);
+  float b = fract(sin(dot(i + vec2(1.0, 0.0), vec2(127.1, 311.7))) * 43758.5453);
+  float c = fract(sin(dot(i + vec2(0.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  float d = fract(sin(dot(i + vec2(1.0, 1.0), vec2(127.1, 311.7))) * 43758.5453);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
 float enh_luma(vec3 c) {
   return dot(c, vec3(0.3, 0.59, 0.11));
 }
@@ -112,12 +129,30 @@ void main() {
   if (gfx_hack_no_tex == 0) {
     //vec4 T0 = texture(tex_T0, tex_coord);
     vec4 T0;
-    if (enh_parallax > 0.0) {
+    if (enh_parallax > 0.0 || enh_notile != vec2(0.0)) {
       // (the derivatives out here, before any branch on the pixel; the mip stays the polygon's, a
       // step in the shift would otherwise show as a seam)
       vec2 uv = tex_coord.xy, dx = dFdx(uv), dy = dFdy(uv);
       vec3 px = dFdx(enh_pos), py = dFdy(enh_pos);
-      T0 = textureGrad(tex_T0, uv + enh_parallax_shift(uv, dx, dy, px, py), dx, dy);
+      // (near only: three reads instead of one; gone by 60 m)
+      float nk = enh_notile == vec2(0.0) ? 0.0 : 1.0 - smoothstep(30.0 * 4096.0, 60.0 * 4096.0, length(enh_pos));
+      vec2 off_a = vec2(0.0), off_b = vec2(0.0);
+      float pick = 0.0;
+      if (nk > 0.0) {
+        float l = enh_notile_noise(uv * 0.37) * 8.0;
+        float ia = floor(l);
+        pick = l - ia;
+        off_a = floor(sin(vec2(3.0, 7.0) * ia) * 4.0 + 0.5) * 0.25 * enh_notile;
+        off_b = floor(sin(vec2(3.0, 7.0) * (ia + 1.0)) * 4.0 + 0.5) * 0.25 * enh_notile;
+      }
+      // (the relief marched on the offset that shows most, so it matches the picture)
+      vec2 shift = enh_parallax > 0.0 ? enh_parallax_shift(uv + (pick < 0.5 ? off_a : off_b), dx, dy, px, py) : vec2(0.0);
+      T0 = textureGrad(tex_T0, uv + shift + off_a, dx, dy);
+      if (nk > 0.0) {
+        vec4 b = textureGrad(tex_T0, uv + shift + off_b, dx, dy);
+        vec4 mixed = mix(T0, b, smoothstep(0.2, 0.8, pick - 0.1 * dot(T0.rgb - b.rgb, vec3(1.0))));
+        T0 = nk >= 1.0 ? mixed : mix(textureGrad(tex_T0, uv + shift, dx, dy), mixed, nk);
+      }
     } else {
       T0 = texture(tex_T0, tex_coord.xy);
     }

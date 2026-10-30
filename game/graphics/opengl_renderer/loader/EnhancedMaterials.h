@@ -37,9 +37,44 @@ enum EnhancedMaterial : u8 {
 };
 constexpr u8 kEnhMaterialMask = 0x0f;
 constexpr u8 kEnhMatHoles = 0x10;  // the texture has see-through texels (the level's list only)
+constexpr u8 kEnhMatRepeatU = 0x20;  // a wall's texture repeats across the polygons, in u
+constexpr u8 kEnhMatRepeatV = 0x40;  // and in v
 
-// Enhanced: the parallax setting (EnhancedPost's), for the background draws
+// Enhanced: the settings (EnhancedPost's) for the background draws: the relief, and whether walls
+// that repeat break their repeats up
 extern float g_enhanced_parallax;
+extern bool g_enhanced_wall_notile;
+
+// which walls' textures really repeat, per axis, from the uvs of the level's nearest geometry: most
+// of a repeated wall's vertices fall outside 0..1. A picture laid once (a trim, a band with a
+// designed top and bottom) mustn't be moved around: in the axes where it stays within one tile, it
+// isn't
+template <typename Draws, typename Unpacked>
+inline void enhanced_find_repeats(const Draws& draws, const Unpacked& unpacked, std::vector<u8>& m) {
+  constexpr u8 both = kEnhMatRepeatU | kEnhMatRepeatV;
+  for (size_t d = 0; d < draws.size(); d++) {
+    const int tex = draws[d].tree_tex_id;
+    if (tex < 0 || tex >= (int)m.size() || (m[tex] & kEnhMaterialMask) != kWall || (m[tex] & both) == both) {
+      continue;
+    }
+    const size_t first = draws[d].unpacked.idx_of_first_idx_in_full_buffer;
+    const size_t end = d + 1 < draws.size() ? draws[d + 1].unpacked.idx_of_first_idx_in_full_buffer
+                                            : unpacked.indices.size();
+    for (size_t i = first; i < end; i++) {
+      const u32 vi = unpacked.indices[i];
+      if (vi >= unpacked.vertices.size()) {
+        continue;  // (a strip's restart)
+      }
+      const auto& v = unpacked.vertices[vi];
+      if (v.s < -0.02f || v.s > 1.02f) {
+        m[tex] |= kEnhMatRepeatU;
+      }
+      if (v.t < -0.02f || v.t > 1.02f) {
+        m[tex] |= kEnhMatRepeatV;
+      }
+    }
+  }
+}
 
 inline u8 enhanced_material(std::string name) {
   std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
@@ -153,6 +188,12 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
       }
       m.push_back(mat);
     }
+    for (const auto& tree : lev->level->tfrag_trees[0]) {
+      enhanced_find_repeats(tree.draws, tree.unpacked, m);
+    }
+    for (const auto& tree : lev->level->tie_trees[0]) {
+      enhanced_find_repeats(tree.static_draws, tree.unpacked, m);
+    }
     // (in the log: a level whose rock or sand isn't named so misses the sun on the rock, the
     // sand's ripples and grade)
     lg::info(
@@ -175,11 +216,13 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   static GLuint cached_program[2] = {0, 0};
   static GLint cached_loc[2] = {-1, -1};
   static GLint cached_parallax[2] = {-1, -1};
+  static GLint cached_notile[2] = {-1, -1};
   int slot = shader == ShaderId::TFRAG3 ? 0 : 1;
   if (cached_program[slot] != program) {
     cached_program[slot] = program;
     cached_loc[slot] = glGetUniformLocation(program, "enh_material");
     cached_parallax[slot] = glGetUniformLocation(program, "enh_parallax");
+    cached_notile[slot] = glGetUniformLocation(program, "enh_notile");
   }
   u8 m = materials && tex >= 0 && tex < (int)materials->size() ? (*materials)[tex] : kPlain;
   u8 kind = m & kEnhMaterialMask;
@@ -187,11 +230,18 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   // the relief (tfrag3.frag): solid rock and walls drawn plainly; Jak 3 only until tried in the others
   // (the rock's a blur stretched over whole cliffs: its shapes are big, it takes twice the height)
   float relief = 0.f;
+  float notile_u = 0.f, notile_v = 0.f;
   // (Jak 2 and 3's solid ties have blending on with a mode that doesn't blend: as setup_opengl_from_draw_mode)
   const bool blended = mode.get_ab_enable() && mode.get_alpha_blend() != DrawMode::AlphaBlend::DISABLED &&
                        mode.get_alpha_blend() != DrawMode::AlphaBlend::SRC_SRC_SRC_SRC;
   if (render_state->version == GameVersion::Jak3 && !(m & kEnhMatHoles) && !blended && !mode.get_decal()) {
     relief = kind == kRock ? 0.1f : (kind == kWall ? 0.05f : 0.f);
+    // (the per-material switch of the anti-tile sampling: walls; a clamped axis can't wrap)
+    if (kind == kWall && g_enhanced_wall_notile) {
+      notile_u = (m & kEnhMatRepeatU) && !mode.get_clamp_s_enable() ? 1.f : 0.f;
+      notile_v = (m & kEnhMatRepeatV) && !mode.get_clamp_t_enable() ? 1.f : 0.f;
+    }
   }
   glUniform1f(cached_parallax[slot], relief * 4096.f * g_enhanced_parallax);
+  glUniform2f(cached_notile[slot], notile_u, notile_v);
 }
