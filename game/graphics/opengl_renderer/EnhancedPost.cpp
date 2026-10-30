@@ -3259,14 +3259,15 @@ void EnhancedPost::update_scene() {
   {
     // (by the late afternoon's hours; all of it from a golden of 0.5, as the shader's low light)
     auto smooth = [](float x) { x = std::clamp(x, 0.f, 1.f); return x * x * (3.f - 2.f * x); };
-    // (and the morning's: the sun as low, long shadows)
+    // (and the morning's: the sun as low, long shadows). The area's own path: the desert's by
+    // its late afternoon, the other outdoor areas' by their day sky
+    const float path = std::max(std::min(m_grade.golden * 2.f, 1.f), m_grade.day_sky);
     const float g = std::max(smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)),
                              smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f))) *
-                    std::min(m_grade.golden * 2.f, 1.f);
+                    path;
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
-    const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) *
-                          std::min(m_grade.golden * 2.f, 1.f);
+    const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
   }
   ease(m_grade.clouds, want.clouds, k_weather);
