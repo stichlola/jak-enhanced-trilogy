@@ -1,10 +1,12 @@
 #pragma once
 
+#include <array>
 #include <unordered_map>
 
 #include "common/common_types.h"
 
 struct SharedRenderState;
+struct EnhancedCamera;
 
 /*!
  * What the sprite renderer adds to the game's smoke and flames (fx_detail): a 3D noise the puffs
@@ -43,4 +45,39 @@ class EnhancedSpriteFx {
   bool m_on = false;
   int m_class_loc = -1;
   std::unordered_map<u64, int> m_classes;  // by GL texture (stable, the VRAM address isn't) + blend
+};
+
+/*!
+ * Where the ground is under a point, from the depth buffer: a line of points below it is read back
+ * into a pixel buffer, answered a frame or so later (no stall). An explosion needs it once: its dust
+ * ring, what it throws bounces there, its scorch mark goes there.
+ */
+class EnhancedGroundProbe {
+ public:
+  // a ticket for poll (the oldest question is dropped if too many are open)
+  int ask(const float* pos,
+          const EnhancedCamera& cam,
+          const std::array<float, 4>& proj,
+          u32 depth_fbo,
+          int w,
+          int h);
+  // false: not yet. true: answered (found: seen, y: its height, world)
+  bool poll(int ticket, bool* found, float* y);
+
+ private:
+  static constexpr int kSlots = 4;
+  static constexpr int kPoints = 12;
+  struct Slot {
+    u32 pbo = 0;
+    void* fence = nullptr;
+    int ticket = -1;
+    float top[3] = {};
+    float view[kPoints][3] = {};
+    bool on_screen[kPoints] = {};
+    float cam_rot_y[3] = {};  // the world y of each view axis
+    float cam_y = 0.f;
+    float depth_a = 0.f, depth_b = 0.f;
+  };
+  Slot m_slots[kSlots];
+  int m_next_ticket = 0;
 };

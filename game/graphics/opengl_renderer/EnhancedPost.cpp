@@ -1664,10 +1664,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
                                   [&](const Blast& b) {
                                     // gun blasts are short: free their slots for the next ones
-                                    const double life = b.kind == 2 ? 0.3 : b.kind != 0 ? 0.7 : 1.6;
+                                    // (fx_detail: an explosion's dust and debris last longer)
+                                    const double life = b.kind == 2   ? 0.3
+                                                        : b.kind != 0 ? 0.7
+                                                        : m_settings.fx_detail > 0.f ? 2.4
+                                                                                     : 1.6;
                                     return m_time - b.start > life;
                                   }),
                    m_blasts.end());
+    update_blast_fx(cam, on, w, h);
     // an explosion's wave through the grass: it spreads for a third of a second, then the grass
     // rises back
     g_enhanced_blast_push.count = 0;
@@ -2399,8 +2404,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float blast_age[kBlasts] = {};
       float blast_seed[kBlasts] = {};
       float blast_dir[kBlasts * 4] = {};
+      float blast_ground[kBlasts] = {};
       int blast_count = 0;
-      for (const auto& b : m_blasts) {
+      // (fx_detail: the newest first, the older ones linger now)
+      const bool newest_first = m_settings.fx_detail > 0.f;
+      for (size_t k = 0; k < m_blasts.size(); k++) {
+        const auto& b = m_blasts[newest_first ? m_blasts.size() - 1 - k : k];
         if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
           break;
         }
@@ -2421,6 +2430,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
         }
         blast_dir[blast_count * 4 + 3] = (float)b.kind;
+        // (> 0: no ground known)
+        blast_ground[blast_count] = b.ground < 1e11f ? std::min(b.ground - b.pos[1], 0.f) : 1.f;
         blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
         blast_age[blast_count++] = (float)(m_time - b.start);
       }
@@ -2428,6 +2439,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
       glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
       glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
+      glUniform1fv(glGetUniformLocation(id, "blast_ground"), kBlasts, blast_ground);
       glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
     }
@@ -5458,6 +5470,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
+  glUniform1f(glGetUniformLocation(id, "fx_detail"), m_settings.fx_detail);
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
   glUniform1f(glGetUniformLocation(id, "vignette"),
               m_settings.vignette + (g_enhanced_menu.photo_active ? m_settings.photo_vignette : 0.f));

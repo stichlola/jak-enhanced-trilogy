@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -19,8 +21,9 @@ EnhancedFx g_enhanced_fx;
 namespace {
 
 // (units past those the game's shaders bind for themselves at draw time)
-constexpr int kNoiseUnit = 14;
-constexpr int kDepthUnit = 15;
+constexpr int kNoiseUnit = 30;
+constexpr int kDepthUnit = 31;
+constexpr float kMeter = 4096.f;
 
 // a small 3D noise, tiling on all sides, two independent channels: fractal value noise made here
 // (no game data). Its mips fade to grey, so far-off sprites stop being eroded by themselves
@@ -238,5 +241,171 @@ void EnhancedSpriteFx::set_bucket(SharedRenderState* render_state,
       copy_depth(render_state);
     }
     glUniform1i(m_class_loc, c);
+  }
+}
+
+int EnhancedGroundProbe::ask(const float* pos,
+                             const EnhancedCamera& cam,
+                             const std::array<float, 4>& proj,
+                             u32 depth_fbo,
+                             int w,
+                             int h) {
+  const int ticket = m_next_ticket++;
+  auto& s = m_slots[ticket % kSlots];
+  if (!s.pbo) {
+    glGenBuffers(1, &s.pbo);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+    glBufferData(GL_PIXEL_PACK_BUFFER, kPoints * sizeof(float), nullptr, GL_STREAM_READ);
+  }
+  if (s.fence) {
+    glDeleteSync((GLsync)s.fence);
+  }
+  s.ticket = ticket;
+  std::memcpy(s.top, pos, sizeof(s.top));
+  for (int col = 0; col < 3; col++) {
+    s.cam_rot_y[col] = cam.rot[1][col];
+  }
+  s.cam_y = cam.trans[1];
+  s.depth_a = proj[0];
+  s.depth_b = proj[1];
+  GLint old_read = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, depth_fbo);
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+  for (int k = 0; k < kPoints; k++) {
+    float* v = s.view[k];
+    for (int col = 0; col < 3; col++) {
+      v[col] = 0.f;
+      for (int row = 0; row < 3; row++) {
+        const float world = pos[row] - (row == 1 ? k * 0.75f * kMeter : 0.f);
+        v[col] += (world - cam.trans[row]) * cam.rot[row][col];
+      }
+    }
+    s.on_screen[k] = false;
+    if (v[2] > 0.5f * kMeter) {
+      const int px = (int)((v[0] * proj[2] / v[2] * 0.5f + 0.5f) * w);
+      const int py = (int)((v[1] * proj[3] / v[2] * 0.5f + 0.5f) * h);
+      if (px >= 0 && px < w && py >= 0 && py < h) {
+        s.on_screen[k] = true;
+        glReadPixels(px, py, 1, 1, GL_DEPTH_COMPONENT, GL_FLOAT, (void*)(k * sizeof(float)));
+      }
+    }
+  }
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
+  s.fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  return ticket;
+}
+
+bool EnhancedGroundProbe::poll(int ticket, bool* found, float* y) {
+  *found = false;
+  auto& s = m_slots[ticket % kSlots];
+  if (s.ticket != ticket || !s.fence) {
+    return true;  // dropped
+  }
+  const GLenum state = glClientWaitSync((GLsync)s.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+  if (state != GL_ALREADY_SIGNALED && state != GL_CONDITION_SATISFIED) {
+    return false;
+  }
+  glDeleteSync((GLsync)s.fence);
+  s.fence = nullptr;
+  s.ticket = -1;
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, s.pbo);
+  if (const auto* d = (const float*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0,
+                                                     kPoints * sizeof(float), GL_MAP_READ_BIT)) {
+    // where a point gone under the ground is hidden, the depth there is the ground on its way: the
+    // lowest such hit (higher ones are legs, the body the blast hit). Nothing further than 10 m off:
+    // that's a wall in front of it all
+    for (int k = 0; k < kPoints; k++) {
+      if (!s.on_screen[k] || d[k] <= 1e-7f) {
+        continue;
+      }
+      const float* v = s.view[k];
+      const float z = std::abs(s.depth_b / (d[k] * 2.f - 1.f - s.depth_a));
+      if (z > v[2] + 0.1f * kMeter || (v[2] - z) * std::hypot(v[0] / v[2], 1.f) > 10.f * kMeter) {
+        continue;
+      }
+      const float scale = z / v[2];
+      const float hit_y = s.cam_y + (s.cam_rot_y[0] * v[0] + s.cam_rot_y[1] * v[1] +
+                                     s.cam_rot_y[2] * v[2]) * scale;
+      const float point_y = s.top[1] - k * 0.75f * kMeter;
+      if (hit_y > s.top[1] + 0.3f * kMeter || hit_y < point_y - 0.3f * kMeter) {
+        continue;
+      }
+      if (!*found || hit_y < *y) {
+        *found = true;
+        *y = hit_y;
+      }
+    }
+    glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+  }
+  glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+  return true;
+}
+
+// the explosions' layers beyond what the composite draws by itself: for each new one, once the ground
+// under it is known, the smoke that stays behind (the game's puffs). Test switch:
+// JAK_ENHANCED_BLAST_TEST=seconds[,radius m]: an explosion 6 m ahead of Jak every so often
+void EnhancedPost::update_blast_fx(const EnhancedCamera& cam, bool on, int w, int h) {
+  const auto& pl = g_enhanced_player;
+  static const char* test = std::getenv("JAK_ENHANCED_BLAST_TEST");
+  static double test_last = -1e9;
+  if (test && on && pl.valid) {
+    float every = 4.f, radius = 4.f;
+    std::sscanf(test, "%f,%f", &every, &radius);
+    if (m_time - test_last > every) {
+      test_last = m_time;
+      const float fx = cam.rot[0][2], fz = cam.rot[2][2];
+      const float len = std::max(std::sqrt(fx * fx + fz * fz), 0.01f);
+      Blast b{{pl.pos[0] + fx / len * 6.f * kMeter, pl.pos[1] + 0.5f * kMeter,
+               pl.pos[2] + fz / len * 6.f * kMeter},
+              radius * kMeter,
+              m_time};
+      m_blasts.push_back(b);
+    }
+  }
+  if (!on || m_settings.fx_detail <= 0.f || m_settings.blast <= 0.f) {
+    return;
+  }
+  for (auto& b : m_blasts) {
+    if (b.kind != 0 || b.fx_done) {
+      continue;
+    }
+    if (b.probe < 0) {
+      b.probe = m_ground_probe.ask(b.pos, cam, m_last_proj, m_depth_fbo, w, h);
+    }
+    bool found = false;
+    float y = 0.f;
+    if (!m_ground_probe.poll(b.probe, &found, &y)) {
+      continue;
+    }
+    b.fx_done = true;
+    // off screen or hidden: Jak's ground, if he is near and on it
+    if (!found && pl.valid && pl.state != 0 && pl.state != 6 && pl.state != 7 &&
+        std::abs(pl.pos[1] - b.pos[1]) < 5.f * kMeter &&
+        std::hypot(pl.pos[0] - b.pos[0], pl.pos[2] - b.pos[2]) < 40.f * kMeter) {
+      found = true;
+      y = pl.pos[1];
+    }
+    if (found) {
+      b.ground = y;
+    }
+    // what stays behind: a few columns of smoke drifting off, sized by the blast
+    if (m_settings.blast_sparks > 0.f) {
+      const float r = std::clamp(b.radius / kMeter, 1.5f, 10.f);
+      for (int k = 0; k < 3; k++) {
+        Puff f;
+        const float a = k * 2.1f + (float)(std::rand() % 100) * 0.01f;
+        f.pos[0] = b.pos[0] + std::cos(a) * r * 0.25f * kMeter;
+        f.pos[1] = found ? y : b.pos[1];
+        f.pos[2] = b.pos[2] + std::sin(a) * r * 0.25f * kMeter;
+        f.size = std::clamp(r * 0.45f, 1.f, 4.f);
+        f.kind = 3;
+        f.seed = (float)(std::rand() % 1000) / 1000.f;
+        f.life = 4.f + k;
+        f.time = m_time;
+        m_puffs.push_back(f);
+      }
+    }
   }
 }

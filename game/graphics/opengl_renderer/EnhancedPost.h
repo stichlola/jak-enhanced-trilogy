@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
+#include "game/graphics/opengl_renderer/EnhancedParticles.h"
 
 struct EnhancedRtLevel;
 
@@ -412,8 +413,13 @@ class EnhancedPost {
     double start;
     float dir[3] = {0.f, 0.f, 0.f};  // gun blasts: where it's fired (world)
     int kind = 0;  // 0: an explosion, 1: the red gun's blast, 2: the red gun charging, 3: charged
+    float ground = 1e12f;  // the ground under it, world height, once known (update_blast_fx)
+    int probe = -1;
+    bool fx_done = false;
   };
   std::vector<Blast> m_blasts;
+  EnhancedGroundProbe m_ground_probe;
+  void update_blast_fx(const EnhancedCamera& cam, bool on, int w, int h);
   // where Jak was lately (world, game units): rings spread on the water from these
   struct WakePoint {
     float pos[3];

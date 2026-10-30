@@ -180,6 +180,8 @@ uniform float close_up;          // cutscenes: nearer than this (game units) no 
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float blast_seed[4];
+uniform float blast_ground[4];  // the ground under it, along up from the blast (<= 0; > 0: not known)
+uniform float fx_detail;        // richer explosions, shots and marks (0 = off)
 uniform vec4 blast_dir[4];      // gun blasts: where it's fired (view space), w: kind (0 explosion,
                                 // 1 red gun, 2 red gun charging: only sparks on the gun, 3 a
                                 // charged shot: wide, red going fuchsia at its edges)
@@ -755,6 +757,69 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
     trans *= 1.0 - a;
   }
   return vec4(col, 1.0 - trans);
+}
+
+// an explosion's layers over the scene along the ray (the flash and the sparks are drawn apart, the
+// smoke is puffs): the ring of dust it blows out along the ground, and the fireball, boiling from
+// white to orange to soot. Everything scales with the blast's radius. Premultiplied color, coverage.
+vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
+  vec3 bp = blast_pos[i].xyz;
+  float age = blast_age[i];
+  float rad = clamp(blast_pos[i].w, 1.5 * 4096.0, 12.0 * 4096.0);
+  float seed = blast_seed[i];
+  vec3 col = vec3(0.0);
+  float trans = 1.0;
+  float upd = dot(ray, up_view);
+  if (blast_ground[i] <= 0.0 && age < 2.3 && abs(upd) > 0.01) {
+    // three sheets one over the other: low and wide, higher and behind it
+    float grow = 1.0 - exp(-age * 3.0);
+    float ring = rad * (0.35 + 1.9 * grow);
+    float fade = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(0.9, 2.3, age));
+    for (int k = 0; k < 3; k++) {
+      float t = (dot(bp, up_view) + blast_ground[i] + float(k) * 0.14 * rad + 0.1 * 4096.0) / upd;
+      if (t <= 0.0 || t > scene_dist) {
+        continue;
+      }
+      vec3 hp = ray * t - bp;
+      float rr = length(hp - up_view * dot(hp, up_view));
+      float band = (rr - ring * (1.0 - 0.13 * float(k))) / (rad * (0.28 + 0.35 * grow) * (1.0 - 0.2 * float(k)));
+      if (abs(band) > 1.6) {
+        continue;
+      }
+      float b = exp(-band * band * 2.5);
+      vec3 nq = (view_to_world * hp) / (0.33 * rad) + vec3(seed * 7.0, float(k) * 5.0 - age * 0.6, seed);
+      b *= smoothstep(0.25, 0.7, vnoise3(nq) + b * 0.15);
+      float a = b * fade * clamp((scene_dist - t) / (0.5 * 4096.0), 0.0, 1.0) * (0.55 - 0.12 * float(k));
+      col += trans * a * dust;
+      trans *= 1.0 - a;
+    }
+  }
+  if (age < 0.75) {
+    float u = age / 0.75;
+    float r = rad * (0.25 + 0.75 * (1.0 - exp(-age * 9.0)));
+    float tc = dot(bp, ray);
+    float h2 = dot(bp, bp) - tc * tc;
+    if (h2 < r * r && tc + r > 0.0) {
+      float half_chord = sqrt(r * r - h2);
+      float t0 = max(tc - half_chord, 0.0);
+      float t1 = min(tc + half_chord, scene_dist);
+      if (t1 > t0) {
+        vec3 q = view_to_world * (ray * (0.5 * (t0 + t1)) - bp) / r;
+        float n = vnoise3(q * 2.6 + vec3(seed * 3.0, -age * 3.0, seed)) * 0.6 +
+                  vnoise3(q * 6.0 + vec3(-seed, -age * 5.0, seed * 2.0)) * 0.4;
+        float thick = (t1 - t0) / (2.0 * r);
+        float body = smoothstep(0.35, 0.75, n + thick * 0.75 - u * 0.35) * (1.0 - smoothstep(0.6, 1.0, u));
+        float temp = thick * 0.8 + n * 0.6 - u * 1.25;
+        vec3 fire_c = mix(vec3(0.6, 0.08, 0.01), vec3(1.0, 0.45, 0.08), smoothstep(0.0, 0.4, temp));
+        fire_c = mix(fire_c, vec3(1.0, 0.9, 0.55), smoothstep(0.45, 0.85, temp));
+        float soot = body * mix(0.2, 0.85, smoothstep(0.1, 0.8, u)) * (1.0 - smoothstep(-0.1, 0.25, temp));
+        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * (2.2 - 1.6 * u);
+        trans *= 1.0 - max(soot, body * 0.5);
+      }
+    }
+  }
+  float k = fx_detail * blast_strength;
+  return vec4(col * k, 1.0 - mix(1.0, trans, min(k, 1.0)));
 }
 
 // the sandstorm's air at a world point (m): rolling clouds of sand stretched along the wind and
@@ -3106,6 +3171,19 @@ void main() {
         hot = mix(vec3(1.0, 0.85, 0.5), hot, phase);  // white-hot as it leaves the flame
       }
       c += hot * (glow * fade * flick * fire.y * (pop ? 3.2 : 2.4));
+    }
+  }
+
+  // an explosion's dust ring and fireball
+  if (fx_detail > 0.0 && blast_count > 0) {
+    float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.12;
+    vec3 dust = mix(vec3(0.62, 0.52, 0.4) * (0.25 + 0.65 * daylight), fog_color * 0.9, 0.25);
+    float scene_dist = z > 0.0 ? length(p) : 1e12;
+    for (int i = 0; i < blast_count; i++) {
+      if (blast_dir[i].w < 0.5) {
+        vec4 l = blast_layers(i, ray, scene_dist, dust);
+        c = c * (1.0 - l.a) + l.rgb;
+      }
     }
   }
 
