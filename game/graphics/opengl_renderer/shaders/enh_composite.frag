@@ -2960,7 +2960,7 @@ void main() {
           lit += cl.a * cl.a;
         }
       }
-      c += sun_color() * lit / 10.0 * toward * cover * cloud_rays * 0.22 *
+      c += sun_color() * smoothstep(0.15, 0.9, lit / 10.0) * toward * cover * cloud_rays * 0.45 *
            (1.0 - smoothstep(0.25, 0.45, sky_sun.w));
     }
   }
