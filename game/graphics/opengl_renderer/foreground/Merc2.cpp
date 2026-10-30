@@ -2,12 +2,15 @@
 
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/log/log.h"
+#include "common/texture/texture_slots.h"
 #include "common/util/fnv.h"
 #include "common/util/simd_util.h"
 
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -752,6 +755,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->perspective_matrix = glGetUniformLocation(id, "perspective_matrix");
   uniforms->ignore_alpha = glGetUniformLocation(id, "ignore_alpha");
   uniforms->enh_cloth = glGetUniformLocation(id, "enh_cloth");
+  uniforms->enh_mat = glGetUniformLocation(id, "enh_mat");
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
 }
@@ -921,7 +925,8 @@ void Merc2::handle_setup_dma(DmaFollower& dma, SharedRenderState* render_state) 
                 g_enhanced_merc.enabled ? g_enhanced_merc.spec : 0.f);
     glUniform1f(glGetUniformLocation(id, "enh_wet"),
                 g_enhanced_merc.enabled ? g_enhanced_merc.wet : 0.f);
-    glUniform1f(glGetUniformLocation(id, "enh_char"), g_enhanced_merc.enabled ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(id, "enh_char"),
+                g_enhanced_merc.enabled ? g_enhanced_char_detail.load() : 0.f);
   }
   switch_to_emerc(render_state);
   set_uniform(m_emerc_uniforms.hvdf_offset, m_low_memory.hvdf_offset);
@@ -1298,6 +1303,26 @@ void Merc2::enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones
   }
 }
 
+namespace {
+// the character material of each animated texture slot, by the slot's name
+int enhanced_anim_slot_char_material(GameVersion version, int slot) {
+  static GameVersion table_version = GameVersion::Jak1;
+  static std::vector<u8> table;
+  if (table.empty() || table_version != version) {
+    table.clear();
+    table_version = version;
+    if (version != GameVersion::Jak1) {
+      const auto& names = version == GameVersion::Jak2 ? jak2_animated_texture_slots()
+                                                       : jak3_animated_texture_slots();
+      for (const auto& name : names) {
+        table.push_back(enhanced_char_material(name));
+      }
+    }
+  }
+  return slot >= 0 && slot < (int)table.size() ? table[slot] : kCharDefault;
+}
+}  // namespace
+
 void Merc2::do_draws(const Draw* draw_array,
                      const LevelData* lev,
                      u32 num_draws,
@@ -1311,6 +1336,9 @@ void Merc2::do_draws(const Draw* draw_array,
   glBindVertexArray(m_vao);
   s32 last_tex = INT32_MIN;
   int last_light = -1;
+  int last_mat = -1;
+  // Enhanced: the parts' materials, by their textures' names
+  const auto& char_materials = enhanced_level_char_materials(lev);
   bool normal_vtx_buffer_bound = true;
 
   bool fog_on = true;
@@ -1412,6 +1440,23 @@ void Merc2::do_draws(const Draw* draw_array,
                          draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) ||
                         !draw.mode.get_depth_write_enable());
     glUniform1i(uniforms.enh_cloth, cloth ? 1 : 0);
+
+    // Enhanced: what the part is made of. (an animated texture has no index in the level, but its
+    // slot's name: Jak's own face, hair and arms in Jak 3 are, for Dark Jak's colors)
+    int mat = kCharDefault;
+    if ((draw.texture & 0xffffff00) == 0xefffff00) {
+      mat = kCharEye;
+    } else if (draw.texture >= 0) {
+      if (draw.texture < (int)char_materials.size()) {
+        mat = char_materials[draw.texture];
+      }
+    } else {
+      mat = enhanced_anim_slot_char_material(render_state->version, -(draw.texture + 1));
+    }
+    if (mat != last_mat) {
+      glUniform1i(uniforms.enh_mat, mat);
+      last_mat = mat;
+    }
 
     if (m_lights_buffer[draw.light_idx].w1 && !set_fade) {
       DrawMode mode = draw.mode;

@@ -38,6 +38,7 @@ EnhancedPlayer g_enhanced_player;
 std::atomic<float> g_enhanced_l2_trigger{0.f};
 std::atomic<float> g_enhanced_board_boost{0.f};
 std::atomic<float> g_enhanced_aim{0.f};
+std::atomic<float> g_enhanced_char_detail{1.f};
 bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
@@ -1159,6 +1160,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
+  g_enhanced_char_detail = m_settings.char_detail;
   update_auto_quality();
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
@@ -6179,6 +6181,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["photo_filter"] = s.photo_filter;
   j["photo_vignette"] = s.photo_vignette;
   j["eye_adapt"] = s.eye_adapt;
+  j["char_detail"] = s.char_detail;
   j["hit_chroma"] = s.hit_chroma;
   j["dawn_fog"] = s.dawn_fog;
   j["cloud_rays"] = s.cloud_rays;
@@ -6269,6 +6272,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("photo_filter", s.photo_filter);
   get("photo_vignette", s.photo_vignette);
   get("eye_adapt", s.eye_adapt);
+  get("char_detail", s.char_detail);
   get("hit_chroma", s.hit_chroma);
   get("dawn_fog", s.dawn_fog);
   get("cloud_rays", s.cloud_rays);
@@ -6511,6 +6515,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Warmth", &m_settings.warmth, -0.2f, 0.2f);
     ImGui::SliderFloat("Vignette", &m_settings.vignette, 0.f, 1.f);
     ImGui::SliderFloat("Eye adaptation", &m_settings.eye_adapt, 0.f, 1.f);
+    ImGui::SliderFloat("Character detail", &m_settings.char_detail, 0.f, 1.f);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
     ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
     ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);

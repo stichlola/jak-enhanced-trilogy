@@ -27,7 +27,19 @@ uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
 uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
 uniform int enh_cloth;      // Enhanced: see-through cloth, shown as the game draws it (no post)
-uniform float enh_char;     // Enhanced: strength of the relief (0 = off, as without it)
+uniform float enh_char;     // Enhanced: strength of the relief and materials (0 = off, as without them)
+uniform int enh_mat;        // Enhanced: the part's material (EnhancedMaterials.h; 0 = as without it)
+
+const int MAT_SKIN = 1;
+const int MAT_HAIR = 2;
+const int MAT_METAL = 3;
+const int MAT_LEATHER = 4;
+const int MAT_CLOTH = 5;
+const int MAT_FUR = 6;
+const int MAT_EYE = 7;
+const int MAT_LENS = 8;
+// the relief's height per material: faces have lines painted on them, glass has none
+const float BUMP_K[9] = float[9](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0);
 
 void main() {
   // (here, ahead of the discard: derivatives aren't defined for the pixels it drops)
@@ -72,10 +84,10 @@ void main() {
   // its own fetch, so a pixel's slope isn't shared with its 2x2 block
   vec3 bump_g = vec3(0.0);
   float nrm_len = length(vtx_nrm);
-  if (enh_char > 0.0 && gfx_hack_no_tex == 0 && decal_enable == 0 && nrm_len > 0.1) {
+  if (enh_char > 0.0 && enh_mat > 0 && gfx_hack_no_tex == 0 && decal_enable == 0 && nrm_len > 0.1) {
     // (none far off, where it would only shimmer: 8 to 25 m. None at a cutout's edge either: its
     // see-through texels hold any color)
-    float k = enh_char * (1.0 - smoothstep(32768.0, 102400.0, length(enh_pos))) *
+    float k = enh_char * BUMP_K[enh_mat] * (1.0 - smoothstep(32768.0, 102400.0, length(enh_pos))) *
               (ignore_alpha != 0 ? 1.0 : smoothstep(0.064, 0.2, T0.a));
     if (k > 0.001) {
       const vec3 lum = vec3(0.3, 0.59, 0.11);
@@ -148,16 +160,101 @@ void main() {
     float ndl = max(dot(n, l), 0.0);
     float rim = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 3.0) * (0.35 + 0.65 * ndl);
     float ndl_b = max(dot(nb, l), 0.0);
-    float spec = pow(max(dot(nb, normalize(l + v)), 0.0), 40.0) * ndl_b;
+    // what each material makes of the highlight and of the soft light below
+    float c = clamp(enh_char, 0.0, 1.0);
+    float sp_pow = 40.0, sp_k = 1.0, wrap_k = 1.0;
+    vec3 sp_col = 0.3 + 0.7 * color.rgb;
+    vec3 wrap_tint = vec3(1.0, 0.55, 0.4);
+    vec3 albedo = clamp(T0.rgb * 2.0, 0.0, 1.0);
+    if (c > 0.0) {
+      if (enh_mat == MAT_SKIN) {  // soft and broad, and the light scatters further under it
+        sp_pow = mix(40.0, 14.0, c);
+        sp_k = mix(1.0, 0.55, c);
+        wrap_k = mix(1.0, 1.9, c);
+        wrap_tint = mix(wrap_tint, vec3(1.0, 0.45, 0.3), c);
+      } else if (enh_mat == MAT_HAIR) {  // the strands' own highlight comes below
+        sp_k = mix(1.0, 0.25, c);
+      } else if (enh_mat == MAT_METAL) {  // tight, bright, the metal's own color
+        sp_pow = mix(40.0, 90.0, c);
+        sp_k = mix(1.0, 1.7, c);
+        sp_col = mix(sp_col, albedo * 1.3 + 0.05, c);
+        wrap_k = mix(1.0, 0.5, c);
+      } else if (enh_mat == MAT_LEATHER) {
+        sp_pow = mix(40.0, 26.0, c);
+        sp_k = mix(1.0, 0.8, c);
+        wrap_k = mix(1.0, 0.8, c);
+      } else if (enh_mat == MAT_CLOTH) {
+        sp_pow = mix(40.0, 12.0, c);
+        sp_k = mix(1.0, 0.15, c);
+        wrap_k = mix(1.0, 1.1, c);
+      } else if (enh_mat == MAT_FUR) {
+        sp_pow = mix(40.0, 10.0, c);
+        sp_k = mix(1.0, 0.1, c);
+        wrap_k = mix(1.0, 1.25, c);
+      } else if (enh_mat == MAT_LENS) {  // glass: a small hard glint of pure light
+        sp_pow = mix(40.0, 220.0, c);
+        sp_k = mix(1.0, 2.2, c);
+        sp_col = mix(sp_col, vec3(1.0), c);
+        wrap_k = mix(1.0, 0.3, c);
+      } else if (enh_mat == MAT_EYE) {
+        sp_pow = mix(40.0, 90.0, c);
+        sp_k = mix(1.0, 0.5, c);
+        sp_col = mix(sp_col, vec3(1.0), c);
+        wrap_k = mix(1.0, 0.5, c);
+      }
+    }
+    float spec = pow(max(dot(nb, normalize(l + v)), 0.0), sp_pow) * ndl_b;
     vec3 key = clamp(vtx_key_color, 0.0, 1.5);
-    color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * (0.3 + 0.7 * color.rgb));
+    color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * sp_k * sp_col);
     // soft light past the terminator, warm like light scattered under skin and cloth (the game's
     // own light stops hard where the surface turns away)
     float wrap = clamp((dot(nb, l) + 0.45) / 1.45, 0.0, 1.0) - ndl_b;
-    color.rgb += color.rgb * key * wrap * vec3(1.0, 0.55, 0.4) * 0.35 * enh_rim_spec.x;
+    color.rgb += color.rgb * key * wrap * wrap_tint * 0.35 * enh_rim_spec.x * wrap_k;
     // and the shadow side catches the sky: a cool rim from the ambient light
     float back = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 2.5) * (1.0 - ndl);
     color.rgb += clamp(enh_ambient, 0.0, 1.0) * back * 0.35 * enh_rim_spec.x;
+
+    // and what only some materials have
+    if (c > 0.0 && enh_mat > 0) {
+      float nv = clamp(abs(dot(nb, v)), 0.0, 1.0);
+      vec3 amb = clamp(enh_ambient, 0.0, 1.0);
+      // a sky to reflect: dark below the horizon, toward the key light's color above. (the ambient
+      // light and key color are all this shader knows of what's around)
+      vec3 sky_r = reflect(-v, nb);
+      float sky_up = dot(sky_r, enh_world_to_view * vec3(0.0, 1.0, 0.0));
+      vec3 sky = mix(amb * 0.5, mix(amb, key, 0.6) * 1.2, smoothstep(-0.2, 0.6, sky_up));
+      float wrapped = clamp((dot(nb, l) + 0.5) / 1.5, 0.0, 1.0);
+      if (enh_mat == MAT_HAIR) {
+        // Kajiya-Kay: a band across the strands, which run along the texture's v (the tangent from
+        // its derivative, in the view space). Two lobes: the light's own, and a broader one colored
+        // by the hair, shifted toward the root. Where v has no direction here, the plain highlight
+        vec3 r1 = enh_world_to_view * cross(p_dy, transpose(enh_world_to_view) * nb);
+        vec3 r2 = enh_world_to_view * cross(transpose(enh_world_to_view) * nb, p_dx);
+        vec3 t = r1 * st_dx.y + r2 * st_dy.y;
+        float t_len = length(t);
+        if (t_len > 0.0) {
+          t /= t_len;
+          vec3 h = normalize(l + v);
+          float th1 = dot(normalize(t + nb * 0.12), h);
+          float th2 = dot(normalize(t - nb * 0.2), h);
+          float strand = pow(max(1.0 - th1 * th1, 0.0), 60.0) * 0.8;
+          vec3 strand2 = (0.4 + 0.6 * albedo) * pow(max(1.0 - th2 * th2, 0.0), 14.0) * 0.45;
+          color.rgb += key * wrapped * (strand + strand2) * enh_rim_spec.y * c;
+        }
+      } else if (enh_mat == MAT_METAL) {
+        float f = 0.3 + 0.7 * pow(1.0 - nv, 3.0);
+        color.rgb = color.rgb * (1.0 - 0.15 * c) + sky * (albedo * 0.85 + 0.1) * f * 0.6 * enh_rim_spec.y * 2.0 * c;
+      } else if (enh_mat == MAT_LEATHER) {
+        color.rgb += sky * (albedo * 0.5 + 0.1) * pow(1.0 - nv, 3.0) * 0.5 * c;
+      } else if (enh_mat == MAT_CLOTH || enh_mat == MAT_FUR) {
+        // the fibers along the edge catch the light from behind them
+        float sheen = pow(1.0 - nv, enh_mat == MAT_FUR ? 2.0 : 3.0) * (0.3 + 0.7 * wrapped);
+        color.rgb += key * (0.25 + 0.75 * albedo) * sheen * (enh_mat == MAT_FUR ? 0.5 : 0.3) * enh_rim_spec.x * c;
+      } else if (enh_mat == MAT_LENS) {
+        float f = 0.04 + 0.96 * pow(1.0 - nv, 5.0);
+        color.rgb += sky * (0.25 + f) * 0.8 * c;
+      }
+    }
   }
 
   // Enhanced: wet in the rain: darker cloth and skin, a tight bright highlight from the key light
