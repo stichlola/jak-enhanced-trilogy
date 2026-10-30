@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/common_types.h"
@@ -61,6 +62,19 @@ void enhanced_note_texture_edit(const std::string& tpage, const std::string& nam
 // the loader's: the user's version of a level texture, in the level's alpha (PS2's, 128 opaque, if
 // the game's is), else false
 bool enhanced_texture_edit(const tfrag3::Texture& tex, std::vector<u32>& out, int& w, int& h);
+
+// The remade textures (docs/ai-textures.md): whole new pictures of a texture, at any size of the same
+// shape, in custom_assets/<game>/texture_remade/<tpage>/<name>.png or .../_all/<name>.png. Loaded with
+// the level, common's too (Jak and Daxter are there), so no new extraction; a user's edit wins.
+// False if there is none or it can't be used (the reason in the log). In the level's alpha
+bool enhanced_remade_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& w, int& h);
+// the same for an animated texture's slot, by name, on the GPU (0: none). Kept for good: few and small
+GLuint enhanced_remade_by_name(const std::string& name);
+bool enhanced_remade_any();
+// and its relief map, <name>_n.png (normal) or <name>_h.png (height), on the GPU: {GL texture, 1
+// normal or 2 height} or {0, 0}. tpage empty: in any folder. Uses GL_TEXTURE1 for the upload
+std::pair<GLuint, u8> enhanced_remade_relief(const std::string& tpage, const std::string& name);
+bool enhanced_remade_has_relief();
 
 // a file opened with the program the system has for it (a PNG: the user's paint program)
 void enhanced_open_file(const fs::path& path);

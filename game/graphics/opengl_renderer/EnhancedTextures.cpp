@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <map>
 #include <mutex>
 #include <set>
 
@@ -509,6 +511,150 @@ bool enhanced_texture_edit(const tfrag3::Texture& tex, std::vector<u32>& out, in
   }
   stbi_image_free(px);
   return true;
+}
+
+namespace {
+std::mutex g_remade_mutex;
+bool g_remade_read = false;
+bool g_remade_relief = false;
+std::map<std::string, fs::path> g_remade;          // "tpage/name" (or "_all/name")
+std::map<std::string, fs::path> g_remade_by_name;  // "name", from whichever folder
+std::map<std::string, GLuint> g_remade_gl;          // pictures put on the GPU, by file
+
+void read_remade() {
+  std::lock_guard<std::mutex> lock(g_remade_mutex);
+  if (g_remade_read) {
+    return;
+  }
+  g_remade_read = true;
+  const auto dir = file_util::get_jak_project_dir() / "custom_assets" /
+                   game_version_names[g_game_version] / "texture_remade";
+  std::error_code ec;
+  if (!fs::exists(dir, ec)) {
+    return;
+  }
+  for (const auto& page : fs::directory_iterator(dir, ec)) {
+    if (!page.is_directory()) {
+      continue;
+    }
+    for (const auto& f : fs::directory_iterator(page.path(), ec)) {
+      if (f.path().extension() == ".png") {
+        const std::string stem = f.path().stem().string();
+        g_remade[page.path().filename().string() + "/" + stem] = f.path();
+        g_remade_by_name[stem] = f.path();
+        if (stem.size() > 2 && (stem.ends_with("_n") || stem.ends_with("_h"))) {
+          g_remade_relief = true;
+        }
+      }
+    }
+  }
+  lg::info("[enhanced] remade textures: {}", g_remade.size());
+}
+
+fs::path remade_path(const std::string& tpage, const std::string& name) {
+  read_remade();
+  if (tpage.empty()) {
+    auto it = g_remade_by_name.find(name);
+    return it == g_remade_by_name.end() ? fs::path() : it->second;
+  }
+  auto it = g_remade.find(tpage + "/" + name);
+  if (it == g_remade.end()) {
+    it = g_remade.find("_all/" + name);
+  }
+  return it == g_remade.end() ? fs::path() : it->second;
+}
+
+// a PNG as the game's texels. The game's alpha is the PS2's (128 opaque): a picture saved with plain
+// 0..255 alpha (any above 128), for a texture in the PS2's, is halved
+bool load_remade(const fs::path& path, bool plain_level, std::vector<u32>& out, int& w, int& h) {
+  int n = 0;
+  u8* px = stbi_load(path.string().c_str(), &w, &h, &n, 4);
+  if (!px) {
+    lg::warn("[enhanced] remade texture {}: can't read it", path.string());
+    return false;
+  }
+  out.resize((size_t)w * h);
+  std::memcpy(out.data(), px, out.size() * 4);
+  stbi_image_free(px);
+  bool over = false;
+  for (u32 c : out) {
+    over |= (c >> 24) > 0x80;
+  }
+  if (over && !plain_level) {
+    for (u32& c : out) {
+      c = (c & 0xffffff) | (((c >> 24) + 1) / 2) << 24;
+    }
+  }
+  return true;
+}
+
+GLuint remade_gl(const fs::path& path, bool wrap, bool as_is) {
+  const auto it = g_remade_gl.find(path.string());
+  if (it != g_remade_gl.end()) {
+    return it->second;
+  }
+  std::vector<u32> px;
+  int w = 0, h = 0;
+  GLuint gl = 0;
+  // (as_is: a relief map's alpha means nothing and its values aren't colors)
+  if (load_remade(path, as_is, px, w, h)) {
+    glGenTextures(1, &gl);
+    glBindTexture(GL_TEXTURE_2D, gl);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, px.data());
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wrap ? GL_REPEAT : GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  g_remade_gl[path.string()] = gl;
+  return gl;
+}
+}  // namespace
+
+bool enhanced_remade_any() {
+  read_remade();
+  return !g_remade.empty();
+}
+
+bool enhanced_remade_has_relief() {
+  read_remade();
+  return g_remade_relief;
+}
+
+bool enhanced_remade_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& w, int& h) {
+  const auto path = remade_path(tex.debug_tpage_name, tex.debug_name);
+  if (path.empty() || !load_remade(path, plain_alpha_of(tex), out, w, h)) {
+    return false;
+  }
+  // (the same UVs on another shape would be a different picture altogether)
+  if ((s64)w * tex.h != (s64)h * tex.w) {
+    lg::warn("[enhanced] remade texture {}: {}x{} isn't the shape of the game's {}x{}, not used",
+             path.string(), w, h, tex.w, tex.h);
+    return false;
+  }
+  return true;
+}
+
+GLuint enhanced_remade_by_name(const std::string& name) {
+  const auto path = remade_path("", name);
+  return path.empty() ? 0 : remade_gl(path, false, false);
+}
+
+std::pair<GLuint, u8> enhanced_remade_relief(const std::string& tpage, const std::string& name) {
+  for (u8 mode = 1; mode <= 2; mode++) {
+    const auto path = remade_path(tpage, name + (mode == 1 ? "_n" : "_h"));
+    if (!path.empty()) {
+      glActiveTexture(GL_TEXTURE1);
+      const GLuint gl = remade_gl(path, true, true);
+      glActiveTexture(GL_TEXTURE0);
+      if (gl) {
+        return {gl, mode};
+      }
+    }
+  }
+  return {0, 0};
 }
 
 void enhanced_open_file(const fs::path& path) {

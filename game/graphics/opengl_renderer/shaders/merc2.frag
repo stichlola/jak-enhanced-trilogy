@@ -7,6 +7,7 @@ in vec2 vtx_st;
 in float fog;
 
 uniform sampler2D tex_T0;
+uniform sampler2D tex_relief;  // Enhanced: a remade texture's own relief map (docs/ai-textures.md)
 
 uniform vec4 fog_color;
 uniform int ignore_alpha;
@@ -30,6 +31,7 @@ uniform int enh_cloth;      // Enhanced: see-through cloth, shown as the game dr
 uniform float enh_char;     // Enhanced: strength of the relief and materials (0 = off, as without them)
 uniform int enh_mat;        // Enhanced: the part's material (EnhancedMaterials.h; 0 = as without it)
 uniform float enh_eye_lid;  // Enhanced: an eye's eyelid reaches down to this v of its texture (0 = open)
+uniform int enh_relief;     // Enhanced: tex_relief is 0 none, 1 a normal map, 2 a height map
 
 const int MAT_SKIN = 1;
 const int MAT_HAIR = 2;
@@ -85,10 +87,11 @@ void main() {
   // its own fetch, so a pixel's slope isn't shared with its 2x2 block
   vec3 bump_g = vec3(0.0);
   float nrm_len = length(vtx_nrm);
-  if (enh_char > 0.0 && enh_mat > 0 && gfx_hack_no_tex == 0 && decal_enable == 0 && nrm_len > 0.1) {
+  if (enh_char > 0.0 && (enh_mat > 0 || enh_relief != 0) && gfx_hack_no_tex == 0 && decal_enable == 0 &&
+      nrm_len > 0.1) {
     // (none far off, where it would only shimmer: 8 to 25 m. None at a cutout's edge either: its
     // see-through texels hold any color)
-    float k = enh_char * BUMP_K[enh_mat] * (1.0 - smoothstep(32768.0, 102400.0, length(enh_pos))) *
+    float k = enh_char * (enh_relief != 0 ? 1.0 : BUMP_K[enh_mat]) * (1.0 - smoothstep(32768.0, 102400.0, length(enh_pos))) *
               (ignore_alpha != 0 ? 1.0 : smoothstep(0.064, 0.2, T0.a));
     if (k > 0.001) {
       const vec3 lum = vec3(0.3, 0.59, 0.11);
@@ -97,16 +100,36 @@ void main() {
       vec3 r2 = cross(N, p_dx);
       float det = dot(p_dx, r1);
       if (abs(det) > 0.01) {
-        float h0 = dot(T0.rgb, lum);
-        float hx = dot(textureGrad(tex_T0, vtx_st + st_dx, st_dx, st_dy).rgb, lum);
-        float hy = dot(textureGrad(tex_T0, vtx_st + st_dy, st_dx, st_dy).rgb, lum);
-        // (1.2 cm = 49 game units; the positions are in game units too, so this is a plain slope)
-        bump_g = ((hx - h0) * r1 + (hy - h0) * r2) * 49.0 * k / det;
+        if (enh_relief == 1) {
+          // a normal map: the picture's axes on the surface (v runs down the picture, green up it)
+          vec3 m = textureGrad(tex_relief, vtx_st, st_dx, st_dy).xyz * 2.0 - 1.0;
+          vec3 axis_u = (r1 * st_dx.x + r2 * st_dy.x) * sign(det);
+          vec3 axis_v = (r1 * st_dx.y + r2 * st_dy.y) * sign(det);
+          float axis_k = inversesqrt(max(max(dot(axis_u, axis_u), dot(axis_v, axis_v)), 1e-12));
+          vec3 w = normalize(axis_u * axis_k * m.x - axis_v * axis_k * m.y + N * max(m.z, 0.05));
+          bump_g = (N - w / max(dot(w, N), 0.2)) * k;
+        } else {
+          // the heights: the map's own, or the picture's brightness
+          float h0, hx, hy;
+          if (enh_relief == 2) {
+            h0 = textureGrad(tex_relief, vtx_st, st_dx, st_dy).r;
+            hx = textureGrad(tex_relief, vtx_st + st_dx, st_dx, st_dy).r;
+            hy = textureGrad(tex_relief, vtx_st + st_dy, st_dx, st_dy).r;
+          } else {
+            h0 = dot(T0.rgb, lum);
+            hx = dot(textureGrad(tex_T0, vtx_st + st_dx, st_dx, st_dy).rgb, lum);
+            hy = dot(textureGrad(tex_T0, vtx_st + st_dy, st_dx, st_dy).rgb, lum);
+          }
+          // (1.2 cm = 49 game units; the positions are in game units too, so this is a plain slope)
+          bump_g = ((hx - h0) * r1 + (hy - h0) * r2) * 49.0 * k / det;
+        }
         bump_g -= N * dot(bump_g, N);
-        // (held back: at grazing angles a pixel spans so much that the slope explodes)
+        // (held back: at grazing angles a pixel spans so much that the slope explodes. A normal map
+        // says outright how steep it means to be)
+        float g_max = enh_relief == 1 ? 1.5 : 0.6;
         float g_len = length(bump_g);
-        if (g_len > 0.6) {
-          bump_g *= 0.6 / g_len;
+        if (g_len > g_max) {
+          bump_g *= g_max / g_len;
         }
       }
     }

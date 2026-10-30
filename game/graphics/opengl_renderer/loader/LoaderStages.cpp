@@ -26,6 +26,11 @@ u64 add_texture(TexturePool& pool, const tfrag3::Texture& tex, bool is_common) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, edit_w, edit_h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
                  sharp.data());
     enhanced_forget_texture(gl_tex);
+  } else if (enhanced_remade_texture(tex, sharp, edit_w, edit_h)) {
+    // (a remade picture of it, docs/ai-textures.md)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, edit_w, edit_h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                 sharp.data());
+    enhanced_forget_texture(gl_tex);
   } else if (enhanced_hd_screen_texture(tex, sharp, hd_scale)) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.w * hd_scale, tex.h * hd_scale, 0, GL_RGBA,
                  GL_UNSIGNED_INT_8_8_8_8_REV, sharp.data());

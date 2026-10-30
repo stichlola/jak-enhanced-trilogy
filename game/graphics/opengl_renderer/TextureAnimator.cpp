@@ -7,6 +7,7 @@
 #include "common/util/Timer.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedTextures.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 #include "game/graphics/opengl_renderer/slime_lut.h"
 #include "game/graphics/texture/TexturePool.h"
@@ -1646,6 +1647,15 @@ void TextureAnimator::run_clut_blender_group(DmaTransfer& tf,
   blenders.last_updated_frame = frame_idx;
   for (size_t i = 0; i < blenders.blenders.size(); i++) {
     m_private_output_slots[blenders.outputs[i]] = blenders.blenders[i].run(weights);
+    // Enhanced: a remade picture of the texture (docs/ai-textures.md) stands in for the blend while
+    // the morph is at rest (Jak's face as himself; as Dark Jak the game's own colors take back over)
+    if (f == 0.f && enhanced_remade_any()) {
+      const GLuint remade =
+          enhanced_remade_by_name(animated_texture_slots(m_version).at(blenders.outputs[i]));
+      if (remade) {
+        m_private_output_slots[blenders.outputs[i]] = remade;
+      }
+    }
   }
 
   const u32* tbps = (const u32*)(tf.data + 16);
