@@ -27,10 +27,18 @@ uniform mat3 enh_world_to_view;
 uniform vec2 enh_rim_spec;  // Enhanced: rim light, highlight strength (0 = vanilla)
 uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
 uniform int enh_cloth;      // Enhanced: see-through cloth, shown as the game draws it (no post)
+uniform float enh_char;     // Enhanced: strength of the relief (0 = off, as without it)
 
 void main() {
+  // (here, ahead of the discard: derivatives aren't defined for the pixels it drops)
+  vec2 st_dx = dFdx(vtx_st);
+  vec2 st_dy = dFdy(vtx_st);
+  vec3 p_dx = -dFdx(enh_pos);
+  vec3 p_dy = -dFdy(enh_pos);
+
+  vec4 T0 = vec4(1.0);
   if (gfx_hack_no_tex == 0) {
-    vec4 T0 = texture(tex_T0, vtx_st);
+    T0 = texture(tex_T0, vtx_st);
     // all merc is tcc=rgba and modulate
     if (decal_enable == 0) {
       color = vtx_color * T0 * 2;
@@ -58,10 +66,45 @@ void main() {
   if (ignore_alpha == 0 && color.w < 0.128) {
     discard;
   }
+
+  // Enhanced: relief from the texture's brightness, the height 1.2 cm at its most (Mikkelsen's
+  // derivative bump). World space, tilting the smooth normal by bump_g; each of the three heights is
+  // its own fetch, so a pixel's slope isn't shared with its 2x2 block
+  vec3 bump_g = vec3(0.0);
+  float nrm_len = length(vtx_nrm);
+  if (enh_char > 0.0 && gfx_hack_no_tex == 0 && decal_enable == 0 && nrm_len > 0.1) {
+    // (none far off, where it would only shimmer: 8 to 25 m. None at a cutout's edge either: its
+    // see-through texels hold any color)
+    float k = enh_char * (1.0 - smoothstep(32768.0, 102400.0, length(enh_pos))) *
+              (ignore_alpha != 0 ? 1.0 : smoothstep(0.064, 0.2, T0.a));
+    if (k > 0.001) {
+      const vec3 lum = vec3(0.3, 0.59, 0.11);
+      vec3 N = transpose(enh_world_to_view) * (vtx_nrm / nrm_len);
+      vec3 r1 = cross(p_dy, N);
+      vec3 r2 = cross(N, p_dx);
+      float det = dot(p_dx, r1);
+      if (abs(det) > 0.01) {
+        float h0 = dot(T0.rgb, lum);
+        float hx = dot(textureGrad(tex_T0, vtx_st + st_dx, st_dx, st_dy).rgb, lum);
+        float hy = dot(textureGrad(tex_T0, vtx_st + st_dy, st_dx, st_dy).rgb, lum);
+        // (1.2 cm = 49 game units; the positions are in game units too, so this is a plain slope)
+        bump_g = ((hx - h0) * r1 + (hy - h0) * r2) * 49.0 * k / det;
+        bump_g -= N * dot(bump_g, N);
+        // (held back: at grazing angles a pixel spans so much that the slope explodes)
+        float g_len = length(bump_g);
+        if (g_len > 0.6) {
+          bump_g *= 0.6 / g_len;
+        }
+      }
+    }
+  }
+  // the bumped normal in the view space the lights are in
+  vec3 nb = normalize(vtx_nrm / nrm_len - enh_world_to_view * bump_g);
+
   // Enhanced: the normal for the post pass (world), as the levels write it: the smooth one (view
   // space here) where it stays near the triangle's own face, else the face's
   {
-    vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
+    vec3 f = cross(p_dx, p_dy);
     float flen = length(f);
     vec3 sn = transpose(enh_world_to_view) * vtx_nrm;
     float len = length(sn);
@@ -78,24 +121,39 @@ void main() {
     if (enh_cloth != 0 && flen > 0.0 && dot(n, transpose(enh_world_to_view) * normalize(vtx_view)) < 0.0) {
       n = -n;
     }
+    // (with the relief. It's raised along the model's outside: n may be the other way, see sign(d))
+    if (flen > 0.0 && bump_g != vec3(0.0)) {
+      n = normalize(n - bump_g * (dot(n, sn) < 0.0 ? -1.0 : 1.0));
+    }
     // (0.52: see-through cloth, the composite puts the game's own color back over it)
     enh_normal_out = flen > 0.0 ? vec4(n * (enh_cloth != 0 ? 0.52 : 0.45) * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
+  // Enhanced: the relief in the key light, where the surface isn't already turned away from it
+  if (bump_g != vec3(0.0) && length(vtx_key) > 0.01) {
+    vec3 n = normalize(vtx_nrm);
+    vec3 l = normalize(vtx_key);
+    float key_lum = min(dot(clamp(vtx_key_color, 0.0, 1.5), vec3(0.3, 0.59, 0.11)) * 1.5, 1.0);
+    color.rgb *= 1.0 + clamp(dot(nb, l) - dot(n, l), -0.35, 0.35) * 0.9 * key_lum *
+                           smoothstep(-0.4, 0.2, dot(n, l));
+  }
+
   // Enhanced: a rim of the key light around the silhouette, brighter on the lit side, and a soft
-  // highlight (Blinn) from it
+  // highlight (Blinn) from it. The relief goes into the highlight and the soft light past the
+  // terminator; the rims keep the smooth normal, they draw the silhouette and would only sparkle
   if (decal_enable == 0 && (enh_rim_spec.x > 0.0 || enh_rim_spec.y > 0.0) && length(vtx_key) > 0.01) {
     vec3 n = normalize(vtx_nrm);
     vec3 v = normalize(vtx_view);
     vec3 l = normalize(vtx_key);
     float ndl = max(dot(n, l), 0.0);
     float rim = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 3.0) * (0.35 + 0.65 * ndl);
-    float spec = pow(max(dot(n, normalize(l + v)), 0.0), 40.0) * ndl;
+    float ndl_b = max(dot(nb, l), 0.0);
+    float spec = pow(max(dot(nb, normalize(l + v)), 0.0), 40.0) * ndl_b;
     vec3 key = clamp(vtx_key_color, 0.0, 1.5);
     color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * (0.3 + 0.7 * color.rgb));
     // soft light past the terminator, warm like light scattered under skin and cloth (the game's
     // own light stops hard where the surface turns away)
-    float wrap = clamp((dot(n, l) + 0.45) / 1.45, 0.0, 1.0) - ndl;
+    float wrap = clamp((dot(nb, l) + 0.45) / 1.45, 0.0, 1.0) - ndl_b;
     color.rgb += color.rgb * key * wrap * vec3(1.0, 0.55, 0.4) * 0.35 * enh_rim_spec.x;
     // and the shadow side catches the sky: a cool rim from the ambient light
     float back = pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 2.5) * (1.0 - ndl);
@@ -105,7 +163,7 @@ void main() {
   // Enhanced: wet in the rain: darker cloth and skin, a tight bright highlight from the key light
   // and the grey sky caught on what faces up and at grazing angles
   if (decal_enable == 0 && enh_wet > 0.0 && length(vtx_key) > 0.01) {
-    vec3 n = normalize(vtx_nrm);
+    vec3 n = nb;
     vec3 v = normalize(vtx_view);
     vec3 l = normalize(vtx_key);
     float ndl = max(dot(n, l), 0.0);
