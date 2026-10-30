@@ -15,7 +15,8 @@
   // match: "other")
   "levels": {
     "jak1": [
-      {"zone": "islands", "prefixes": ["village1", "village2", "beach", "training", "intro", "rolling", "title", "demo"]},
+      {"zone": "rock-village", "prefixes": ["village2"]},
+      {"zone": "islands", "prefixes": ["village1", "beach", "training", "intro", "rolling", "title", "demo"]},
       {"zone": "jungle", "prefixes": ["jungle"]},
       {"zone": "swamp", "prefixes": ["swamp"]},
       {"zone": "misty", "prefixes": ["misty"]},
@@ -138,7 +139,7 @@
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
-      "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, },
+      "day": {"lift": [0, 0.008, 0.004], "gain": [1.07, 1, 0.86], "saturation": 1.12, "contrast": 0.06, "warmth": 0.03, "clouds": 0.45, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
       "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "morning_mist": 0.5,
                   "spells": {"period": 420, "fair": 0.32, "overcast": 0.1, "shower": 0.28, "thunder": 0.14, "fog": 0.14, "snow": 0.02}},
@@ -171,7 +172,7 @@
     // Jak 2's wilds outside Haven (Dead Town, the mountain, the atoll, the construction site):
     // grey-green, showers come over now and then
     "wilds": {
-      "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, },
+      "day": {"lift": [0, 0.006, 0.01], "gain": [1.01, 1.02, 0.98], "saturation": 0.98, "contrast": 0.06, "warmth": 0.0, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6},
       "night": {"lift": [0, 0.006, 0.026], "gain": [0.97, 0.99, 1.05], "saturation": 0.95, "contrast": 0.06, "warmth": -0.03, "clouds": 0.55},
       "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.25},
                   "spells": {"period": 480, "fair": 0.4, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.1, "snow": 0.02}},
@@ -181,15 +182,24 @@
     // spells: mostly fair, some with a shower, a few with a thunderstorm. The game is saturated
     // already: only a touch of the sunny look
     "islands": {
-      "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, },
+      "day": {"lift": [0.004, 0.008, 0.016], "gain": [1.02, 1.01, 0.98], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.2, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6},
       "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.35},
       "weather": {"fog": {"period": 480, "clear": 0.75, "light": 0.2}, "sunny": 0.3,
                   "spells": {"period": 600, "fair": 0.55, "overcast": 0.05, "shower": 0.22, "thunder": 0.15, "fog": 0.03}},
       "ambience": {"crickets": 0.9, "birds": 0.8, "waves": 0.6, "frogs": 0.2}
     },
+    // Jak 1's rock village: under attack, the boulders burning, a grey sky (the game's own, not our
+    // clear one)
+    "rock-village": {
+      "day": {"lift": [0.006, 0.006, 0.01], "gain": [1.04, 1.02, 1.0], "saturation": 0.98, "contrast": 0.03, "warmth": 0.02, "clouds": 0.6, "rock_sun": 0.3},
+      "night": {"lift": [0, 0.006, 0.03], "gain": [0.98, 1, 1.05], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.6},
+      "weather": {"fog": {"period": 480, "clear": 0.6, "light": 0.3},
+                  "spells": {"period": 600, "fair": 0.4, "overcast": 0.3, "shower": 0.2, "thunder": 0.1}},
+      "ambience": {"crickets": 0.5, "birds": 0.2, "waves": 0.3}
+    },
     // the jungle: deep greens, the rain comes often
     "jungle": {
-      "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, },
+      "day": {"lift": [0, 0.01, 0.004], "gain": [1.02, 1.04, 0.94], "saturation": 1.1, "contrast": 0.06, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6},
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
       "weather": {"fog": {"period": 420, "clear": 0.5, "light": 0.3}, "sunny": 0.3, "morning_mist": 0.5,
                   "spells": {"period": 360, "fair": 0.3, "overcast": 0.05, "shower": 0.34, "thunder": 0.22, "fog": 0.09}},
