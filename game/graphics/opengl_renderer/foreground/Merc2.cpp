@@ -756,6 +756,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->ignore_alpha = glGetUniformLocation(id, "ignore_alpha");
   uniforms->enh_cloth = glGetUniformLocation(id, "enh_cloth");
   uniforms->enh_mat = glGetUniformLocation(id, "enh_mat");
+  uniforms->enh_eye_lid = glGetUniformLocation(id, "enh_eye_lid");
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
 }
@@ -1375,6 +1376,7 @@ void Merc2::do_draws(const Draw* draw_array,
     if (draw.texture != last_tex) {
       if (draw.texture < (int)lev->textures.size() && draw.texture >= 0) {
         glBindTexture(GL_TEXTURE_2D, lev->textures.at(draw.texture));
+        glUniform1f(uniforms.enh_eye_lid, 0.f);  // (an eye of a plain texture: no lid in it)
       } else if ((draw.texture & 0xffffff00) == 0xefffff00) {
         if (render_state->version == GameVersion::Jak3 ||
             render_state->version == GameVersion::JakX) {
@@ -1382,11 +1384,13 @@ void Merc2::do_draws(const Draw* draw_array,
               render_state->eye_renderer->lookup_eye_texture_hash(draw.hash, (draw.texture & 1));
           if (maybe_eye) {
             glBindTexture(GL_TEXTURE_2D, *maybe_eye);
+            glUniform1f(uniforms.enh_eye_lid, render_state->eye_renderer->enhanced_lid_edge(*maybe_eye));
           }
         } else {
           auto maybe_eye = render_state->eye_renderer->lookup_eye_texture(draw.texture & 0xff);
           if (maybe_eye) {
             glBindTexture(GL_TEXTURE_2D, *maybe_eye);
+            glUniform1f(uniforms.enh_eye_lid, render_state->eye_renderer->enhanced_lid_edge(*maybe_eye));
           }
         }
 

@@ -1,5 +1,7 @@
 #include "EyeRenderer.h"
 
+#include <algorithm>
+
 #include "common/util/FileUtil.h"
 
 #include "game/graphics/opengl_renderer/AdgifHandler.h"
@@ -573,6 +575,14 @@ void EyeRenderer::run_gpu(const std::vector<SingleEyeDraws>& draws,
       glDrawArrays(GL_TRIANGLE_STRIP, buffer_idx / 4, 4);
     }
     buffer_idx += 4 * 4;
+    // Enhanced: the lid's lower edge, in the texture's v. It's the vertices' y here (see
+    // add_draw_to_buffer_*): 512..1024 is the whole texture, top to bottom
+    {
+      const float y = draw.using_64 ? ((float)draw.lid.sprite.xyz1[1] -
+                                       (draw.pair / 4) * SINGLE_EYE_SIZE * 32) / 2.f
+                                    : (float)draw.lid.sprite.xyz1[1] - draw.pair * SINGLE_EYE_SIZE * 16;
+      out_tex.enh_lid_edge = draw.lid_tex ? std::clamp((y - 512.f) / 512.f, 0.f, 1.f) : 0.f;
+    }
 
     // finally, give to "vram"
     render_state->texture_pool->move_existing_to_vram(out_tex.gpu_tex, out_tex.tbp);
@@ -586,6 +596,15 @@ void EyeRenderer::run_gpu(const std::vector<SingleEyeDraws>& draws,
 
   glBindVertexArray(0);
   glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+float EyeRenderer::enhanced_lid_edge(u64 gl_texture) {
+  for (auto& slot : m_gpu_eye_textures) {
+    if (slot.fb.texture() == gl_texture) {
+      return slot.enh_lid_edge;
+    }
+  }
+  return 0.f;
 }
 
 std::optional<u64> EyeRenderer::lookup_eye_texture(u8 eye_id) {

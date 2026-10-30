@@ -23,6 +23,8 @@ class EyeRenderer : public BucketRenderer {
   void handle_eye_dma2(DmaFollower& dma, SharedRenderState* render_state, ScopedProfilerNode& prof);
   std::optional<u64> lookup_eye_texture(u8 eye_id);
   std::optional<u64> lookup_eye_texture_hash(u64 hash, bool lr);
+  // Enhanced: how far down the eye's texture (v, 0..1) its eyelid has come, by the texture's GL id
+  float enhanced_lid_edge(u64 gl_texture);
 
   struct SpriteInfo {
     u8 a;
@@ -56,6 +58,7 @@ class EyeRenderer : public BucketRenderer {
     FramebufferTexturePair fb;
     u64 fnv_name_hash = 0;
     bool lr = false;
+    float enh_lid_edge = 0.f;
 
     // note: eye texture increased to 128x128 (originally 32x32) here.
     GpuEyeTex() : fb(128, 128, GL_UNSIGNED_INT_8_8_8_8_REV) {}

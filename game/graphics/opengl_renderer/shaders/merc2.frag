@@ -29,6 +29,7 @@ uniform float enh_wet;      // Enhanced: rain on the characters (0 = dry)
 uniform int enh_cloth;      // Enhanced: see-through cloth, shown as the game draws it (no post)
 uniform float enh_char;     // Enhanced: strength of the relief and materials (0 = off, as without them)
 uniform int enh_mat;        // Enhanced: the part's material (EnhancedMaterials.h; 0 = as without it)
+uniform float enh_eye_lid;  // Enhanced: an eye's eyelid reaches down to this v of its texture (0 = open)
 
 const int MAT_SKIN = 1;
 const int MAT_HAIR = 2;
@@ -269,6 +270,35 @@ void main() {
     float spec = pow(max(dot(n, normalize(l + v)), 0.0), 120.0) * ndl;
     color.rgb += clamp(vtx_key_color, 0.0, 1.5) * spec * 0.9 * enh_wet;
     color.rgb += (clamp(enh_ambient, 0.0, 1.0) * 0.6 + 0.06) * fres * 0.5 * enh_wet;
+  }
+
+  // Enhanced: live eyes. The eye's mesh spans its whole texture, u and v 0..1 (the EyeRenderer's
+  // picture, or the eye's own), v downward and u the same way on both eyes, so one spot in the UVs
+  // catches the same light in both. Below the eyelid only: the lid is painted into the texture and
+  // closes over all this when he blinks
+  if (enh_char > 0.0 && enh_mat == MAT_EYE && length(vtx_key) > 0.01) {
+    float c = clamp(enh_char, 0.0, 1.0);
+    vec2 e = vtx_st - 0.5;
+    float px = max(length(st_dx), length(st_dy));
+    float open = smoothstep(enh_eye_lid, enh_eye_lid + 0.06, vtx_st.y);
+    // depth: darker toward the eye's corners and in the shade of the upper lid
+    float depth = (1.0 - 0.35 * smoothstep(0.3, 0.72, length(e))) *
+                  (1.0 - 0.3 * (1.0 - smoothstep(0.0, 0.18, vtx_st.y - enh_eye_lid)));
+    color.rgb *= mix(1.0, depth, c * open);
+    vec3 key = clamp(vtx_key_color, 0.0, 1.5);
+    vec3 amb = clamp(enh_ambient, 0.0, 1.0);
+    vec3 n = normalize(vtx_nrm);
+    vec3 v = normalize(vtx_view);
+    // the sky faintly on the eye's wet surface
+    float up = dot(reflect(-v, n), enh_world_to_view * vec3(0.0, 1.0, 0.0));
+    vec3 sky = mix(amb * 0.5, mix(amb, key, 0.5), smoothstep(-0.2, 0.6, up));
+    color.rgb += sky * pow(1.0 - clamp(abs(dot(n, v)), 0.0, 1.0), 3.0) * 0.35 * c * open;
+    // the catchlight, upper right on the iris. Smaller than a pixel from afar: fainter, not blinking
+    const float r = 0.07;
+    float soft = max(0.02, px);
+    float spot = (1.0 - smoothstep(r - soft, r + soft, length(vtx_st - vec2(0.6, 0.36)))) *
+                 min(1.0, (r / max(px, 0.0001)) * (r / max(px, 0.0001)));
+    color.rgb += (key * 1.2 + amb * 0.25) * spot * c * open;
   }
 
    color.xyz = mix(color.xyz, fog_color.rgb, clamp(fog_color.a * fog, 0, 1));
