@@ -21,6 +21,7 @@
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedSmoothMerc.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
@@ -4228,6 +4229,16 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp);
     glBindVertexArray(m_shadow_vao);
     glEnableVertexAttribArray(0);
+    if (g_enhanced_menu.blank_world) {
+      glUniform1i(u_cut, 0);
+      glUniform1f(u_alpha, -1.f);
+      // (not in the far map: its big texels leave stripes on the ground, its slopes show the sun anyway)
+      if (!far_map) {
+        enhanced_terrain_shadow_draw();
+        prof.add_draw_call();
+      }
+      return;
+    }
     for (auto& [lid, draws] : m_shadow_draws) {
       for (auto& d : draws) {
         if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big)) {
@@ -6191,25 +6202,8 @@ void EnhancedPost::draw_menu() {
     }
   }
   if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
-    struct Place {
-      const char* name;
-      const char* continue_point;
-    };
-    static const Place places[] = {
-        {"Plaza (Jak 2)", "piazza-start"},
-        {"Port", "ctyport-start"},
-        {"Hip Hog", "ctyport-hiphog"},
-        {"Slums alley", "ctysluma-alley"},
-        {"Industrial zone", "ctyinda-start"},
-        {"Central sector", "ctygenb-start"},
-        {"Metal Head city", "mhcitya-near-ctyport"},
-        {"Spargus", "wascitya-start"},
-        {"Desert", "desert-facing-wasdoors"},
-    };
-    // (the plaza only where it's built, see enhanced_has_piazza)
     int shown = 0;
-    for (int i = enhanced_has_piazza() ? 0 : 1; i < (int)(sizeof(places) / sizeof(places[0])); i++) {
-      const auto& p = places[i];
+    for (const auto& p : enhanced_places()) {
       if (shown++ % 2) {
         ImGui::SameLine();
       }

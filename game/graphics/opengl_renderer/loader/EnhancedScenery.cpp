@@ -19,6 +19,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/pipelines/opengl.h"
 #include "game/runtime.h"
@@ -1727,7 +1728,11 @@ bool line_near_box(const float* p, const float* d, float r, const float* lo, con
 }
 }  // namespace
 
-int enhanced_collide_tris(const float* box, const float* seg, float* out, int stride, int max) {
+int enhanced_collide_tris(const float* box, const float* seg, float* out, int stride, int max_tris) {
+  // (the level's own ground first, with room left for the objects on it)
+  const int ground = enhanced_terrain_collide(box, seg, out, stride, max_tris * 3 / 4);
+  out += (size_t)ground * stride;
+  const int max = max_tris - ground;
   auto& w = g_cworld;
   {
     // (built again when the list changed, or a little later while models still load; the library
@@ -1798,7 +1803,7 @@ int enhanced_collide_tris(const float* box, const float* seg, float* out, int st
         continue;
       }
       if (n >= max) {
-        return n;
+        return ground + n;
       }
       float* dst = out + (size_t)n * stride;
       for (int j = 0; j < 3; j++) {
@@ -1810,7 +1815,7 @@ int enhanced_collide_tris(const float* box, const float* seg, float* out, int st
       n++;
     }
   }
-  return n;
+  return ground + n;
 }
 
 void enhanced_put_jak(const float* pos) {
@@ -1979,8 +1984,8 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   }
   const auto& b = tb->second;
   const float reach = 150.f * kMeter;
-  if (cam.x() < b[0] - reach || cam.x() > b[2] + reach || cam.z() < b[1] - reach ||
-      cam.z() > b[3] + reach) {
+  if (!g_enhanced_menu.blank_world && (cam.x() < b[0] - reach || cam.x() > b[2] + reach ||
+                                       cam.z() < b[1] - reach || cam.z() > b[3] + reach)) {
     return;
   }
   auto& lib = library();

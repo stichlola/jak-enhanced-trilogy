@@ -1,6 +1,8 @@
 ;;-*-Lisp-*-
 (in-package goal)
 
+(define-extern *enhanced-blank* symbol)
+
 ;; name: logic-target.gc
 ;; name in dgo: logic-target
 ;; dgos: GAME
@@ -386,6 +388,63 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
            (move-to-point! ctrl (-> *enhanced-gameplay-vec* 2))
            (vector-reset! (-> ctrl transv))
            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-blank-update ()
+  ;; a private level from scratch: no actors in the game's world while it's on
+  (let ((blank (pc-enhanced-blank-world)))
+    ;; what the world's spawned on its own, with no entity to kill: its vehicles, its doors, the air train.
+    ;; All that isn't Jak's, in a level from scratch
+    (when blank
+      (iterate-process-tree
+        *active-pool*
+        (lambda ((p process))
+          (let ((ret (the-as object #t)))
+            (when (or (type? p process-drawable) (= (-> p type symbol) 'part-spawner))
+              (let ((up (the-as process-tree p))
+                    (his #f)
+                    )
+                (while (and up (not his))
+                  (if (= up *target*)
+                      (set! his #t)
+                      )
+                  (set! up (if (-> up parent) (ppointer->process (-> up parent))))
+                  )
+                (when (not his)
+                  (deactivate p)
+                  (set! ret 'dead)
+                  )
+                )
+              )
+            ret
+            )
+          )
+        *kernel-context*
+        )
+      )
+    (when (!= blank *enhanced-blank*)
+      (set! *enhanced-blank* blank)
+      (set! *spawn-actors* (not blank))
+      (when blank
+        (dotimes (i (-> *level* length))
+          (let ((lev (-> *level* level i)))
+            (when (and (= (-> lev status) 'active) (-> lev entity))
+              (let ((links (-> lev bsp level entity)))
+                (dotimes (k (-> links length))
+                  (let ((ent (-> links data k entity)))
+                    (if (not (and (-> ent extra process) (logtest? (-> ent extra process mask) (process-mask no-kill))))
+                        (kill! ent)
+                        )
+                    )
+                  )
+                )
+              )
+            )
           )
         )
       )

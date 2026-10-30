@@ -295,6 +295,7 @@
 (define-extern pc-enhanced-set-player (function pointer none))
 (define-extern pc-enhanced-set-scene (function string float symbol none))
 (define-extern pc-enhanced-set-continue (function string none))
+(define-extern pc-enhanced-blank-world (function symbol))
 (define-extern pc-enhanced-set-dust (function float float float float none))
 (define-extern pc-enhanced-thunder (function int))
 (define-extern pc-enhanced-set-pushers (function pointer int none))

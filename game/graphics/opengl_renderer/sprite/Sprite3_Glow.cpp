@@ -47,6 +47,11 @@ bool glow_math(const SpriteGlowConsts* consts,
   Vector4f p0 = consts->camera[3] + consts->camera[0] * in->pos[0] +
                 consts->camera[1] * in->pos[1] + consts->camera[2] * in->pos[2];
 
+  // Enhanced: behind the camera (the sun, looking down from the editor): not mirrored onto the screen
+  if (p0.z() <= 0.f) {
+    return false;
+  }
+
   // Compute fade. Interestingly, the fade is computed based on depth, not distance from the camera.
   // I think this is kind of wrong, and it leads to some weird fadeout behavior.
   float fade = in->fade_a * p0.z() + in->fade_b;  // fade_a is negative

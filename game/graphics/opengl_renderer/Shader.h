@@ -89,6 +89,7 @@ enum class ShaderId {
   SHRUB_INST = 57,  // Enhanced: detailed scenery (EnhancedScenery)
   SHRUB_IMP = 58,   // Enhanced: its far pictures (impostors)
   SHRUB_GRASS = 59, // Enhanced: dense grass fields (EnhancedGrass)
+  ENH_TERRAIN = 60, // Enhanced: a private level's own ground (EnhancedTerrain)
   MAX_SHADERS
 };
 

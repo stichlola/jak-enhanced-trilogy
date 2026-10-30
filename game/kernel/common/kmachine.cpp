@@ -1135,6 +1135,10 @@ void pc_enhanced_set_scene(u32 name, u32 hour, u32 movie) {
 }
 
 // Enhanced: the game's current continue point
+u64 pc_enhanced_blank_world() {
+  return bool_to_symbol(g_enhanced_menu.blank_world);
+}
+
 void pc_enhanced_set_continue(u32 name) {
   std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
   g_enhanced_scene.continue_point = Ptr<String>(name).c()->data();
@@ -1341,7 +1345,9 @@ u64 pc_enhanced_minimap() {
   // (hidden in photo mode, and in a thick fog or sandstorm when the weather affects play)
   const auto& w = g_enhanced_play_weather;
   const bool blind = w.enabled && !enhanced_light() && std::max(w.sand.load(), w.fog.load()) > 0.7f;
-  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active && !blind);
+  // (a level from scratch: the map of the game's world, that isn't there, off)
+  return bool_to_symbol(g_enhanced_menu.minimap && !g_enhanced_menu.photo_active && !blind &&
+                        !g_enhanced_menu.blank_world);
 }
 
 // Enhanced: a marked bed within 3 m of pos (a vector, game units; and 2 m up or down): its place
@@ -1526,7 +1532,9 @@ u64 pc_enhanced_editor_probe_hit(u32 hit) {
 // radius, move x y z), pat their surface. How many were added
 u64 pc_enhanced_collide_fill(u32 tris, u32 room, u32 box, u32 seg, u32 pat) {
   float* out = Ptr<float>(tris).c();
-  const int n = enhanced_collide_tris(Ptr<float>(box).c(), seg ? Ptr<float>(seg).c() : nullptr, out, 16,
+  // (no line: GOAL's #f, the symbol, not a null pointer)
+  const bool line = seg && seg != (u32)bool_to_symbol(false);
+  const int n = enhanced_collide_tris(Ptr<float>(box).c(), line ? Ptr<float>(seg).c() : nullptr, out, 16,
                                       (int)room);
   for (int i = 0; i < n; i++) {
     // (as hfrag's: the surface, no shape behind it, the background's prim)
@@ -1709,6 +1717,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-player", (void*)pc_enhanced_set_player);
   make_func_symbol_func("pc-enhanced-set-scene", (void*)pc_enhanced_set_scene);
   make_func_symbol_func("pc-enhanced-set-continue", (void*)pc_enhanced_set_continue);
+  make_func_symbol_func("pc-enhanced-blank-world", (void*)pc_enhanced_blank_world);
   make_func_symbol_func("pc-enhanced-set-dust", (void*)pc_enhanced_set_dust);
   make_func_symbol_func("pc-enhanced-thunder", (void*)pc_enhanced_thunder);
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);

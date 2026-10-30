@@ -6,6 +6,7 @@
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 
 #include "common/log/log.h"
@@ -352,6 +353,16 @@ void Shrub::render_tree(int idx,
     auto fade = enhanced_scenery_fade(*tree.source);
     glUniform2f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_lod"),
                 fade.x(), fade.y());
+  }
+
+  // (from scratch: the shrubs aren't drawn, but they still light what's the level's own)
+  if (g_enhanced_menu.blank_world) {
+    enhanced_draw_terrain(*tree.source, settings, render_state, prof);
+    enhanced_draw_grass(*tree.source, settings, render_state, prof);
+    enhanced_draw_placed(*tree.source, settings, render_state, prof);
+    enhanced_draw_terrain_water(settings, render_state, prof);
+    glBindVertexArray(0);
+    return;
   }
 
   glBindVertexArray(tree.vao);

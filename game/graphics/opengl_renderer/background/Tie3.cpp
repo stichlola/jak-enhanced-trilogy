@@ -4,6 +4,7 @@
 #include "common/log/log.h"
 #include "common/util/Assert.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
@@ -545,7 +546,7 @@ void Tie3::draw_matching_draws_for_tree(int idx,
   auto& tree = m_trees.at(geom).at(idx);
 
   // don't render if we haven't loaded
-  if (!m_has_level) {
+  if (!m_has_level || g_enhanced_menu.blank_world) {
     return;
   }
   bool use_envmap = tfrag3::is_envmap_first_draw_category(category);
@@ -919,7 +920,7 @@ void Tie3::render_tree_wind(int idx,
                             SharedRenderState* render_state,
                             ScopedProfilerNode& prof) {
   auto& tree = m_trees.at(geom).at(idx);
-  if (tree.wind_draws->empty()) {
+  if (tree.wind_draws->empty() || g_enhanced_menu.blank_world) {
     return;
   }
 

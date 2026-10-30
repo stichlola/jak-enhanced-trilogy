@@ -1,4 +1,5 @@
 #include "OceanNear.h"
+#include "game/graphics/enhanced_state.h"
 
 #include "common/log/log.h"
 
@@ -26,7 +27,7 @@ void OceanNear::render(DmaFollower& dma,
                        SharedRenderState* render_state,
                        ScopedProfilerNode& prof) {
   // skip if disabled
-  if (!m_enabled) {
+  if (!m_enabled || g_enhanced_menu.blank_world) {
     while (dma.current_tag_offset() != render_state->next_bucket) {
       dma.read_and_advance();
     }

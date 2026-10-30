@@ -21,6 +21,8 @@
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include <map>
+#include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/pipelines/opengl.h"
 #include "game/runtime.h"
 
@@ -599,6 +601,14 @@ std::shared_ptr<GrassField> bake_user_field(size_t zi) {
       floors.push_back(f.second);
     }
   }
+  // (a level from scratch: only its own ground, the game's world under it doesn't count)
+  if (g_enhanced_menu.blank_world) {
+    floors.clear();
+    floors.push_back([](float x, float z, float, float* y) {
+      *y = enhanced_terrain_height(x / kMeter, z / kMeter) * kMeter;
+      return true;
+    });
+  }
   if (floors.empty()) {
     return nullptr;
   }
@@ -1075,7 +1085,7 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
   if (g_enhanced_grass <= 0.f) {
     return;
   }
-  if (tree.enh_grass) {
+  if (tree.enh_grass && !g_enhanced_menu.blank_world) {
     auto f = std::static_pointer_cast<const GrassField>(tree.enh_grass);
     draw_field(f, f->tod, f->base_rgb, tree, settings, render_state, prof);
   }
@@ -1094,12 +1104,32 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
         last = render_state->frame_idx;
         Host h;
         h.tree = &tree;
-        const auto& verts = tree.unpacked.vertices;
-        if (!verts.empty()) {
-          h.tod = verts[0].color_index;
-          for (int c = 0; c < 3; c++) {
-            h.base_rgb[c] = verts[0].rgba_base[c] / 255.f;
+        // (not just any vertex's colors: a shrub's first one can be in the dark under a rock, and
+        // the grass would come out black. One of the tree's bright ones)
+        static std::map<const tfrag3::ShrubTree*, std::pair<int, std::array<float, 3>>> lit;
+        auto found = lit.find(&tree);
+        if (found == lit.end()) {
+          const auto& verts = tree.unpacked.vertices;
+          std::vector<std::pair<float, size_t>> order;
+          const size_t stride = std::max<size_t>(1, verts.size() / 4096);
+          for (size_t v = 0; v < verts.size(); v += stride) {
+            const auto* c = verts[v].rgba_base;
+            order.emplace_back(0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2], v);
           }
+          std::pair<int, std::array<float, 3>> pick = {0, {0.5f, 0.5f, 0.5f}};
+          if (!order.empty()) {
+            std::sort(order.begin(), order.end());
+            const auto& vert = verts[order[order.size() * 3 / 4].second];
+            pick.first = vert.color_index;
+            for (int c = 0; c < 3; c++) {
+              pick.second[c] = vert.rgba_base[c] / 255.f;
+            }
+          }
+          found = lit.emplace(&tree, pick).first;
+        }
+        h.tod = found->second.first;
+        for (int c = 0; c < 3; c++) {
+          h.base_rgb[c] = found->second.second[c];
         }
         orphans.emplace_back(field, h);
         continue;

@@ -3,6 +3,7 @@
 #include "EnhancedImport.h"
 #include "EnhancedTextures.h"
 
+#include <memory>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -29,6 +30,7 @@
 #include "game/graphics/opengl_renderer/EnhancedNotes.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/runtime.h"
 
 #include "third-party/imgui/imgui.h"
@@ -167,9 +169,11 @@ std::vector<Probe> g_probes;  // asked and not yet taken back (answered ones go 
 int g_probe_next = 1;
 
 // ---- the editor
-enum Tool { kSelect, kGrass, kPlace, kLight, kMeasure, kTexture, kNote, kToolCount };
+enum Tool { kSelect, kGrass, kPlace, kLight, kMeasure, kTexture, kNote, kGround, kToolCount };
 constexpr const char* kToolNames[kToolCount] = {"Select", "Grass",    "Objects", "Lights",
-                                                "Measure", "Textures", "Notes"};
+                                                "Measure", "Textures", "Notes",  "Ground"};
+// the Ground tool's brushes
+enum GroundMode { kGroundDraw, kGroundSmooth, kGroundFlatten, kGroundGrab, kGroundPaint, kGroundLake };
 
 struct Pick {
   int kind = 0;  // 0 an object, 1 a light
@@ -182,6 +186,13 @@ struct State {
   std::vector<EnhancedLight> lights;
   std::vector<V3> lush, edge;  // the grass painting: x, z, the brush's radius (m)
   float fade = 12.f;
+  // a level from scratch: its ground (shared: the undo steps keep only the ones that differ), its lakes
+  struct Ground {
+    std::vector<float> h;
+    std::vector<u32> mask;
+  };
+  std::shared_ptr<const Ground> ground;
+  std::vector<std::array<float, 3>> lakes;  // x, z, the water's height (m)
 };
 
 // where Jak starts a private level; from across the world: by this continue point, until he's in
@@ -428,6 +439,22 @@ struct Editor {
   bool level_popup = false;
   char level_field[64] = {};
   bool level_copy = false;
+  bool level_blank = false;    // this level is from scratch: the ground's its own
+  int ground_mode = kGroundDraw;
+  int ground_mat = kMatGrass;
+  float ground_brush = 12.f;     // m
+  float ground_strength = 0.5f;  // 0..1
+  bool ground_stroke = false;
+  float ground_target = 0.f;     // the flatten brush's height, the grab's start
+  V3 ground_at = {0, 0, 0};
+  float ground_mouse_y = 0.f;
+  float ground_per_px = 0.f;     // m of height per pixel of a drag
+  int lake_held = -1;
+  double ground_lift_t = 0;
+  bool level_scratch = false;  // the New Level window's choice
+  int level_place = -1;        // the New Level window's choice in enhanced_places (-1: here)
+  std::string level_going_to;  // a new level's game area, on the way: its start's set on arrival
+  double level_going_t = 0;
   std::string level_msg;
   std::future<std::string> level_pick;
   bool level_pick_export = false;
@@ -626,9 +653,20 @@ void commit(Editor& e, bool objects, bool lights, bool grass) {
   e.dirty = true;
 }
 
+void put_ground(const State::Ground& g);
+
 void restore(Editor& e, const State& st) {
   bool grass = st.lush != e.s.lush || st.edge != e.s.edge || st.fade != e.s.fade;
+  // (the ground of a step too old to be kept: as it is)
+  auto ground = st.ground ? st.ground : e.s.ground;
+  if (e.level_blank && st.ground && st.ground != e.s.ground) {
+    put_ground(*st.ground);
+  }
+  if (e.level_blank) {
+    enhanced_terrain_set_lakes(st.lakes);
+  }
   e.s = st;
+  e.s.ground = ground;
   e.sel.clear();
   e.falls.clear();
   commit(e, true, true, grass);
@@ -677,6 +715,67 @@ std::string new_level_id(const std::string& name) {
   return out;
 }
 
+// (from scratch: the ground goes around a flat spot of the desert: its shrubs light it, the sky's the
+// desert's)
+constexpr float kBlankCenter[3] = {2282.f, 30.f, 290.f};
+
+fs::path terrain_file(const std::string& id) {
+  return levels_dir() / id / "terrain.bin";
+}
+
+void save_terrain(const Editor& e) {
+  std::vector<float> h;
+  std::vector<u32> m;
+  enhanced_terrain_get(&h, &m);
+  std::vector<u8> data(h.size() * 8);
+  memcpy(data.data(), h.data(), h.size() * 4);
+  memcpy(data.data() + h.size() * 4, m.data(), m.size() * 4);
+  const auto packed = compression::compress_zstd(data.data(), data.size());
+  file_util::write_binary_file(terrain_file(e.level), packed.data(), packed.size());
+}
+
+void set_blank(Editor& e, bool blank) {
+  e.level_blank = blank;
+  g_enhanced_menu.blank_world = blank;
+  if (!blank) {
+    enhanced_terrain_clear();
+    if (e.tool == kGround) {
+      e.tool = kSelect;
+    }
+  }
+}
+
+std::shared_ptr<const State::Ground> ground_now() {
+  auto g = std::make_shared<State::Ground>();
+  enhanced_terrain_get(&g->h, &g->mask);
+  return g;
+}
+
+void put_ground(const State::Ground& g) {
+  const float half = (kTerrainSize - 1) * kTerrainCell * 0.5f;
+  enhanced_terrain_set(kBlankCenter[0] - half, kBlankCenter[2] - half, kBlankCenter[1], g.h, g.mask);
+}
+
+// a level's ground as it was saved (or flat)
+void load_terrain(const std::string& id) {
+  const size_t n = (size_t)kTerrainSize * kTerrainSize;
+  std::vector<float> h;
+  std::vector<u32> m;
+  std::error_code ec;
+  if (fs::exists(terrain_file(id), ec)) {
+    std::vector<u8> data;
+    const auto file = file_util::read_binary_file(terrain_file(id));
+    if (compression::try_decompress_zstd(file.data(), file.size(), n * 8, &data) && data.size() == n * 8) {
+      h.resize(n);
+      m.resize(n);
+      memcpy(h.data(), data.data(), n * 4);
+      memcpy(m.data(), data.data() + n * 4, n * 4);
+    }
+  }
+  const float half = (kTerrainSize - 1) * kTerrainCell * 0.5f;
+  enhanced_terrain_set(kBlankCenter[0] - half, kBlankCenter[2] - half, kBlankCenter[1], h, m);
+}
+
 nlohmann::json level_json(const Editor& e) {
   auto objects = nlohmann::json::array();
   for (const auto& p : e.s.objects) {
@@ -701,6 +800,8 @@ nlohmann::json level_json(const Editor& e) {
   j["version"] = 1;
   j["game"] = game_version_names[g_game_version];
   j["name"] = e.level_name;
+  j["blank"] = e.level_blank;
+  j["lakes"] = e.s.lakes;
   j["objects"] = objects;
   j["lights"] = lights;
   j["grass"] = grass;
@@ -717,6 +818,7 @@ nlohmann::json level_json(const Editor& e) {
 
 struct LevelFile {
   std::string name;
+  bool blank = false;
   LevelStart start;
   State st;
 };
@@ -728,6 +830,10 @@ bool read_level(const nlohmann::json& j, LevelFile* out) {
       return false;
     }
     out->name = j.value("name", std::string("Level"));
+    out->blank = j.value("blank", false);
+    if (j.contains("lakes")) {
+      out->st.lakes = j["lakes"].get<std::vector<std::array<float, 3>>>();
+    }
     for (const auto& o : j.at("objects")) {
       auto p = placed_from_json(o);
       if (safe_file_name(p.model)) {
@@ -771,6 +877,9 @@ void save_level(const Editor& e) {
   try {
     file_util::create_dir_if_needed(levels_dir() / e.level);
     file_util::write_text_file(levels_dir() / e.level / "level.json", level_json(e).dump(1));
+    if (e.level_blank && enhanced_terrain_on()) {
+      save_terrain(e);
+    }
     lg::info("[enhanced] level {}: saved ({} objects, {} lights)", e.level, e.s.objects.size(), e.s.lights.size());
   } catch (const std::exception& ex) {
     lg::error("[enhanced] level {}: {}", e.level, ex.what());
@@ -789,6 +898,7 @@ void show_state(Editor& e, const State& st) {
   push_objects(e);
   enhanced_set_lights(e.s.lights, false);
   push_grass(e);
+  enhanced_terrain_set_lakes(e.s.lakes);
 }
 
 // (leaving the main world: what it has on disk, its lights and grass as the renderer has them)
@@ -842,6 +952,23 @@ void go_to_level_start(Editor& e) {
 
 // on the way to a level's start: once Jak's in its level (or it's been long), the last step
 void level_wait_update(Editor& e) {
+  if (!e.level_going_to.empty()) {
+    std::string cont;
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+      cont = g_enhanced_scene.continue_point;
+    }
+    const double waited = ImGui::GetTime() - e.level_going_t;
+    if (!e.in_level) {
+      e.level_going_to.clear();
+    } else if ((cont == e.level_going_to && waited > 3.0) || waited > 30.0) {
+      e.level_going_to.clear();
+      if (e.center_ok) {
+        set_level_start(e, e.center * (1.f / kMeter));
+      }
+      save_level(e);
+    }
+  }
   if (e.level_wait.empty()) {
     return;
   }
@@ -876,6 +1003,11 @@ bool open_level(Editor& e, const std::string& id) {
   e.level = id;
   e.level_name = f.name;
   e.start = f.start;
+  set_blank(e, f.blank);
+  if (f.blank) {
+    load_terrain(id);
+    f.st.ground = ground_now();
+  }
   // (grass painted where the world has no field for it yet: one made, the brush's own way)
   for (const auto& q : f.st.lush) {
     if (!enhanced_grass_field_at(q[0], q[1], 0.f)) {
@@ -904,11 +1036,13 @@ void leave_level(Editor& e) {
   e.start = LevelStart();
   e.level_wait.clear();
   e.level_msg.clear();
+  set_blank(e, false);
   show_state(e, e.world);
 }
 
 // what's on the screen becomes a new level called this; or, with empty, a new one with nothing
-void make_level(Editor& e, const std::string& name, bool empty) {
+void make_level(Editor& e, const std::string& name, bool empty, const std::string& go_to = "",
+                bool blank = false) {
   keep_world(e);
   const State st = empty ? State() : e.s;
   e.in_level = true;
@@ -922,7 +1056,26 @@ void make_level(Editor& e, const std::string& name, bool empty) {
     set_level_start(e, e.center * (1.f / kMeter));
   }
   show_state(e, st);
+  set_blank(e, blank);
+  if (blank) {
+    load_terrain("");
+    e.s.ground = ground_now();
+    e.saved = e.s;
+    e.start.have = true;
+    e.start.pos = {kBlankCenter[0], kBlankCenter[1] + 0.5f, kBlankCenter[2]};
+    e.start.scene = "desert";
+    e.start.cont = "desert-start";
+    save_level(e);
+    save_terrain(e);
+    go_to_level_start(e);
+    return;
+  }
   save_level(e);
+  if (!go_to.empty()) {
+    g_enhanced_menu.ask(2, go_to);
+    e.level_going_to = go_to;
+    e.level_going_t = ImGui::GetTime();
+  }
 }
 
 // ---- a level as one file to give to someone: JAKLEVEL1, then, zstd: for each file its name's
@@ -969,6 +1122,10 @@ void export_level(Editor& e, const std::string& path) {
     };
     const std::string json = level_json(e).dump(1);
     put_file("level.json", json.data(), json.size());
+    if (e.level_blank && fs::exists(terrain_file(e.level))) {
+      const auto ground = file_util::read_binary_file(terrain_file(e.level));
+      put_file("terrain.bin", ground.data(), ground.size());
+    }
     std::vector<std::string> done;
     int game_models = 0;
     for (const auto& p : e.s.objects) {
@@ -1087,6 +1244,11 @@ std::string import_level(Editor& e, const std::string& path) {
     }
     file_util::create_dir_if_needed(levels_dir() / id);
     file_util::write_text_file(levels_dir() / id / "level.json", j.dump(1));
+    // (its ground: read back with its size checked, see load_terrain)
+    if (f.blank && files.count("terrain.bin")) {
+      const auto g = files["terrain.bin"];
+      file_util::write_binary_file(terrain_file(id), data.data() + g.first, g.second);
+    }
     e.models = enhanced_scenery_models();
     lg::info("[enhanced] level {}: imported, {} models", id, renamed.size());
     return id;
@@ -3865,6 +4027,52 @@ void side_panel(Editor& e) {
   const std::string tool_header = fmt::format("Tool: {}###tool", kToolNames[e.tool]);
   const int shown = ImGui::CollapsingHeader(tool_header.c_str(), ImGuiTreeNodeFlags_DefaultOpen) ? e.tool : -1;
   switch (shown) {
+    case kGround: {
+      static const char* names[] = {"Raise", "Smooth", "Flatten", "Grab", "Paint", "Lake"};
+      static const char* tips[] = {
+          "Hold to raise the ground. Ctrl lowers it, Shift smooths",
+          "Hold to even it out",
+          "Hold to bring it to the height where you started the stroke",
+          "Drag up or down: the ground under the brush goes with you",
+          "Hold to paint what the ground is made of. Too steep is always rock",
+          "Click a hollow and drag up or down: its water. Ctrl+click: take a lake away"};
+      for (int m = 0; m < 6; m++) {
+        if (m % 3) {
+          ImGui::SameLine();
+        }
+        ImGui::PushStyleColor(ImGuiCol_Button, e.ground_mode == m ? kBlue : grey(0.2f));
+        if (ImGui::Button(names[m], ImVec2(86.f * ui_k(), 0))) {
+          e.ground_mode = m;
+        }
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) {
+          ImGui::SetTooltip("%s", tips[m]);
+        }
+      }
+      ImGui::Spacing();
+      ImGui::TextWrapped("%s", tips[e.ground_mode]);
+      ImGui::Spacing();
+      if (e.ground_mode == kGroundPaint) {
+        static const char* mats[kMatCount] = {"Sand", "Grass", "Rock", "Dirt"};
+        for (int m = 0; m < kMatCount; m++) {
+          if (m) {
+            ImGui::SameLine();
+          }
+          ImGui::PushStyleColor(ImGuiCol_Button, e.ground_mat == m ? kBlue : grey(0.2f));
+          if (ImGui::Button(mats[m], ImVec2(64.f * ui_k(), 0))) {
+            e.ground_mat = m;
+          }
+          ImGui::PopStyleColor();
+        }
+      }
+      if (e.ground_mode != kGroundLake) {
+        prop("Radius");
+        ImGui::SliderFloat("##GroundRadius", &e.ground_brush, 2.f, 150.f, "%.0f m", ImGuiSliderFlags_Logarithmic);
+        prop("Strength");
+        ImGui::SliderFloat("##GroundStrength", &e.ground_strength, 0.02f, 1.f, "%.2f");
+      }
+      break;
+    }
     case kGrass: {
       ImGui::TextWrapped("Paint grass anywhere (Ctrl: erase). The settings below change all the painted grass.");
       e.grass_mode = 0;
@@ -4383,6 +4591,12 @@ void tool_icon(ImDrawList* dl, int tool, ImVec2 c, float s, ImU32 col) {
       dl->AddBezierQuadratic(P(0.45f, 0.9f), P(0.6f, 0.3f), P(0.95f, -0.15f), col, th);
       dl->AddLine(P(-0.9f, 0.9f), P(0.9f, 0.9f), col, th);
       break;
+    case kGround: {
+      // a mountain
+      const ImVec2 hill[5] = {P(-0.95f, 0.75f), P(-0.3f, -0.6f), P(0.05f, 0.f), P(0.4f, -0.3f), P(0.95f, 0.75f)};
+      dl->AddPolyline(hill, 5, col, ImDrawFlags_Closed, th);
+      break;
+    }
     case kPlace: {
       // a cube
       const ImVec2 top = P(0.f, -0.9f), l = P(-0.8f, -0.45f), r = P(0.8f, -0.45f), m = P(0.f, 0.f),
@@ -4455,12 +4669,13 @@ void toolbar(Editor& e) {
       "Click to place a light, then change its color, power and size",
       "Drag from one point to another: how far",
       "Click something: the pictures it's made of, to replace, edit or recolor",
-      "Write and draw notes on the ground"};
+      "Write and draw notes on the ground",
+      "Shape the ground as in Blender's sculpt mode, paint what it's made of, fill hollows with water"};
   const float icon = 44.f * k;
   const float bw = e.advanced ? icon : 200.f * k;
   ImDrawList* dl = ImGui::GetWindowDrawList();
   for (int t = 0; t < kToolCount; t++) {
-    if (t == kNote && !e.advanced) {
+    if ((t == kNote && !e.advanced) || (t == kGround && !e.level_blank)) {
       continue;
     }
     const bool on = e.tool == t;
@@ -5038,6 +5253,8 @@ void level_popups(Editor& e) {
     if (e.level_ask != 3) {
       e.level_field[0] = 0;
       e.level_copy = e.level_ask == 2;
+      e.level_place = -1;
+      e.level_scratch = false;
     }
     ImGui::OpenPopup(e.level_ask == 3 ? "Delete this level?" : e.level_ask == 1 ? "New level" : "Save as a new level");
     e.level_popup = true;
@@ -5059,14 +5276,43 @@ void level_popups(Editor& e) {
     const bool enter = ImGui::InputTextWithHint("##levelname", "The level's name", e.level_field, sizeof(e.level_field),
                                                 ImGuiInputTextFlags_EnterReturnsTrue);
     if (std::strcmp(title, "New level") == 0) {
-      ImGui::Checkbox("Start from what's here now", &e.level_copy);
+      const auto& places = enhanced_places();
+      ImGui::Spacing();
+      if (ImGui::RadioButton("Over a place of the game", !e.level_scratch)) {
+        e.level_scratch = false;
+      }
+      if (ImGui::RadioButton("From scratch: your own ground, nothing else", e.level_scratch)) {
+        e.level_scratch = true;
+      }
+      ImGui::Spacing();
+      ImGui::BeginDisabled(e.level_scratch);
+      ImGui::SetNextItemWidth(360.f * ui_k());
+      if (ImGui::BeginCombo("##levelplace", e.level_place < 0 ? "This place, where I am" : places[e.level_place].name)) {
+        if (ImGui::Selectable("This place, where I am", e.level_place < 0)) {
+          e.level_place = -1;
+        }
+        for (int i = 0; i < (int)places.size(); i++) {
+          if (ImGui::Selectable(places[i].name, e.level_place == i)) {
+            e.level_place = i;
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::BeginDisabled(e.level_place >= 0);
+      ImGui::Checkbox("Start from the objects that are here now", &e.level_copy);
+      ImGui::EndDisabled();
+      ImGui::EndDisabled();
+      ImGui::Spacing();
     }
     ImGui::TextDisabled("Kept on this PC only. The main world doesn't change.");
     ImGui::Spacing();
     const bool named = e.level_field[0] != 0;
     ImGui::BeginDisabled(!named);
     if ((ImGui::Button("Make It  (Enter)", ImVec2(180.f * ui_k(), 36.f * ui_k())) || enter) && named) {
-      make_level(e, e.level_field, !e.level_copy);
+      const bool here = e.level_place < 0 || e.level_scratch;
+      make_level(e, e.level_field, e.level_scratch || !(here && e.level_copy),
+                 here ? std::string() : std::string(enhanced_places()[e.level_place].continue_point),
+                 e.level_scratch);
       e.level_popup = false;
       ImGui::CloseCurrentPopup();
     }
@@ -5108,6 +5354,8 @@ void level_popups(Editor& e) {
   }
 }
 
+bool g_add_script_pick = false;  // the test script: the first one the search found
+
 void add_menu(Editor& e) {
   if (e.add_menu) {
     ImGui::OpenPopup("Add##add");
@@ -5148,7 +5396,9 @@ void add_menu(Editor& e) {
         header = true;
       }
       std::string label = "  " + pretty(m) + "##" + m;
-      if (ImGui::Selectable(label.c_str())) {
+      const bool script_pick = g_add_script_pick;
+      g_add_script_pick = false;
+      if (ImGui::Selectable(label.c_str()) || script_pick) {
         remember(e);
         e.model = (int)i;
         EnhancedPlaced p;
@@ -5244,9 +5494,9 @@ bool pad_input(Editor& e) {
   }
   const bool left = pad_pressed(ImGuiKey_GamepadDpadLeft, true), right = pad_pressed(ImGuiKey_GamepadDpadRight, true);
   const bool up = pad_pressed(ImGuiKey_GamepadDpadUp, true), down = pad_pressed(ImGuiKey_GamepadDpadDown, true);
-  float* brush = e.tool == kGrass ? &e.grass_brush : e.tool == kPlace ? &e.place_brush : nullptr;
+  float* brush = e.tool == kGrass ? &e.grass_brush : e.tool == kPlace ? &e.place_brush : e.tool == kGround ? &e.ground_brush : nullptr;
   if (brush && (up || down)) {
-    *brush = std::clamp(*brush * (up ? 1.15f : 1.f / 1.15f), 0.3f, 60.f);
+    *brush = std::clamp(*brush * (up ? 1.15f : 1.f / 1.15f), 0.3f, 150.f);
   }
   switch (e.tool) {
     case kGrass:
@@ -5429,13 +5679,13 @@ void handle_input(Editor& e) {
   }
 
   // F: the brush's size follows the mouse (as Blender's)
-  float* brush = e.tool == kGrass ? &e.grass_brush : e.tool == kPlace ? &e.place_brush : nullptr;
+  float* brush = e.tool == kGrass ? &e.grass_brush : e.tool == kPlace ? &e.place_brush : e.tool == kGround ? &e.ground_brush : nullptr;
   if (e.resizing) {
     float d = std::hypot(io.MousePos.x - e.resize_mouse.x, io.MousePos.y - e.resize_mouse.y);
     float depth = e.hover_ok ? std::max(dot(e.hover - cam_pos(e), view_axis(e, 2)), 1.f * kMeter)
                              : 20.f * kMeter;
     if (brush) {
-      *brush = std::clamp(d * per_pixel(e, depth) / kMeter, 0.3f, 60.f);
+      *brush = std::clamp(d * per_pixel(e, depth) / kMeter, 0.3f, 150.f);
     }
     if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) || ImGui::IsKeyPressed(ImGuiKey_Enter, false)) {
       e.resizing = false;
@@ -5452,7 +5702,7 @@ void handle_input(Editor& e) {
     // the tools
     for (int t = 0; t < kToolCount; t++) {
       if (ImGui::IsKeyPressed((ImGuiKey)(ImGuiKey_1 + t), false) && e.tool != kNote &&
-          (t != kNote || e.advanced)) {
+          (t != kNote || e.advanced) && (t != kGround || e.level_blank)) {
         e.tool = (Tool)t;
       }
     }
@@ -5490,7 +5740,7 @@ void handle_input(Editor& e) {
         *brush = std::max(0.3f, *brush / 1.15f);
       }
       if (brush && ImGui::IsKeyPressed(ImGuiKey_RightBracket)) {
-        *brush = std::min(60.f, *brush * 1.15f);
+        *brush = std::min(150.f, *brush * 1.15f);
       }
       if (shift && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
         e.add_menu = true;
@@ -5718,6 +5968,89 @@ void handle_input(Editor& e) {
         e.have_measure = length(e.measure_b - e.measure_a) > 0.01f * kMeter;
       }
       break;
+    case kGround: {
+      const float dt = std::min(io.DeltaTime, 0.05f);
+      const float at_x = e.hover[0] / kMeter, at_z = e.hover[2] / kMeter;
+      if (e.ground_mode == kGroundLake) {
+        if (press && e.hover_ok) {
+          remember(e);
+          if (ctrl) {
+            // the nearest lake with its water here
+            int best = -1;
+            float best_d = 1e30f;
+            for (int i = 0; i < (int)e.s.lakes.size(); i++) {
+              const float dx = e.s.lakes[i][0] - at_x, dz = e.s.lakes[i][1] - at_z;
+              if (dx * dx + dz * dz < best_d) {
+                best_d = dx * dx + dz * dz;
+                best = i;
+              }
+            }
+            if (best >= 0) {
+              e.s.lakes.erase(e.s.lakes.begin() + best);
+            }
+          } else {
+            e.s.lakes.push_back({at_x, at_z, e.hover[1] / kMeter + 0.3f});
+            e.lake_held = (int)e.s.lakes.size() - 1;
+            e.ground_mouse_y = io.MousePos.y;
+            e.ground_target = e.s.lakes.back()[2];
+            e.ground_per_px = per_pixel(e, std::max(dot(e.hover - cam_pos(e), view_axis(e, 2)), 1.f * kMeter)) / kMeter;
+          }
+          enhanced_terrain_set_lakes(e.s.lakes);
+          e.dirty = true;
+        }
+        if (e.lake_held >= 0 && down) {
+          e.s.lakes[e.lake_held][2] = e.ground_target + (e.ground_mouse_y - io.MousePos.y) * e.ground_per_px;
+          enhanced_terrain_set_lakes(e.s.lakes);
+        }
+        if (!down) {
+          e.lake_held = -1;
+        }
+        break;
+      }
+      if (press && e.hover_ok) {
+        remember(e);
+        // (the ground of only the last so many steps kept: each is 2 MB)
+        int kept = 0;
+        for (auto it = e.undo.rbegin(); it != e.undo.rend(); ++it) {
+          if (it->ground && ++kept > 30) {
+            it->ground = nullptr;
+          }
+        }
+        e.ground_stroke = true;
+        e.ground_at = e.hover;
+        e.ground_target = e.hover[1] / kMeter;
+        e.ground_mouse_y = io.MousePos.y;
+        e.ground_per_px = per_pixel(e, std::max(dot(e.hover - cam_pos(e), view_axis(e, 2)), 1.f * kMeter)) / kMeter;
+        if (e.ground_mode == kGroundGrab) {
+          enhanced_terrain_grab_begin();
+        }
+      }
+      if (e.ground_stroke && down) {
+        const float r = e.ground_brush, power = e.ground_strength;
+        if (e.ground_mode == kGroundGrab) {
+          enhanced_terrain_grab(e.ground_at[0] / kMeter, e.ground_at[2] / kMeter, r,
+                                (e.ground_mouse_y - io.MousePos.y) * e.ground_per_px);
+        } else if (e.hover_ok) {
+          // (the speed grows with the brush: a mountain as quick to make as a mound)
+          const float raise = power * dt * (0.5f + r * 0.1f);
+          if (shift || e.ground_mode == kGroundSmooth) {
+            enhanced_terrain_brush(kBrushSmooth, at_x, at_z, r, power * dt * 8.f, 0.f, 0);
+          } else if (e.ground_mode == kGroundFlatten) {
+            enhanced_terrain_brush(kBrushFlatten, at_x, at_z, r, power * dt * 6.f, e.ground_target, 0);
+          } else if (e.ground_mode == kGroundPaint) {
+            enhanced_terrain_brush(kBrushPaint, at_x, at_z, r, power * dt * 6.f, 0.f, erase ? kMatSand : e.ground_mat);
+          } else {
+            enhanced_terrain_brush(kBrushRaise, at_x, at_z, r, erase ? -raise : raise, 0.f, 0);
+          }
+        }
+      }
+      if (e.ground_stroke && !down) {
+        e.ground_stroke = false;
+        e.s.ground = ground_now();
+        e.dirty = true;
+      }
+      break;
+    }
     case kGrass:
     case kPlace: {
       if (press && e.hover_ok && (e.tool == kGrass || e.model >= 0 || erase || e.place_mode == 1)) {
@@ -5883,10 +6216,12 @@ void draw_marks(Editor& e) {
   }
   // the brush on the ground
   const bool over_ui = io.WantCaptureMouse && !e.pad;
-  if ((e.tool == kGrass || e.tool == kPlace) && e.hover_ok && !over_ui && !e.modal) {
-    float r = (e.tool == kGrass ? e.grass_brush : e.place_brush) * kMeter;
+  if ((e.tool == kGrass || e.tool == kPlace || (e.tool == kGround && e.ground_mode != kGroundLake)) && e.hover_ok &&
+      !over_ui && !e.modal) {
+    float r = (e.tool == kGrass ? e.grass_brush : e.tool == kGround ? e.ground_brush : e.place_brush) * kMeter;
     const bool erasing = io.KeyCtrl || (e.pad && ImGui::IsKeyDown(ImGuiKey_GamepadFaceLeft));
     ImU32 col = erasing ? IM_COL32(255, 255, 255, 230)
+                : e.tool == kGround ? IM_COL32(90, 170, 255, 230)
                 : e.tool == kGrass ? IM_COL32(120, 230, 90, 230)
                                    : IM_COL32(255, 170, 50, 230);
     draw_ground_circle(e, dl, e.hover, r, col, 2.f);
@@ -5993,7 +6328,7 @@ void pad_test() {
 // mouse (a cursor is drawn; to test and to film the editor, the desktop free meanwhile). Lines:
 //   wait <s> | move <x> <y> <s> (0..1 of the window, eased) | press l|m|r | release l|m|r
 //   key <imgui key name> | hold <name> | drop <name> | text <what to type> | editor (F4)
-//   wheel <clicks> | play <level id> | world | menu | export <file> | import <file> (past the file dialogs)
+//   scratch <name> (a new level from scratch) | ground <brush> (the Ground tool) | wheel <clicks> | play <level id> | world | menu | export <file> | import <file> (past the file dialogs)
 void script_test() {
   static const char* file = std::getenv("JAK_ENHANCED_EDITOR_SCRIPT");
   if (!file) {
@@ -6010,6 +6345,21 @@ void script_test() {
   static ImVec2 from(0.5f, 0.5f), to(0.5f, 0.5f);
   auto& io = ImGui::GetIO();
   const double now = ImGui::GetTime();
+  // (once it's done, a new file is a new script: no need to boot again for each try)
+  static fs::file_time_type stamp;
+  if (read && at >= lines.size()) {
+    static double looked = 0;
+    if (now - looked >= 0.25) {
+      looked = now;
+      std::error_code ec;
+      const auto when = fs::last_write_time(file, ec);
+      if (!ec && when != stamp) {
+        read = false;
+        lines.clear();
+        at = 0;
+      }
+    }
+  }
   // (it waits for the file: it can be written when the game's ready)
   if (!read) {
     static double checked = 0;
@@ -6021,6 +6371,8 @@ void script_test() {
       return;
     }
     read = true;
+    stamp = fs::last_write_time(file);
+    step_t = now;
     std::istringstream in(file_util::read_text_file(fs::path(file)));
     for (std::string t; std::getline(in, t);) {
       if (!t.empty() && t.back() == '\r') {
@@ -6104,6 +6456,13 @@ void script_test() {
       enhanced_level_leave();
     } else if (l.verb == "menu") {
       g_enhanced_menu.open = !g_enhanced_menu.open;
+    } else if (l.verb == "pick") {
+      g_add_script_pick = true;
+    } else if (l.verb == "ground") {
+      g_ed.tool = kGround;
+      sscanf(l.arg.c_str(), "%d %f %d %f", &g_ed.ground_mode, &g_ed.ground_brush, &g_ed.ground_mat, &g_ed.ground_strength);
+    } else if (l.verb == "scratch") {
+      make_level(g_ed, l.arg, true, "", true);
     } else if (l.verb == "wheel") {
       io.AddMouseWheelEvent(0.f, (float)std::atof(l.arg.c_str()));
     } else if (l.verb == "export") {
@@ -6138,6 +6497,28 @@ int g_level_ask = 0;  // 1 play, 2 back to the main world
 std::string g_level_ask_id;
 
 }  // namespace
+
+bool enhanced_has_piazza();
+
+const std::vector<EnhancedPlace>& enhanced_places() {
+  static const std::vector<EnhancedPlace> places = [] {
+    std::vector<EnhancedPlace> out;
+    // (the plaza only where it's built)
+    if (enhanced_has_piazza()) {
+      out.push_back({"Plaza (Jak 2)", "piazza-start"});
+    }
+    out.insert(out.end(), {{"Port", "ctyport-start"},
+                           {"Hip Hog", "ctyport-hiphog"},
+                           {"Slums alley", "ctysluma-alley"},
+                           {"Industrial zone", "ctyinda-start"},
+                           {"Central sector", "ctygenb-start"},
+                           {"Metal Head city", "mhcitya-near-ctyport"},
+                           {"Spargus", "wascitya-start"},
+                           {"Desert", "desert-facing-wasdoors"}});
+    return out;
+  }();
+  return places;
+}
 
 std::vector<EnhancedLevelInfo> enhanced_levels() {
   std::vector<EnhancedLevelInfo> out;
@@ -6362,6 +6743,16 @@ void enhanced_editor_ui() {
   }
   script_test();
   level_wait_update(e);
+  // a level from scratch: Jak under his own ground (the ground raised over him, or the rim passed): back on top
+  if (e.level_blank && g_enhanced_player.valid && e.level_wait.empty() && ImGui::GetTime() - e.ground_lift_t > 1.0) {
+    const float p[3] = {g_enhanced_player.pos[0] / kMeter, g_enhanced_player.pos[1] / kMeter,
+                         g_enhanced_player.pos[2] / kMeter};
+    const float top = enhanced_terrain_height(p[0], p[2]);
+    if (p[1] < top - 1.f) {
+      e.ground_lift_t = ImGui::GetTime();
+      g_enhanced_menu.ask(3, fmt::format("{:.2f},{:.2f},{:.2f},{:.1f}", p[0], top + 0.5f, p[2], e.start.yaw));
+    }
+  }
   {
     std::lock_guard<std::mutex> lock(g_level_ask_mutex);
     // (unsaved changes aren't thrown away: nothing happens until they're saved or dropped)

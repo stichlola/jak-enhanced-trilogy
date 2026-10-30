@@ -417,6 +417,9 @@ void TFragment::render_tree(int geom,
   if (!m_has_level) {
     return;
   }
+  if (g_enhanced_menu.blank_world) {
+    return;
+  }
   auto& tree = m_cached_trees.at(geom).at(settings.tree_idx);
   [[maybe_unused]] const auto* itimes = settings.camera.itimes;
   EnhancedNormalTarget normals;

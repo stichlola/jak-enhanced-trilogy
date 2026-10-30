@@ -52,6 +52,12 @@ struct EnhancedLevelInfo {
   int objects = 0;
 };
 std::vector<EnhancedLevelInfo> enhanced_levels();
+// the game's areas Jak can be sent to (the menu's Teleport, a new level's place)
+struct EnhancedPlace {
+  const char* name;
+  const char* continue_point;
+};
+const std::vector<EnhancedPlace>& enhanced_places();
 // the level on now ("": the main world)
 std::string enhanced_level_active();
 // its objects shown and Jak taken to its start (carried out in the next enhanced_editor_ui)

@@ -233,6 +233,8 @@ struct EnhancedMenu {
   std::atomic<bool> photo_active = false;
   // the in-game editor (F4, EnhancedEditor): photo mode with the mouse's tools on it
   std::atomic<bool> editor = false;
+  // a private level from scratch: the game's world neither drawn nor solid, no actors in it
+  std::atomic<bool> blank_world = false;
   bool editing() const { return editor && photo_active; }
   // asked to leave it (F4, Start, the menu): it leaves at once when everything is saved, else asks
   std::atomic<bool> editor_leave = false;

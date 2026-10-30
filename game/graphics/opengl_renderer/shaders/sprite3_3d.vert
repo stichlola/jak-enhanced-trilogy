@@ -208,6 +208,10 @@ void main() {
   // scissoring area adjust
   transformed.y *= SCISSOR_ADJUST * HEIGHT_SCALE;
   gl_Position = transformed;
+  // Enhanced: behind the camera (the sun, looking down from the editor): not mirrored onto the screen
+  if (rendermode != 2u && transformed_pos_vf02.w <= 0.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  }
 
   if (enh_light_count > 0 && rendermode != 2u) {
     // Enhanced: a puff near a lamp or a fire takes its color, by the falloff the post pass uses

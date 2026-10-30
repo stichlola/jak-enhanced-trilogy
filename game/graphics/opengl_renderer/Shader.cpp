@@ -240,6 +240,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_SHADOW) = {"enh_shadow", version};
   at(ShaderId::ENH_SHADOW_MERC) = {"enh_shadow_merc", version};
   at(ShaderId::SHRUB_INST) = {"shrub_inst", version};
+  at(ShaderId::ENH_TERRAIN) = {"enh_terrain", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
 

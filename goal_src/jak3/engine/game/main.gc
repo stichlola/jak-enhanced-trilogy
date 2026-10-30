@@ -146,6 +146,7 @@
   )
 
 (define-extern enhanced-photo-update (function none))
+(define-extern enhanced-blank-update (function none))
 
 (define *last-master-mode* 'game)
 
@@ -1489,6 +1490,7 @@
     ;; to render)
     (with-profiler 'camera *profile-camera-color*
       (enhanced-photo-update)
+      (enhanced-blank-update) ;; (here: it has to work with the editor open and the game paused)
       (update-camera)
       (execute-cam-post-hook-engine)
       )
