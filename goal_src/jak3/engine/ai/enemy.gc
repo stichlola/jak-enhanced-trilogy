@@ -2159,7 +2159,14 @@
 (defmethod damage-enemy-from-attack! ((this enemy) (arg0 object) (arg1 event-message-block))
   "Given an attack message, apply damage."
   (let* ((blow? (enhanced-darkjak-blow? (-> this incoming penetrate-using)))
-         (f0-0 (* (get-damage-from-attack this arg0 arg1) (if blow? 2.5 1.0)))
+         ;; (and from invisibility, a blow from behind the enemy's back: three times)
+         (sneak? (and (pc-enhanced-balance?)
+                      *target*
+                      (logtest? (target-flags invisible) (-> *target* target-flags))
+                      (logtest? (penetrate punch spin flop uppercut) (-> this incoming penetrate-using))
+                      )
+                 )
+         (f0-0 (* (get-damage-from-attack this arg0 arg1) (cond (sneak? 3.0) (blow? 2.5) (else 1.0))))
          (f30-0 (apply-incoming-hitpoint-mods this f0-0))
          (alive? (< 0.0 (-> this hit-points)))
          )

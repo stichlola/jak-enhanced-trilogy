@@ -78,6 +78,28 @@
                   )
              (or (when (< 0.0 (-> self fact shield-level))
                    (send-event (ppointer->process (-> self lightjak shield)) 'hit)
+                   ;; Enhanced balance: a shot the Light Shield stops goes back to whoever fired it
+                   ;; (the shot is gone, its shooter hit as if it had bounced back)
+                   (when (and (pc-enhanced-balance?) arg2 (type? arg2 projectile))
+                     (let ((shooter (handle->process (-> (the-as projectile arg2) ignore-handle))))
+                       (when (and shooter (!= shooter self))
+                         (send-event
+                           shooter
+                           'attack
+                           #f
+                           (static-attack-info :mask (vehicle-impulse-factor) ((id (new-attack-id))
+                                                                               (damage 2.0)
+                                                                               (vehicle-damage-factor 1.0)
+                                                                               (vehicle-impulse-factor 1.0)
+                                                                               (penetrate-using (penetrate touch))
+                                                                               (attacker-velocity *zero-vector*)
+                                                                               )
+                                               )
+                           )
+                         )
+                       )
+                     (send-event arg2 'die)
+                     )
                    #t
                    )
                  (and (-> *setting-control* user-current board-trail)

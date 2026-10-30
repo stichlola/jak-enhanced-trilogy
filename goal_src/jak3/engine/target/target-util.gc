@@ -737,7 +737,8 @@
        )
       (('bomb)
        (let* ((f0-32 (-> self control bomb-scale))
-              (f28-0 (lerp-scale (-> *TARGET-bank* root-radius) 122880.0 f0-32 0.0 1.0))
+              ;; Enhanced balance: the Dark Bomb's blast reaches 40 m, not 30 (the flyers overhead too)
+              (f28-0 (lerp-scale (-> *TARGET-bank* root-radius) (if (pc-enhanced-balance?) 163840.0 122880.0) f0-32 0.0 1.0))
               )
          (sphere<-vector+r!
            (the-as sphere (-> self control root-prim local-sphere))
