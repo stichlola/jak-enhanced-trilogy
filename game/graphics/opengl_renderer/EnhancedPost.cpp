@@ -149,6 +149,7 @@ struct ZoneLook {
   float morning_yaw = 0.f;  // the sun's path turned further in the morning (degrees)
   float day_sky = 0.f;      // the clear day sky (pink toward the morning sun) and its clouds (0..1)
   float rock_sun = 0.f;     // the sun's own direction lighting rock and cliffs (0..1)
+  float wall_sun = 0.f;     // and, milder, the walls and the rest of the plain scenery (0..1)
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -363,6 +364,7 @@ void load_world() {
       out.light_max_elev = l.value("light_max_elev", out.light_max_elev);
       out.day_sky = l.value("day_sky", out.day_sky);
       out.rock_sun = l.value("rock_sun", out.rock_sun);
+  out.wall_sun = l.value("wall_sun", out.wall_sun);
     };
     for (const auto& item : j.at("zones").items()) {
       const std::string name = item.key();
@@ -2965,6 +2967,7 @@ void EnhancedPost::update_scene() {
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
   want.day_sky = s.area_grading ? mix(day.day_sky, night.day_sky) : 0.f;
   want.rock_sun = s.area_grading ? mix(day.rock_sun, night.rock_sun) : 0.f;
+  want.wall_sun = s.area_grading ? mix(day.wall_sun, night.wall_sun) : 0.f;
   want.sun_yaw = mix(day.sun_yaw, night.sun_yaw);
   want.morning_yaw = mix(day.morning_yaw, night.morning_yaw);
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
@@ -3244,6 +3247,7 @@ void EnhancedPost::update_scene() {
   ease(m_grade.golden, want.golden, k_grade);
   ease(m_grade.day_sky, want.day_sky, k_grade);
   ease(m_grade.rock_sun, want.rock_sun, k_grade);
+  ease(m_grade.wall_sun, want.wall_sun, k_grade);
   ease(m_grade.sun_yaw, want.sun_yaw, k_grade);
   ease(m_grade.morning_yaw, want.morning_yaw, k_grade);
   g_sun_yaw = m_grade.sun_yaw;
@@ -5085,6 +5089,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "sky_day"),
                 ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) * sky_k);
     glUniform1f(glGetUniformLocation(id, "rock_sun"), m_ssao_ready ? m_grade.rock_sun : 0.f);
+  glUniform1f(glGetUniformLocation(id, "wall_sun"), m_ssao_ready ? m_grade.wall_sun : 0.f);
     // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);

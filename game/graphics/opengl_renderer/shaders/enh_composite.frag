@@ -87,6 +87,7 @@ uniform float morning;          // the desert's morning (0..1): clear blue sky, 
 uniform float sky_morning;      // the area's morning sky (0..1): pink and peach toward the low sun
 uniform float sky_day;          // the area's day sky (0..1, dawn to sunset): clear blue, its clouds lit to match
 uniform float rock_sun;         // the sun's own direction lighting rock and cliffs (0..1, the area's)
+uniform float wall_sun;         // and, milder, the walls and plain scenery (0..1, the area's)
 uniform float day_look;         // the desert's day (0..1, morning to late afternoon): the morning's colors
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
@@ -3751,7 +3752,7 @@ void main() {
   // by day the same on rock: the game bakes the mountains evenly dark, so the sun's own direction
   // lights them, the faces turned away in a cooler shade (fading out as the late afternoon's takes
   // over)
-  if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0)) {
+  if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
@@ -3769,6 +3770,19 @@ void main() {
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
       c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun);
+    }
+    // the city's walls the same, milder: the game lights a street's both sides alike, so the faces
+    // toward the sun a little brighter and warmer, the others a little cooler (not the characters,
+    // the shrubs or the sky: plain scenery only)
+    if (tag > 0.985 && wall_sun > 0.0 && wsurf == 0.0) {
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - sky_day)) * (1.0 - weather.x);
+      float wndl = dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0)));
+      float lit = smoothstep(-0.15, 0.4, wndl);
+      vec3 relit = c * mix(vec3(0.88, 0.9, 0.96), vec3(1.22, 1.15, 1.04), lit);
+      // (not far off, where the haze takes over, nor on the ground, which the shadows already shape)
+      float wall = 1.0 - smoothstep(0.6, 0.9, abs(world_dir(surf_n).y));
+      float near_k = 1.0 - smoothstep(150.0, 500.0, length(p) / 4096.0);
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * wall * near_k * wall_sun);
     }
     // (and the sand and the rocky ground: the game lights them a greyish white, stopped down above
     // they went a dull grey. Warm golden sand instead, its brightness kept, the sun's side and

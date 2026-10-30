@@ -581,6 +581,7 @@ class EnhancedPost {
     float light_max_elev = 90.f;      // in the late afternoon, that light no higher than (degrees)
     float day_sky = 0.f;              // the clear day sky and its clouds (0..1)
     float rock_sun = 0.f;             // the sun's direction lighting rock and cliffs (0..1)
+  float wall_sun = 0.f;             // and, milder, walls and plain scenery (0..1)
   };
   void update_scene();
   Grade m_grade;
