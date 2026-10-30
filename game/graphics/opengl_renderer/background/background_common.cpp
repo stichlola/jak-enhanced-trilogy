@@ -266,6 +266,7 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   auto id = sh.id();
   glUniform1i(glGetUniformLocation(id, "gfx_hack_no_tex"), Gfx::g_global_settings.hack_no_tex);
   glUniform1i(glGetUniformLocation(id, "decal"), false);
+  glUniform1f(glGetUniformLocation(id, "enh_parallax"), 0.f);  // Enhanced: per draw, off unless asked
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glUniformMatrix4fv(glGetUniformLocation(id, "camera"), 1, GL_FALSE, settings.camera[0].data());
 

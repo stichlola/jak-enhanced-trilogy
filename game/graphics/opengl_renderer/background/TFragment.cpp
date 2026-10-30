@@ -497,7 +497,7 @@ void TFragment::render_tree(int geom,
     }
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, ShaderId::TFRAG3);
     glUniform1i(m_uniforms.decal, draw.mode.get_decal() ? 1 : 0);
-    enhanced_set_material(render_state, ShaderId::TFRAG3, m_materials, tex_idx);
+    enhanced_set_material(render_state, ShaderId::TFRAG3, m_materials, tex_idx, draw.mode);
     tree.tris_this_frame += draw.num_triangles;
     tree.draws_this_frame++;
 
