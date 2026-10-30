@@ -497,6 +497,11 @@ void enhanced_smooth_characters(tfrag3::Level& level, const std::string& name) {
     if (!is_character(model.name)) {
       continue;
     }
+    // (a replacement: the only strips in it are the game's eyes and face it kept, which stay as is)
+    if (!model.effects.empty() && !model.effects[0].all_draws.empty() &&
+        model.effects[0].all_draws[0].no_strip) {
+      continue;
+    }
     size_t tris_in = 0, tris_out = 0;
     Smoother smoother(level.merc_data);
     if (smoother.run(model, &tris_in, &tris_out)) {

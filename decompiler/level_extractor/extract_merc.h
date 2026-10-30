@@ -17,5 +17,6 @@ void extract_merc(const ObjectFileData& ag_data,
                   tfrag3::Level& out,
                   bool dump_level,
                   GameVersion version,
-                  MercSwapInfo& swapped_info);
+                  MercSwapInfo& swapped_info,
+                  const std::map<std::string, level_tools::ArtData>* art_data = nullptr);
 }  // namespace decompiler

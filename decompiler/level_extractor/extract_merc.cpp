@@ -1620,7 +1620,10 @@ void create_modifiable_vertex_data(
   }
 }
 
-void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path& mdl_path) {
+void replace_model(tfrag3::Level& lvl,
+                   tfrag3::MercModel& model,
+                   const fs::path& mdl_path,
+                   const MercReplacementOptions& options) {
   if (model.max_bones < 100) {
     auto lvl_name = lvl.level_name == "" ? "common" : lvl.level_name;
     lg::info("Replacing {} for {}: {} effects, {} max bones, {} max draws\n", model.name, lvl_name,
@@ -1640,7 +1643,7 @@ void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path&
 
     auto swap_info = load_replacement_merc_model(model, lvl.merc_data.indices.size(),
                                                  lvl.merc_data.vertices.size(), lvl.textures.size(),
-                                                 mdl_path.string(), old_verts, false);
+                                                 mdl_path.string(), old_verts, false, options);
     model = swap_info.new_model;
     size_t old_start = lvl.merc_data.vertices.size();
     for (auto& ind : swap_info.new_indices) {
@@ -1652,6 +1655,72 @@ void replace_model(tfrag3::Level& lvl, tfrag3::MercModel& model, const fs::path&
                                   swap_info.new_vertices.end());
     lvl.textures.insert(lvl.textures.end(), swap_info.new_textures.begin(),
                         swap_info.new_textures.end());
+
+    // Enhanced: a copied blend-shape face (copy_mod_draws) only lives in mod_draw, which is used
+    // only while the game sends weights: the rest of the time it would be missing. So also as
+    // plain draws of its neutral vertices.
+    model.max_draws = 0;
+    for (auto& e : model.effects) {
+      if (e.has_mod_draw) {
+        const u32 first_vertex = lvl.merc_data.vertices.size();
+        lvl.merc_data.vertices.insert(lvl.merc_data.vertices.end(), e.mod.vertices.begin(),
+                                      e.mod.vertices.end());
+        const size_t copied_eye_draws = e.all_draws.size();
+        for (const auto& mod_draw : e.mod.mod_draw) {
+          // (copy_eye_draws has the whole of an eye in all_draws already)
+          const auto end = e.all_draws.begin() + copied_eye_draws;
+          if (mod_draw.eye_id != 0xff &&
+              std::any_of(e.all_draws.begin(), end, [&](const tfrag3::MercDraw& d) {
+                return d.eye_id == mod_draw.eye_id;
+              })) {
+            continue;
+          }
+          tfrag3::MercDraw draw = mod_draw;
+          draw.first_index = lvl.merc_data.indices.size();
+          for (size_t i = 0; i < mod_draw.index_count; i++) {
+            const u32 idx = lvl.merc_data.indices.at(mod_draw.first_index + i);
+            lvl.merc_data.indices.push_back(idx == UINT32_MAX ? idx : idx + first_vertex);
+          }
+          e.all_draws.push_back(draw);
+        }
+      }
+      // (as extract_merc counts them: Merc2 makes room for this many)
+      model.max_draws += e.all_draws.size() + e.mod.mod_draw.size() + e.mod.fix_draw.size();
+    }
+  }
+}
+
+// Enhanced: all_lods: the model's other lods become copies of the replaced -lod0 (the same draws,
+// so no extra memory), else the old model would come back in the distance
+void share_replacement_with_lods(tfrag3::Level& lvl,
+                                 u32 first_model,
+                                 const fs::path& replacements_path,
+                                 MercSwapInfo& swapped_info) {
+  for (u32 mi = first_model; mi < lvl.merc_data.models.size(); mi++) {
+    const std::string name = lvl.merc_data.models[mi].name;
+    const auto at = name.rfind("-lod");
+    if (at == std::string::npos || name.compare(at, std::string::npos, "-lod0") == 0 ||
+        swapped_info.should_swap(name)) {
+      continue;
+    }
+    const std::string lod0 = name.substr(0, at) + "-lod0";
+    if (!swapped_info.should_swap(lod0)) {
+      continue;
+    }
+    const auto options = read_merc_replacement_options(replacements_path / (lod0 + ".glb"));
+    if (!options.enabled || !options.all_lods) {
+      continue;
+    }
+    for (u32 oi = first_model; oi < lvl.merc_data.models.size(); oi++) {
+      const auto& other = lvl.merc_data.models[oi];
+      if (other.name == lod0 && !other.effects.empty() && !other.effects[0].all_draws.empty() &&
+          other.effects[0].all_draws[0].no_strip) {
+        lg::info("{} shares the replacement of {}", name, lod0);
+        lvl.merc_data.models[mi] = other;
+        lvl.merc_data.models[mi].name = name;
+        break;
+      }
+    }
   }
 }
 
@@ -1684,7 +1753,8 @@ void extract_merc(const ObjectFileData& ag_data,
                   tfrag3::Level& out,
                   bool dump_level,
                   GameVersion version,
-                  MercSwapInfo& swapped_info) {
+                  MercSwapInfo& swapped_info,
+                  const std::map<std::string, level_tools::ArtData>* art_data) {
   if (dump_level) {
     file_util::create_dir_if_needed(file_util::get_file_path({"debug_out/merc"}));
   }
@@ -1822,9 +1892,21 @@ void extract_merc(const ObjectFileData& ag_data,
           if (file_util::file_exists(mdl_path.string())) {
             auto it = std::find_if(out.merc_data.models.begin(), out.merc_data.models.end(),
                                    [&](const auto& m) { return m.name == ctrl.name; });
-            if (it != out.merc_data.models.end()) {
+            auto options = read_merc_replacement_options(mdl_path);
+            if (art_data) {
+              // (lods can share the -lod0's skeleton)
+              auto joints = art_data->find(ctrl.name);
+              const auto lod_at = ctrl.name.rfind("-lod");
+              if (joints == art_data->end() && lod_at != std::string::npos) {
+                joints = art_data->find(ctrl.name.substr(0, lod_at) + "-lod0");
+              }
+              if (joints != art_data->end() && !joints->second.joint_group.empty()) {
+                options.game_joints = &joints->second.joint_group;
+              }
+            }
+            if (it != out.merc_data.models.end() && options.enabled) {
               auto& model = *it;
-              replace_model(out, model, mdl_path);
+              replace_model(out, model, mdl_path, options);
               swapped_info.add_to_swapped_list(ctrl.name, out.level_name);
             }
           }
@@ -1851,5 +1933,10 @@ void extract_merc(const ObjectFileData& ag_data,
       }
     }
   }
+
+  share_replacement_with_lods(out, first_model,
+                              file_util::get_jak_project_dir() / "custom_assets" /
+                                  game_version_names[version] / "merc_replacements",
+                              swapped_info);
 }
 }  // namespace decompiler

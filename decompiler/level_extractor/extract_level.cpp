@@ -128,9 +128,10 @@ void extract_art_groups_from_level(const ObjectFileDB& db,
     for (const auto& file : files) {
       if (file.name.length() > 3 && !file.name.compare(file.name.length() - 3, 3, "-ag")) {
         const auto& ag_file = db.lookup_record(file);
-        extract_merc(ag_file, tex_db, db.dts, tex_remap, level_data, false, db.version(),
-                     swapped_info);
+        // (joints first: a replacement model can be matched to them by name)
         extract_joint_group(ag_file, db.dts, db.version(), art_group_data);
+        extract_merc(ag_file, tex_db, db.dts, tex_remap, level_data, false, db.version(),
+                     swapped_info, &art_group_data);
         extract_animations(ag_file, db.dts, db.version(), art_group_data);
       }
     }
