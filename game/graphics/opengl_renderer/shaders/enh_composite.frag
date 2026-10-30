@@ -759,6 +759,90 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
   return vec4(col, 1.0 - trans);
 }
 
+// a piece thrown by an explosion, age seconds later: gravity, a little drag, and one bounce on the
+// ground (g: its height from the start along up, > 0: none), then it lies there (rest). Analytic, and
+// only pieces under the ground look for when they hit it: the sparks' loop runs per pixel
+vec3 blast_arc(vec3 bp, vec3 dir, float speed, float age, float g, out vec3 vel, out bool rest) {
+  const float fall = 0.5 * 9.8 * 4096.0 * 0.7;
+  rest = false;
+  vec3 sp = bp + dir * speed * (1.0 - exp(-age * 2.0)) * 0.5 - up_view * (fall * age * age);
+  vel = dir * speed * exp(-age * 2.0) - up_view * (2.0 * fall * age);
+  if (g > 0.0 || dot(sp - bp, up_view) >= g) {
+    return sp;
+  }
+  float vy = dot(dir, up_view) * speed;
+  float t0 = 0.0, t1 = age;
+  for (int k = 0; k < 5; k++) {
+    float t = 0.5 * (t0 + t1);
+    if (vy * (1.0 - exp(-t * 2.0)) * 0.5 - fall * t * t > g) {
+      t0 = t;
+    } else {
+      t1 = t;
+    }
+  }
+  float drag = exp(-t1 * 2.0);
+  vec3 hit = bp + dir * speed * (1.0 - drag) * 0.5 - up_view * (fall * t1 * t1);
+  vec3 v = dir * speed * drag - up_view * (2.0 * fall * t1);
+  float vn = dot(v, up_view);
+  // (loses most of its fall and some of its way along the ground)
+  vec3 vb = (v - up_view * vn) * 0.6 - up_view * (vn * 0.45);
+  float tau = age - t1;
+  float second = -vn * 0.45 / fall;  // when it comes down again
+  if (tau >= second) {
+    rest = true;
+    vel = vec3(0.0);
+    return hit + (vb - up_view * dot(vb, up_view)) * second;
+  }
+  vel = vb - up_view * (2.0 * fall * tau);
+  return hit + vb * tau - up_view * (fall * tau * tau);
+}
+
+// the dark chunks an explosion throws: small tumbling bits of rock and metal, hot at first, hidden
+// behind the scene, that bounce once and lie on the ground until the blast's end
+void blast_chunks(int i, float z, inout vec3 c) {
+  float age = blast_age[i];
+  vec3 bp = blast_pos[i].xyz;
+  if (age > 2.4 || bp.z < 1.0 * 4096.0) {
+    return;
+  }
+  float sc = clamp(blast_pos[i].w / (4.0 * 4096.0), 0.6, 2.5);
+  // (far from the pixel on screen: they fly up to ~15 m)
+  vec2 cuv = vec2(bp.x * proj.z / bp.z, bp.y * proj.w / bp.z) * 0.5 + 0.5;
+  vec2 reach = abs(vec2(proj.z, proj.w)) * 0.5 * (16.0 * sc * 4096.0) / max(bp.z - 15.0 * sc * 4096.0, 2.0 * 4096.0);
+  vec2 off = abs(tex_coord - cuv);
+  if (off.x > reach.x || off.y > reach.y) {
+    return;
+  }
+  for (int j = 0; j < 12; j++) {
+    float s = blast_seed[i] * 9.1 + float(j) * 5.3;
+    float h1 = fract(sin(s * 12.9898) * 43758.5453);
+    float h2 = fract(sin(s * 78.233) * 43758.5453);
+    float h3 = fract(sin(s * 37.719) * 43758.5453);
+    float h4 = fract(sin(s * 93.989) * 43758.5453);
+    vec3 dw = normalize(vec3(h1 - 0.5, 0.35 + h2 * 0.65, h3 - 0.5));
+    vec3 dir = right_view * dw.x + up_view * dw.y + fwd_view * dw.z;
+    vec3 vel;
+    bool rest;
+    vec3 sp = blast_arc(bp, dir, (5.0 + 11.0 * h4) * sc * 4096.0, age, blast_ground[i], vel, rest);
+    if (sp.z < 0.5 * 4096.0 || (z > 0.0 && sp.z > z + 0.1 * 4096.0)) {
+      continue;
+    }
+    vec2 a = vec2(sp.x * proj.z / sp.z, sp.y * proj.w / sp.z) * 0.5 + 0.5;
+    vec2 pa = (tex_coord - a) / texel;
+    float px = max((0.05 + 0.13 * h1) * sc * 4096.0 * abs(proj.z) * 0.5 / (sp.z * texel.x), 0.8);
+    if (dot(pa, pa) > px * px * 4.0) {
+      continue;
+    }
+    // (tumbling until it has settled, about a second in)
+    float ang = (h2 - 0.5) * 22.0 * min(age, 1.0) + h3 * 6.283;
+    vec2 q = abs(mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * pa);
+    float shape = max(q.x, q.y * (1.4 + h3));
+    float cov = (1.0 - smoothstep(px * 0.7, px, shape)) * (1.0 - smoothstep(1.8, 2.4, age)) * blast_sparks;
+    vec3 col = vec3(0.05, 0.045, 0.04) + vec3(1.0, 0.3, 0.05) * 1.4 * exp(-age * 3.5);
+    c = mix(c, col, clamp(cov, 0.0, 1.0) * min(fx_detail * 2.0, 1.0));
+  }
+}
+
 // an explosion's layers over the scene along the ray (the flash and the sparks are drawn apart, the
 // smoke is puffs): the ring of dust it blows out along the ground, and the fireball, boiling from
 // white to orange to soot. Everything scales with the blast's radius. Premultiplied color, coverage.
@@ -3183,6 +3267,9 @@ void main() {
       if (blast_dir[i].w < 0.5) {
         vec4 l = blast_layers(i, ray, scene_dist, dust);
         c = c * (1.0 - l.a) + l.rgb;
+        if (blast_sparks > 0.0) {
+          blast_chunks(i, z, c);
+        }
       }
     }
   }
@@ -3247,6 +3334,14 @@ void main() {
       float drag = (1.0 - exp(-age * 2.0)) / 2.0;  // distance flown with drag, per unit speed
       vec3 sp = bp + dir * speed * drag - up_view * (0.5 * 9.8 * 4096.0 * age * age * 0.7);
       vec3 vel = dir * speed * exp(-age * 2.0) - up_view * (9.8 * 4096.0 * age * 0.7);
+      // (an explosion's bounce off the ground, gone at the second landing)
+      if (!gun && fx_detail > 0.0 && blast_ground[i] <= 0.0) {
+        bool rest;
+        sp = blast_arc(bp, dir, speed, age, blast_ground[i], vel, rest);
+        if (rest) {
+          continue;
+        }
+      }
       vec3 tail = sp - vel * 0.03;
       if (sp.z < 0.5 * 4096.0 || tail.z < 0.5 * 4096.0 || (z > 0.0 && sp.z > z)) {
         continue;
