@@ -502,6 +502,7 @@ class EnhancedPost {
     bool own_vertices = false;  // wind ties: world positions built here
     bool wind = false;          // a caster (drawn with shadow_casters only)
     bool shrub = false;         // a shrub's (their vertex layout; the near map only)
+  bool big = false;           // the big shrubs' strips again (over 4 m): the far map only
     u32 first = 0;              // first index
     GLuint tex = 0;             // alpha tested with this texture (0 = solid)
   };

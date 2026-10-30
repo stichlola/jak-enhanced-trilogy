@@ -3882,9 +3882,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     }
     add_wind_shadow_draws(lev, cut, &draws);
     // the shrubs (bushes, plants, small rocks), cut out by their textures' alpha: the near map
-    // only (on the far one they cost the most and their shadows are a texel or two). The game's own
-    // only: the vegetation's extra copies for the denser settings don't cast
-    size_t n_shrubs = 0;
+    // only (on the far one they cost the most and their shadows are a texel or two), except the big
+    // plants (over 4 m: bushes, small trees), whose strips go again, on their own, to the far map.
+    // The game's own only: the vegetation's extra copies for the denser settings don't cast
+    size_t n_shrubs = 0, n_big = 0;
     const auto& shrubs = lev->level->shrub_trees;
     for (size_t i = 0; i < shrubs.size() && i < lev->shrub_vertex_data.size(); i++) {
       const auto& tree = shrubs[i];
@@ -3920,10 +3921,79 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         added++;
       }
       n_shrubs += added;
+      // the big plants: each instance's size from its vertices (unpack() lays them out in order)
+      const auto& verts = tree.unpacked.vertices;
+      const auto& groups = tree.packed_vertices.instance_groups;
+      if (!added || verts.empty() || groups.empty()) {
+        continue;
+      }
+      std::vector<u8> big_vert(verts.size(), 0);
+      bool any_big = false;
+      for (u32 g = 0, v0 = 0; g < groups.size() && v0 < verts.size(); g++) {
+        u32 v1 = std::min<u32>(v0 + groups[g].end_vert - groups[g].start_vert, verts.size());
+        float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+        for (u32 v = v0; v < v1; v++) {
+          const float q[3] = {verts[v].x, verts[v].y, verts[v].z};
+          for (int a = 0; a < 3; a++) {
+            lo[a] = std::min(lo[a], q[a]);
+            hi[a] = std::max(hi[a], q[a]);
+          }
+        }
+        constexpr float kBig = 4.f * 4096.f;
+        if (v1 > v0 && (hi[0] - lo[0] > kBig || hi[1] - lo[1] > kBig || hi[2] - lo[2] > kBig)) {
+          std::fill(big_vert.begin() + v0, big_vert.begin() + v1, 1);
+          any_big = true;
+        }
+        v0 = v1;
+      }
+      if (!any_big) {
+        continue;
+      }
+      // their strips, draw by draw, into one index buffer of their own
+      std::vector<u32> big_idx;
+      std::vector<ShadowDraw> big_draws;
+      for (size_t k = draws.size() - added; k < draws.size(); k++) {
+        const auto& src = draws[k];
+        u32 first = big_idx.size();
+        u32 end = std::min<u32>(src.first + src.count, tree.indices.size());
+        for (u32 at = src.first; at < end;) {
+          u32 stop = at;
+          while (stop < end && tree.indices[stop] != UINT32_MAX) {
+            stop++;
+          }
+          if (stop > at && tree.indices[at] < big_vert.size() && big_vert[tree.indices[at]]) {
+            big_idx.insert(big_idx.end(), tree.indices.begin() + at, tree.indices.begin() + stop);
+            big_idx.push_back(UINT32_MAX);
+          }
+          at = stop + 1;
+        }
+        if (big_idx.size() > first) {
+          ShadowDraw b = src;
+          b.big = true;
+          b.own_indices = false;
+          b.first = first;
+          b.count = big_idx.size() - first;
+          big_draws.push_back(b);
+        }
+      }
+      if (big_draws.empty()) {
+        continue;
+      }
+      GLuint big_ib = 0;
+      glGenBuffers(1, &big_ib);
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, big_ib);
+      glBufferData(GL_ELEMENT_ARRAY_BUFFER, big_idx.size() * sizeof(u32), big_idx.data(),
+                   GL_STATIC_DRAW);
+      for (size_t k = 0; k < big_draws.size(); k++) {
+        big_draws[k].indices = big_ib;
+        big_draws[k].own_indices = k == 0;
+        draws.push_back(big_draws[k]);
+      }
+      n_big += big_draws.size();
     }
-    lg::info("[enhanced] shadow casters {}: {} draws cast, {} shrub draws (near only); left out {} "
-             "see-through (no depth), {} water",
-             name, n_cast, n_shrubs, n_veil, n_water);
+    lg::info("[enhanced] shadow casters {}: {} draws cast, {} shrub draws (near map), {} of big "
+             "plants (far map); left out {} see-through (no depth), {} water",
+             name, n_cast, n_shrubs, n_big, n_veil, n_water);
   }
   for (auto it = m_shadow_draws.begin(); it != m_shadow_draws.end();) {
     if (std::find(in_use.begin(), in_use.end(), it->first) == in_use.end()) {
@@ -4017,7 +4087,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     glEnableVertexAttribArray(0);
     for (auto& [lid, draws] : m_shadow_draws) {
       for (auto& d : draws) {
-        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map)) {
+        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big)) {
           continue;
         }
         glUniform1i(u_cut, d.cut);
