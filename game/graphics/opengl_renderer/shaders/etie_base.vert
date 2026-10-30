@@ -6,6 +6,7 @@ layout (location = 2) in int time_of_day_index;
 layout (location = 3) in vec4 normal_in;  // Enhanced
 
 uniform vec4 hvdf_offset;
+uniform vec4 cam_trans;  // Enhanced: enh_pos relative to the camera, as tfrag3.vert
 uniform mat4 camera;
 uniform float fog_constant;
 uniform float fog_min;
@@ -66,5 +67,5 @@ void main() {
 
   tex_coord = tex_coord_in;
   enh_normal = normal_in.xyz;
-  enh_pos = position_in;
+  enh_pos = position_in - cam_trans.xyz;
 }
