@@ -23,8 +23,10 @@ from PIL import Image
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-# seen from far away or never up close: their low resolution is by design, they count for less
-FAR_WORDS = ("lowres", "-low", "low-", "lod", "hills", "peaks", "background", "sky", "horizon", "distant")
+# seen from far away or never up close (palcab: the backdrop outside the palace cable car): their
+# low resolution is by design, they get a list of their own
+FAR_WORDS = ("lowres", "lores", "lorez", "-low", "low-", "lod", "hills", "peaks", "background", "sky", "horizon",
+             "distant", "palcab")
 # not world surfaces: left out of the "no world data" ranking
 SKIP_TPAGE_WORDS = ("minimap", "sprite", "warp")
 
@@ -35,6 +37,15 @@ def image_size(path):
             return im.size
     except OSError:
         return None
+
+
+def is_flat(path):
+    """One color all over (a black 4x4): no resolution could help it"""
+    try:
+        with Image.open(path) as im:
+            return all(hi - lo < 8 for lo, hi in im.convert("RGB").getextrema())
+    except OSError:
+        return False
 
 
 def scan_textures(root, hd_root):
@@ -190,7 +201,7 @@ def row(name, tpages, level_areas, target):
     eff = density * math.sqrt(hd[0] * hd[1] / (w * h)) if hd else density
     far = any(x in name.lower() for x in FAR_WORDS)
     lack = target / eff - 1.0 if eff > 0 else 0.0
-    score = world * max(lack, 0.0) * (0.1 if far else 1.0)
+    score = world * max(lack, 0.0)
     return {
         "name": name,
         "tpage": tpage,
@@ -266,6 +277,10 @@ def main():
         else:
             missing.add(name)
     rows.sort(key=lambda r: -r["score"])
+    flat = [r for r in rows if is_flat(os.path.join(args.textures, r["tpage"], r["name"] + ".png"))]
+    flat_names = {r["name"] for r in flat}
+    far = [r for r in rows if r["far"] and r["name"] not in flat_names]
+    rows = [r for r in rows if not r["far"] and r["name"] not in flat_names]
 
     # no world data: by size, then how many tpages share them
     rest = []
@@ -281,9 +296,10 @@ def main():
 
     no_hd = [r for r in rows if not r["hd"]]
     lines = []
-    lines.append("worst textures: %d in the world, %d of them without an HD version; %d with no world data; "
-                 "target %.0f texels/m" % (len(rows), len(no_hd), len(rest), args.target))
-    lines.append("score: world area x how far under the target (1/10 for far-away textures). t/m: texels per meter.")
+    lines.append("worst textures: %d in the world up close, %d of them without an HD version; %d far-away, %d of one "
+                 "flat color (apart); %d with no world data; target %.0f texels/m"
+                 % (len(rows), len(no_hd), len(far), len(flat), len(rest), args.target))
+    lines.append("score: world area x how far under the target. t/m: texels per meter.")
     if missing:
         lines.append("%d names in the levels have no png in the textures folder (e.g. %s)" % (len(missing), sorted(missing)[0]))
     summary = list(lines)
@@ -296,6 +312,8 @@ def main():
         f.writelines(fmt_row(r) + "\n" for r in rows)
         f.write("\n== worst without an HD version\n" + HEADER + "\n")
         f.writelines(fmt_row(r) + "\n" for r in no_hd)
+        f.write("\n== far away (backdrops, low-detail versions)\n" + HEADER + "\n")
+        f.writelines(fmt_row(r) + "\n" for r in far)
         # per level: each texture's own numbers there
         by_level = defaultdict(list)
         for r in rows:
@@ -308,7 +326,7 @@ def main():
                 density = math.sqrt(r["w"] * r["h"] * uv / world) if world > 0 and uv > 0 else 0.0
                 eff = density * math.sqrt(r["hd"][0] * r["hd"][1] / (r["w"] * r["h"])) if r["hd"] else density
                 lack = args.target / eff - 1.0 if eff > 0 else 0.0
-                scored.append((world * max(lack, 0.0) * (0.1 if r["far"] else 1.0), world, density, eff, r))
+                scored.append((world * max(lack, 0.0), world, density, eff, r))
             scored.sort(key=lambda s: -s[0])
             for s, world, density, eff, r in scored[:25]:
                 f.write("%10.0f  %9.0f m2  %6.1f t/m  %6.1f eff  %4dx%-4d %-6s %s/%s\n" % (
