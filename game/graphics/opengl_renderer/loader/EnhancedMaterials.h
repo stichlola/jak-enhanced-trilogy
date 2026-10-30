@@ -42,9 +42,9 @@ inline u8 enhanced_material(std::string name) {
   for (size_t at; (at = name.find("environment")) != std::string::npos;) {
     name.replace(at, 11, "env");
   }
-  // the ground's sand (not sandstone, not a sandbag); Sandover's beaches (bch-beach-01,
-  // vil-beach-01path, vil1-medres-beach: not its rocks and grass)
-  if ((has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick"})) ||
+  // the ground's sand (not sandstone, not a sandbag, not Misty Island's quicksand: mud);
+  // Sandover's beaches (bch-beach-01, vil-beach-01path, vil1-medres-beach: not its rocks and grass)
+  if ((has({"sand"}) && !has({"stone", "bag", "rock", "wall", "brick", "quick"})) ||
       (has({"beach"}) && !has({"rock", "grass", "shrub", "plant", "leaf"}))) {
     return kSand;
   }
