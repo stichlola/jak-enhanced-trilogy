@@ -41,6 +41,9 @@ extern std::atomic<float> g_enhanced_l2_trigger;
 extern std::atomic<float> g_enhanced_board_boost;
 // Jak 3: whether Jak aims his gun (0/1; the player's second vector, z): a light depth of field
 extern std::atomic<float> g_enhanced_aim;
+// The characters' relief, materials per part and live eyes (merc2.frag), from the settings' char_detail:
+// 0 = off, the look without them
+extern std::atomic<float> g_enhanced_char_detail;
 
 // OpenGOAL's debug toolbar (ImGui's menu bar at the top) only in a debug start (-debug): a player's
 // game never shows it, whatever debug-settings.json says (set by main from the arguments)

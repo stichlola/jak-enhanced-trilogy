@@ -13,6 +13,8 @@ struct LevelData {
   std::vector<GLuint> textures;
   u64 load_id = UINT64_MAX;
   mutable std::vector<u8> enh_materials;  // Enhanced: see EnhancedMaterials.h
+  mutable std::vector<u8> enh_char_materials;  // Enhanced: and the characters', same place
+  mutable std::vector<std::pair<GLuint, u8>> enh_relief;  // Enhanced: see EnhancedTextures.h
 
   struct TieOpenGL {
     GLuint vertex_buffer;

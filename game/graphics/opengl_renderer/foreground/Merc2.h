@@ -136,6 +136,9 @@ class Merc2 {
 
     GLuint fade;
     GLuint enh_cloth;
+    GLuint enh_mat;
+    GLuint enh_eye_lid;
+    GLuint enh_relief;
   };
 
   Uniforms m_merc_uniforms, m_emerc_uniforms;

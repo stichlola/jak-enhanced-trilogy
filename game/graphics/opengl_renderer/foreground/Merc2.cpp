@@ -2,12 +2,16 @@
 
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/log/log.h"
+#include "common/texture/texture_slots.h"
 #include "common/util/fnv.h"
 #include "common/util/simd_util.h"
 
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTextures.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -752,6 +756,10 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->perspective_matrix = glGetUniformLocation(id, "perspective_matrix");
   uniforms->ignore_alpha = glGetUniformLocation(id, "ignore_alpha");
   uniforms->enh_cloth = glGetUniformLocation(id, "enh_cloth");
+  uniforms->enh_mat = glGetUniformLocation(id, "enh_mat");
+  uniforms->enh_eye_lid = glGetUniformLocation(id, "enh_eye_lid");
+  uniforms->enh_relief = glGetUniformLocation(id, "enh_relief");
+  glUniform1i(glGetUniformLocation(id, "tex_relief"), 1);  // (texture unit 1)
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
 }
@@ -921,6 +929,8 @@ void Merc2::handle_setup_dma(DmaFollower& dma, SharedRenderState* render_state) 
                 g_enhanced_merc.enabled ? g_enhanced_merc.spec : 0.f);
     glUniform1f(glGetUniformLocation(id, "enh_wet"),
                 g_enhanced_merc.enabled ? g_enhanced_merc.wet : 0.f);
+    glUniform1f(glGetUniformLocation(id, "enh_char"),
+                g_enhanced_merc.enabled ? g_enhanced_char_detail.load() : 0.f);
   }
   switch_to_emerc(render_state);
   set_uniform(m_emerc_uniforms.hvdf_offset, m_low_memory.hvdf_offset);
@@ -1297,6 +1307,49 @@ void Merc2::enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones
   }
 }
 
+namespace {
+const std::vector<std::string>& enhanced_anim_slot_names(GameVersion version) {
+  static const std::vector<std::string> none;
+  return version == GameVersion::Jak1  ? none
+         : version == GameVersion::Jak2 ? jak2_animated_texture_slots()
+                                        : jak3_animated_texture_slots();
+}
+
+// the character material of each animated texture slot, by the slot's name
+int enhanced_anim_slot_char_material(GameVersion version, int slot) {
+  static std::vector<u8> table;
+  if (table.empty()) {
+    for (const auto& name : enhanced_anim_slot_names(version)) {
+      table.push_back(enhanced_char_material(name));
+    }
+  }
+  return slot >= 0 && slot < (int)table.size() ? table[slot] : kCharDefault;
+}
+
+// and each one's remade relief map, if any were made
+std::pair<GLuint, u8> enhanced_anim_slot_relief(GameVersion version, int slot) {
+  static std::vector<std::pair<GLuint, u8>> table;
+  if (table.empty()) {
+    for (const auto& name : enhanced_anim_slot_names(version)) {
+      table.push_back(enhanced_remade_relief("", name));
+    }
+  }
+  return slot >= 0 && slot < (int)table.size() ? table[slot] : std::pair<GLuint, u8>{0, 0};
+}
+
+// the level's remade relief maps, by texture index
+const std::vector<std::pair<GLuint, u8>>& enhanced_level_relief(const LevelData* lev) {
+  auto& m = lev->enh_relief;
+  if (m.size() != lev->level->textures.size()) {
+    m.clear();
+    for (const auto& tex : lev->level->textures) {
+      m.push_back(enhanced_remade_relief(tex.debug_tpage_name, tex.debug_name));
+    }
+  }
+  return m;
+}
+}  // namespace
+
 void Merc2::do_draws(const Draw* draw_array,
                      const LevelData* lev,
                      u32 num_draws,
@@ -1310,6 +1363,15 @@ void Merc2::do_draws(const Draw* draw_array,
   glBindVertexArray(m_vao);
   s32 last_tex = INT32_MIN;
   int last_light = -1;
+  int last_mat = -1;
+  // Enhanced: the parts' materials, by their textures' names
+  const auto& char_materials = enhanced_level_char_materials(lev);
+  // Enhanced: and the relief maps made for them, on texture unit 1 (nearly always none)
+  const bool relief_on = enhanced_remade_has_relief();
+  static const std::vector<std::pair<GLuint, u8>> no_relief;
+  const auto& level_relief = relief_on ? enhanced_level_relief(lev) : no_relief;
+  GLuint last_relief = 0;
+  glUniform1i(uniforms.enh_relief, 0);
   bool normal_vtx_buffer_bound = true;
 
   bool fog_on = true;
@@ -1346,6 +1408,7 @@ void Merc2::do_draws(const Draw* draw_array,
     if (draw.texture != last_tex) {
       if (draw.texture < (int)lev->textures.size() && draw.texture >= 0) {
         glBindTexture(GL_TEXTURE_2D, lev->textures.at(draw.texture));
+        glUniform1f(uniforms.enh_eye_lid, 0.f);  // (an eye of a plain texture: no lid in it)
       } else if ((draw.texture & 0xffffff00) == 0xefffff00) {
         if (render_state->version == GameVersion::Jak3 ||
             render_state->version == GameVersion::JakX) {
@@ -1353,11 +1416,13 @@ void Merc2::do_draws(const Draw* draw_array,
               render_state->eye_renderer->lookup_eye_texture_hash(draw.hash, (draw.texture & 1));
           if (maybe_eye) {
             glBindTexture(GL_TEXTURE_2D, *maybe_eye);
+            glUniform1f(uniforms.enh_eye_lid, render_state->eye_renderer->enhanced_lid_edge(*maybe_eye));
           }
         } else {
           auto maybe_eye = render_state->eye_renderer->lookup_eye_texture(draw.texture & 0xff);
           if (maybe_eye) {
             glBindTexture(GL_TEXTURE_2D, *maybe_eye);
+            glUniform1f(uniforms.enh_eye_lid, render_state->eye_renderer->enhanced_lid_edge(*maybe_eye));
           }
         }
 
@@ -1411,6 +1476,42 @@ void Merc2::do_draws(const Draw* draw_array,
                          draw.mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) ||
                         !draw.mode.get_depth_write_enable());
     glUniform1i(uniforms.enh_cloth, cloth ? 1 : 0);
+
+    // Enhanced: what the part is made of. (an animated texture has no index in the level, but its
+    // slot's name: Jak's own face, hair and arms in Jak 3 are, for Dark Jak's colors)
+    int mat = kCharDefault;
+    if ((draw.texture & 0xffffff00) == 0xefffff00) {
+      mat = kCharEye;
+    } else if (draw.texture >= 0) {
+      if (draw.texture < (int)char_materials.size()) {
+        mat = char_materials[draw.texture];
+      }
+    } else {
+      mat = enhanced_anim_slot_char_material(render_state->version, -(draw.texture + 1));
+    }
+    if (mat != last_mat) {
+      glUniform1i(uniforms.enh_mat, mat);
+      last_mat = mat;
+    }
+    if (relief_on) {
+      std::pair<GLuint, u8> relief = {0, 0};
+      if (draw.texture >= 0) {
+        if (draw.texture < (int)level_relief.size()) {
+          relief = level_relief[draw.texture];
+        }
+      } else if ((draw.texture & 0xffffff00) != 0xefffff00) {
+        relief = enhanced_anim_slot_relief(render_state->version, -(draw.texture + 1));
+      }
+      if (relief.first != last_relief) {
+        glUniform1i(uniforms.enh_relief, relief.second);
+        if (relief.first) {
+          glActiveTexture(GL_TEXTURE1);
+          glBindTexture(GL_TEXTURE_2D, relief.first);
+          glActiveTexture(GL_TEXTURE0);
+        }
+        last_relief = relief.first;
+      }
+    }
 
     if (m_lights_buffer[draw.light_idx].w1 && !set_fade) {
       DrawMode mode = draw.mode;

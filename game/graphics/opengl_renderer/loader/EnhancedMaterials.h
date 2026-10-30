@@ -82,6 +82,141 @@ inline u8 enhanced_material(std::string name) {
   return kPlain;
 }
 
+// Enhanced: the characters' parts, from their textures' names (merc2.frag's enh_mat). A name not
+// recognized stays kCharDefault: exactly the look it had. They are read whole words where a short
+// word hides in longer ones: "arm" in "armor", "ear" in "gear", "hair" in "chair", "face" in
+// "surface", "fur" in "furnace", "eye" in "faceyellow".
+enum EnhancedCharMaterial : u8 {
+  kCharDefault = 0,
+  kCharSkin = 1,
+  kCharHair = 2,
+  kCharMetal = 3,
+  kCharLeather = 4,
+  kCharCloth = 5,
+  kCharFur = 6,
+  kCharEye = 7,
+  kCharLens = 8
+};
+
+inline u8 enhanced_char_material(std::string name) {
+  std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return std::tolower(c); });
+  auto has = [&](std::initializer_list<const char*> words) {
+    for (auto w : words) {
+      if (name.find(w) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // whole words, between the name's dashes and digits ("jakc-arm-norm", "grunt-skin-01")
+  std::vector<std::string> tokens(1);
+  for (char c : name) {
+    if (c >= 'a' && c <= 'z') {
+      tokens.back().push_back(c);
+    } else if (!tokens.back().empty()) {
+      tokens.emplace_back();
+    }
+  }
+  auto word = [&](std::initializer_list<const char*> words) {
+    for (auto w : words) {
+      if (std::find(tokens.begin(), tokens.end(), w) != tokens.end()) {
+        return true;
+      }
+    }
+    return false;
+  };
+  // reflections and animation targets are no surface of their own
+  if (has({"environment", "envmap", "reflection", "-dest", "shadow", "glow"})) {
+    return kCharDefault;
+  }
+  const bool daxter = has({"daxter", "mechdax"}) || word({"sk", "pecker"});
+
+  // the eyes, and what's around them
+  if (has({"eye"}) && !has({"eyell"})) {
+    if (has({"brow"})) {
+      return kCharHair;
+    }
+    if (has({"lid"})) {
+      return has({"metal"}) ? kCharMetal : daxter ? kCharFur : kCharSkin;
+    }
+    return has({"light", "ring", "let"}) ? kCharDefault : kCharEye;
+  }
+  if (has({"lens", "glass"})) {
+    return kCharLens;
+  }
+  if (has({"teeth", "tooth", "tongue", "gem", "crystal"})) {
+    return kCharDefault;
+  }
+
+  // Daxter is all fur but for what he wears
+  if (has({"daxter"})) {
+    if (has({"bolt"})) {
+      return kCharMetal;
+    }
+    if (has({"goggle", "helmet", "strap", "belt", "glove"})) {
+      return kCharLeather;
+    }
+    if (has({"pants"})) {
+      return kCharCloth;
+    }
+    return kCharFur;
+  }
+  if (has({"fur", "wool", "plume"}) && !has({"furn"})) {
+    return kCharFur;
+  }
+  if (has({"hair", "beard", "mustache", "moustache", "ponytail"}) && !has({"chair"})) {
+    return kCharHair;
+  }
+  if (has({"skin", "flesh"}) && !has({"door"})) {
+    return kCharSkin;
+  }
+
+  // straps and leather first: "jakc-chestplate-straps" isn't the plate
+  if (has({"leather", "strap", "lthr"})) {
+    return kCharLeather;
+  }
+  if ((has({"metal", "steel", "chrome", "armor", "armour", "buckle", "rivet", "brass", "copper", "bronze",
+            "silver", "shield", "wristguard", "kneeguard", "helmet", "headgear", "sword", "gunbarrel", "guntube",
+            "gunhandle", "gunbolt", "pipe", "chain"}) &&
+       !has({"rust", "rubber"})) ||
+      word({"iron", "gold", "gun", "bolt", "bolts", "blade", "clip", "clips"}) ||
+      (has({"plate"}) && !has({"template"}))) {
+    return kCharMetal;
+  }
+  if (has({"belt", "pouch", "glove", "shoe", "boot", "holster", "wristband", "sandal", "harness", "flap", "goggle"}) ||
+      word({"horn", "spat", "lightbrownspat"})) {
+    return kCharLeather;
+  }
+  if (has({"cloth", "scarf", "pants", "skirt", "wrap", "shirt", "sleeve", "jacket", "tunic", "waistband", "legg",
+           "fabric", "towel", "bandana", "jeans", "vest", "coat", "underwear", "undergarment", "diaper", "corset",
+           "headband", "pantleg", "inseam"}) ||
+      word({"rag", "robe", "cape", "hood", "sash", "sock"})) {
+    return kCharCloth;
+  }
+  // bare skin (a face on a door or a nose on a ship isn't)
+  if (word({"face", "facelft", "facert", "faceleft", "faceright", "arm", "forearm", "armlft", "finger", "fingers",
+            "fingertop", "fingerbottom", "hand", "handback", "handpalm", "handtop", "handbottom", "head", "neck",
+            "nose", "ear", "ears", "lip", "lips", "leg", "legs", "foot", "feet", "toe", "belly", "chest", "thigh",
+            "thighs"}) &&
+      !has({"door", "panel", "cube", "wheel", "gate", "vehicle", "bot-", "robo", "mech", "turret", "ship", "saw",
+            "missle", "catapult", "wood", "idol", "pipe"})) {
+    return kCharSkin;
+  }
+  return kCharDefault;
+}
+
+// the level's character materials by texture index (computed on first use)
+inline const std::vector<u8>& enhanced_level_char_materials(const LevelData* lev) {
+  auto& m = lev->enh_char_materials;
+  if (m.size() != lev->level->textures.size()) {
+    m.clear();
+    for (const auto& tex : lev->level->textures) {
+      m.push_back(enhanced_char_material(tex.debug_name));
+    }
+  }
+  return m;
+}
+
 // the level's materials by texture index (computed on first use)
 inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
   auto& m = lev->enh_materials;
