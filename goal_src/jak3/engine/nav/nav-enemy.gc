@@ -670,6 +670,12 @@
       (set! (-> this draw shadow-ctrl) *nav-enemy-dummy-shadow-control*)
       )
   (get-nav-control this (-> arg0 nav-mesh))
+  ;; Enhanced: the mesh had no room left (raised population; only the traffic's spawns check first):
+  ;; this enemy doesn't come, instead of crashing on its missing nav below
+  (when (or (not (-> this nav)) (zero? (-> this nav)))
+    (format 0 "[enhanced] no nav-mesh room for ~S, not spawned~%" (-> this name))
+    (deactivate this)
+    )
   (set! (-> this water-max-height) (-> this nav state mesh water-max-height))
   (let ((v1-32 this))
     (set! (-> v1-32 enemy-flags) (the-as enemy-flag (logclear (-> v1-32 enemy-flags) (enemy-flag ef37))))
