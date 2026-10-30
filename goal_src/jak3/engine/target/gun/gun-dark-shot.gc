@@ -2972,6 +2972,10 @@
                  )
             (+! (-> self cached-damage) f0-7)
             )
+          ;; Enhanced balance: the Mass Inverter's fall hurts more (it barely hurt at all)
+          (if (pc-enhanced-balance?)
+              (+! (-> self cached-damage) 3.0)
+              )
           )
         (let ((v1-37 (as-type (-> (the-as process-focusable gp-0) root) collide-shape-moving)))
           (if v1-37

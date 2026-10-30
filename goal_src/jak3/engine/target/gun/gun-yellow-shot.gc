@@ -1629,6 +1629,13 @@
     (set! (-> this max-actor-deflect-count) 7)
     (set! (-> this timeout) (seconds 5))
     )
+  ;; Enhanced balance: the Beam Reflexor reaches two enemies through its bounces (three upgraded),
+  ;; not four (seven): a gun for around corners, not one that clears the room by itself
+  (when (pc-enhanced-balance?)
+    (set! (-> this max-actor-deflect-count)
+          (if (logtest? (game-secrets gun-upgrade-yellow-2) (-> *game-info* secrets)) 3 2)
+          )
+    )
   (set! (-> this muzzle-flash-part) (-> *part-id-table* 274))
   (sound-play "yellow2-shot" :pitch 1)
   (light-trail-tracker-spawn
@@ -1694,8 +1701,9 @@
         (when (deal-damage! this s5-0 (the-as event-message-block #f))
           (set-time! (-> this last-attack-time))
           (+! (-> this enemy-hit-count) 1)
+          ;; (Enhanced balance: every enemy after the first costs three shots, not one)
           (when (and (< 1 (-> this enemy-hit-count)) (< (-> this enemy-hit-count) 4))
-            (adjust-player-ammo -1.0 (pickup-type ammo-yellow))
+            (adjust-player-ammo (if (pc-enhanced-balance?) -3.0 -1.0) (pickup-type ammo-yellow))
             (when (>= 0.0 (get-remaining-player-ammo (pickup-type ammo-yellow)))
               (set! (-> this timeout) 0)
               0
@@ -1806,6 +1814,10 @@
   (set! (-> this timeout) (seconds 3))
   (set! (-> this sound-id) (new-sound-id))
   (set! (-> this damage) 2.0)
+  ;; Enhanced balance: the Gyro Burster's shots, sprayed all around, hit softer
+  (if (pc-enhanced-balance?)
+      (set! (-> this damage) 1.4)
+      )
   (when (logtest? (game-feature feature22) (-> *game-info* features))
     (set! (-> this damage) (* 2.0 (-> this damage)))
     (set! (-> this vehicle-impulse-factor) (/ (-> this vehicle-impulse-factor) 2))

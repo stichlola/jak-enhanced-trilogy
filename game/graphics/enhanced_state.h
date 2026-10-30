@@ -78,6 +78,11 @@ struct EnhancedPlayWeather {
 };
 extern EnhancedPlayWeather g_enhanced_play_weather;
 
+// Enhanced balance (Jak 3, the menu's switch, off by default; pc-enhanced-balance?): the guns apart
+// from each other and the dark and light powers made worth using in a fight (the game's code reads
+// it where each value is set: goal_src/jak3, ";; Enhanced balance")
+extern std::atomic<bool> g_enhanced_balance;
+
 // Beds for the nap (game/assets/enhanced/beds.json, marked from the Enhanced menu where Jak stands on
 // one): napping within 3 m of one, Jak lies down on it, seen by a camera of its own. The running
 // game's, world positions in game units (pc-enhanced-bed).

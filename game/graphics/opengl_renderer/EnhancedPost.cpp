@@ -41,6 +41,7 @@ bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
 EnhancedPlayWeather g_enhanced_play_weather;
+std::atomic<bool> g_enhanced_balance{false};
 EnhancedBeds g_enhanced_beds;
 std::atomic<int> g_enhanced_thunder{0};
 EnhancedPushers g_enhanced_pushers;
@@ -5822,6 +5823,18 @@ void EnhancedPost::draw_menu() {
             "Sandstorms slow vehicles on sand; thick fog and sandstorms hide the minimap;\n"
             "more marauders roam the desert at night (Jak 3)");
       }
+      bool balance = g_enhanced_balance;
+      if (ImGui::Checkbox("Enhanced balance (Jak 3)", &balance)) {
+        g_enhanced_balance = balance;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip(
+            "Guns for range, Dark Jak for close combat and crowds, Light Jak for defense:\n"
+            "the Beam Reflexor bounces fewer times, the Needle Lazer, Arc Wielder and Gyro Burster\n"
+            "hit softer, the Wave Concussor and Mass Inverter harder, the Super Nova costs less;\n"
+            "Dark Jak hits much harder, shrugs off hits, and his blows and kills keep him going\n"
+            "and heal him; Light Jak's shield and freeze cost less, his kills give light eco back");
+      }
     }
   }
   save_menu_settings();
@@ -5992,6 +6005,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   j["weather_affects_play"] = g_enhanced_play_weather.enabled.load();
+  j["enhanced_balance"] = g_enhanced_balance.load();
   auto keys = nlohmann::json::array();
   for (const auto& k : g_enhanced_menu.keys) {
     keys.push_back(k.load());
@@ -6089,6 +6103,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   bool play_weather = true;
   get("weather_affects_play", play_weather);
   g_enhanced_play_weather.enabled = play_weather;
+  bool balance = false;
+  get("enhanced_balance", balance);
+  g_enhanced_balance = balance;
   g_enhanced_menu.minimap_size = map_size;
   int hints = 0;
   get("hints_shown", hints);

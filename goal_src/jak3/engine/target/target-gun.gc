@@ -799,6 +799,12 @@
                                                10.0
                                                )
                )
+         ;; Enhanced balance: the Super Nova costs less, so it's fired more than once a fight
+         (if (pc-enhanced-balance?)
+             (set! (-> self gun ammo-required)
+                   (if (logtest? (game-secrets gun-upgrade-dark-3) (-> *game-info* secrets)) 5.0 6.0)
+                   )
+             )
          )
         ((33)
          (set! (-> self gun ammo-required) 1.0)

@@ -2143,12 +2143,46 @@
     )
   )
 
+;; Enhanced balance: whether this hit is one of Dark Jak's blows (his punches, kicks and dives, not
+;; the bombs, which already hit hard)
+(defun enhanced-darkjak-blow? ((arg0 penetrate))
+  (and (pc-enhanced-balance?)
+       *target*
+       (focus-test? *target* dark)
+       (nonzero? (-> *target* darkjak))
+       (logtest? (-> *target* darkjak stage) (darkjak-stage active))
+       (logtest? (penetrate punch spin flop uppercut dark-punch dark-skin) arg0)
+       (not (logtest? (penetrate dark-bomb dark-smack) arg0))
+       )
+  )
+
 (defmethod damage-enemy-from-attack! ((this enemy) (arg0 object) (arg1 event-message-block))
   "Given an attack message, apply damage."
-  (let* ((f0-0 (get-damage-from-attack this arg0 arg1))
+  (let* ((blow? (enhanced-darkjak-blow? (-> this incoming penetrate-using)))
+         (f0-0 (* (get-damage-from-attack this arg0 arg1) (if blow? 2.5 1.0)))
          (f30-0 (apply-incoming-hitpoint-mods this f0-0))
+         (alive? (< 0.0 (-> this hit-points)))
          )
     (set! (-> this hit-points) (- (-> this hit-points) f30-0))
+    ;; Enhanced balance: each blow keeps Dark Jak going a little longer, and a kill heals him and
+    ;; feeds him dark eco; a kill in Light Jak's form gives some light eco back
+    (when (pc-enhanced-balance?)
+      (when blow?
+        (send-event *target* 'get-pickup (pickup-type eco-pill-dark) 2.0)
+        (when (and alive? (>= 0.0 (-> this hit-points)))
+          (send-event *target* 'get-pickup (pickup-type health) 1.0)
+          (send-event *target* 'get-pickup (pickup-type eco-pill-dark) 6.0)
+          )
+        )
+      (when (and alive?
+                 (>= 0.0 (-> this hit-points))
+                 *target*
+                 (focus-test? *target* light)
+                 (nonzero? (-> *target* lightjak))
+                 )
+        (send-event *target* 'get-pickup (pickup-type eco-pill-light) 4.0)
+        )
+      )
     (if (not (logtest? (-> this enemy-flags) (enemy-flag auto-reset-penetrate)))
         (set! (-> this root penetrated-by) (get-penetrated-by this))
         )

@@ -373,6 +373,10 @@
   (set! (-> this timeout) (seconds 3))
   (set! (-> this sound-id) (new-sound-id))
   (set! (-> this damage) 1.0)
+  ;; Enhanced balance: the Needle Lazer's needles, which seek every enemy around, hit softer
+  (if (pc-enhanced-balance?)
+      (set! (-> this damage) 0.7)
+      )
   (set! (-> this vehicle-damage-factor) 2.0)
   (set! (-> this vehicle-impulse-factor) 2.0)
   (logior! (-> this options) (projectile-options po13))
@@ -2532,6 +2536,10 @@
     (set! (-> this move) gun-blue-shot-move)
     (vector-reset! (-> this collide-normal))
     (set! (-> this damage) 2.5)
+    ;; Enhanced balance: the Arc Wielder's arcs, which chain between enemies, hit softer
+    (if (pc-enhanced-balance?)
+        (set! (-> this damage) 1.75)
+        )
     (set! (-> this vehicle-damage-factor) 2.0)
     (set! (-> this vehicle-impulse-factor) 0.5)
     (logior! (-> this options) (projectile-options po13))

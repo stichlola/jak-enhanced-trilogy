@@ -1309,6 +1309,11 @@ u64 pc_enhanced_menu_state() {
   return (u64)(g_enhanced_menu.opens.load() * 2 + (g_enhanced_menu.open ? 1 : 0));
 }
 
+// Enhanced: whether the menu's Enhanced balance is on (not in Enhanced Light: the game plays as it was)
+u64 pc_enhanced_balance() {
+  return bool_to_symbol(g_enhanced_balance && !enhanced_light());
+}
+
 // Enhanced: whether the HUD shows the minimap (the menu's switch)
 u64 pc_enhanced_minimap() {
   // (hidden in photo mode, and in a thick fog or sandstorm when the weather affects play)
@@ -1692,6 +1697,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-fire", (void*)pc_enhanced_fire);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
+  make_func_symbol_func("pc-enhanced-balance?", (void*)pc_enhanced_balance);
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
   make_func_symbol_func("pc-enhanced-light?", (void*)pc_enhanced_light);
   make_func_symbol_func("pc-enhanced-strike", (void*)pc_enhanced_strike);

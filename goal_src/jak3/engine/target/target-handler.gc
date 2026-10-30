@@ -128,6 +128,19 @@
           (return #t)
           )
       (set! (-> self control attacked-by-id) (the-as int (-> self attack-info-rec id)))
+      ;; Enhanced balance: Dark Jak shrugs off ordinary hits (they cost health, but don't knock him
+      ;; down or out of his combo); falls, lava and the like stay what they were
+      (when (and (pc-enhanced-balance?)
+                 (= arg0 'attack)
+                 (focus-test? self dark)
+                 (nonzero? (-> self darkjak))
+                 (logtest? (-> self darkjak stage) (darkjak-stage active))
+                 (not (attack-mode-is-invinc 'normal s4-0))
+                 (not (focus-test? self mech board pilot))
+                 )
+        (logior! (-> self attack-info-rec mask) (attack-mask mode))
+        (set! (-> self attack-info-rec mode) 'damage)
+        )
       (cond
         ((and (logtest? (-> self attack-info-rec mask) (attack-mask mode))
               (or (= (-> self attack-info-rec mode) 'damage) (= (-> self attack-info-rec mode) 'shock-no-interrupt))
