@@ -27,6 +27,7 @@
     "jak2": [
       {"zone": "forest", "prefixes": ["for", "lfor"]},
       {"zone": "metalhead", "prefixes": ["mhc", "nst", "lmh", "nes"]},
+      {"zone": "haven-slums", "prefixes": ["ctyslum"]},
       {"zone": "haven", "prefixes": ["cty", "lcty", "hiphog", "gungame", "freehq", "onintent", "vinroom", "piazza", "stadium", "intp", "kiosk", "oracle", "pal", "hide", "lwide", "lcitylow", "portwall", "skatepark", "lrace", "lport", "lshuttle", "lguard", "lcguard", "lpower", "lprotect", "lbombbot", "lbbush", "lwhack", "lprtrace", "lmeetbrt", "lhipout", "lkiddoge", "lhelldog", "lpackage", "lsack"]},
       {"zone": "desert", "prefixes": ["was", "lwas", "des", "wca", "wcb", "hang", "arena", "str", "dig"]},
       {"zone": "under", "prefixes": ["sew", "fact", "mine", "tow", "rail", "prec", "comb", "drill", "und", "cas"]},
@@ -117,6 +118,15 @@
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"city": 0.75}
     },
+    // Haven's slums (Jak 2): the game paints them blue-grey and dark; warmer and lighter, so the
+    // shacks read as sun-bleached wood and plaster (the same weather as the rest of Haven)
+    "haven-slums": {
+      "day": {"lift": [0.006, 0.003, -0.004], "gain": [1.1, 1.06, 0.98], "saturation": 1.04, "contrast": 0.03, "warmth": 0.05, "clouds": 0.5, "day_sky": 1, "rock_sun": 0.6},
+      "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
+      "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
+                  "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
+      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
+    },
     // desert: sun-baked by day, cold blue night; sandstorms come and go, the nights are clear
     "desert": {
       "day": {"lift": [0.004, 0.0, -0.006], "gain": [1.03, 1.0, 0.95], "saturation": 1.05, "contrast": 0.24, "warmth": 0.02, "clouds": 0.42, "sand": 0.85, "sun_haze": 0.8, "rock_detail": 0.5, "golden": 0.5, "sun_yaw": 105, "morning_yaw": -65, "sun_max_elev": 9, "light_max_elev": 18, "day_sky": 1, "rock_sun": 0.8},
@@ -141,8 +151,8 @@
     },
     // underground (sewers, factory, mines, tower, caves, the sunken city): cool and contrasty
     "under": {
-      "day": {"lift": [-0.004, 0.002, 0.012], "gain": [1, 1, 1.02], "saturation": 0.94, "contrast": 0.1, "warmth": -0.01, "clouds": 0.4},
-      "night": {"lift": [-0.004, 0.002, 0.012], "gain": [1, 1, 1.02], "saturation": 0.94, "contrast": 0.1, "warmth": -0.01, "clouds": 0.4},
+      "day": {"lift": [0.022, 0.021, 0.026], "gain": [1.24, 1.22, 1.2], "saturation": 0.96, "contrast": 0.0, "warmth": 0.01, "clouds": 0.4},
+      "night": {"lift": [0.022, 0.021, 0.026], "gain": [1.24, 1.22, 1.2], "saturation": 0.96, "contrast": 0.0, "warmth": 0.01, "clouds": 0.4},
       "weather": {"outdoors": false, "fog": 0}
     },
     // volcano: hot, the air shimmering over the lava
