@@ -4181,7 +4181,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   make_mvp(m_settings.shadow_range * kMeter, 300.f * kMeter, m_light_mvp);
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
-  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, m_light_mvp_far);
+  float far_mvp[16];
+  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, far_mvp);
 
   GLfloat old_clear_depth = 0.f;
   GLint old_depth_func = GL_GEQUAL;
@@ -4247,8 +4248,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       }
     }
   };
-  // (the far one every other frame: the sun barely moves, the camera's moves are snapped)
+  // (the far one every other frame: the sun barely moves. Its matrix changes only along with the
+  // map: the new one over last frame's map made the far shadows jump while the camera moved)
   if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
+    memcpy(m_light_mvp_far, far_mvp, sizeof(far_mvp));
     draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true);
     m_shadow_far_ready = true;
   }
