@@ -56,6 +56,17 @@ inline u8 enhanced_material(std::string name) {
   if (has({"cliff", "mount", "rock", "boulder", "sandstone"}) && !has({"shrub", "grass", "metal", "rust"})) {
     return kRock;
   }
+  // and the rock named otherwise: the mines' and caves' walls, the nest's cave, the forest's and
+  // the rubble's stones, the far hills and peaks seen from Haven (Jak 3); the caves of Volcanic
+  // Crater, the drill platform, the atoll and the hilltops behind it (Jak 1 and 2)
+  if (has({"minb-stone", "minc-stone", "comb-stone", "cav-stone", "rostone", "fora-stone-",
+           "rub-stone-", "stalag", "cave-wall", "cave-sides", "cave-plain", "cave-carved",
+           "background-peaks", "background-hills", "crater-rim", "cavewall", "cv-wall-", "dig-cave-broken",
+           "dig-cave-floor", "cpad-stone", "cpad-cave-floor", "boss-stone", "cboss-lowres-stone",
+           "atoll-r-stone", "background-hilltops", "nest-stonewall"}) &&
+      !has({"brick", "tile", "shrub"})) {
+    return kRock;
+  }
   // rusty, old or dirty: rough, whatever it's made of
   if (has({"rust", "old", "dirt", "grime", "moss", "mud", "sand", "rock", "wood", "cloth"})) {
     return kPlain;
