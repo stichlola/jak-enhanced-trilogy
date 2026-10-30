@@ -2367,6 +2367,14 @@ capture exactly."
     ;; (the trigger comes back from pc-enhanced-set-player, in the second vector: last frame's)
     (let ((v (-> *enhanced-player-vec* 1)))
       (set! (-> v x) *enhanced-board-boost*)
+      ;; z: whether Jak aims his gun (out and firing), for a light depth of field
+      (set! (-> v z) (if (and (focus-test? *target* gun) (not (focus-test? *target* pilot board))
+                              (or (cpad-hold? 0 r1) (focus-test? *target* shooting))
+                              )
+                         1.0
+                         0.0
+                         )
+            )
       (let ((throttle (if (< 0.02 (-> v y))
                           (-> v y)
                           (if (cpad-hold? 0 l2) 1.0 0.0)

@@ -692,6 +692,22 @@ vec4 ride_puffs(vec3 ray_view, float scene_dist, vec3 sand, vec3 spray, vec3 sun
       // (thin and grey: a wisp, not a ball; steamier in the rain)
       a = min(dens * (1.0 - smoothstep(0.15, 1.0, u)) * smoothstep(0.0, 0.15, age) * 0.75, 0.5);
       pc = vec3(luma(sand)) * mix(0.7, 0.95, weather.x) * lit;
+      // lit from below by the fires near it (orange, strongest in the column's lower part) and by
+      // the game's glows (lamps, eco) around it
+      vec3 glow = vec3(0.0);
+      for (int k = 0; k < fire_count; k++) {
+        vec3 fw = o + view_to_world * (fire_pos[k].xyz / 4096.0);
+        float fr = 2.5 + 3.0 * fire_pos[k].w / 4096.0;
+        vec3 fd = c - fw;
+        glow += vec3(1.0, 0.42, 0.12) * exp(-dot(fd, fd) / (fr * fr)) * (1.2 - 0.6 * u);
+      }
+      for (int k = 0; k < light_count; k++) {
+        vec3 lw = o + view_to_world * (light_pos[k].xyz / 4096.0);
+        float lr = max(light_pos[k].w / 4096.0, 0.5);
+        vec3 ld = c - lw;
+        glow += light_color[k].rgb * max(1.0 - dot(ld, ld) / (lr * lr), 0.0) * 0.5;
+      }
+      pc += vec3(luma(sand)) * glow;
     } else if (kind == 2) {
       a = dens * (1.0 - smoothstep(0.2, 1.0, u)) * smoothstep(0.0, 0.04, age) * 1.4;
       pc = vec3(luma(spray)) * vec3(1.05, 1.1, 1.18) * lit;
@@ -906,6 +922,24 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
         vec3 tint = mix(vec3(0.72, 0.82, 1.0), vec3(1.0, 0.86, 0.66), ihash3(key + 31.0));
         add += tint * shape * b * tw * (layer == 0 ? 1.0 : city_dim);
       }
+    }
+    // a shooting star now and then (about one every 15 s, two in three slots empty): a thin streak
+    // that crosses a bit of the sky in half a second, brightest at its head
+    float slot = floor(clouds.z / 6.0);
+    float since = clouds.z - slot * 6.0 - 6.0 * ihash3(vec3(slot, 3.0, 9.0)) * 0.8;
+    if (ihash3(vec3(slot, 1.0, 5.0)) > 0.62 && since > 0.0 && since < 0.55) {
+      float az = 6.2832 * ihash3(vec3(slot, 2.0, 7.0));
+      float el = 0.45 + 0.6 * ihash3(vec3(slot, 4.0, 1.0));
+      vec3 from = vec3(cos(az) * cos(el), sin(el), sin(az) * cos(el));
+      vec3 across = normalize(cross(from, vec3(0.0, 1.0, 0.0)) + vec3(0.0, -0.35, 0.0));
+      float prog = since / 0.55;
+      vec3 head = normalize(from + across * 0.3 * prog);
+      vec3 tail = normalize(from + across * 0.3 * max(prog - 0.35, 0.0));
+      vec3 seg = head - tail;
+      float k = clamp(dot(wd - tail, seg) / max(dot(seg, seg), 1e-6), 0.0, 1.0);
+      float d = length(wd - (tail + seg * k));
+      float w = px * 0.9;
+      add += vec3(0.85, 0.9, 1.0) * exp(-d * d / (w * w)) * k * k * 1.6 * sin(3.1416 * prog) * city_dim;
     }
     add *= clear;
   }
@@ -3752,6 +3786,47 @@ void main() {
   // by day the same on rock: the game bakes the mountains evenly dark, so the sun's own direction
   // lights them, the faces turned away in a cooler shade (fading out as the late afternoon's takes
   // over)
+  // dust and grime gathered at the foot of the walls: a wall's lowest meter a little darker where it
+  // stands on a floor (found a few steps below on screen: the first point lower down that faces up)
+  if (z > 0.0 && wsurf == 0.0 && abs(world_dir(surf_n).y) < 0.35 && length(p) < 60.0 * 4096.0 &&
+      length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0) > 0.985) {
+    float h = 1e9;
+    for (int k = 1; k <= 4; k++) {
+      vec2 uq = tex_coord - vec2(0.0, texel.y * float(k * k) * 5.0);
+      float dq = texture(tex_T3, uq).r;
+      vec4 gq = texture(tex_T11, uq);
+      if (dq > 1e-7 && gq.a > 0.17 && (gq.rgb * 2.0 - 1.0).y > 0.7) {
+        vec3 dw = view_to_world * (view_pos(uq, dq) - p) / 4096.0;
+        if (dw.y < 0.0 && length(dw.xz) < 1.5) {
+          h = min(h, -dw.y);
+        }
+      }
+    }
+    c *= 1.0 - 0.2 * (1.0 - smoothstep(0.05, 1.1, h)) * (1.0 - smoothstep(30.0, 60.0, length(p) / 4096.0));
+  }
+  // characters lit from behind by the sun: a thin bright rim along their outline, so they stand out
+  // from the scenery (by day, outdoors: the areas with a day sky)
+  if (z > 0.0 && sky_day > 0.0 && wsurf == 0.0) {
+    float ctag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
+    if (ctag > 0.4 && ctag < 0.56) {
+      float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w) * (1.0 - weather.x);
+      vec3 vd = normalize(-p);
+      float edge = pow(1.0 - clamp(dot(surf_n, vd), 0.0, 1.0), 3.0);
+      float behind = smoothstep(-0.1, 0.6, dot(normalize(p), sun_dir.xyz));
+      float side = clamp(dot(surf_n, sun_dir.xyz) + 0.5, 0.0, 1.0);
+      c += vec3(1.0, 0.86, 0.66) * edge * behind * side * daylight * sky_day * 0.35 *
+           (1.0 - smoothstep(15.0, 40.0, length(p) / 4096.0));
+    }
+  }
+  // the far air takes the sky's color: warm toward the sun, cool and bluer away from it, so the
+  // distance reads deeper (by day; the desert has its own haze)
+  if (z > 0.0 && sky_day > 0.0 && sun_haze == 0.0) {
+    float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - weather.x);
+    float far_k = smoothstep(120.0, 1200.0, length(p) / 4096.0) * daylight * sky_day;
+    float toward = dot(normalize(p), sky_sun.xyz) * 0.5 + 0.5;
+    vec3 air = mix(vec3(0.9, 0.97, 1.08), vec3(1.08, 1.0, 0.88), smoothstep(0.35, 0.95, toward));
+    c = mix(c, c * air, far_k * 0.6);
+  }
   if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
     float tag = length(texture(tex_T11, tex_coord).rgb * 2.0 - 1.0);
     if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {

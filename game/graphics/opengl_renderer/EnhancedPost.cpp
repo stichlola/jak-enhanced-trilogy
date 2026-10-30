@@ -37,6 +37,7 @@ EnhancedSun g_enhanced_sun;
 EnhancedPlayer g_enhanced_player;
 std::atomic<float> g_enhanced_l2_trigger{0.f};
 std::atomic<float> g_enhanced_board_boost{0.f};
+std::atomic<float> g_enhanced_aim{0.f};
 bool g_enhanced_debug_toolbar = false;
 EnhancedScene g_enhanced_scene;
 EnhancedDust g_enhanced_dust;
@@ -3501,7 +3502,10 @@ void EnhancedPost::update_scene() {
                                 : 0.f;
     m_flash = std::min(1.f, f * m_bolt[3]) * std::min(1.f, m_storm * 1.5f);
   }
-  ease(m_cine, movie && s.cine_dof ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
+  // (and lighter while Jak aims his gun: what he aims at, at the middle, stays sharp)
+  const bool aim = !movie && g_enhanced_player.valid && g_enhanced_aim.load() > 0.5f;
+  ease(m_cine, movie && s.cine_dof ? 1.f : (aim && s.cine_dof ? 0.3f : 0.f),
+       1.f - std::exp(-dt / (aim ? 0.25f : 0.4f)));
   ease(m_movie, movie ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
 }
 

@@ -1114,6 +1114,7 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   // kernel function would be simpler, but one more C function symbol crashes jak3 on boot
   if (g_game_version == GameVersion::Jak3) {
     g_enhanced_board_boost = v[4];
+    g_enhanced_aim = v[6];
     v[5] = g_enhanced_l2_trigger;
   }
   g_enhanced_player.valid = true;
