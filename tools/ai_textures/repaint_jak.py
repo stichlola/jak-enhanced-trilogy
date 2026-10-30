@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Jak 3: Jak's shoes repainted from the game's own 64 x 128 pictures, into texture_remade.
+"""Jak 3: the textures of Jak that the 4x upscale spoiled, remade from the game's own, into texture_remade.
 
-The 4x upscale took the pictures' single-pixel mottling for shapes and drew it as blocks with
-stepped edges. Here the originals only give the layout and the colors: where the leather is worn
-through, where the plate is, the color of each. The edges and the grain are painted new, at 8x, with
-a height map (<name>_h.png) so that the relief follows the leather and not the painted marks.
+The upscale took the pictures' single-pixel mottling for shapes and drew it as blocks with stepped
+edges. Here the originals only give the layout and the colors. The shoes are painted new (where the
+leather is worn through, where the plate is, the color of each), the others keep the original's
+shapes without its pixels. All at 8x, each with a height map (<name>_h.png) so that the relief
+follows the material and not the painted marks.
 
-    python repaint_jak_shoes.py <decompiler_out>/jak3/textures <out>/texture_remade
+    python repaint_jak.py <decompiler_out>/jak3/textures <out>/texture_remade
 """
 import argparse
 from pathlib import Path
@@ -160,6 +161,20 @@ def shoe_bottom(src, rng):
     return out, alpha, h
 
 
+def smooth(src, name, rng):
+    """The original's own shapes without its pixels: smoothed past the grid, the edges tightened
+    again (no steps, and nothing the original doesn't have), a little new grain."""
+    rgb, alpha = load(src, name)
+    shape = rgb.shape[:2]
+    soft = blur(rgb, SCALE * 0.6)
+    out = soft + 0.9 * (soft - blur(soft, SCALE * 1.6))
+    g = grain(shape, rng)
+    out = out * (1.0 + 0.045 * g[:, :, None])
+    lum = soft.mean(axis=2)
+    h = 0.5 + 1.2 * (lum - blur(lum, SCALE * 4.0)) + 0.03 * g
+    return out, alpha, h
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("textures", type=Path, help="the decompiler's textures folder")
@@ -167,7 +182,12 @@ def main():
     args = ap.parse_args()
     src = args.textures / PAGE
     dst = args.out / PAGE
-    for name, paint in (("jakc-shoetop", shoe_top), ("jakc-shoeplate", shoe_plate), ("jakc-shoebottom", shoe_bottom)):
+    painters = [("jakc-shoetop", shoe_top), ("jakc-shoeplate", shoe_plate), ("jakc-shoebottom", shoe_bottom)]
+    # (those the upscale gave steps, or marks the original doesn't have: the waistband's lines, a
+    # corner of the fingers. Not the hair: its black spots are see-through, they don't show)
+    for name in ("waistband", "leggging", "leatherpouch", "glovetop", "wraps", "wristbands-a", "finger"):
+        painters.append((f"jakc-{name}", lambda s, r, n=f"jakc-{name}": smooth(s, n, r)))
+    for name, paint in painters:
         rng = np.random.default_rng(sum(name.encode()))
         rgb, alpha, height = paint(src, rng)
         save(dst, name, rgb, alpha, height)

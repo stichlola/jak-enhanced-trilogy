@@ -116,9 +116,14 @@ void main() {
             hx = textureGrad(tex_relief, vtx_st + st_dx, st_dx, st_dy).r;
             hy = textureGrad(tex_relief, vtx_st + st_dy, st_dx, st_dy).r;
           } else {
-            h0 = dot(T0.rgb, lum);
-            hx = dot(textureGrad(tex_T0, vtx_st + st_dx, st_dx, st_dy).rgb, lum);
-            hy = dot(textureGrad(tex_T0, vtx_st + st_dy, st_dx, st_dy).rgb, lum);
+            // (from a softer read of the picture, over a wider step: its finest marks and noise are
+            // paint, not shape, as relief they crumpled smooth parts like paper)
+            vec2 sx = st_dx * 3.0, sy = st_dy * 3.0;
+            h0 = dot(textureGrad(tex_T0, vtx_st, sx, sy).rgb, lum);
+            hx = dot(textureGrad(tex_T0, vtx_st + sx, sx, sy).rgb, lum);
+            hy = dot(textureGrad(tex_T0, vtx_st + sy, sx, sy).rgb, lum);
+            hx = h0 + (hx - h0) / 3.0;
+            hy = h0 + (hy - h0) / 3.0;
           }
           // (1.2 cm = 49 game units; the positions are in game units too, so this is a plain slope)
           bump_g = ((hx - h0) * r1 + (hy - h0) * r2) * 49.0 * k / det;
