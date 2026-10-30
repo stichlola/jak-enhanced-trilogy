@@ -527,6 +527,23 @@ void Merc2::handle_pc_model(const DmaTransfer& setup,
     // get the matrix data
     memcpy(&skel_matrix_buffer[input_data[i]], real_addr, sizeof(MercMat));
   }
+  // Enhanced: the game only sends the bones its own mesh uses, a replacement (no_strip, skinned) may
+  // use others. All of them are computed, side by side (GOAL: matrix-buf + 128 * idx), so get them.
+  if (render_state->version == GameVersion::Jak3 && i > 0 && model->max_bones < 100 &&
+      model->effects.at(0).all_draws.at(0).no_strip) {
+    bool sent[MAX_SKEL_BONES] = {};
+    for (int j = 0; j < i; j++) {
+      sent[input_data[j]] = true;
+    }
+    u32 addr;
+    memcpy(&addr, &matrix_array[0], 4);
+    const u8* all_bones = setup.data - setup.data_offset + addr - 128 * input_data[0];
+    for (int j = 0; j <= (int)model->max_bones && j < MAX_SKEL_BONES; j++) {
+      if (!sent[j]) {
+        memcpy(&skel_matrix_buffer[j], all_bones + 128 * j, sizeof(MercMat));
+      }
+    }
+  }
   input_data += 128 + 16 * i;
 
   // Next part is some flags
@@ -570,6 +587,16 @@ void Merc2::handle_pc_model(const DmaTransfer& setup,
   // blerc/mod draws
   if (model->effects.at(0).all_draws.at(0).no_strip) {
     num_effects = model->effects.size();
+    // Enhanced: its effects aren't the game's, whose switches (and fades) they would get by number:
+    // all of them follow the first one, where the whole mesh is
+    if (render_state->version == GameVersion::Jak3) {
+      if (current_effect_enable_bits & 1) {
+        current_effect_enable_bits = ~0ull;
+      }
+      for (int ei = flags->effect_count; ei < num_effects; ei++) {
+        memcpy(fade_buffer + ei * 4, fade_buffer, 4);
+      }
+    }
   }
 
   // will hold opengl buffers for the updated vertices

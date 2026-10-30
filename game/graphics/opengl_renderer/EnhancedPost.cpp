@@ -21,6 +21,7 @@
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedSmoothMerc.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
@@ -5948,6 +5949,12 @@ void EnhancedPost::draw_menu() {
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
+    {
+      bool smooth = g_enhanced_smooth_chars > 0;
+      if (ImGui::Checkbox("Smoother characters (after a restart)", &smooth)) {
+        g_enhanced_smooth_chars = smooth ? 1 : 0;
+      }
+    }
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
     ImGui::SliderFloat("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
@@ -6202,6 +6209,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["grass_push"] = g_enhanced_wind.push;
   j["vegetation"] = g_enhanced_vegetation;
   j["scenery_dist"] = g_enhanced_scenery_dist;
+  j["smooth_chars"] = g_enhanced_smooth_chars;
   j["water_reflections"] = s.water_reflections;
   j["water_swell"] = s.water_swell;
   j["water_refraction"] = s.water_refraction;
@@ -6294,6 +6302,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   if (!std::getenv("JAK_ENHANCED_SCENERY")) {
     get("scenery_dist", g_enhanced_scenery_dist);
     g_enhanced_scenery_dist = std::clamp(g_enhanced_scenery_dist, 0.f, 200.f);
+  }
+  if (!std::getenv("JAK_ENHANCED_SMOOTH_CHARS")) {
+    get("smooth_chars", g_enhanced_smooth_chars);
   }
   get("water_reflections", s.water_reflections);
   get("water_swell", s.water_swell);

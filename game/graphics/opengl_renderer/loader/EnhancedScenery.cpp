@@ -85,6 +85,7 @@ struct Batch {
   DrawMode mode;
   bool foliage = false;
   bool stone = false;  // a stone's model: tagged rock for the post pass (its detail and light)
+  int proto = -1;      // TIE: its proto, which the game can hide (else -1)
   float base_rgb[3] = {0.5f, 0.5f, 0.5f};
   float tint[3] = {1, 1, 1};  // the model's texture brought to the proto's colors
   std::vector<GpuInstance> instances;
@@ -609,6 +610,181 @@ void prepare_tree(tfrag3::ShrubTree& tree,
   tree.enh_scenery = data;
 }
 
+// The same for a TIE tree: crates, barrels, lamps, small rocks. Each copy of a proto has a matrix of
+// its own, its strips cut into several matrix groups; which proto they are comes from the draws.
+// Not for: protos in the wind (their draws are instanced, not in static_draws) or with an
+// environment map or in the water (other shaders, that don't know the crossfade)
+void prepare_tie_tree(tfrag3::TieTree& tree,
+                      const std::vector<tfrag3::Texture>& textures,
+                      u32 tree_idx,
+                      Library& lib,
+                      int* replaced) {
+  const auto& groups = tree.packed_vertices.matrix_groups;
+  auto& verts = tree.unpacked.vertices;
+  std::vector<u32> group_first(groups.size() + 1, 0);
+  for (u32 g = 0; g < groups.size(); g++) {
+    group_first[g + 1] = group_first[g] + groups[g].end_vert - groups[g].start_vert;
+  }
+
+  std::vector<char> listed(tree.proto_names.size(), 0);
+  for (size_t p = 0; p < listed.size(); p++) {
+    listed[p] = models_for(lib, tree.proto_names[p]) != nullptr;
+  }
+  std::vector<s32> group_proto(groups.size(), -1);
+  std::unordered_map<u32, const tfrag3::StripDraw*> normal_draw;  // the first one of each proto
+  std::vector<char> other_shader(listed.size(), 0);
+  const auto& indices = tree.unpacked.indices;
+  for (int c = 0; c < tfrag3::kNumTieCategories; c++) {
+    const auto category = (tfrag3::TieCategory)c;
+    for (u32 d = tree.category_draw_indices[c]; d < tree.category_draw_indices[c + 1]; d++) {
+      const auto& draw = tree.static_draws[d];
+      size_t at = draw.unpacked.idx_of_first_idx_in_full_buffer;
+      for (const auto& vis : draw.vis_groups) {
+        const u32 proto = vis.tie_proto_idx;
+        if (proto < listed.size() && listed[proto]) {
+          if (category == tfrag3::TieCategory::NORMAL) {
+            normal_draw.emplace(proto, &draw);
+          } else if (category != tfrag3::TieCategory::TRANS) {
+            other_shader[proto] = 1;
+          }
+          for (size_t k = at; k < at + vis.num_inds && k < indices.size(); k++) {
+            if (indices[k] != UINT32_MAX && indices[k] < group_first.back()) {
+              u32 g = std::upper_bound(group_first.begin(), group_first.end(), indices[k]) -
+                      group_first.begin() - 1;
+              group_proto[g] = proto;
+            }
+          }
+        }
+        at += vis.num_inds;
+      }
+    }
+  }
+  for (u32 p = 0; p < listed.size(); p++) {
+    if (listed[p] && other_shader[p]) {
+      lg::warn("[enhanced] scenery: {} has an environment map or is in the water: not replaced",
+               tree.proto_names[p]);
+    }
+  }
+
+  // the copies
+  struct Copy {
+    u32 proto = 0;
+    std::vector<u32> groups;
+    Vec3 lo = Vec3(1e30f, 1e30f, 1e30f), hi = Vec3(-1e30f, -1e30f, -1e30f);  // proto's own space
+  };
+  std::map<s32, Copy> copies;
+  for (u32 g = 0; g < groups.size(); g++) {
+    const s32 proto = group_proto[g];
+    if (proto < 0 || groups[g].matrix_idx < 0 || other_shader[proto] || !normal_draw.count(proto)) {
+      continue;
+    }
+    auto& copy = copies[groups[g].matrix_idx];
+    copy.proto = proto;
+    copy.groups.push_back(g);
+    for (u32 v = groups[g].start_vert; v < groups[g].end_vert; v++) {
+      const auto& pv = tree.packed_vertices.vertices[v];
+      copy.lo = Vec3(std::min(copy.lo.x(), pv.x), std::min(copy.lo.y(), pv.y),
+                     std::min(copy.lo.z(), pv.z));
+      copy.hi = Vec3(std::max(copy.hi.x(), pv.x), std::max(copy.hi.y(), pv.y),
+                     std::max(copy.hi.z(), pv.z));
+    }
+  }
+  if (copies.empty()) {
+    return;
+  }
+
+  auto data = std::make_shared<SceneryTree>();
+  std::unordered_map<u64, size_t> batch_of;  // (proto, mesh) -> batch
+  for (const auto& [matrix_idx, copy] : copies) {
+    const auto& meshes = *models_for(lib, tree.proto_names[copy.proto]);
+    const int m = meshes[std::min<size_t>(hash01(tree_idx, matrix_idx, 1) * meshes.size(),
+                                          meshes.size() - 1)];
+    const auto& mesh = lib.meshes[m];
+    const u64 key = ((u64)copy.proto << 32) | (u32)m;
+    auto it = batch_of.find(key);
+    if (it == batch_of.end()) {
+      Batch b;
+      b.mesh = m;
+      b.proto = copy.proto;
+      const auto& draw = *normal_draw.at(copy.proto);
+      b.mode = draw.mode;
+      b.foliage = draw.mode.get_at_enable() && mesh.cutout;
+      {
+        const auto name = proto_key(tree.proto_names[copy.proto]);
+        b.stone = !mesh.cutout && (name.find("pebble") != std::string::npos ||
+                                   name.find("rock") != std::string::npos ||
+                                   name.find("stone") != std::string::npos);
+      }
+      // TIE has no baked light of its own: time of day x 2, which is shrub_inst's x 4 x this
+      auto own = lib.own_colors.find(proto_key(tree.proto_names[copy.proto]));
+      if (own != lib.own_colors.end()) {
+        for (int c = 0; c < 3; c++) {
+          b.tint[c] = std::clamp(own->second[c] / std::max(mesh.avg[c], 0.02f), 0.2f, 2.5f);
+        }
+      } else if (draw.tree_tex_id >= 0 && (size_t)draw.tree_tex_id < textures.size()) {
+        Vec3 want = texture_average(textures[draw.tree_tex_id]);
+        for (int c = 0; c < 3; c++) {
+          b.tint[c] = std::clamp(want[c] / std::max(mesh.avg[c], 0.02f), 0.4f, 2.5f);
+        }
+      }
+      it = batch_of.emplace(key, data->batches.size()).first;
+      data->batches.push_back(std::move(b));
+    }
+
+    // into the proto's place as it is, the foot on its foot, as tall (not turned at random, not
+    // sunk, unlike a plant: a crate has a front and stands on its bottom)
+    Vec3 msize = mesh.hi - mesh.lo;
+    msize = Vec3(msize.x(), mesh.hi.y() - mesh.foot_y, msize.z());
+    float h = std::max(copy.hi.y() - copy.lo.y(), 1.f);
+    float w = std::max(std::max(copy.hi.x() - copy.lo.x(), copy.hi.z() - copy.lo.z()), 1.f);
+    float s = std::min(h / std::max(msize.y(), 1.f),
+                       1.6f * w / std::max(std::max(msize.x(), msize.z()), 1.f));
+    Vec3 mfoot((mesh.lo.x() + mesh.hi.x()) * 0.5f, mesh.foot_y, (mesh.lo.z() + mesh.hi.z()) * 0.5f);
+    Vec3 pfoot((copy.lo.x() + copy.hi.x()) * 0.5f, copy.lo.y(), (copy.lo.z() + copy.hi.z()) * 0.5f);
+    Affine fit = yaw_scale(0.f, s, Vec3(0, 0, 0));
+    fit.t = pfoot - fit.turn(mfoot);
+    const auto& mat = tree.packed_vertices.matrices[matrix_idx];
+    Affine place{{Vec3(mat[0].x(), mat[0].y(), mat[0].z()), Vec3(mat[1].x(), mat[1].y(), mat[1].z()),
+                  Vec3(mat[2].x(), mat[2].y(), mat[2].z())},
+                 Vec3(mat[3].x(), mat[3].y(), mat[3].z())};
+    Affine full = place.after(fit);
+
+    auto& b = data->batches[it->second];
+    GpuInstance inst;
+    for (int c = 0; c < 3; c++) {
+      inst.col[c][0] = full.c[c].x();
+      inst.col[c][1] = full.c[c].y();
+      inst.col[c][2] = full.c[c].z();
+      inst.col[c][3] = 0;
+    }
+    inst.col[0][3] = tree.packed_vertices.color_indices.at(group_first[copy.groups[0]]);
+    inst.col[3][0] = full.t.x();
+    inst.col[3][1] = full.t.y();
+    inst.col[3][2] = full.t.z();
+    inst.col[3][3] = 1;
+    b.instances.push_back(inst);
+    Vec3 center = full.apply((mesh.lo + mesh.hi) * 0.5f);
+    float scale = std::max({full.c[0].length(), full.c[1].length(), full.c[2].length()});
+    b.spheres.emplace_back(center.x(), center.y(), center.z(),
+                           scale * (mesh.hi - mesh.lo).length() * 0.5f);
+    b.tiers.push_back(0);
+    (*replaced)++;
+
+    // the proto's vertices fade out where the model is drawn: flagged in the normal's 2 unused bits
+    // (normal_in.w in tfrag3.vert), which nothing else reads
+    for (u32 g : copy.groups) {
+      for (u32 v = group_first[g]; v < group_first[g + 1]; v++) {
+        verts[v].nor = (verts[v].nor & 0x3fffffffu) | (1u << 30);
+      }
+    }
+  }
+  data->impostors = !data->batches.empty();
+  for (const auto& b : data->batches) {
+    data->impostors = data->impostors && !lib.meshes[b.mesh].imp_rgba.empty();
+  }
+  tree.enh_scenery = data;
+}
+
 void upload_cutout(const std::vector<u8>& rgba, int w, int h);
 
 void make_gl(Mesh& mesh, Library& lib) {
@@ -844,11 +1020,8 @@ void make_imp_gl(Mesh& mesh, Library& lib) {
 }  // namespace
 
 void enhanced_prepare_scenery(tfrag3::Level& level, const std::string& name) {
-  if (level.shrub_trees.empty()) {
-    return;
-  }
-  // JAK_ENHANCED_SCENERY_LIST: the level's shrub protos and how many draws use each (to pick
-  // which to replace in scenery.json)
+  // JAK_ENHANCED_SCENERY_LIST: the level's shrub and TIE protos and how many draws or copies use
+  // each (to pick which to replace in scenery.json)
   static const bool list = std::getenv("JAK_ENHANCED_SCENERY_LIST") != nullptr;
   if (list) {
     std::map<std::string, int> uses;
@@ -862,6 +1035,24 @@ void enhanced_prepare_scenery(tfrag3::Level& level, const std::string& name) {
     for (const auto& [proto, n] : uses) {
       lg::info("[enhanced] scenery list: {}: {} ({} draws)", name, proto, n);
     }
+    if (!level.tie_trees[0].empty()) {
+      std::map<std::string, int> strips;
+      for (const auto& tree : level.tie_trees[0]) {
+        for (const auto& draw : tree.static_draws) {
+          for (const auto& vis : draw.vis_groups) {
+            if (vis.tie_proto_idx < tree.proto_names.size()) {
+              strips[tree.proto_names[vis.tie_proto_idx]]++;
+            }
+          }
+        }
+      }
+      for (const auto& [proto, n] : strips) {
+        lg::info("[enhanced] scenery list: {}: {} (tie, {} groups)", name, proto, n);
+      }
+    }
+  }
+  if (level.shrub_trees.empty() && level.tie_trees[0].empty()) {
+    return;
   }
   auto& lib = library();
   std::lock_guard<std::mutex> lock(lib.mutex);
@@ -873,29 +1064,66 @@ void enhanced_prepare_scenery(tfrag3::Level& level, const std::string& name) {
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
     prepare_tree(level.shrub_trees[t], level.textures, t, lib, &replaced);
   }
+  // (the most detailed TIE only: Tie3 draws the others just with a debug setting, then plain)
+  for (u32 t = 0; t < level.tie_trees[0].size(); t++) {
+    prepare_tie_tree(level.tie_trees[0][t], level.textures, t, lib, &replaced);
+  }
   if (replaced) {
     lg::info("[enhanced] scenery: {}: {} copies get a detailed model", name, replaced);
   }
 }
 
-math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree) {
-  if (!tree.enh_scenery || g_enhanced_scenery_dist <= 0.f) {
+namespace {
+math::Vector2f scenery_fade(const std::shared_ptr<void>& scenery) {
+  if (!scenery || g_enhanced_scenery_dist <= 0.f) {
     return math::Vector2f(0, 0);
   }
   // the game's protos only where the models end: with their far pictures (impostors) out to
   // kImpReach, where the protos are a few pixels; else the far versions' reach (dithered: the two
   // differ, up close it showed)
-  const auto& data = *static_cast<const SceneryTree*>(tree.enh_scenery.get());
+  const auto& data = *static_cast<const SceneryTree*>(scenery.get());
   float end = data.impostors ? kImpReach * kMeter
                              : g_enhanced_scenery_dist * g_enhanced_scenery_scale * kFarReach * kMeter;
   return math::Vector2f(end * 0.85f, end);
+}
+
+void draw_scenery(const std::shared_ptr<void>& scenery,
+                  const std::vector<u8>* proto_vis,
+                  const TfragRenderSettings& settings,
+                  SharedRenderState* render_state,
+                  ScopedProfilerNode& prof);
+}  // namespace
+
+math::Vector2f enhanced_scenery_fade(const tfrag3::ShrubTree& tree) {
+  return scenery_fade(tree.enh_scenery);
+}
+
+math::Vector2f enhanced_scenery_fade(const tfrag3::TieTree& tree) {
+  return scenery_fade(tree.enh_scenery);
 }
 
 void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
                            const TfragRenderSettings& settings,
                            SharedRenderState* render_state,
                            ScopedProfilerNode& prof) {
-  if (!tree.enh_scenery || g_enhanced_scenery_dist <= 0.f) {
+  draw_scenery(tree.enh_scenery, nullptr, settings, render_state, prof);
+}
+
+void enhanced_draw_scenery(const tfrag3::TieTree& tree,
+                           const std::vector<u8>* proto_vis,
+                           const TfragRenderSettings& settings,
+                           SharedRenderState* render_state,
+                           ScopedProfilerNode& prof) {
+  draw_scenery(tree.enh_scenery, proto_vis, settings, render_state, prof);
+}
+
+namespace {
+void draw_scenery(const std::shared_ptr<void>& scenery,
+                  const std::vector<u8>* proto_vis,
+                  const TfragRenderSettings& settings,
+                  SharedRenderState* render_state,
+                  ScopedProfilerNode& prof) {
+  if (!scenery || g_enhanced_scenery_dist <= 0.f) {
     return;
   }
   auto& lib = library();
@@ -903,7 +1131,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
   if (!lock.owns_lock()) {
     return;  // (the loader is reading a model for a level coming in: the game's protos for now)
   }
-  const auto& data = *static_cast<const SceneryTree*>(tree.enh_scenery.get());
+  const auto& data = *static_cast<const SceneryTree*>(scenery.get());
   // each version reaches one detailed distance further (the impostor: to kImpReach); a copy near
   // the end of its version's reach swaps to the next over the last part of it (both drawn,
   // complementary pixels: shrub.frag's enh_xfade)
@@ -912,7 +1140,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
   const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
   const float thin_from = std::max(far_end * 0.5f, (kFarLods + 1.5f) * step);
   const auto& cam = settings.camera.trans;
-  auto fade = enhanced_scenery_fade(tree);
+  auto fade = scenery_fade(scenery);
   using clock = std::chrono::steady_clock;
   static const auto start = clock::now();
   const float now = std::chrono::duration<float>(clock::now() - start).count();
@@ -927,6 +1155,9 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
     auto& out = lib.copies[bi];
     for (auto& c : out) {
       c.clear();
+    }
+    if (proto_vis && b.proto >= 0 && !(*proto_vis)[b.proto]) {
+      continue;  // (the game has hidden this proto just now, as it's done with the level's own)
     }
     // the last version this model has: its impostor, else its last far version
     int last = mesh.imp_rgba.empty() && !mesh.imp_tex ? 0 : kImp;
@@ -1116,6 +1347,7 @@ void enhanced_draw_scenery(const tfrag3::ShrubTree& tree,
   }
   glBindVertexArray(0);
 }
+}  // namespace
 
 GLuint enhanced_crush_map(float out[4]) {
   auto& lib = library();

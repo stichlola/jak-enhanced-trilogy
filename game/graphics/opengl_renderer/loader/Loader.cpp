@@ -10,6 +10,7 @@
 
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedSmoothMerc.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "common/util/compress.h"
 
@@ -290,6 +291,8 @@ void Loader::loader_thread() {
         }
       }
 
+      enhanced_smooth_characters(*result, lev);
+
       {
         auto p = scoped_prof("enhanced-vegetation");
         enhanced_add_vegetation(*result, lev);
@@ -333,6 +336,7 @@ const tfrag3::Level& Loader::load_common(TexturePool& tex_pool, const std::strin
   Serializer ser(decomp_data.data(), decomp_data.size());
   m_common_level.level = std::make_unique<tfrag3::Level>();
   m_common_level.level->serialize(ser);
+  enhanced_smooth_characters(*m_common_level.level, name);
   for (auto& tex : m_common_level.level->textures) {
     m_common_level.textures.push_back(add_texture(tex_pool, tex, true));
   }

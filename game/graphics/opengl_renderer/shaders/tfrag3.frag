@@ -124,7 +124,21 @@ vec2 enh_parallax_shift(vec2 uv, vec2 dx, vec2 dy, vec3 px, vec3 py) {
   return shift * (t - 0.5);
 }
 
+// Enhanced: the detailed model stands in near the camera, this proto beyond, dithered across the
+// band: the same pixels as shrub.frag leaves the model (EnhancedScenery)
+flat in int enh_lod_kind;
+uniform vec2 enh_lod;  // distance from the camera (0, 0 = off)
+float enh_dither() {
+  ivec2 p = ivec2(gl_FragCoord.xy) & 3;
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  return fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
+}
+
 void main() {
+  if (enh_lod_kind != 0 && enh_lod.y > 0.0 &&
+      smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) <= enh_dither()) {
+    discard;
+  }
   enh_normal_out = enh_pack_normal(enh_normal);
   if (gfx_hack_no_tex == 0) {
     //vec4 T0 = texture(tex_T0, tex_coord);
