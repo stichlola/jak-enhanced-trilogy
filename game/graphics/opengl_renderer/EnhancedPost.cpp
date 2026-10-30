@@ -4918,19 +4918,22 @@ void EnhancedPost::prepare(GLuint scene_tex,
   GLuint src = scene_tex;
   int src_w = w;
   int src_h = h;
-  for (int i = 0; i < kLevels; i++) {
-    auto& level = m_levels[i];
-    glBindFramebuffer(GL_FRAMEBUFFER, level.fbo);
-    glViewport(0, 0, level.w, level.h);
-    glBindTexture(GL_TEXTURE_2D, src);
-    glUniform2f(u_texel, 1.f / src_w, 1.f / src_h);
-    glUniform1i(u_first, i == 0);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    prof.add_draw_call();
-    src = level.tex;
-    src_w = level.w;
-    src_h = level.h;
-  }
+  auto bloom_down = [&]() {
+    for (int i = 0; i < kLevels; i++) {
+      auto& level = m_levels[i];
+      glBindFramebuffer(GL_FRAMEBUFFER, level.fbo);
+      glViewport(0, 0, level.w, level.h);
+      glBindTexture(GL_TEXTURE_2D, src);
+      glUniform2f(u_texel, 1.f / src_w, 1.f / src_h);
+      glUniform1i(u_first, i == 0);
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      prof.add_draw_call();
+      src = level.tex;
+      src_w = level.w;
+      src_h = level.h;
+    }
+  };
+  ENH_TIMED("enh-bloom-down", bloom_down());
 
   // up: tent-filter each level and add it onto the next bigger one
   auto& up = render_state->shaders[ShaderId::ENH_BLOOM_UP];
@@ -4941,16 +4944,19 @@ void EnhancedPost::prepare(GLuint scene_tex,
   glEnable(GL_BLEND);
   glBlendFunc(GL_ONE, GL_ONE);
   glBlendEquation(GL_FUNC_ADD);
-  for (int i = kLevels - 1; i > 0; i--) {
-    auto& from = m_levels[i];
-    auto& to = m_levels[i - 1];
-    glBindFramebuffer(GL_FRAMEBUFFER, to.fbo);
-    glViewport(0, 0, to.w, to.h);
-    glBindTexture(GL_TEXTURE_2D, from.tex);
-    glUniform2f(u_up_texel, 1.f / from.w, 1.f / from.h);
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-    prof.add_draw_call();
-  }
+  auto bloom_up = [&]() {
+    for (int i = kLevels - 1; i > 0; i--) {
+      auto& from = m_levels[i];
+      auto& to = m_levels[i - 1];
+      glBindFramebuffer(GL_FRAMEBUFFER, to.fbo);
+      glViewport(0, 0, to.w, to.h);
+      glBindTexture(GL_TEXTURE_2D, from.tex);
+      glUniform2f(u_up_texel, 1.f / from.w, 1.f / from.h);
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      prof.add_draw_call();
+    }
+  };
+  ENH_TIMED("enh-bloom-up", bloom_up());
   glDisable(GL_BLEND);
   glBindVertexArray(0);
 }
