@@ -1164,6 +1164,14 @@ void EnhancedPost::update_auto_quality() {
     return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : kAutoLevels - 1;
   }();
   m_auto_level = std::clamp(m_auto_level, auto_min, std::max(auto_min, auto_max));
+  // the passes it sets aside or brings back fade over a second: the shade jumped in one frame
+  // without the indirect light
+  auto fade = [&](float& f, bool on) {
+    f = std::clamp(f + (on ? 1.f : -1.f) * std::min(m_frame_ms, 50.f) / 1000.f, 0.f, 1.f);
+  };
+  fade(m_fade_volume, m_auto_level < 1);
+  fade(m_fade_gi, m_auto_level < 2);
+  fade(m_fade_rays, m_auto_level < 3);
   g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   g_enhanced_render_scale = kRenderScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
@@ -1968,8 +1976,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         c.pos[3] = 14.f * kMeter;
         // a steady bulb with a faint hum in it
-        const float hum = 0.94f + 0.04f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
-                          0.02f * std::sin(t * 41.f);
+        const float hum = 0.97f + 0.02f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
+                          0.01f * std::sin(t * 41.f);
         const float k = m_lamp_on * hum * m_settings.light_strength;
         c.color[0] = 1.25f * k;
         c.color[1] = 0.62f * k;
@@ -3701,7 +3709,7 @@ void EnhancedPost::do_shafts(GLuint scene_tex,
   // (the desert's haze shadow runs at every quality, with the sun anywhere; the rays need it in
   // front)
   bool haze = m_grade.sun_haze > 0.f && m_settings.enabled;
-  bool rays = m_settings.shafts && m_auto_level < 3;
+  bool rays = m_settings.shafts && m_fade_rays > 0.f;
   if (len < 1e-6f) {
     return;
   }
@@ -4881,13 +4889,13 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
     // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
-    if (m_settings.volume && m_auto_level < 1 && m_ssao_ready && m_fog > 0.01f) {
+    if (m_settings.volume && m_fade_volume > 0.f && m_ssao_ready && m_fog > 0.01f) {
       ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
-    if (m_settings.gi && m_auto_level < 2 && m_ssao_ready) {
+    if (m_settings.gi && m_fade_gi > 0.f && m_ssao_ready) {
       ENH_TIMED("enh-gi", do_gi(scene_tex, screen_vao, render_state, prof));
     }
-    if (((m_settings.shafts && m_auto_level < 3) || m_grade.sun_haze > 0.f) && m_ssao_ready &&
+    if (((m_settings.shafts && m_fade_rays > 0.f) || m_grade.sun_haze > 0.f) && m_ssao_ready &&
         g_enhanced_sun.valid) {
       ENH_TIMED("enh-shafts", do_shafts(scene_tex, screen_vao, render_state, prof));
     }
@@ -5251,15 +5259,17 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T8"), 8);
   glUniform1i(glGetUniformLocation(id, "tex_T9"), 9);
   glUniform1f(glGetUniformLocation(id, "shadow_strength"),
-              m_shadow_ready ? m_settings.shadow_strength : 0.f);
+              // (a sharp dark shape from the moon would stand out on the lamps' light: faint at night)
+              m_shadow_ready ? m_settings.shadow_strength * g_enhanced_sun.shadow * (1.f - 0.7f * m_night) : 0.f);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
+  glUniform1f(glGetUniformLocation(id, "volume_fade"), m_fade_volume);
   glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
               m_vol_h ? 1.f / m_vol_h : 0.f);
   glUniform1f(glGetUniformLocation(id, "gi_strength"),
-              m_gi_ready ? m_settings.gi_strength * game_gi_scale() : 0.f);
+              m_gi_ready ? m_settings.gi_strength * game_gi_scale() * m_fade_gi : 0.f);
   glUniform1f(glGetUniformLocation(id, "shafts_strength"),
-              m_shafts_ready ? m_settings.shafts_strength * (1.f + 1.2f * m_clear) : 0.f);
+              m_shafts_ready ? m_settings.shafts_strength * (1.f + 1.2f * m_clear) * m_fade_rays : 0.f);
   glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
               m_last_proj[3]);
   const bool dof = m_settings.dof && m_ssao_ready;

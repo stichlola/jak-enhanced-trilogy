@@ -728,6 +728,8 @@ class EnhancedPost {
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)
   double m_fast_since = 0.0;
   int m_auto_level = 0;
+  // the passes the auto quality sets aside, fading (1 = on)
+  float m_fade_volume = 1.f, m_fade_gi = 1.f, m_fade_rays = 1.f;
   double m_auto_changed = 0.0;
   static constexpr int kAutoLevels = 6;
   float m_level_post[kAutoLevels] = {};  // the post pass's time when a level was entered, then what it saved

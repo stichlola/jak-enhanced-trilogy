@@ -13,6 +13,7 @@ uniform sampler2D tex_T4;  // god rays
 uniform sampler2D tex_T7;  // indirect light (SSGI)
 uniform sampler2D tex_T8;  // volumetric mist, half resolution (rgb scattered, a transmittance)
 uniform int volume;
+uniform float volume_fade;  // (1; down to 0 as the auto quality sets it aside)
 uniform sampler2DShadow tex_T9;  // sun shadow map
 uniform float shadow_strength;   // 0 = no shadow map this frame
 uniform mat4 light_mvp;          // world (game units) -> shadow map
@@ -543,6 +544,26 @@ vec2 vogel(int i, int n, float rot) {
   return r * vec2(cos(a), sin(a));
 }
 
+// the normal averaged over about a meter around this pixel (only what lies at about the same depth,
+// and not past 40 m, where a meter is a few pixels), so a light's edge doesn't draw the triangles
+vec3 soft_normal(vec2 uv, vec3 n, float z) {
+  if (z > 40.0 * 4096.0) {
+    return n;
+  }
+  vec2 r = vec2(proj.z, proj.w) * 0.5 * 4096.0 / z;
+  float rot = pixel_angle();
+  vec3 sum = n;
+  for (int i = 0; i < 6; i++) {
+    vec2 q = uv + vogel(i, 6, rot) * r;
+    vec4 g = texture(tex_T11, q);
+    if (g.a > 0.17 && abs(view_z(texture(tex_T3, q).r) - z) < 1.5 * 4096.0) {
+      vec3 m = normalize((g.rgb * 2.0 - 1.0) * view_to_world);
+      sum += dot(m, n) < -0.2 ? -m : m;
+    }
+  }
+  return normalize(sum);
+}
+
 // the far map: past the near one, the long shadows of the mountains, big rocks and trees (0.6 m
 // texels: a 3x3 filter, no penumbra search)
 float sun_shadow_far(vec3 w) {
@@ -563,6 +584,20 @@ float sun_shadow_far(vec3 w) {
     }
   }
   return (1.0 - lit / 9.0) * fade;
+}
+
+// a cheap look: whether this point stands in the shadow of something (four taps, no penumbra)
+float sun_shadow_rough(vec3 w) {
+  vec3 s = (light_mvp * vec4(w, 1.0)).xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return sun_shadow_far(w);
+  }
+  float r = 0.5 / shadow_params.y;
+  float lit = texture(tex_T9, vec3(s.xy + vec2(r, r), s.z - 0.00012)) +
+              texture(tex_T9, vec3(s.xy + vec2(-r, r), s.z - 0.00012)) +
+              texture(tex_T9, vec3(s.xy + vec2(r, -r), s.z - 0.00012)) +
+              texture(tex_T9, vec3(s.xy + vec2(-r, -r), s.z - 0.00012));
+  return 1.0 - lit * 0.25;
 }
 
 float sun_shadow(vec3 w) {
@@ -2510,6 +2545,8 @@ void main() {
   // the surface normal, once: the shadows, the wet ground, the prints, the lights and the
   // reflections all use it
   vec3 surf_n = z > 0.0 ? surface_normal(tex_coord, p) : vec3(0.0, 0.0, -1.0);
+  // the same across a meter, for how the sun and the lamps fall on it: the terrain is flat triangles
+  vec3 soft_n = z > 0.0 ? soft_normal(tex_coord, surf_n, z) : surf_n;
   // how much of the sun reaches it (the shadow map's, below): the sand's glints and sheen need it
   float sun_lit = 1.0;
   if (normal_debug != 0 && z > 0.0) {
@@ -2701,35 +2738,43 @@ void main() {
   // baked per vertex and knows nothing of what stands between them and the sun)
   if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surf_n;
-    float ndl = dot(nn, sun_dir.xyz);
+    float ndl = dot(soft_n, sun_dir.xyz);
     sun_lit = smoothstep(0.0, 0.15, ndl);
+    float facing = smoothstep(0.0, 0.3, ndl);
+    float sh = 0.0;
     if (ndl > 0.0) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
-      float sh = sun_shadow(w) * smoothstep(0.0, 0.3, ndl);
-      if (close_up > 0.0) {
-        sh *= smoothstep(0.5 * close_up, close_up, z);
-      }
-      // contact shadows: the shadow map is too coarse for a foot on the ground, a hand on a hip, a
-      // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
-      if (z < 30.0 * 4096.0) {
-        vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
-        float cs = contact_shadow(from, sun_dir.xyz);
-        sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) *
-                         smoothstep(0.0, 0.3, ndl));
-      }
-      sun_lit *= 1.0 - sh;
-      // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
-      // and fuller (light and shadow apart)
-      // (in the desert's day the shade takes the open sky's blue: lilac-grey, not brown)
-      // (the desert's deep lilac; elsewhere only a little cooler: on Sandover's beach that blue
-      // turned the shaded sand navy)
-      float lilac = sky_day * min(sun_haze * 1.25, 1.0);
-      vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
-      c *= vec3(1.0) - shadow_strength * sh * tint;
-      c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
-                       vec3(0.08, 0.07, 0.05);
+      sh = sun_shadow(w) * facing;
     }
+    // turned away from the sun the map can't tell a shadow from the surface itself: looked at from
+    // 2 m toward the sun, past the small shapes. Without it, inside a mountain's shadow the edges
+    // of the rocks kept their full light
+    if (facing < 1.0) {
+      vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
+      sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
+    }
+    if (close_up > 0.0) {
+      sh *= smoothstep(0.5 * close_up, close_up, z);
+    }
+    // contact shadows: the shadow map is too coarse for a foot on the ground, a hand on a hip, a
+    // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
+    if (ndl > 0.0 && z < 30.0 * 4096.0) {
+      vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
+      float cs = contact_shadow(from, sun_dir.xyz);
+      sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
+    }
+    sun_lit *= 1.0 - sh;
+    // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
+    // and fuller (light and shadow apart)
+    // (in the desert's day the shade takes the open sky's blue: lilac-grey, not brown)
+    // (the desert's deep lilac; elsewhere only a little cooler: on Sandover's beach that blue
+    // turned the shaded sand navy)
+    float lilac = sky_day * min(sun_haze * 1.25, 1.0);
+    vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
+    c *= vec3(1.0) - shadow_strength * sh * tint;
+    c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
+                     vec3(0.08, 0.07, 0.05);
   }
 
   // cloud shadows: each point looks up toward the sun through the same cloud field the sky draws;
@@ -2744,7 +2789,9 @@ void main() {
   float lo = 0.6 - clouds.y * 0.42 + 0.03 * min(golden * 2.0, 1.0) * sun_haze;
       // (one look through the middle of the layer, counted for three: the patches are big and soft,
       // three looks cost a millisecond)
-      float d = 3.0 * cloud_density(wp + sw * ((1450.0 - wp.y) / sw.y), lo, 2);
+      // (through a fixed slant, not along the sun: with the layer so high the sun's own move sent the
+      // patches racing over the ground as the hours passed, the whole view dark within seconds)
+      float d = 3.0 * cloud_density(wp + vec3(0.3, 1.0, 0.2) * (1450.0 - wp.y), lo, 2);
       float cs = (1.0 - exp(-d * 2.5)) * min(clouds.x, 1.0) * (1.0 - clouds.w) *
                  smoothstep(0.06, 0.2, sw.y) * (1.0 - smoothstep(0.75, 0.97, clouds.y));
       // (faint in the late afternoon: the low sun's light across the valley stays whole)
@@ -2830,8 +2877,11 @@ void main() {
       float r = light_pos[i].w;
       if (d < r) {
         float k = 1.0 - (d * d) / (r * r);
-        float ndl = dot(nn, to_light / max(d, 1.0));
-        float lit = clamp(ndl * 0.85 + 0.15, 0.0, 1.0);
+        float ndl = dot(soft_n, to_light / max(d, 1.0));
+        // (a light Jak carries stands low over the ground: mostly wrapped around the shapes, or it
+        // draws every triangle of the terrain and leaves the steps black)
+        float lit = light_color[i].a < 0.5 ? clamp(ndl * 0.85 + 0.15, 0.0, 1.0)
+                                           : clamp(ndl * 0.3 + 0.7, 0.0, 1.0);
         // the strongest lights (sorted first) cast shadows where they still matter
         // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
         // (not in full daylight: a torch's shadow doesn't show under the sun)
@@ -3254,7 +3304,7 @@ void main() {
     vec4 v = sum / wsum;
     // under rain the mist is grey, whatever the area's fog tint
     v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.82, 0.94, 1.15), weather.x * 0.6);
-    c = c * v.a + v.rgb * (1.0 - 0.85 * night_dark.x);
+    c = c * mix(1.0, v.a, volume_fade) + v.rgb * volume_fade * (1.0 - 0.85 * night_dark.x);
   }
 
   // fireflies (a green-gold glow that swells and dies every few seconds) or seeds and pollen (pale

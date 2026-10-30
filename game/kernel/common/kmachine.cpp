@@ -1097,6 +1097,7 @@ void pc_enhanced_set_sun(u32 vec_ptr) {
   g_enhanced_sun.dir[0] = v[0];
   g_enhanced_sun.dir[1] = v[1];
   g_enhanced_sun.dir[2] = v[2];
+  g_enhanced_sun.shadow = g_game_version == GameVersion::Jak3 ? v[3] : 1.f;
   g_enhanced_sun.valid = true;
 }
 

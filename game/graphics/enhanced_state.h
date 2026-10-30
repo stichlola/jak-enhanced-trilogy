@@ -16,6 +16,8 @@
 // time-of-day light-group 0 dir0. Set every frame by pc-enhanced-set-sun.
 struct EnhancedSun {
   float dir[3] = {0.f, 1.f, 0.f};
+  // how much of its shadows to show (Jak 3: none while the sun turns into the moon)
+  float shadow = 1.f;
   bool valid = false;
 };
 extern EnhancedSun g_enhanced_sun;
