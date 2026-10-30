@@ -3294,7 +3294,7 @@ void EnhancedPost::update_scene() {
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
     // the morning's low fog in the areas under open sky (not the desert's dry air), gone by mid-morning
     m_dawn_fog = smooth(hour - 5.f) * (1.f - smooth((hour - 7.5f) / 2.f)) * m_grade.day_sky *
-                 std::max(0.f, 1.f - m_grade.golden * 2.f) * s.dawn_fog;
+                 std::max(0.f, 1.f - m_grade.golden * 2.f) * s.dawn_fog * (m_city ? 0.5f : 1.f);
   }
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
@@ -3536,7 +3536,9 @@ void EnhancedPost::update_scene() {
   ease(m_movie, movie ? 1.f : 0.f, 1.f - std::exp(-dt / 0.4f));
   {
     // Jak's own state: wet out of the water, a jolt of split colors on a hit, a little as Dark Jak
-    const int fx = g_enhanced_player.valid && !movie ? g_enhanced_player.flags : 0;
+    // (test switch: JAK_ENHANCED_FX_TEST=<flags> holds them)
+    static const int fx_test = std::getenv("JAK_ENHANCED_FX_TEST") ? std::atoi(std::getenv("JAK_ENHANCED_FX_TEST")) : 0;
+    const int fx = (g_enhanced_player.valid && !movie ? g_enhanced_player.flags : 0) | fx_test;
     m_jak_wet = (fx & 1) ? 1.f : std::max(0.f, m_jak_wet - dt / 14.f);
     const float want = ((fx & 4) ? 1.f : (fx & 2) ? 0.35f : 0.f) * s.hit_chroma;
     ease(m_chroma, want, 1.f - std::exp(-dt / (want > m_chroma ? 0.04f : 0.35f)));

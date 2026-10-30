@@ -281,6 +281,32 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
   return light_blocked_by(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
 }
 
+// a contact shadow toward the light: only what's close in depth to the ray counts (a thin thing
+// standing in front of it isn't its shadow), softer the farther along the ray it's met
+float contact_shadow(vec3 from, vec3 dir) {
+  const int STEPS = 10;
+  const float reach = 0.5 * 4096.0;
+  for (int s = 0; s < STEPS; s++) {
+    float t = (float(s) + 0.5) / float(STEPS);
+    vec3 q = from + dir * reach * t;
+    if (q.z < 0.3 * 4096.0) {
+      break;
+    }
+    vec2 quv = vec2(q.x * proj.z / q.z, q.y * proj.w / q.z) * 0.5 + 0.5;
+    if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+      break;
+    }
+    float sd = texture(tex_T3, quv).r;
+    if (sd > 1e-7) {
+      float gap = q.z - view_z(sd);
+      if (gap > 0.02 * 4096.0 + q.z * 0.002 && gap < 0.25 * 4096.0) {
+        return 1.0 - t * t;
+      }
+    }
+  }
+  return 0.0;
+}
+
 vec3 view_pos(vec2 uv, float d) {
   float z = proj.y / (d * 2.0 - 1.0 - proj.x);
   vec2 ndc = uv * 2.0 - 1.0;
@@ -2474,12 +2500,11 @@ void main() {
         sh *= smoothstep(0.5 * close_up, close_up, z);
       }
       // contact shadows: the shadow map is too coarse for a foot on the ground, a hand on a hip, a
-      // crate's edge; a short march toward the sun through the depth buffer finds them (60 cm)
+      // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
       if (z < 30.0 * 4096.0) {
         vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
-        float cs = light_blocked_by(from, from + sun_dir.xyz * 40960.0, hash1(gl_FragCoord.xy),
-                                    0.6 * 4096.0, 8);
-        sh = max(sh, cs * 0.85 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) *
+        float cs = contact_shadow(from, sun_dir.xyz);
+        sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) *
                          smoothstep(0.0, 0.3, ndl));
       }
       sun_lit *= 1.0 - sh;
@@ -2940,7 +2965,7 @@ void main() {
     }
   }
   // low fog on the ground: mornings, and steam off the wet ground when the sun comes back out
-  float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w) + 0.3 * dawn_fog * (1.0 - clouds.w);
+  float low_fog = weather2.y + 0.1 * weather2.z * (1.0 - clouds.w) + 0.12 * dawn_fog * (1.0 - clouds.w);
   if (low_fog > 0.0) {
     float dist = z > 0.0 ? length(p) / 4096.0 : 2500.0;
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w);
