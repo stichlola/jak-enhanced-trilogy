@@ -310,6 +310,22 @@ struct EnhancedExplosions {
 };
 extern EnhancedExplosions g_enhanced_explosions;
 
+// Jak's gun shots this frame (pc-enhanced-shot, the game's thread): where each one is, for the ribbons
+// drawn behind them (EnhancedParticles). Kind: 1 red (the grenade), 2 blue, 3 yellow, 4 dark. id: the
+// shot's process; below 0: it hit here (-1 the ground or a wall, -2 something that moves)
+struct EnhancedShots {
+  static constexpr int kMax = 48;
+  struct Entry {
+    float pos[3];
+    int kind;
+    int id;
+  };
+  Entry pending[kMax];
+  int count = 0;
+  std::mutex mutex;
+};
+extern EnhancedShots g_enhanced_shots;
+
 // Lightning that strikes the ground in a thunderstorm: the post pass picks where (world, game
 // units: around Jak, mostly far) and asks; the game (pc-enhanced-strike) finds the ground there,
 // sets off an explosion that hurts what it touches and says where it hit (pc-enhanced-strike-hit),

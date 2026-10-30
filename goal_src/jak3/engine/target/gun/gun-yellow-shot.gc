@@ -1058,6 +1058,8 @@
   )
 
 (defmethod projectile-method-25 ((this gun-yellow-shot))
+  ;; Enhanced: the renderer's ribbon behind the shot
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (-> this pid))
   (let* ((s4-0 (-> this root trans))
          (a1-0 (-> this tail-pos))
          (gp-1 (vector-! (new 'stack-no-clear 'vector) s4-0 a1-0))
@@ -1111,6 +1113,8 @@
   )
 
 (defmethod projectile-method-26 ((this gun-yellow-shot))
+  ;; Enhanced: sparks and a mark in the renderer
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (if (-> this hit-actor?) -2 -1))
   (let ((v1-8
           (cond
             ((-> this hit-actor?)
@@ -1932,6 +1936,8 @@
   )
 
 (defmethod projectile-method-25 ((this gun-yellow-shot-2))
+  ;; Enhanced: the renderer's ribbon behind the shot
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (-> this pid))
   (let* ((s5-0 (-> this root trans))
          (a1-0 (-> this tail-pos))
          (s4-1 (vector-! (new 'stack-no-clear 'vector) s5-0 a1-0))
@@ -1973,6 +1979,8 @@
   )
 
 (defmethod projectile-method-26 ((this gun-yellow-shot-3))
+  ;; Enhanced: sparks and a mark in the renderer
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (if (-> this hit-actor?) -2 -1))
   (let ((v1-8
           (cond
             ((-> this hit-actor?)

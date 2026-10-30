@@ -1467,6 +1467,8 @@
       (set! (-> *part-id-table* 258 init-specs 1 initial-valuef) (lerp 0.1 1.0 (-> this size-t)))
       (set! (-> *part-id-table* 258 init-specs 2 initial-valuef) (lerp 409.6 3686.4 (-> this size-t)))
       (spawn (-> this part) (-> this root trans))
+      ;; Enhanced: the renderer's ribbon behind the shot
+      (pc-enhanced-shot (the-as pointer (-> this root trans)) 4 (-> this pid))
       )
     )
   (ja-post)
@@ -1857,6 +1859,8 @@
   :virtual #t
   :enter (behavior ()
     (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 153 (seconds 0.2))
+    ;; Enhanced: sparks and a mark in the renderer
+    (pc-enhanced-shot (the-as pointer (-> self root trans)) 4 (if (< 0 (-> self hits)) -2 -1))
     (let ((t9-1 (-> (method-of-type projectile impact) enter)))
       (if t9-1
           (t9-1)

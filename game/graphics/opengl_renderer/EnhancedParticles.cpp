@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -13,10 +14,12 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/Shader.h"
 #include "game/graphics/pipelines/opengl.h"
 #include "game/graphics/texture/TexturePool.h"
 
 EnhancedFx g_enhanced_fx;
+EnhancedShots g_enhanced_shots;
 
 namespace {
 
@@ -408,4 +411,329 @@ void EnhancedPost::update_blast_fx(const EnhancedCamera& cam, bool on, int w, in
       }
     }
   }
+}
+
+namespace {
+
+// what each gun's shot leaves: color, half width (m), how long a point of it lasts (s)
+struct ShotStyle {
+  float color[3];
+  float width;
+  float life;
+};
+constexpr ShotStyle kShotStyles[5] = {
+    {{1.f, 1.f, 1.f}, 0.1f, 0.3f},       // (no such gun)
+    {{1.f, 0.25f, 0.1f}, 0.16f, 0.35f},  // red: the grenade's hot streak
+    {{0.35f, 0.7f, 1.f}, 0.07f, 0.22f},  // blue: thin, crackling
+    {{1.f, 0.75f, 0.2f}, 0.09f, 0.3f},   // yellow: a long tracer
+    {{0.7f, 0.2f, 1.f}, 0.22f, 0.5f},    // dark: wide, wavering
+};
+
+struct ShotPoint {
+  float pos[3];
+  float time;
+};
+struct ShotTrail {
+  int id;
+  int kind;
+  static constexpr int kPoints = 16;
+  ShotPoint points[kPoints];
+  int count = 0;
+};
+struct ShotSpark {
+  float pos[3];
+  float vel[3];
+  float born, life;
+  int kind;
+};
+
+struct ShotVertex {
+  float pos[3];
+  float side;
+  float color[4];
+};
+static_assert(sizeof(ShotVertex) == 32);
+
+std::vector<ShotTrail> g_trails;
+std::vector<ShotSpark> g_sparks;
+std::vector<ShotVertex> g_shot_vertices;
+float g_shots_time = 0.f;
+
+float rnd() {
+  return (float)(std::rand() % 1000) / 1000.f;
+}
+
+void shot_seen(int id, int kind, const float* pos, float now) {
+  ShotTrail* t = nullptr;
+  for (auto& o : g_trails) {
+    if (o.id == id && o.kind == kind) {
+      t = &o;
+      break;
+    }
+  }
+  if (!t) {
+    if (g_trails.size() >= 16) {
+      g_trails.erase(g_trails.begin());  // (the oldest)
+    }
+    g_trails.emplace_back();
+    t = &g_trails.back();
+    t->id = id;
+    t->kind = kind;
+  }
+  // (still: nothing to trail)
+  if (t->count > 0) {
+    const float* last = t->points[t->count - 1].pos;
+    if (std::hypot(pos[0] - last[0], pos[1] - last[1], pos[2] - last[2]) < 0.02f * kMeter) {
+      return;
+    }
+  }
+  if (t->count == ShotTrail::kPoints) {
+    std::memmove(t->points, t->points + 1, sizeof(ShotPoint) * (ShotTrail::kPoints - 1));
+    t->count--;
+  }
+  auto& p = t->points[t->count++];
+  std::memcpy(p.pos, pos, sizeof(p.pos));
+  p.time = now;
+}
+
+void shot_hit(int kind, const float* pos, float now) {
+  const int n = kind == 2 ? 6 : 9;
+  for (int i = 0; i < n && g_sparks.size() < 64; i++) {
+    ShotSpark s;
+    std::memcpy(s.pos, pos, sizeof(s.pos));
+    const float a = rnd() * 6.2832f, speed = (3.f + 6.f * rnd()) * kMeter;
+    const float up = 0.2f + 0.8f * rnd();
+    s.vel[0] = std::cos(a) * speed * (1.f - up * 0.6f);
+    s.vel[1] = up * speed;
+    s.vel[2] = std::sin(a) * speed * (1.f - up * 0.6f);
+    s.born = now;
+    s.life = 0.2f + 0.25f * rnd();
+    s.kind = kind;
+    g_sparks.push_back(s);
+  }
+}
+
+// test switch: shots flying ahead of Jak, each gun in turn
+void shot_test(float now) {
+  static const bool test = std::getenv("JAK_ENHANCED_SHOT_TEST") != nullptr;
+  const auto& pl = g_enhanced_player;
+  if (!test || !pl.valid || !g_enhanced_camera.valid) {
+    return;
+  }
+  static float start = -1e9f;
+  static float from[3], dir[3];
+  static int kind = 1, id = 1000000;
+  if (now - start > 0.6f) {
+    start = now;
+    kind = kind % 4 + 1;
+    id++;
+    const float fx = g_enhanced_camera.rot[0][2], fz = g_enhanced_camera.rot[2][2];
+    const float len = std::max(std::hypot(fx, fz), 0.01f);
+    dir[0] = fx / len;
+    dir[1] = -2.f / 35.f;  // (down to the ground in the half second)
+    dir[2] = fz / len;
+    from[0] = pl.pos[0];
+    from[1] = pl.pos[1] + 2.f * kMeter;
+    from[2] = pl.pos[2];
+  }
+  const float age = now - start;
+  float p[3];
+  for (int k = 0; k < 3; k++) {
+    p[k] = from[k] + dir[k] * 70.f * kMeter * std::min(age, 0.5f);
+  }
+  static float hit_at = 0.f;
+  if (age < 0.5f) {
+    shot_seen(id, kind, p, now);
+  } else if (hit_at != start) {
+    hit_at = start;
+    shot_hit(kind, p, now);
+  }
+}
+
+// a polyline's camera-facing strip (fade: alpha at each point, width in game units)
+void add_ribbon(const std::vector<std::array<float, 4>>& line,
+                const float* color,
+                float width,
+                const float* cam) {
+  for (size_t i = 0; i + 1 < line.size(); i++) {
+    ShotVertex quad[4];
+    for (int end = 0; end < 2; end++) {
+      const auto& p = line[i + end];
+      const auto& before = line[i + end == 0 ? 0 : i + end - 1];
+      const auto& after = line[std::min(i + end + 1, line.size() - 1)];
+      const float tx = after[0] - before[0], ty = after[1] - before[1], tz = after[2] - before[2];
+      const float cx = cam[0] - p[0], cy = cam[1] - p[1], cz = cam[2] - p[2];
+      float sx = ty * cz - tz * cy, sy = tz * cx - tx * cz, sz = tx * cy - ty * cx;
+      const float len = std::max(std::hypot(sx, sy, sz), 1e-3f);
+      const float w = width * (0.4f + 0.6f * p[3]) / len;
+      sx *= w;
+      sy *= w;
+      sz *= w;
+      for (int s = 0; s < 2; s++) {
+        const float sign = s == 0 ? -1.f : 1.f;
+        auto& v = quad[end * 2 + s];
+        v.pos[0] = p[0] + sx * sign;
+        v.pos[1] = p[1] + sy * sign;
+        v.pos[2] = p[2] + sz * sign;
+        v.side = sign;
+        v.color[0] = color[0];
+        v.color[1] = color[1];
+        v.color[2] = color[2];
+        v.color[3] = p[3];
+      }
+    }
+    for (int idx : {0, 1, 2, 2, 1, 3}) {
+      g_shot_vertices.push_back(quad[idx]);
+    }
+  }
+}
+
+void build_shot_vertices(float now, const float* cam, float detail) {
+  g_shot_vertices.clear();
+  std::vector<std::array<float, 4>> line;
+  for (const auto& t : g_trails) {
+    if (t.count < 2) {
+      continue;
+    }
+    const auto& style = kShotStyles[t.kind];
+    line.clear();
+    float along = 0.f;
+    for (int i = 0; i + 1 < t.count; i++) {
+      const auto& a = t.points[i];
+      const auto& b = t.points[i + 1];
+      const float dx = b.pos[0] - a.pos[0], dy = b.pos[1] - a.pos[1], dz = b.pos[2] - a.pos[2];
+      const float len = std::hypot(dx, dy, dz);
+      // the blue crackles and the dark wavers: points in between, pushed sideways; the others stay
+      // straight (the game's own shot draws over them)
+      const float step = t.kind == 2 ? 0.8f * kMeter : t.kind == 4 ? 0.5f * kMeter : len + 1.f;
+      const int parts = std::clamp((int)(len / step) + 1, 1, 48);
+      for (int k = 0; k < parts; k++) {
+        const float u = (float)k / parts;
+        float p[4] = {a.pos[0] + dx * u, a.pos[1] + dy * u, a.pos[2] + dz * u, 0.f};
+        const float time = a.time + (b.time - a.time) * u;
+        p[3] = std::clamp(1.f - (now - time) / style.life, 0.f, 1.f);
+        along += len / parts;
+        if (t.kind == 2 && (i > 0 || k > 0)) {
+          p[0] += (rnd() - 0.5f) * 0.3f * kMeter;
+          p[1] += (rnd() - 0.5f) * 0.3f * kMeter;
+          p[2] += (rnd() - 0.5f) * 0.3f * kMeter;
+        } else if (t.kind == 4) {
+          const float wave = std::sin(along / kMeter * 2.5f + now * 18.f) * 0.14f * kMeter;
+          p[0] += wave;
+          p[1] += std::cos(along / kMeter * 2.1f + now * 14.f) * 0.14f * kMeter;
+          p[2] -= wave;
+        }
+        line.push_back({p[0], p[1], p[2], p[3] * detail});
+      }
+    }
+    const auto& last = t.points[t.count - 1];
+    line.push_back({last.pos[0], last.pos[1], last.pos[2],
+                    std::clamp(1.f - (now - last.time) / style.life, 0.f, 1.f) * detail});
+    add_ribbon(line, style.color, style.width * kMeter, cam);
+  }
+  for (const auto& s : g_sparks) {
+    const float u = (now - s.born) / s.life;
+    const float fade = std::clamp(1.f - u, 0.f, 1.f) * detail;
+    line.clear();
+    line.push_back({s.pos[0], s.pos[1], s.pos[2], fade});
+    line.push_back({s.pos[0] - s.vel[0] * 0.025f, s.pos[1] - s.vel[1] * 0.025f,
+                    s.pos[2] - s.vel[2] * 0.025f, fade * 0.3f});
+    add_ribbon(line, kShotStyles[s.kind].color, 0.03f * kMeter, cam);
+  }
+}
+
+}  // namespace
+
+void enhanced_draw_shots(SharedRenderState* render_state,
+                         const float* camera,
+                         const float* hvdf_offset,
+                         float pfog0) {
+  const float now = g_enhanced_fx.time;
+  const float dt = std::clamp(now - g_shots_time, 0.f, 0.1f);
+  g_shots_time = now;
+  const bool on = g_enhanced_fx.detail > 0.f;
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_shots.mutex);
+    for (int i = 0; on && i < g_enhanced_shots.count; i++) {
+      const auto& e = g_enhanced_shots.pending[i];
+      if (e.kind < 1 || e.kind > 4) {
+        continue;
+      }
+      if (e.id >= 0) {
+        shot_seen(e.id, e.kind, e.pos, now);
+      } else {
+        shot_hit(e.kind, e.pos, now);
+      }
+    }
+    g_enhanced_shots.count = 0;
+  }
+  if (!on) {
+    g_trails.clear();
+    g_sparks.clear();
+    return;
+  }
+  shot_test(now);
+  // the old parts go; a shot's process can end, its trail just fades
+  for (auto& t : g_trails) {
+    const float life = kShotStyles[t.kind].life;
+    int gone = 0;
+    while (gone < t.count && now - t.points[gone].time > life) {
+      gone++;
+    }
+    if (gone > 0) {
+      std::memmove(t.points, t.points + gone, sizeof(ShotPoint) * (t.count - gone));
+      t.count -= gone;
+    }
+  }
+  std::erase_if(g_trails, [](const ShotTrail& t) { return t.count == 0; });
+  std::erase_if(g_sparks, [&](const ShotSpark& s) { return now - s.born > s.life; });
+  for (auto& s : g_sparks) {
+    s.vel[1] -= 9.8f * 0.7f * kMeter * dt;
+    for (int k = 0; k < 3; k++) {
+      s.pos[k] += s.vel[k] * dt;
+    }
+  }
+  if ((g_trails.empty() && g_sparks.empty()) || !g_enhanced_camera.valid) {
+    return;
+  }
+  build_shot_vertices(now, g_enhanced_camera.trans, g_enhanced_fx.detail);
+  if (g_shot_vertices.empty()) {
+    return;
+  }
+
+  static std::unique_ptr<Shader> shader;
+  static GLuint vao = 0, vbo = 0;
+  if (!shader) {
+    shader = std::make_unique<Shader>("enh_trail", render_state->version);
+    glGenVertexArrays(1, &vao);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, sizeof(ShotVertex), (void*)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(ShotVertex),
+                          (void*)offsetof(ShotVertex, color));
+  }
+  shader->activate();
+  const auto id = shader->id();
+  glUniformMatrix4fv(glGetUniformLocation(id, "camera"), 1, GL_FALSE, camera);
+  glUniform4fv(glGetUniformLocation(id, "hvdf_offset"), 1, hvdf_offset);
+  glUniform1f(glGetUniformLocation(id, "pfog0"), pfog0);
+  glBindVertexArray(vao);
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, g_shot_vertices.size() * sizeof(ShotVertex), g_shot_vertices.data(),
+               GL_STREAM_DRAW);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_BLEND);
+  glBlendEquation(GL_FUNC_ADD);
+  glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_GEQUAL);
+  glDepthMask(GL_FALSE);
+  glDrawArrays(GL_TRIANGLES, 0, (GLsizei)g_shot_vertices.size());
+  glBindVertexArray(0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  // (the HUD's sprites come next)
+  render_state->shaders[ShaderId::SPRITE3].activate();
 }

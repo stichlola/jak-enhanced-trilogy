@@ -530,6 +530,10 @@ void Sprite3::render_jak1(DmaFollower& dma,
     flush_sprites(render_state, prof, false);
   }
 
+  // Enhanced: the ribbons and sparks of Jak's shots, in the scene with the particles
+  enhanced_draw_shots(render_state, m_3d_matrix_data.camera.data(), m_3d_matrix_data.hvdf_offset.data(),
+                      m_frame_data.pfog0);
+
   // shadow draw
   render_fake_shadow(dma);
 

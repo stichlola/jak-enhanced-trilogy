@@ -81,3 +81,11 @@ class EnhancedGroundProbe {
   Slot m_slots[kSlots];
   int m_next_ticket = 0;
 };
+
+// Draws what Jak's gun shots leave behind (g_enhanced_shots), placed like the sprites: leaves the
+// sprite shader active. Test switch: JAK_ENHANCED_SHOT_TEST=1: shots of each gun in turn fly ahead of
+// Jak every half second and hit the ground.
+void enhanced_draw_shots(SharedRenderState* render_state,
+                         const float* camera,
+                         const float* hvdf_offset,
+                         float pfog0);
