@@ -299,6 +299,7 @@
 (define-extern pc-enhanced-set-pushers (function pointer int none))
 (define-extern pc-enhanced-explosion (function pointer none))
 (define-extern pc-enhanced-gun-blast (function pointer pointer none))
+(define-extern pc-enhanced-shot (function pointer int int none))
 (define-extern pc-enhanced-light? (function symbol))
 (define-extern pc-enhanced-strike (function pointer symbol))
 (define-extern pc-enhanced-strike-hit (function pointer none))

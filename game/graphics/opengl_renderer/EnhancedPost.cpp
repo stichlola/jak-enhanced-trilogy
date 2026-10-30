@@ -950,6 +950,9 @@ EnhancedPost::EnhancedPost() {
   if (const char* sparks = std::getenv("JAK_ENHANCED_SPARKS")) {
     m_settings.blast_sparks = (float)std::atof(sparks);
   }
+  if (const char* fx = std::getenv("JAK_ENHANCED_FX_DETAIL")) {
+    m_settings.fx_detail = (float)std::atof(fx);
+  }
   if (const char* motes = std::getenv("JAK_ENHANCED_MOTES")) {
     // fireflies and pollen: 0 off, else their amount; "force" shows them anywhere (screenshots)
     m_settings.motes = std::strcmp(motes, "force") == 0 ? 1.f : (float)std::atof(motes);
@@ -1172,6 +1175,17 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   }
   g_enhanced_char_detail = m_settings.char_detail;
   update_auto_quality();
+  g_enhanced_fx.detail = m_settings.enabled ? m_settings.fx_detail : 0.f;
+  g_enhanced_fx.time = (float)m_time;
+  {
+    const float* d = g_enhanced_sun.dir;
+    const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    const bool up = g_enhanced_sun.valid && len > 1e-6f && d[1] / len > 0.02f;
+    for (int k = 0; k < 3 && up; k++) {
+      g_enhanced_fx.sun[k] = d[k] / len;
+    }
+    g_enhanced_fx.sun[3] = up ? 1.f - std::max(m_night, night_darkness()) : 0.f;
+  }
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
@@ -1662,10 +1676,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
                                   [&](const Blast& b) {
                                     // gun blasts are short: free their slots for the next ones
-                                    const double life = b.kind == 2 ? 0.3 : b.kind != 0 ? 0.7 : 1.6;
+                                    // (fx_detail: an explosion's dust and debris last longer)
+                                    const double life = b.kind == 2   ? 0.3
+                                                        : b.kind != 0 ? 0.7
+                                                        : m_settings.fx_detail > 0.f ? 2.4
+                                                                                     : 1.6;
                                     return m_time - b.start > life;
                                   }),
                    m_blasts.end());
+    update_blast_fx(cam, on, w, h);
     // an explosion's wave through the grass: it spreads for a third of a second, then the grass
     // rises back
     g_enhanced_blast_push.count = 0;
@@ -2397,8 +2416,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float blast_age[kBlasts] = {};
       float blast_seed[kBlasts] = {};
       float blast_dir[kBlasts * 4] = {};
+      float blast_ground[kBlasts] = {};
       int blast_count = 0;
-      for (const auto& b : m_blasts) {
+      // (fx_detail: the newest first, the older ones linger now)
+      const bool newest_first = m_settings.fx_detail > 0.f;
+      for (size_t k = 0; k < m_blasts.size(); k++) {
+        const auto& b = m_blasts[newest_first ? m_blasts.size() - 1 - k : k];
         if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
           break;
         }
@@ -2419,6 +2442,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
         }
         blast_dir[blast_count * 4 + 3] = (float)b.kind;
+        // (> 0: no ground known)
+        blast_ground[blast_count] = b.ground < 1e11f ? std::min(b.ground - b.pos[1], 0.f) : 1.f;
         blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
         blast_age[blast_count++] = (float)(m_time - b.start);
       }
@@ -2426,8 +2451,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
       glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
       glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
+      glUniform1fv(glGetUniformLocation(id, "blast_ground"), kBlasts, blast_ground);
       glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
+      enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
     }
     // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
     // city), dry and calm, a few dozen meters around Jak, each wandering on its own
@@ -5458,6 +5485,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
               m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
+  glUniform1f(glGetUniformLocation(id, "fx_detail"), m_settings.fx_detail);
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
   glUniform1f(glGetUniformLocation(id, "vignette"),
               m_settings.vignette + (g_enhanced_menu.photo_active ? m_settings.photo_vignette : 0.f));
@@ -6196,6 +6224,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["char_detail"] = s.char_detail;
   j["parallax"] = s.parallax;
   j["wall_notile"] = s.wall_notile;
+  j["fx_detail"] = s.fx_detail;
   j["hit_chroma"] = s.hit_chroma;
   j["dawn_fog"] = s.dawn_fog;
   j["cloud_rays"] = s.cloud_rays;
@@ -6289,6 +6318,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("char_detail", s.char_detail);
   get("parallax", s.parallax);
   get("wall_notile", s.wall_notile);
+  get("fx_detail", s.fx_detail);
   get("hit_chroma", s.hit_chroma);
   get("dawn_fog", s.dawn_fog);
   get("cloud_rays", s.cloud_rays);
@@ -6398,6 +6428,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.area_grading = d.area_grading;
   s.clouds = d.clouds;
   s.blast_sparks = d.blast_sparks;
+  s.fx_detail = d.fx_detail;
   s.motes = d.motes;
   s.weather = d.weather;
   s.weather_mix = d.weather_mix;
@@ -6538,6 +6569,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Character detail", &m_settings.char_detail, 0.f, 1.f);
     ImGui::SliderFloat("Relief (parallax)", &m_settings.parallax, 0.f, 2.f);
     ImGui::Checkbox("Walls repeat less", &m_settings.wall_notile);
+    ImGui::SliderFloat("Effects detail", &m_settings.fx_detail, 0.f, 1.f);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
     ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
     ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);

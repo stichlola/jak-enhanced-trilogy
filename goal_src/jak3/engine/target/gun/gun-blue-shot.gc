@@ -2320,6 +2320,10 @@
          (vf6 :class vf)
          )
     (init-vf0-vector)
+    ;; Enhanced: the renderer's crackling ribbon from the muzzle to the hit, sparks and a mark
+    (pc-enhanced-shot (the-as pointer (-> this init-pos)) 2 (-> this pid))
+    (pc-enhanced-shot (the-as pointer (-> this root trans)) 2 (-> this pid))
+    (pc-enhanced-shot (the-as pointer (-> this root trans)) 2 (if (< 0 (-> this hits)) -2 -1))
     (let ((s3-1 (vector-! (new 'stack-no-clear 'vector) (-> this root trans) (-> this init-pos))))
       (draw-beam (-> *part-id-table* 231) (-> this init-pos) s3-1 #t)
       (draw-beam (-> *part-id-table* 234) (-> this init-pos) (-> this starting-dir) #f)
@@ -2565,6 +2569,8 @@
   )
 
 (defmethod projectile-method-26 ((this gun-blue-shot-3))
+  ;; Enhanced: sparks and a mark in the renderer
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 2 (if (< 0 (-> this hits)) -2 -1))
   (let ((s5-0 sphere-in-view-frustum?)
         (a0-2 (new 'stack 'sphere))
         )

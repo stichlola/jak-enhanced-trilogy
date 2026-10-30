@@ -426,6 +426,8 @@
 
 (defmethod projectile-method-25 ((this gun-red-3-grenade))
   (spawn (-> this part) (-> this root trans))
+  ;; Enhanced: the renderer's ribbon behind the grenade
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 1 (-> this pid))
   (if (logtest? (-> this root status) (collide-status touch-surface))
       (sound-play "red3-bounce")
       )
@@ -435,6 +437,8 @@
 
 (defmethod projectile-bounce-method-42 ((this gun-red-3-grenade))
   (spawn (-> this part) (-> this root trans))
+  ;; Enhanced: the renderer's ribbon behind the grenade
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 1 (-> this pid))
   (call-parent-method this)
   (none)
   )

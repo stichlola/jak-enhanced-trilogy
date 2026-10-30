@@ -1189,6 +1189,18 @@ void pc_enhanced_gun_blast(u32 pos_ptr, u32 dir_ptr) {
   }
 }
 
+// Enhanced: where a gun's shot is, or where it hit (see EnhancedShots)
+void pc_enhanced_shot(u32 pos_ptr, u32 kind, u32 id) {
+  auto* p = Ptr<float>(pos_ptr).c();
+  std::lock_guard<std::mutex> lock(g_enhanced_shots.mutex);
+  if (g_enhanced_shots.count < EnhancedShots::kMax) {
+    auto& e = g_enhanced_shots.pending[g_enhanced_shots.count++];
+    std::memcpy(e.pos, p, sizeof(e.pos));
+    e.kind = (int)kind;
+    e.id = (int)id;
+  }
+}
+
 // Enhanced: a vehicle's headlight this frame: position + strength, direction
 void pc_enhanced_headlight(u32 pos_ptr, u32 dir_ptr) {
   auto* p = Ptr<float>(pos_ptr).c();
@@ -1694,6 +1706,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-set-pushers", (void*)pc_enhanced_set_pushers);
   make_func_symbol_func("pc-enhanced-explosion", (void*)pc_enhanced_explosion);
   make_func_symbol_func("pc-enhanced-gun-blast", (void*)pc_enhanced_gun_blast);
+  make_func_symbol_func("pc-enhanced-shot", (void*)pc_enhanced_shot);
   make_func_symbol_func("pc-enhanced-getenv", (void*)pc_enhanced_getenv);
   make_func_symbol_func("pc-enhanced-set-lights", (void*)pc_enhanced_set_lights);
   make_func_symbol_func("pc-enhanced-headlight", (void*)pc_enhanced_headlight);

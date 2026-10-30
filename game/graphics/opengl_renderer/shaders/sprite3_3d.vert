@@ -28,10 +28,14 @@ uniform int enh_light_count;     // Enhanced: lights near the smoke (world, radi
 uniform vec4 enh_light_pos[8];
 uniform vec4 enh_light_color[8];
 uniform float enh_smoke;         // how much they brighten and tint it
+uniform int enh_fx_class;        // Enhanced: this draw's smoke or flames (EnhancedParticles), 0 = no
 
 flat out vec4 fragment_color;
 out vec3 tex_coord;
 flat out uvec2 tex_info;
+flat out int enh_kind;           // 0 untouched, 1 smoke, 2 a blended flame, 3 an added flame
+out vec2 enh_q;                  // where in the sprite: -1..1 along the screen, not turning with it
+flat out vec4 enh_cen;           // the sprite's place in the noise; w: its size (game units)
 
 vec4 matrix_transform(mat4 mtx, vec3 pt) {
   return mtx[3]
@@ -69,7 +73,25 @@ vec4 sprite_transform2(vec3 root, vec4 off, mat3 sprite_rot, float sx, float sy)
   return transformed_pos;
 }
 
+// Enhanced: smoke or flame, by the class of its texture and its own color (a warm flame, grey smoke:
+// not the eco and magic that use the same pictures)
+int enh_kind_of(vec4 col) {
+  float mx = max(col.r, max(col.g, col.b));
+  float sat = (mx - min(col.r, min(col.g, col.b))) / max(mx, 1e-3);
+  bool warm = col.r > col.g && col.g > col.b && sat > 0.4;
+  if (enh_fx_class == 1) {
+    return warm ? 2 : (sat < 0.45 ? 1 : 0);
+  }
+  if (enh_fx_class == 2) {
+    return 3;
+  }
+  return enh_fx_class == 3 && warm ? 3 : 0;
+}
+
 void main() {
+  enh_kind = 0;
+  enh_q = vec2(0.0);
+  enh_cen = vec4(0.0);
 
   // STEP 1: UNPACK DATA AND CREATE READABLE VARIABLES
 
@@ -132,6 +154,18 @@ void main() {
     vf13_rotated_trans *= scales_vf01.z;
 
     transformed = offset_pos_vf10 + vf12_rotated * xy0_vf19.x + vf13_rotated_trans * xy0_vf19.y;
+
+    if (enh_fx_class != 0) {
+      enh_kind = enh_kind_of(rgba);
+      // the corner on screen, without the sprite's turn (y up, as the framebuffer sees it)
+      vec2 off = vf12_rotated.xy * xy0_vf19.x + vf13_rotated_trans.xy * xy0_vf19.y;
+      float half_size = max(abs(scales_vf01.w), abs(scales_vf01.z)) *
+                        max(max(abs(xy0_vf19.x), abs(xy0_vf19.y)), 1e-3);
+      enh_q = vec2(off.x / max(abs(basis_x.x), 1e-5), -off.y / max(abs(basis_y.y), 1e-5)) /
+              max(half_size, 1e-3);
+      // (a puff that moves drifts through the noise: every 6 m a whole tile)
+      enh_cen = vec4(fract(position / (6.0 * 4096.0)), max(sx, sy));
+    }
 
   } else if (rendermode == 2) { // hud sprites
   

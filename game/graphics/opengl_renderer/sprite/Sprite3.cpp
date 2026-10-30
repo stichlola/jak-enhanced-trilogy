@@ -530,6 +530,10 @@ void Sprite3::render_jak1(DmaFollower& dma,
     flush_sprites(render_state, prof, false);
   }
 
+  // Enhanced: the ribbons and sparks of Jak's shots, in the scene with the particles
+  enhanced_draw_shots(render_state, m_3d_matrix_data.camera.data(), m_3d_matrix_data.hvdf_offset.data(),
+                      m_frame_data.pfog0);
+
   // shadow draw
   render_fake_shadow(dma);
 
@@ -606,6 +610,9 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx_offset * sizeof(u32), m_index_buffer_data.data(),
                GL_STREAM_DRAW);
 
+  // (Enhanced: not the HUD, drawn double)
+  m_enhanced_fx.begin_flush(render_state, !double_draw, m_3d_matrix_data.camera.data());
+
   // now do draws!
   for (const auto bucket : m_bucket_list) {
     u32 tbp = bucket->key >> 32;
@@ -644,6 +651,11 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
         glUniform1f(glGetUniformLocation(shader, "enh_smoke"), sl.strength);
       }
     }
+
+    m_enhanced_fx.set_bucket(render_state, tbp, *tex,
+                             mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST,
+                             mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_SRC_DST ||
+                                 mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_FIX_DST);
 
     prof.add_draw_call();
     prof.add_tri(2 * (bucket->ids.size() / 5));

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
+#include "game/graphics/opengl_renderer/EnhancedParticles.h"
 
 struct EnhancedRtLevel;
 
@@ -220,6 +221,7 @@ class EnhancedPost {
     float char_detail = 1.f;       // the characters' relief, materials and live eyes (0 = off)
     float parallax = 1.f;          // real relief on rock and walls near the camera (0 = off, 1 = as made)
     bool wall_notile = true;       // walls that repeat break their repeats up, near the camera
+    float fx_detail = 1.f;         // richer smoke, fire, explosions, shots and scorch marks (0 = off)
     float hit_chroma = 1.f;        // colors split on a hit and as Dark Jak (0 = off)
     float dawn_fog = 1.f;          // the morning's low fog (0 = off)
     float cloud_rays = 1.f;        // the low sun's rays through the gaps in the clouds (0 = off)
@@ -414,8 +416,13 @@ class EnhancedPost {
     double start;
     float dir[3] = {0.f, 0.f, 0.f};  // gun blasts: where it's fired (world)
     int kind = 0;  // 0: an explosion, 1: the red gun's blast, 2: the red gun charging, 3: charged
+    float ground = 1e12f;  // the ground under it, world height, once known (update_blast_fx)
+    int probe = -1;
+    bool fx_done = false;
   };
   std::vector<Blast> m_blasts;
+  EnhancedGroundProbe m_ground_probe;
+  void update_blast_fx(const EnhancedCamera& cam, bool on, int w, int h);
   // where Jak was lately (world, game units): rings spread on the water from these
   struct WakePoint {
     float pos[3];
