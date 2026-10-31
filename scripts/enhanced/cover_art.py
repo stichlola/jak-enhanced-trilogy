@@ -477,24 +477,29 @@ def save_bmp(img, path, size):
 WHEEL = ROOT / "game/assets/enhanced/wheel"
 # where each portrait's Jak stands (its middle across, 0..1): Jak 1 with Daxter beside him
 PORTRAIT_X = (0.47, 0.56, 0.5)
+# the banner's panels (2560 x 1280): each portrait's size, its Jak's middle across and its top, so that
+# all three whole faces stand on one line under the title
+BANNER_PLACES = ((1900, 0.455, -440), (2000, 0.56, -70), (2000, 0.5, -80))
 
 
-def portrait_art():
-    """The three game-wheel portraits (game/assets/enhanced/wheel) as the cover's three panels, split
-    by slanted glowing seams, darkened at the top for the title; None without them."""
+def portrait_art(W=W, H=H, places=None, shade_to=None):
+    """The three game-wheel portraits (game/assets/enhanced/wheel) as three panels, split by slanted
+    glowing seams, darkened at the top for the title; None without them."""
     paths = [WHEEL / f"jak{n}.png" for n in (1, 2, 3)]
     if not all(p.exists() for p in paths):
         return None
+    places = places or [(H, x, 0) for x in PORTRAIT_X]
+    shade_to = shade_to or TITLE * 1.6
     art = Image.new("RGBA", (W, H), (0, 0, 0, 255))
     slant = 90
     seams = [0, W // 3, 2 * W // 3, W]
     for i, path in enumerate(paths):
-        pic = Image.open(path).convert("RGBA").resize((H, H), Image.LANCZOS)
+        size, across, top = places[i]
+        pic = Image.open(path).convert("RGBA").resize((size, size), Image.LANCZOS)
         mid = (seams[i] + seams[i + 1]) // 2
-        # (pasted with Jak on the panel's middle; a negative offset is cut off on the left)
+        # (pasted with Jak on the panel's middle; what falls outside is cut off)
         layer = Image.new("RGBA", (W, H))
-        left = int(mid - PORTRAIT_X[i] * H)
-        layer.alpha_composite(pic.crop((max(0, -left), 0, H, H)), (max(0, left), 0))
+        layer.paste(pic, (int(mid - across * size), top))
         mask = Image.new("L", (W, H))
         x0t, x0b = seams[i] + (slant if i else 0), seams[i] - (slant if i else 0)
         x1t, x1b = seams[i + 1] + (slant if i < 2 else 0), seams[i + 1] - (slant if i < 2 else 0)
@@ -514,7 +519,7 @@ def portrait_art():
     # the top darkened under the title
     shade = Image.new("L", (1, H))
     for y in range(H):
-        shade.putpixel((0, y), int(210 * max(0.0, 1.0 - y / (H * TITLE * 1.6)) ** 1.5))
+        shade.putpixel((0, y), int(210 * max(0.0, 1.0 - y / (H * shade_to)) ** 1.5))
     dark = Image.new("RGBA", (W, H), (8, 6, 14, 255))
     dark.putalpha(shade.resize((W, H)))
     art.alpha_composite(dark)
@@ -541,9 +546,14 @@ def cmd_compose():
     cover.alpha_composite(title, ((W - title.width) // 2, int(H * TITLE / 2 - title.height / 2) + 10))
     cover.convert("RGB").save(dest / "cover.png")
     cover.convert("RGB").save(dest / "cover.jpg", quality=92)
-    # the social banner (2:1): the title and the faces
-    banner = cover.resize((1280, 960), Image.LANCZOS).crop((0, 20, 1280, 660))
-    banner.convert("RGB").save(dest / "banner-1280x640.png")
+    # the social banner (2:1): its own panels, the 4:3 cover's would lose the faces' chins
+    wide = portrait_art(2560, 1280, BANNER_PLACES, 0.4)
+    if wide is None:
+        wide = cover.resize((2560, 1920), Image.LANCZOS).crop((0, 40, 2560, 1320))
+    else:
+        title = title_block(1800)
+        wide.alpha_composite(title, ((2560 - title.width) // 2, 24))
+    wide.resize((1280, 640), Image.LANCZOS).convert("RGB").save(dest / "banner-1280x640.png")
     # the installer's side picture (welcome and last page, 164 x 314 at 100%, 328 x 628 at 200%):
     # the middle panel, no title
     tall = art.crop((W // 2 - 400, int(H * TITLE) - 120, W // 2 + 400, H))
