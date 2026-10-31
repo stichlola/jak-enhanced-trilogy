@@ -12,6 +12,7 @@
 
 #include "game/runtime.h"
 
+#include "third-party/imgui/imgui.h"
 #include "third-party/stb_image/stb_image.h"
 
 #ifdef _WIN32
@@ -655,6 +656,61 @@ std::pair<GLuint, u8> enhanced_remade_relief(const std::string& tpage, const std
     }
   }
   return {0, 0};
+}
+
+void enhanced_remade_switch(const std::vector<LevelData*>& levels) {
+  static const bool on = std::getenv("JAK_ENHANCED_REMADE_SWITCH") != nullptr;
+  if (!on) {
+    return;
+  }
+  static bool remade = true;
+  static int frames = 0;
+  static std::set<GLuint> shown_old;
+  const bool pressed = ImGui::IsKeyPressed(ImGuiKey_F7, false);
+  remade ^= pressed;
+  // (and now and then: the levels that came in since)
+  if (pressed || ++frames % 60 == 0) {
+    int changed = 0;
+    std::vector<u32> px;
+    for (const auto* lev : levels) {
+      if (!lev || !lev->level) {
+        continue;
+      }
+      const auto& texs = lev->level->textures;
+      for (size_t i = 0; i < texs.size() && i < lev->textures.size(); i++) {
+        const auto& tex = texs[i];
+        const GLuint gl = lev->textures[i];
+        if (shown_old.count(gl) == (remade ? 0u : 1u) ||
+            remade_path(tex.debug_tpage_name, tex.debug_name).empty() ||
+            enhanced_has_texture_edit(tex.debug_tpage_name, tex.debug_name)) {
+          continue;
+        }
+        int w = tex.w, h = tex.h;
+        if (remade && !enhanced_remade_texture(tex, px, w, h)) {
+          continue;
+        }
+        glBindTexture(GL_TEXTURE_2D, gl);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
+                     remade ? px.data() : tex.data.data());
+        glGenerateMipmap(GL_TEXTURE_2D);
+        if (remade) {
+          shown_old.erase(gl);
+        } else {
+          shown_old.insert(gl);
+        }
+        changed++;
+      }
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    if (changed) {
+      lg::info("[enhanced] remade switch: {} {} textures", remade ? "new" : "old", changed);
+    }
+  }
+  const char* text = remade ? "NEW textures  (F7)" : "OLD textures  (F7)";
+  auto* dl = ImGui::GetForegroundDrawList();
+  dl->AddText(ImGui::GetFont(), 48.f, ImVec2(42.f, 42.f), IM_COL32(0, 0, 0, 220), text);
+  dl->AddText(ImGui::GetFont(), 48.f, ImVec2(40.f, 40.f),
+              remade ? IM_COL32(120, 255, 140, 255) : IM_COL32(255, 190, 90, 255), text);
 }
 
 void enhanced_open_file(const fs::path& path) {

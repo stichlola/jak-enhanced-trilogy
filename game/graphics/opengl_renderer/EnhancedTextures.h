@@ -75,6 +75,9 @@ bool enhanced_remade_any();
 // normal or 2 height} or {0, 0}. tpage empty: in any folder. Uses GL_TEXTURE1 for the upload
 std::pair<GLuint, u8> enhanced_remade_relief(const std::string& tpage, const std::string& name);
 bool enhanced_remade_has_relief();
+// JAK_ENHANCED_REMADE_SWITCH set: F7 swaps the remade pictures and the game's own in the loaded levels,
+// with the name of what's showing on screen (to compare them; every frame)
+void enhanced_remade_switch(const std::vector<LevelData*>& levels);
 
 // a file opened with the program the system has for it (a PNG: the user's paint program)
 void enhanced_open_file(const fs::path& path);
