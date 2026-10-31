@@ -4,11 +4,12 @@
 // Check it against the games' levels with: python scripts/enhanced/check_games.py
 {
   // per game: the bounced light (GI) and the lamps' strength (Jak 2's levels are lit brighter and
-  // its neon is stronger; Jak 1 is saturated already)
+  // its neon is stronger; Jak 1 is saturated already), how much metal and gloss reflect (reflect:
+  // times) and how rough they are (rough: 1 = a slightly matte grain, 0 = a clean mirror)
   "tuning": {
     "jak1": {"gi": 0.6, "lamps": 1.0},
     "jak2": {"gi": 0.6, "lamps": 0.45},
-    "jak3": {"gi": 1.0, "lamps": 1.0}
+    "jak3": {"gi": 1.0, "lamps": 1.0, "reflect": 0.6, "rough": 1.0}
   },
 
   // per game: which zone a level is in, from the start of its name (the first match wins; no
@@ -73,7 +74,9 @@
   //   the sky (degrees) and no higher than (degrees, late afternoon): a key light apart from the sun
   //   day_sky: the clear day sky (blue, pink toward the morning sun) and its clouds lit to match, the
   //   shade the open sky's blue (0..1); rock_sun: the sun's own direction lighting rock and cliffs
-  //   (0..1: the game bakes them evenly lit)
+  //   (0..1: the game bakes them evenly lit); headlights: the vehicles' headlights (times: their
+  //   light, beams and glare); glows: the light the game's glows cast (times: engines, lamps' halos);
+  //   lamps: the levels' own lamps and the fires they place (times)
   // "weather" is what the "Changing" weather does there (all optional):
   //   outdoors: false = no weather at all (caves, interiors)
   //   rain, mist, snow, heat (hot air over lava), dust, sunny (the zone's own touch of vivid
@@ -105,8 +108,8 @@
     },
     // Haven: teal shadows and warm light by day; blue night, neon kept vivid
     "haven": {
-      "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6},
-      "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
+      "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
+      "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
@@ -114,8 +117,8 @@
     // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
     // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
     "haven-industrial": {
-      "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6},
-      "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65},
+      "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
+      "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"city": 0.75}
@@ -123,8 +126,8 @@
     // Haven's slums (Jak 2): the game paints them blue-grey and dark; warmer and lighter, so the
     // shacks read as sun-bleached wood and plaster (the same weather as the rest of Haven)
     "haven-slums": {
-      "day": {"lift": [0.006, 0.003, -0.004], "gain": [1.1, 1.06, 0.98], "saturation": 1.04, "contrast": 0.03, "warmth": 0.05, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6},
-      "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65},
+      "day": {"lift": [0.006, 0.003, -0.004], "gain": [1.1, 1.06, 0.98], "saturation": 1.04, "contrast": 0.03, "warmth": 0.05, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
+      "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
       "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}

@@ -157,6 +157,9 @@ struct ZoneLook {
   float day_sky = 0.f;      // the clear day sky (pink toward the morning sun) and its clouds (0..1)
   float rock_sun = 0.f;     // the sun's own direction lighting rock and cliffs (0..1)
   float wall_sun = 0.f;     // and, milder, the walls and the rest of the plain scenery (0..1)
+  float headlights = 1.f;   // the vehicles' headlights: their light, beams and glare (times)
+  float glows = 1.f;        // the light the game's glows cast (engines, lamps' halos; times)
+  float lamps = 1.f;        // the levels' own lamps and the fires they place (times)
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
@@ -208,6 +211,9 @@ struct WorldZone {
 struct World {
   float gi[3] = {0.6f, 0.6f, 1.f};  // Jak 1, 2, 3
   float lamps[3] = {1.f, 0.45f, 1.f};
+  // how much metal and gloss reflect (times) and how rough they are (1 = as made)
+  float reflect[3] = {1.f, 1.f, 1.f};
+  float rough[3] = {1.f, 1.f, 1.f};
   std::vector<WorldZone> zones;  // [0]: "other", for the levels in no zone
   std::vector<std::pair<std::string, int>> prefixes[3];
   Season seasons[4];
@@ -348,6 +354,8 @@ void load_world() {
         const auto& t = j["tuning"][games[g]];
         w.gi[g] = t.value("gi", w.gi[g]);
         w.lamps[g] = t.value("lamps", w.lamps[g]);
+        w.reflect[g] = t.value("reflect", w.reflect[g]);
+        w.rough[g] = t.value("rough", w.rough[g]);
       }
     }
     auto read_look = [](const nlohmann::json& l, ZoneLook& out) {
@@ -362,6 +370,9 @@ void load_world() {
       out.sand = l.value("sand", 0.f);
       out.sun_haze = l.value("sun_haze", 0.f);
       out.rock_detail = l.value("rock_detail", 0.f);
+      out.headlights = l.value("headlights", 1.f);
+      out.glows = l.value("glows", 1.f);
+      out.lamps = l.value("lamps", 1.f);
       // (as the day's unless the night says otherwise)
       out.golden = l.value("golden", out.golden);
       out.sun_yaw = l.value("sun_yaw", out.sun_yaw);
@@ -1629,7 +1640,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         continue;
       }
       float intensity =
-          std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day);
+          std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day) * m_grade.glows;
       // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
       // far beacons and the sky's glows are bigger), and staying put
       const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&
@@ -1789,7 +1800,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         float bright = lc[0] + lc[1] + lc[2];
         for (int k = 0; k < 3; k++) {
           c.color[k] =
-              lc[k] * m_settings.light_strength * m_settings.lamp_strength * game_lamp_scale();
+              lc[k] * m_settings.light_strength * m_settings.lamp_strength * game_lamp_scale() * m_grade.lamps;
         }
         c.color[3] = 0.f;
         c.score = bright * radius / (dist + radius);
@@ -1874,7 +1885,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       // (by day a warm glow around the flame, at night far more: a torch's full 13 m of orange
       // light by day laid a bright orange pool on the sunlit sand)
-      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength;
+      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps;
       if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
         float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -2133,6 +2144,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
     glUniform1f(glGetUniformLocation(id, "materials"), m_settings.materials);
+    glUniform1f(glGetUniformLocation(id, "reflect_amount"), g_world.reflect[game_index()]);
+    glUniform1f(glGetUniformLocation(id, "reflect_rough"), g_world.rough[game_index()]);
     glUniform1f(glGetUniformLocation(id, "relief"), m_settings.relief);
     {
       // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
@@ -2657,7 +2670,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             spot_dir[spots * 4 + col] += h[4 + row] * cam.rot[row][col];
           }
         }
-        spot_pos[spots * 4 + 3] = h[3] * shown;
+        spot_pos[spots * 4 + 3] = h[3] * shown * m_grade.headlights;
         spots++;
       }
       glUniform1i(glGetUniformLocation(id, "spot_count"), spots);
@@ -3043,6 +3056,9 @@ void EnhancedPost::update_scene() {
   want.sand = s.area_grading ? mix(day.sand, night.sand) : 0.f;
   want.sun_haze = s.area_grading ? mix(day.sun_haze, night.sun_haze) : 0.f;
   want.rock_detail = s.area_grading ? mix(day.rock_detail, night.rock_detail) : 0.f;
+  want.headlights = s.area_grading ? mix(day.headlights, night.headlights) : 1.f;
+  want.glows = s.area_grading ? mix(day.glows, night.glows) : 1.f;
+  want.lamps = s.area_grading ? mix(day.lamps, night.lamps) : 1.f;
   want.golden = s.area_grading ? mix(day.golden, night.golden) : 0.f;
   want.day_sky = s.area_grading ? mix(day.day_sky, night.day_sky) : 0.f;
   want.rock_sun = s.area_grading ? mix(day.rock_sun, night.rock_sun) : 0.f;
@@ -3323,6 +3339,9 @@ void EnhancedPost::update_scene() {
   ease(m_grade.sand, want.sand, k_grade);
   ease(m_grade.sun_haze, want.sun_haze, k_grade);
   ease(m_grade.rock_detail, want.rock_detail, k_grade);
+  ease(m_grade.headlights, want.headlights, k_grade);
+  ease(m_grade.glows, want.glows, k_grade);
+  ease(m_grade.lamps, want.lamps, k_grade);
   ease(m_grade.golden, want.golden, k_grade);
   ease(m_grade.day_sky, want.day_sky, k_grade);
   ease(m_grade.rock_sun, want.rock_sun, k_grade);

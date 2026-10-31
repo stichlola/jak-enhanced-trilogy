@@ -91,6 +91,8 @@ uniform float rock_sun;         // the sun's own direction lighting rock and cli
 uniform float wall_sun;         // and, milder, the walls and plain scenery (0..1, the area's)
 uniform float day_look;         // the desert's day (0..1, morning to late afternoon): the morning's colors
 uniform float haze_shadow;      // 1: the god rays texture's alpha has the haze's shadow
+uniform float reflect_amount;   // how much metal and gloss reflect (times; world.json's tuning)
+uniform float reflect_rough;    // and how rough they are (1 = as made below)
 uniform float rock_detail;      // the area's rock picture over rock and cliffs (0 = off)
 uniform float rock_detail_avg;  // that picture's average brightness
 uniform sampler2D tex_T10;      // the rock picture (tiling, mipmapped)
@@ -518,6 +520,12 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
       if (hi.z > 0.0) {
         quv = 0.5 * vec2(proj.z * hi.x, proj.w * hi.y) / hi.z + 0.5;
       }
+      // (it only passed behind an edge, the depth jumps there: the pixel isn't what it reflects,
+      // it would smear a streak over the surface. The ray goes on)
+      float hd = texture(tex_T3, quv).r;
+      if (hd <= 1e-7 || abs(hi.z - view_z(hd)) > used * 0.25 + 0.1 * 4096.0) {
+        continue;
+      }
       vec2 edge = min(quv, 1.0 - quv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = texture(tex_T0, quv).rgb;
@@ -535,6 +543,30 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
 float pixel_angle() {
   return 6.2832 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
                         haze.w * 7.13);
+}
+
+// a surface's reflection direction, not a perfect mirror's: a still fine grain in the surface, and
+// each ray spread a little differently every frame (the TAA averages it to a soft, slightly matte
+// look). rough: the spread's size (radians, about)
+vec3 rough_reflection(vec3 p, vec3 v, vec3 n, float z, float rough) {
+  vec3 a = abs(n.x) < 0.7 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+  vec3 t = normalize(cross(n, a));
+  vec3 b = cross(n, t);
+  // the grain sits on the surface (world space; from the plane it faces), fading out with distance
+  // before it would shimmer
+  vec3 w = (view_to_world * p + cam_pos) / 4096.0;
+  vec3 wn = abs(view_to_world * n);
+  vec2 g = wn.y > wn.x && wn.y > wn.z ? w.xz : (wn.x > wn.z ? w.yz : w.xy);
+  float near = 1.0 - smoothstep(6.0 * 4096.0, 20.0 * 4096.0, z);
+  vec2 grain = vec2(gnoise(g * 45.0), gnoise(g * 45.0 + 11.7)) * near * 1.6;
+  float ang = pixel_angle();
+  float rad = sqrt(fract(ang * 1.618));
+  vec2 spread = vec2(cos(ang), sin(ang)) * rad;
+  vec3 m = normalize(n + (t * (grain.x + spread.x) + b * (grain.y + spread.y)) * rough * 0.5);
+  vec3 r = reflect(v, m);
+  // (a tilted micro-surface must not reflect into the surface itself)
+  float below = dot(r, n);
+  return below < 0.02 ? normalize(r + n * (0.02 - below)) : r;
 }
 
 // the i-th of n points spread evenly over the unit disk (Vogel), turned by rot
@@ -2420,6 +2452,10 @@ void main() {
         lsum += vec3(1.0, 0.93, 0.8) * (pow(nh, 500.0) * 6.0 + pow(nh, 70.0) * 0.25) * facing_us *
                 spot_pos[i].w / (1.0 + d * d / (60.0 * 60.0 * 4096.0 * 4096.0));
       }
+      // (not where the reflected ray meets a wall first: a lamp behind it can't be seen in the water;
+      // and a soft ceiling, or a few close lamps burn a white hole in calm water)
+      lsum *= 1.0 - 0.9 * ssr_hit;
+      lsum /= 1.0 + max(lsum.r, max(lsum.g, lsum.b));
       wc += lsum * lamp_night * (0.4 + 0.6 * water_strength);
     }
     // the far lights too (across a harbor, the desert's fires by an oasis): thin columns of light
@@ -2939,12 +2975,14 @@ void main() {
       int mfine = mlen > 0.9975 || mlen <= 0.985 ? 0 : (mlen > 0.9925 ? 1 : 2);
       vec3 nn = surf_n;
       vec3 vdir = normalize(p);
-      vec3 r = reflect(vdir, nn);
+      // how rough each is: bare metal the most, then tile and paint; glass stays the clearest
+      float rough = (mat == 1 ? (mfine == 2 ? 0.07 : 0.13) : (mfine == 1 ? 0.08 : 0.035)) * reflect_rough;
+      vec3 r = rough_reflection(p, vdir, nn, z, rough);
       float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
       float hit;
       // (rust reflects nothing: no trace)
       vec3 refl = mat == 1 && mfine == 1 ? c : trace_reflection(p, r, z, hit);
-      float fade = 1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z);
+      float fade = (1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z)) * reflect_amount;
       // the sun's highlight, where the sun reaches
       float sunlit = 0.0;
       if (sun_dir.w > 0.0 && dot(nn, sun_dir.xyz) > 0.0) {
@@ -3527,7 +3565,8 @@ void main() {
     // dust hanging in the beams: always a little, a lot in the desert's dust, some in the rain
     if (spot_pos[0].w > 0.0) {
       float motes = beam_motes(ray, z, pixel_rad);
-      c += vec3(1.0, 0.93, 0.8) * min(motes, 1.5) * (0.5 + 2.0 * weather.y + 0.4 * weather.x) * 2.6;
+      c += vec3(1.0, 0.93, 0.8) * min(motes, 1.5) * (0.5 + 2.0 * weather.y + 0.4 * weather.x) * 2.6 *
+           min(spot_pos[0].w, 1.0);
     }
   }
 
