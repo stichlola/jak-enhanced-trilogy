@@ -2183,7 +2183,10 @@ void main() {
     float over_land = ((ft > 0.4 && ft < 0.95) || (ft > 0.955 && ft < 0.983)) ? 1.0 : 0.0;
     flame_keep = max(flame_keep, smoothstep(0.85, 0.92, luma(flame_raw)) * smoothstep(0.94, 0.985, flame_raw.r) * (1.0 - over_land) *
                                      step(flame_raw.b, flame_raw.g + 0.02) * step(flame_raw.g, flame_raw.r + 0.02) *
-                                     step(0.9 * flame_raw.r, flame_raw.g));
+                                     step(0.9 * flame_raw.r, flame_raw.g) *
+                                     // (by day not the game's own sun, which has these colors: its glow on the sky, and on what
+                                     // stands toward it, kept its raw yellow as a hard-edged patch)
+                                     (1.0 - max(z == 0.0 ? 1.0 : 0.0, smoothstep(0.3, 0.6, dot(ray, sky_sun.xyz))) * (1.0 - clouds.w)));
   }
 
   // the water's world position and pixel footprint, here in uniform control flow (derivatives)
@@ -3791,6 +3794,17 @@ void main() {
     }
   }
 
+  // the sky comes here well past 1, and the roll-off below flattens every channel past 0.85 to one
+  // pale grey: brought under it as a whole first, half its color kept, so its gradients and the
+  // sun's soft glow survive
+  {
+    float sky_part = z == 0.0 ? 1.0 : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z);
+    if (sky_part > 0.0 && wsurf == 0.0) {
+      vec3 under = c * min(1.0, 0.9 / max(max(c.r, max(c.g, c.b)), 1e-3));
+      under = mix(under, vec3(luma(under)) * vec3(1.0, 0.99, 0.97), 0.5);
+      c = mix(c, under, sky_part);
+    }
+  }
   // highlights roll off instead of clipping (bloom can push past 1): first the brightness, from
   // 0.7 up (the hue kept: sunlit sand and walls keep their color instead of burning to yellow and
   // white), then each channel
