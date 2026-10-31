@@ -1,7 +1,7 @@
 {
   "schemaVersion": "1.0.0",
   "sourceName": "Jak Enhanced",
-  "lastUpdated": "2026-10-30T18:50:26Z",
+  "lastUpdated": "2026-10-31T14:26:52Z",
   "mods": {
     "jak-enhanced-light": {
       "displayName": "Jak Enhanced Light",
@@ -23,6 +23,20 @@
       "coverArtUrl": "https://raw.githubusercontent.com/stichlola/jak-enhanced-trilogy/main/game/assets/enhanced/art/cover.jpg",
       "thumbnailArtUrl": "https://raw.githubusercontent.com/stichlola/jak-enhanced-trilogy/main/game/assets/enhanced/art/banner-1280x640.png",
       "versions": [
+        {
+          "version": "0.11",
+          "publishedDate": "2026-10-31T14:26:52Z",
+          "assets": {
+            "windows": "https://github.com/stichlola/jak-enhanced-trilogy/releases/download/v0.11/Jak-Enhanced-Light-v0.11.zip",
+            "linux": null,
+            "macos": null
+          },
+          "supportedGames": [
+            "jak1",
+            "jak2",
+            "jak3"
+          ]
+        },
         {
           "version": "0.10",
           "publishedDate": "2026-10-30T18:50:26Z",
