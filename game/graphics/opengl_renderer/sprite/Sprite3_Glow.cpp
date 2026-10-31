@@ -67,7 +67,10 @@ bool glow_math(const SpriteGlowConsts* consts,
   rgba.z() *= rgba.w() * fade / 128.f;
   out->flare_draw_color = rgba;
   // Enhanced: every glow is a light source for the post pass's dynamic lights
-  if (fade > 0.f && rgba.x() + rgba.y() + rgba.z() > 8.f) {
+  // (not the sky's: the sun, the moon and the stars are kilometers wide and placed 1 m from the camera,
+  // a light there burned the ground around Jak white at night)
+  if (fade > 0.f && rgba.x() + rgba.y() + rgba.z() > 8.f &&
+      std::max(in->size_x, in->size_y) < 1000.f * 4096.f) {
     g_enhanced_lights.add(in->pos, std::max(in->size_x, in->size_y), rgba.x() / 255.f,
                           rgba.y() / 255.f, rgba.z() / 255.f);
   }

@@ -2868,6 +2868,9 @@ void main() {
     exposure = clamp(0.05 / max(seen, 1e-3), 1.0, 1.0 + 1.2 * night_dark.x);
   }
 
+  // (the eyes adapt to the dark, not to the lights below: on those they burned the ground white)
+  c *= exposure;
+
   // light spill: at night what shines by itself (windows, signs, fires, the lamps' bulbs) lights
   // the surfaces near it on screen, in their own color: the bloom (the bright pixels spread wide)
   // taken as the light falling there. Not on what shines itself.
@@ -2935,12 +2938,12 @@ void main() {
       }
     }
     // many lamps together (a factory's red floods) saturate softly instead of adding up without end
-    added /= 1.0 + 0.35 * max(added.r, max(added.g, added.b));
+    added /= 1.0 + mix(0.35, 0.8, night_dark.x) * max(added.r, max(added.g, added.b));
     if (night_dark.x > 0.0) {
       // at night the light shows the surface's own color, brighter
       // (the game tints the night blue: the surface's own color, warmer, under a lamp)
       vec3 own = albedo * mix(vec3(1.0), vec3(1.3, 1.05, 0.72), night_dark.x);
-      c += (own + 0.12) * added * ao * night_dark.y;
+      c += (own + 0.12) * added * ao;
     } else {
       c += (c + 0.12) * added * ao;
     }
@@ -2952,7 +2955,6 @@ void main() {
     vec3 gi = texture(tex_T7, tex_coord).rgb;
     c += gi * gi_strength * (0.35 + c) * ao * (1.0 - 0.8 * night_dark.x);
   }
-  c *= exposure;
 
   // materials (from the texture names, in the normals' alpha): metal reflects its surroundings
   // tinted by its own color with a broad highlight; glass, marble and tiles reflect them untinted

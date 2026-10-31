@@ -5,6 +5,7 @@
 // ndc_z = a + b / z, ndc_x = fx * x / z, ndc_y = fy * y / z.
 
 uniform sampler2D tex_T0;  // depth
+uniform sampler2D tex_T11;   // the geometry's world normals, their length the material's tag
 uniform mat3 view_to_world;
 uniform vec4 proj;         // a, b, fx, fy
 uniform vec2 texel;
@@ -183,9 +184,27 @@ void main() {
   vec3 pd = view_pos(uv - vec2(0, texel.y));
   vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
   vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+  // on what's flat, from further apart: next to each other the depth's rounding tilts the normal,
+  // a moire of dark rows across ground nearly level along the screen's rows
+  vec3 pfr = view_pos(uv + vec2(32.0 * texel.x, 0));
+  vec3 pfl = view_pos(uv - vec2(32.0 * texel.x, 0));
+  vec3 pfu = view_pos(uv + vec2(0, 32.0 * texel.y));
+  vec3 pfd = view_pos(uv - vec2(0, 32.0 * texel.y));
+  if (abs(pfr.z + pfl.z - 2.0 * p.z) < 0.1 * length(pfr - pfl)) {
+    dx = pfr - pfl;
+  }
+  if (abs(pfu.z + pfd.z - 2.0 * p.z) < 0.1 * length(pfu - pfd)) {
+    dy = pfu - pfd;
+  }
   vec3 n = normalize(cross(dx, dy));
   // (from the depth, not the geometry's smoothed normals: on low-poly walls and crates those lean
   // out of the real face, so the flat surface around counts as blocking: dark flickering streaks)
+  // (but the terrain's grid, tagged 0.85-0.95, is smooth: its own are the right ones)
+  vec4 g = texture(tex_T11, uv);
+  float g_tag = length(g.rgb * 2.0 - 1.0);
+  if (g.a > 0.17 && g_tag > 0.82 && g_tag < 0.96) {
+    n = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
+  }
   if (dot(n, -p) < 0.0) {
     n = -n;  // face the camera, whatever the handedness of the game's view space
   }
