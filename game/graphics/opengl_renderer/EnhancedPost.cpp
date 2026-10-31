@@ -1609,7 +1609,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           c.pos[col] += (l.pos[row] - cam.trans[row]) * cam.rot[row][col];
         }
       }
-      float radius = std::clamp(l.size * m_settings.light_reach, 4.f * kMeter, 30.f * kMeter);
+      // (at most 20 m: a street lamp's 30 m lit a whole square evenly, no pool of light under it)
+      float radius = std::clamp(l.size * m_settings.light_reach, 4.f * kMeter, 20.f * kMeter);
       c.pos[3] = radius;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
