@@ -63,6 +63,10 @@ HANDMADE = [
     ("custom_assets/jak3/texture_remade/_all", 1),  # tools/tripo/tasks.json in jak3-ue5: tex-*, tex2-*
     ("custom_assets/jak3/merc_replacements", 2),  # the same file: spargus_market
 ]
+# the same, by name in a folder shared with what git tracks: the editor's Tripo kits (rocks, slabs,
+# pebbles, trees, with their far versions), in its library even where the main world doesn't use them
+HANDMADE_FILES = ["custom_assets/jak3/scenery/desert_*", "custom_assets/jak3/scenery/rock_big_*",
+                  "custom_assets/jak3/scenery/tree_*"]
 # What the player can edit in the game (F4): placed_path, manual_lights_path, grass_paint, kTerrain
 # (the terrain's pictures, which the Terrain window replaces) in the source
 SHIPPED = [
@@ -117,6 +121,16 @@ def copy_handmade(dest):
             shutil.copy2(f, target)
             count += 1
         print(f"{folder}: {len(files)} files, {taken / 1e6:.1f} MB")
+    for pattern in HANDMADE_FILES:
+        files = sorted(f for f in ROOT.glob(pattern) if f.is_file() and not f.name.endswith("_preview.png"))
+        if not files:
+            sys.exit(f"{pattern}: no files. Stopped: this release would miss what's made by hand")
+        for f in files:
+            target = dest / "data" / f.relative_to(ROOT)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(f, target)
+            count += 1
+        print(f"{pattern}: {len(files)} files, {sum(f.stat().st_size for f in files) / 1e6:.1f} MB")
     return count
 
 
