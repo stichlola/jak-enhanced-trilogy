@@ -1664,6 +1664,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         intensity *= 1.f - 0.65f * pure;
         c.pos[3] = radius * (1.f - 0.45f * pure);
       }
+      // (a shot's violet: red and blue with no green, one bolt turned a whole square pink)
+      if (l.color[1] < 0.5f * std::min(l.color[0], l.color[2])) {
+        intensity *= 0.35f;
+        c.pos[3] = std::min(c.pos[3], 8.f * kMeter);
+      }
       for (int k = 0; k < 3; k++) {
         c.color[k] = l.color[k] / peak * intensity;
       }
@@ -5348,8 +5353,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
                 ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) * sky_k);
     glUniform1f(glGetUniformLocation(id, "rock_sun"), m_ssao_ready ? m_grade.rock_sun : 0.f);
   glUniform1f(glGetUniformLocation(id, "wall_sun"), m_ssao_ready ? m_grade.wall_sun : 0.f);
-    // the late afternoon (16-18, eased in from 14:30 and out by 19): amber light
-    const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 18.f) / 1.f));
+    // the late afternoon (16-19, eased in from 14:30 and out by 20, with the sun down: over by 19 the plain jumped from amber to a noon white): amber light
+    const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 19.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
   }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
