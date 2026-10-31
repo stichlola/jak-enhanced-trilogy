@@ -474,6 +474,8 @@
     )
   )
 
+;; Enhanced: the sun's two glows dimmed and smaller. They're added over everything and switch with their occlusion
+;; test: at full size the wide orange one (12000 m, alpha 80) lit whole walls orange on and off every few seconds.
 (defpart 66
   :init-specs ((:texture (glow effects))
     (:num 1.0)
@@ -737,14 +739,14 @@
 (defpart 67
   :init-specs ((:texture (glow effects))
     (:num 1.0)
-    (:scale-x (meters 2550))
+    (:scale-x (meters 1800))
     (:rot-x (degrees 1687.5))
     (:rot-z (degrees 30))
-    (:scale-y (meters 2550))
+    (:scale-y (meters 1800))
     (:r 64.0)
     (:g 64.0)
     (:b 16.0)
-    (:a 70.0)
+    (:a 35.0)
     (:omega (degrees 0))
     (:timer (seconds -0.005))
     (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14 glow))
@@ -756,14 +758,14 @@
 (defpart 68
   :init-specs ((:texture (glow effects))
     (:num 1.0)
-    (:scale-x (meters 12000))
+    (:scale-x (meters 5000))
     (:rot-x (degrees 1687.5))
     (:rot-z (degrees 30))
-    (:scale-y (meters 12000))
+    (:scale-y (meters 5000))
     (:r 64.0)
     (:g 32.0)
     (:b 0.0)
-    (:a 80.0)
+    (:a 20.0)
     (:omega (degrees 0))
     (:timer (seconds -0.005))
     (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 sp-cpuinfo-flag-14 glow))

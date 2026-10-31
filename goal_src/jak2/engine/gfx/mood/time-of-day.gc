@@ -479,6 +479,99 @@
   (none)
   )
 
+;; The sun's way across the day. The game has four fixed light directions, mixed by the hour for the
+;; vertex lights; the renderer's sun took the first one lit, so it jumped at 4, 10, 14 and 18. These
+;; are the same four, reached at the hours they were lit around, with a low dawn and dusk added.
+;; Each row: hour, x, y, z. Past the last the moon stays, up to the first row.
+(define *enhanced-sun-path* (new 'static 'array float 32
+                                 4.0 0.5 0.814 0.296
+                                 6.0 0.96 0.2 0.15
+                                 9.0 0.906 0.397 0.143
+                                 12.0 0.5 0.814 0.296
+                                 17.0 -0.5 0.814 0.296
+                                 19.0 -0.906 0.397 0.143
+                                 20.5 -0.96 0.2 0.15
+                                 23.0 0.5 0.814 0.296))
+
+(defun enhanced-sun-path! ((out vector) (hour float))
+  "The sun at this hour; w: how much of its shadows to show (none while it turns into the moon)."
+  (let ((row 0)
+        (t0 (if (< hour (-> *enhanced-sun-path* 0))
+                (+ hour 24.0)
+                hour
+                )
+            )
+        )
+    (while (and (< row 7) (>= t0 (-> *enhanced-sun-path* (* 4 (+ row 1)))))
+      (+! row 1)
+      )
+    (let* ((a (* 4 row))
+           (b (if (= row 7) 0 (+ a 4)))
+           (h1 (if (= row 7) 28.0 (-> *enhanced-sun-path* b)))
+           (k (fmin 1.0 (/ (- t0 (-> *enhanced-sun-path* a)) (- h1 (-> *enhanced-sun-path* a)))))
+           )
+      (set! (-> out x) (lerp (-> *enhanced-sun-path* (+ a 1)) (-> *enhanced-sun-path* (+ b 1)) k))
+      (set! (-> out y) (lerp (-> *enhanced-sun-path* (+ a 2)) (-> *enhanced-sun-path* (+ b 2)) k))
+      (set! (-> out z) (lerp (-> *enhanced-sun-path* (+ a 3)) (-> *enhanced-sun-path* (+ b 3)) k))
+      )
+    (vector-normalize! out 1.0)
+    (set! (-> out w) (cond
+                       ((< t0 20.5) 1.0)
+                       ((< t0 21.0) (* 2.0 (- 21.0 t0)))
+                       ((< t0 22.5) 0.0)
+                       ((< t0 23.0) (* 2.0 (- t0 22.5)))
+                       (else 1.0)
+                       )
+          )
+    )
+  out
+  )
+
+(defun enhanced-table-light? ((d vector))
+  "Is this one of the mood table's four fixed directions (and not a level's own light)?"
+  (and (or (= (-> d x) 0.906) (= (-> d x) 0.5) (= (-> d x) -0.5) (= (-> d x) -0.906))
+       (or (= (-> d y) 0.397) (= (-> d y) 0.814))
+       )
+  )
+
+(defun enhanced-send-sun ((ctx time-of-day-context))
+  "The key light for the renderer's sun shadows: the sun's way where the levels use the table's
+lights, a level's own light as it is, mixed as the levels are."
+  (let ((path (new 'stack-no-clear 'vector))
+        (out (new 'stack-no-clear 'vector))
+        (sum 0.0)
+        (shadow 0.0)
+        )
+    (enhanced-sun-path! path (-> ctx time))
+    (vector-zero! out)
+    (dotimes (i LEVEL_MAX)
+      (let ((k (-> ctx interp i)))
+        (when (!= k 0.0)
+          (let* ((d (-> *level* level i mood-context light-group 0 dir0 direction))
+                 (table? (enhanced-table-light? d))
+                 )
+            (vector+float*! out out (if table? path d) k)
+            (+! sum k)
+            (+! shadow (* k (if table? (-> path w) 1.0)))
+            )
+          )
+        )
+      )
+    (cond
+      ((> sum 0.0)
+       (vector-normalize! out 1.0)
+       (set! (-> out w) (/ shadow sum))
+       )
+      (else
+        (vector-copy! out (-> ctx light-group 0 dir0 direction))
+        (set! (-> out w) 1.0)
+        )
+      )
+    (pc-enhanced-set-sun (the-as pointer out))
+    )
+  (none)
+  )
+
 (defun update-time-of-day ((arg0 time-of-day-context))
   (with-pp
     (set! (-> arg0 exterior-level) #f)
@@ -679,7 +772,7 @@
         )
     (update-environment-colors arg0)
     ;; Enhanced: the key light for the renderer's screen-space sun shadows
-    (pc-enhanced-set-sun (the-as pointer (-> arg0 light-group 0 dir0 direction)))
+    (enhanced-send-sun arg0)
     (enhanced-send-lights)
     (enhanced-send-scene arg0)
     (let ((v1-134 (-> arg0 current-fog)))

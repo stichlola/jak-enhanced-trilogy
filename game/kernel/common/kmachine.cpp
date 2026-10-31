@@ -1097,7 +1097,7 @@ void pc_enhanced_set_sun(u32 vec_ptr) {
   g_enhanced_sun.dir[0] = v[0];
   g_enhanced_sun.dir[1] = v[1];
   g_enhanced_sun.dir[2] = v[2];
-  g_enhanced_sun.shadow = g_game_version == GameVersion::Jak3 ? v[3] : 1.f;
+  g_enhanced_sun.shadow = g_game_version != GameVersion::Jak1 ? v[3] : 1.f;
   g_enhanced_sun.valid = true;
 }
 
@@ -1119,6 +1119,8 @@ void pc_enhanced_set_player(u32 vec_ptr) {
     g_enhanced_board_boost = v[4];
     g_enhanced_aim = v[6];
     v[5] = g_enhanced_l2_trigger;
+  } else if (g_game_version == GameVersion::Jak2) {
+    g_enhanced_aim = v[6];
   }
   g_enhanced_player.valid = true;
 }

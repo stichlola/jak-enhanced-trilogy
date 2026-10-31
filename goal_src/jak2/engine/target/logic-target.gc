@@ -1592,6 +1592,9 @@
   (none)
   )
 
+(define *enhanced-hour-goal* 0.0)
+(define *enhanced-hour-steps* 0)
+
 (defun enhanced-menu-update ()
   (when (and *enhanced-pose-wanted* *target*)
     (+! *enhanced-pose-frames* 1)
@@ -1632,6 +1635,23 @@
       (set! *enhanced-nap-wanted* 0)
       )
     )
+  ;; the hour asked for in the menu: the clock runs there, the short way round, in two and a half
+  ;; seconds, so the day passes instead of cutting
+  (when (> *enhanced-hour-steps* 0)
+    (let ((hours (- *enhanced-hour-goal* (-> *time-of-day-context* time))))
+      (if (> hours 12.0)
+          (set! hours (+ hours -24.0))
+          )
+      (if (< hours -12.0)
+          (set! hours (+ hours 24.0))
+          )
+      ;; (the clock counts 18000 ticks an hour)
+      (+! (-> *display* bg-clock frame-counter)
+          (the-as time-frame (the int (/ (* 18000.0 hours) (the float *enhanced-hour-steps*))))
+          )
+      )
+    (+! *enhanced-hour-steps* -1)
+    )
   (case (pc-enhanced-poll-request *enhanced-menu-buf* 64)
     ((12)
      ;; the nap window (N, or the Enhanced menu's button)
@@ -1643,9 +1663,8 @@
      (set! *enhanced-nap-wait* 0)
      )
     ((1)
-     (when *time-of-day*
-       (send-event (ppointer->process *time-of-day*) 'change 'hour (string->int *enhanced-menu-buf*))
-       )
+     (set! *enhanced-hour-goal* (the float (string->int *enhanced-menu-buf*)))
+     (set! *enhanced-hour-steps* 150)
      )
     ((2)
      (let ((cp (get-continue-by-name *game-info* *enhanced-menu-buf*)))
@@ -1676,7 +1695,7 @@
 
 (define-extern enhanced-update-pushers (function none))
 
-(define *enhanced-player-vec* (new 'static 'vector))
+(define *enhanced-player-vec* (new 'static 'inline-array vector 2 (new 'static 'vector) (new 'static 'vector)))
 
 (defbehavior flag-setup target ()
   (cond
@@ -1752,7 +1771,7 @@
   (enhanced-strike-update)
   ;; Enhanced: grass bends away from Jak
   ;; w: 0 elsewhere, 1 on foot on sand, dirt or snow, 2 driving (footprints and ruts), 3 on foot
-  (let ((v *enhanced-player-vec*))
+  (let ((v (-> *enhanced-player-vec* 0)))
     (vector-copy! v (-> self control trans))
     (set! (-> v w) (cond
                      ((focus-test? self pilot) 2.0)
@@ -1780,6 +1799,14 @@
     (if (focus-test? self hit)
         (+! (-> v w) 2048.0)
         )
+    ;; z of the second vector: whether Jak aims his gun (out and firing), for a light depth of field
+    (set! (-> *enhanced-player-vec* 1 z) (if (and (focus-test? self gun) (not (focus-test? self pilot board))
+                                                  (or (cpad-hold? 0 r1) (focus-test? self shooting))
+                                                  )
+                                             1.0
+                                             0.0
+                                             )
+          )
     (pc-enhanced-set-player (the-as pointer v))
     )
   ;; and from whoever is around him (defined in nav-enemy.gc, later in GAME.CGO)

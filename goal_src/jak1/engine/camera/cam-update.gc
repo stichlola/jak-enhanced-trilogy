@@ -215,6 +215,9 @@
 
 (define *start-pos* (new 'global 'vector))
 
+(define-extern movie? (function symbol))
+(define *enhanced-fov-scale* 1.0)
+
 (defun update-camera ()
   (when *start-timer*
     (when (= *timer-value* 180)
@@ -288,7 +291,15 @@
        (set! (-> a2-10 vector 2 quad) a1-11)
        (set! (-> a2-10 vector 3 quad) a3-7)))
     ((and *camera-combiner* (not *external-cam-mode*))
-     (set! (-> *math-camera* fov) (-> *camera-combiner* fov))
+     ;; Enhanced: a wider (or narrower) view in play, from the menu; cutscenes as filmed
+     (set! (-> *math-camera* fov) (if (movie?)
+                                      (-> *camera-combiner* fov)
+                                      (begin
+                                        (set! *enhanced-fov-scale* (* 0.01 (the float (pc-enhanced-fov))))
+                                        (fmin 23665.777 (* (-> *camera-combiner* fov) *enhanced-fov-scale*))
+                                        )
+                                      )
+           )
      (set! (-> *math-camera* trans quad) (-> *camera-combiner* trans quad))
      (+! (-> *math-camera* trans y) (get-no-update *camera-smush-control*))
      (let* ((v1-100 (-> *math-camera* inv-camera-rot))

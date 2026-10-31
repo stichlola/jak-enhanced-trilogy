@@ -175,6 +175,8 @@
       (set! (-> *part-id-table* 217 init-specs 1 initial-valuef) (lerp 0.1 1.0 (-> this size-t)))
       (set! (-> *part-id-table* 217 init-specs 2 initial-valuef) (lerp 409.6 3686.4 (-> this size-t)))
       (spawn (-> this part) (-> this root trans))
+      ;; Enhanced: the renderer's ribbon behind the shot
+      (pc-enhanced-shot (the-as pointer (-> this root trans)) 4 (-> this pid))
       )
     )
   (ja-post)
@@ -526,6 +528,8 @@
 (defstate impact (gun-dark-shot)
   :virtual #t
   :code (behavior ()
+    ;; Enhanced: sparks and a mark in the renderer
+    (pc-enhanced-shot (the-as pointer (-> self root trans)) 4 (if (< 0 (-> self hits)) -2 -1))
     (if (not (time-elapsed? (-> self spawn-time) (seconds 0.1)))
         (send-event (ppointer->process (-> self parent)) 'release)
         )

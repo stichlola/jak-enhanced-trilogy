@@ -76,6 +76,8 @@
          (vf7 :class vf)
          )
     (init-vf0-vector)
+    ;; Enhanced: the renderer's ribbon behind the shot
+    (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (-> this pid))
     (let* ((s4-0 (-> this root trans))
            (a1-0 (-> this tail-pos))
            (s5-1 (vector-! (new 'stack-no-clear 'vector) s4-0 a1-0))
@@ -144,6 +146,8 @@
 
 (defmethod spawn-shell-particles ((this gun-yellow-shot))
   "TODO - confirm"
+  ;; Enhanced: sparks and a mark in the renderer
+  (pc-enhanced-shot (the-as pointer (-> this root trans)) 3 (if (-> this hit-actor?) -2 -1))
   (if (-> this hit-actor?)
       (part-tracker-spawn :to *entity-pool* :group group-gun-yellow-shot-hit-object :mat-joint (-> this root trans))
       (part-tracker-spawn :to *entity-pool* :group group-gun-yellow-shot-hit :mat-joint (-> this root trans))
