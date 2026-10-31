@@ -12,7 +12,7 @@ standing still and worse in motion and in cutscenes, by an amount nobody can pre
 
 | Path | What it does | Use for |
 |---|---|---|
-| `custom_assets/<game>/merc_replacements/<model>.glb` | Read at extraction; replaces one merc model by name in every level holding it | **This document** |
+| `custom_assets/<game>/merc_replacements/<model>.glb` | Read at extraction; replaces one merc model by name in every level holding it. In the releases (`HANDMADE` in `make_release.py`), and after an update `refresh_models.ps1` extracts again the levels holding a changed one | **This document** |
 | `custom_assets/<game>/models/<level>/*.glb`, `goalc/build_actor` | Adds a new model under a new name, needs GOAL to use it | New actors, not replacements |
 | `EnhancedImport.cpp`, `custom_assets/<game>/scenery/` | Static scenery glbs, no skin | Not for characters |
 | `game/assets/enhanced/game_models.json` | The in-game editor's list of placeable models | Not related |

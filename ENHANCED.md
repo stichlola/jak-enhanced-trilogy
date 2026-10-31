@@ -186,6 +186,35 @@ decompiler afterwards.
 Every joint needs all three channels on every frame (build-actor fills missing ones with identity,
 not the rest pose); the mesh needs indices, a material and u8 JOINTS_0 or build-actor crashes.
 
+## Releases and updates
+
+`scripts/enhanced/make_release.py` packs the files tracked by git, plus `HANDMADE`: the folders made by
+hand with Tripo, out of git and copied from the disk (it stops if one is missing). What is computed from
+the game's own files stays out: `texture_replacements`, `scenery/game_*`,
+`texture_remade/level-default-pris` (`repaint_jak.py`). It warns about uncommitted changes (it copies the
+working tree, not HEAD) and about programs older than their sources, and leaves out of `placed.json` the
+objects whose model doesn't ship.
+
+What the player can edit (`SHIPPED`: `placed.json`, `lights.json`, `grass_paint/`, the terrain's pictures)
+isn't in its place in the trilogy's release but in `data/shipped`, so nothing that copies a release over a
+folder can overwrite it, not even an older release's `update.ps1`. The launcher runs `apply_shipped.ps1`
+once per version: a file equal to what was last put there (`shipped/applied.json`) or to any earlier version
+(`manifest.json`, from git's history) is replaced, anything else is the player's and stays. In Enhanced
+Light these files stay in their place: OpenGOAL's launcher deletes a mod's folder at each version.
+
+An update only compiles the code, and replacement models are read when levels are extracted. So the
+launcher runs `refresh_models.ps1` once per version: it compares `custom_assets/<game>/merc_replacements`
+with `out/<game>/merc-stamp.json` and, for what changed, extracts again the levels whose list in
+`goal_src/<game>/dgos/*.gd` names the model's art group, with the decompiler and a narrowed `inputs_file`
+(as `hd_setup.py`, so `texture_replacements` stays baked in). GAME.fr3 is saved and put back, since a
+partial extraction rewrites it without the other levels' animated textures; a model of GAME.CGO itself
+makes it a whole extraction. No `iso_data`: from the disc image if there is one, else skipped until the
+next start, with the old models in the meantime.
+
+`update.ps1` closes what runs from the folder before copying (it asks first; the game's window is asked
+to close, then it is forced), and writes `data/VERSION` last, so an update that stops halfway is offered
+again. The installer does the same with `-CheckOnly` and `-CloseOnly`.
+
 ## Not done (yet)
 
 Next, the small ones first (the big ones below wait until these are done):

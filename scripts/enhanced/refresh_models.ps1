@@ -138,7 +138,7 @@ try {
   & (Join-Path $Bin 'decompiler.exe') $config iso_data decompiler_out --version $version --config-override $over 2>&1 | ForEach-Object {
     $line = "$_"
     Add-Content -LiteralPath $logFile -Value $line
-    if ($line -match 'Processing level (\S+)') {
+    if ($line -match 'stats for (\S+)') {
       Write-Host ("  [{0:mm\:ss}] level {1}" -f ((Get-Date) - $started), $Matches[1])
       $lastShown = Get-Date
     } elseif (((Get-Date) - $lastShown).TotalSeconds -ge 15) {
@@ -147,12 +147,14 @@ try {
     }
   }
   $code = $LASTEXITCODE
+} catch {
+  $code = $_.Exception.Message
 } finally {
   $ErrorActionPreference = 'Stop'
   Pop-Location
 }
 if (-not $whole -and (Test-Path -LiteralPath $commonSaved)) { Move-Item -LiteralPath $commonSaved -Destination $common -Force }
-if ($code -ne 0) {
+if ($code -is [string] -or $code -ne 0) {
   Write-Host "Making the new models failed (code $code, see $logFile). The game works with the old ones; it is tried again at the next start."
   exit 3
 }

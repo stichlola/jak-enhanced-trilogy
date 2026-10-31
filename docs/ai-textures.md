@@ -2,7 +2,8 @@
 
 How a remade picture of a game texture gets into the game. This is the plumbing only: the pictures
 are yours, made from your own copy of the game, and they stay out of git (`texture_remade/` is in
-`.gitignore`).
+`.gitignore`). Folders made by hand with Tripo go in the releases all the same, from the disk:
+`HANDMADE` in `scripts/enhanced/make_release.py` lists them.
 
 ## Where the files go
 

@@ -3,7 +3,6 @@ rem (a "!" in the folder's name can't work below: delayed expansion takes it)
 set "ROOT=%~dp0"
 if not "%ROOT:!=%"=="%ROOT%" (
   echo This folder's path has a "!" in it, which the launcher can't handle:
-  echo %ROOT%
   echo Move Jak Enhanced Trilogy to a folder without it.
   pause
   exit /b 1
