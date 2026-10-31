@@ -86,7 +86,13 @@ function Test-Room([string]$path, [long]$bytes, [string]$what) {
 function Get-Download([string]$url, [string]$file) {
   $request = [Net.HttpWebRequest]::Create($url)
   $request.UserAgent = 'jak-enhanced-update'
-  $response = $request.GetResponse()
+  try {
+    $response = $request.GetResponse()
+  } catch {
+    $web = $_.Exception.InnerException
+    if ($web -and $web.Response) { throw "the server doesn't have this version's file (HTTP $([int]$web.Response.StatusCode))" }
+    throw "couldn't reach the server: check your connection"
+  }
   try {
     $total = $response.ContentLength
     if ($total -gt 0) {
@@ -131,7 +137,11 @@ function Get-Download([string]$url, [string]$file) {
 
 function Expand-WithProgress([string]$zipFile, [string]$destination) {
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  $zip = [IO.Compression.ZipFile]::OpenRead($zipFile)
+  try {
+    $zip = [IO.Compression.ZipFile]::OpenRead($zipFile)
+  } catch {
+    throw "the downloaded file is damaged"
+  }
   try {
     $bytes = [long]0
     foreach ($e in $zip.Entries) { $bytes += $e.Length }

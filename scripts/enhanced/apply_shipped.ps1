@@ -73,7 +73,7 @@ $json = New-Object PSObject
 foreach ($k in ($applied.Keys | Sort-Object)) { $json | Add-Member -NotePropertyName $k -NotePropertyValue $applied[$k] }
 [IO.File]::WriteAllText($appliedFile, ($json | ConvertTo-Json))
 [IO.File]::WriteAllText((Join-Path $shipped 'applied-version.txt'), [string]$manifest.version)
-if ($installed) { Write-Host "Main world: $installed files brought up to date." }
+if ($installed) { Write-Host "Main world: $installed file(s) brought up to date." }
 foreach ($rel in $kept) {
   Write-Host "Kept your edited $rel (the new release's copy is in data\shipped)."
 }
