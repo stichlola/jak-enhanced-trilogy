@@ -1,4 +1,13 @@
 @echo off
+rem (a "!" in the folder's name can't work below: delayed expansion takes it)
+set "ROOT=%~dp0"
+if not "%ROOT:!=%"=="%ROOT%" (
+  echo This folder's path has a "!" in it, which the launcher can't handle:
+  echo %ROOT%
+  echo Move Jak Enhanced Trilogy to a folder without it.
+  pause
+  exit /b 1
+)
 rem Jak Enhanced Trilogy: put your own disc images (.iso) in the ISO folder, then double-click this
 rem file. The first time it extracts your discs (20-40 minutes a game); after that it starts the game
 rem played last, on the trilogy's start menu to pick another.
@@ -30,6 +39,10 @@ if exist "%ROOT%\gk.exe" (
   )
   set "BIN=!PROJ!\out\build\Release\bin"
 )
+rem for PowerShell's single quotes: an apostrophe in the path (C:\Users\O'Brien) is written twice
+set "ROOTQ=%ROOT:'=''%"
+set "PROJQ=%PROJ:'=''%"
+set "BINQ=%BIN:'=''%"
 
 rem Which game each disc is: its serial, from the boot line of SYSTEM.CNF ("BOOT2 = cdrom0:\SCES_524.60;1")
 rem in its first megabytes (the discs also list other games' serials)
@@ -40,7 +53,8 @@ rem the .iso files in the ISO folder, and the ones picked in the installer (ISO\
 if not exist "%ROOT%\ISO\iso-paths.txt" type nul > "%ROOT%\ISO\iso-paths.txt"
 for /f "usebackq delims=" %%F in (`dir /b /s "%ROOT%\ISO\*.iso" 2^>nul ^& type "%ROOT%\ISO\iso-paths.txt"`) do if exist "%%~fF" (
   set "GAME="
-  for /f %%G in ('powershell -NoProfile -Command "$s=[IO.File]::OpenRead('%%~fF'); $b=New-Object byte[] 8MB; $n=$s.Read($b,0,$b.Length); $s.Close(); $t=[Text.Encoding]::ASCII.GetString($b,0,$n); if ($t -match 'cdrom0:\\(\w{4}_\d{3}\.\d{2})') { $id=$Matches[1]; if ($id -match 'SCUS_971\.24|SCES_503\.61|SCPS_150\.21') {'jak1'} elseif ($id -match 'SCUS_972\.65|SCES_516\.08|SCPS_150\.57') {'jak2'} elseif ($id -match 'SCUS_973\.30|SCES_524\.60|SCPS_150\.93') {'jak3'} }"') do set "GAME=%%G"
+  set "ISO_FILE=%%~fF"
+  for /f %%G in ('powershell -NoProfile -Command "$s=[IO.File]::OpenRead($env:ISO_FILE); $b=New-Object byte[] 8MB; $n=$s.Read($b,0,$b.Length); $s.Close(); $t=[Text.Encoding]::ASCII.GetString($b,0,$n); if ($t -match 'cdrom0:\\(\w{4}_\d{3}\.\d{2})') { $id=$Matches[1]; if ($id -match 'SCUS_971\.24|SCES_503\.61|SCPS_150\.21') {'jak1'} elseif ($id -match 'SCUS_972\.65|SCES_516\.08|SCPS_150\.57') {'jak2'} elseif ($id -match 'SCUS_973\.30|SCES_524\.60|SCPS_150\.93') {'jak3'} }"') do set "GAME=%%G"
   if "!GAME!"=="jak1" if not defined JAK1_ISO set "JAK1_ISO=%%~fF" & echo Found Jak and Daxter: The Precursor Legacy: %%~nxF
   if "!GAME!"=="jak2" if not defined JAK2_ISO set "JAK2_ISO=%%~fF" & echo Found Jak II: %%~nxF
   if "!GAME!"=="jak3" if not defined JAK3_ISO set "JAK3_ISO=%%~fF" & echo Found Jak 3: %%~nxF
@@ -57,19 +71,32 @@ rem player chooses: U installs it over this folder with scripts\enhanced\update.
 rem extracted discs and starts this launcher again; nothing is downloaded without asking)
 if defined VER (
   set "LATEST="
-  for /f "usebackq delims=" %%L in (`powershell -NoProfile -Command "try { (Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest').tag_name } catch {}"`) do set "LATEST=%%L"
+  set "LATEST_MB="
+  rem (its tag and its ZIP's real size; a release whose ZIP isn't up yet isn't offered)
+  for /f "usebackq tokens=1,2" %%L in (`powershell -NoProfile -Command "try { $r = Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest'; $a = @($r.assets | Where-Object { $_.name -eq ('Jak-Enhanced-Trilogy-' + $r.tag_name + '.zip') }); if ($a.Count) { $r.tag_name + ' ' + [int]($a[0].size / 1MB) } } catch {}"`) do (
+    set "LATEST=%%L"
+    set "LATEST_MB=%%M"
+  )
   for /f "delims=-" %%V in ("!VER!") do set "MINE=%%V"
   if defined LATEST if /i not "!LATEST!"=="!MINE!" (
     powershell -NoProfile -Command "$v = { param($s) $p = @($s.TrimStart('v') -split '\.') + @('0','0','0'); [version]($p[0..2] -join '.') }; if ((& $v '!LATEST!') -gt (& $v '!MINE!')) { exit 1 }" || (
       echo.
       echo A new version is out: !LATEST! ^(you have !MINE!^).
-      choice /c UC /t 10 /d C /m "U updates now, about 120 MB to download, your games are kept; C carries on"
+      choice /c UC /t 10 /d C /m "U updates now, !LATEST_MB! MB to download, your games are kept; C carries on"
       if not errorlevel 2 (
-        start "Jak Enhanced Trilogy update" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJ%\scripts\enhanced\update.ps1'))) -Root '%ROOT%' -Tag '!LATEST!'"
+        start "Jak Enhanced Trilogy update" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\update.ps1'))) -Root '%ROOTQ%' -Tag '!LATEST!'"
         exit /b 0
       )
     )
   )
+)
+
+rem The main world as this version ships it, in data\shipped: put in place file by file, once per
+rem version, keeping what the player edited (scripts\enhanced\apply_shipped.ps1)
+if defined VER if exist "%PROJ%\shipped\manifest.json" (
+  set "APPLIED="
+  if exist "%PROJ%\shipped\applied-version.txt" set /p APPLIED=<"%PROJ%\shipped\applied-version.txt"
+  if not "!APPLIED!"=="!VER!" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\apply_shipped.ps1'))) -Proj '%PROJQ%'"
 )
 
 rem What still needs setting up: the build once, then each new disc
@@ -98,6 +125,8 @@ if defined NEED_EXTRACT (
     echo only this once^). You can leave it running.
     "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -e -d -c "!JAK%%G_ISO!" || goto :failed
     if defined VER echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
+    rem (this made the levels with the replacement models as they are now)
+    if defined VER powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\refresh_models.ps1'))) -Proj '%PROJQ%' -Bin '%BINQ%' -Game jak%%G -MarkOnly"
   )
 )
 
@@ -139,6 +168,17 @@ if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\
   )
 )
 
+rem An update with new replacement models: the levels holding them are made again (a few minutes; the
+rem models are read only when levels are made). If it can't, the game plays with the old ones and
+rem this comes back at the next start
+if defined VER for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
+  set "CHECKED="
+  if exist "%PROJ%\out\jak%%G\models-checked.txt" set /p CHECKED=<"%PROJ%\out\jak%%G\models-checked.txt"
+  if not "!CHECKED!"=="!VER!" (
+    powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\refresh_models.ps1'))) -Proj '%PROJQ%' -Bin '%BINQ%' -Game jak%%G -Iso $env:JAK%%G_ISO" && echo !VER!>"%PROJ%\out\jak%%G\models-checked.txt"
+  )
+)
+
 rem Which game boots: the one played last (the game writes it), else the first ready. With more than
 rem one ready, the game opens on the trilogy's start menu by itself to pick another
 set "COUNT=0"
@@ -172,7 +212,7 @@ endlocal
 cd /d "%PROJ%"
 rem a hidden PowerShell starts the game and waits for it: if gk.exe closes with an error it opens
 rem the report window (scripts\enhanced\report.ps1: one click sends the logs, nothing without it)
-start "" powershell -NoProfile -WindowStyle Hidden -Command "$p = Start-Process -FilePath '%BIN%\gk.exe' -ArgumentList '--game jak%PICK% -- -boot -fakeiso' -PassThru; $null = $p.Handle; $p.WaitForExit(); if ($p.ExitCode -ne 0) { & ([scriptblock]::Create([IO.File]::ReadAllText('%PROJ%\scripts\enhanced\report.ps1'))) -Proj '%PROJ%' -Crash $p.ExitCode }"
+start "" powershell -NoProfile -WindowStyle Hidden -Command "$p = Start-Process -FilePath '%BINQ%\gk.exe' -ArgumentList '--game jak%PICK% -- -boot -fakeiso' -PassThru; $null = $p.Handle; $p.WaitForExit(); if ($p.ExitCode -ne 0) { & ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\report.ps1'))) -Proj '%PROJQ%' -Crash $p.ExitCode }"
 exit /b 0
 
 :tools

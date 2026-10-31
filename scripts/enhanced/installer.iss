@@ -64,6 +64,9 @@ en.Extract=Jak %1: extracting your disc and compiling the game (20-40 minutes)..
 en.Python=Installing Python for the HD textures...
 en.Hd=Jak %1: making the HD textures (the long part)...
 en.Failed=Something went wrong making Jak %1 (code %2). The launcher tries again at its first start; the details are in %3.
+en.GameOpen=Jak Enhanced Trilogy is open from this folder, and it has to close before installing.%n%nSave your game first: what is not saved is lost.%n%nClose it now?
+en.GameStays=Jak Enhanced Trilogy is still open, so nothing was installed. Close it and run this setup again.
+en.GameStuck=Jak Enhanced Trilogy could not be closed, so nothing was installed. Close it by hand (or restart the computer) and run this setup again.
 en.PlayNow=Play now
 en.Desktop=Create a desktop shortcut
 it.DiscsTitle=I tuoi dischi
@@ -86,6 +89,9 @@ it.Extract=Jak %1: estrazione del disco e compilazione del gioco (20-40 minuti).
 it.Python=Installazione di Python per le texture HD...
 it.Hd=Jak %1: creazione delle texture HD (la parte lunga)...
 it.Failed=Qualcosa è andato storto preparando Jak %1 (codice %2). Il launcher riprova al primo avvio; i dettagli sono in %3.
+it.GameOpen=Jak Enhanced Trilogy è aperto da questa cartella e va chiuso prima di installare.%n%nSalva prima la partita: ciò che non è salvato va perso.%n%nChiuderlo adesso?
+it.GameStays=Jak Enhanced Trilogy è ancora aperto, quindi non è stato installato nulla. Chiudilo e riavvia questa installazione.
+it.GameStuck=Non è stato possibile chiudere Jak Enhanced Trilogy, quindi non è stato installato nulla. Chiudilo a mano (o riavvia il computer) e riavvia questa installazione.
 it.PlayNow=Gioca ora
 it.Desktop=Crea un collegamento sul desktop
 
@@ -93,10 +99,10 @@ it.Desktop=Crea un collegamento sul desktop
 Name: "desktopicon"; Description: "{cm:Desktop}"
 
 [Files]
-Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "\data\game\assets\enhanced\placed.json,\data\game\assets\enhanced\grass_paint"; Flags: ignoreversion recursesubdirs createallsubdirs
-; the main world the player edits: only if they have none
-Source: "{#Src}\data\game\assets\enhanced\placed.json"; DestDir: "{app}\data\game\assets\enhanced"; Flags: onlyifdoesntexist
-Source: "{#Src}\data\game\assets\enhanced\grass_paint\*"; DestDir: "{app}\data\game\assets\enhanced\grass_paint"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
+; (the main world the player edits comes in data\shipped: the launcher puts it in place, keeping their edits)
+Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; run from the temporary folder before anything is copied: closes a game open from this folder
+Source: "{#Src}\data\scripts\enhanced\update.ps1"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"
@@ -248,6 +254,44 @@ begin
   end;
 end;
 
+// a path for PowerShell's single quotes
+function PsQuote(const S: String): String;
+begin
+  Result := S;
+  StringChangeEx(Result, '''', '''''', True);
+  Result := '''' + Result + '''';
+end;
+
+// a script of ours in PowerShell, as the launcher runs them (no execution policy involved)
+function PsParams(const Script, Args: String): String;
+begin
+  Result := '-NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText(' + PsQuote(Script) + '))) ' + Args + '"';
+end;
+
+// a game open from the folder: asks, closes it and waits, before anything is copied
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  App, Script: String;
+  Code: Integer;
+begin
+  Result := '';
+  App := WizardDirValue;
+  if not DirExists(App) then
+    exit;
+  ExtractTemporaryFile('update.ps1');
+  Script := ExpandConstant('{tmp}\update.ps1');
+  if not Exec('powershell.exe', PsParams(Script, '-Root ' + PsQuote(App) + ' -CheckOnly'), '', SW_HIDE,
+              ewWaitUntilTerminated, Code) or (Code <> 10) then
+    exit;
+  if SuppressibleMsgBox(CustomMessage('GameOpen'), mbConfirmation, MB_YESNO, IDYES) <> IDYES then begin
+    Result := CustomMessage('GameStays');
+    exit;
+  end;
+  if not Exec('powershell.exe', PsParams(Script, '-Root ' + PsQuote(App) + ' -CloseOnly'), '', SW_HIDE,
+              ewWaitUntilTerminated, Code) or (Code <> 0) then
+    Result := CustomMessage('GameStuck');
+end;
+
 function Run(const Filename, Params: String): Integer;
 begin
   WorkPage.SetProgress(0, 100);
@@ -310,6 +354,9 @@ begin
       end;
       if Version <> '' then
         SaveStringToFile(Data + '\out\jak' + IntToStr(g) + '\built-version.txt', Version, False);
+      // (this made the levels with the replacement models as they are now)
+      Run('powershell.exe', PsParams(Data + '\scripts\enhanced\refresh_models.ps1', '-Proj ' + PsQuote(Data) +
+          ' -Bin ' + PsQuote(App) + ' -Game jak' + IntToStr(g) + ' -MarkOnly'));
       if HdPage.Values[g - 1] then begin
         WorkPage.SetText(FmtMessage(CustomMessage('Hd'), [IntToStr(g)]), '');
         Code := Run(PythonLauncher, '-3 "' + Data + '\scripts\enhanced\hd_setup.py" --games jak' +
