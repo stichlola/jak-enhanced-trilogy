@@ -3318,16 +3318,16 @@ void EnhancedPost::update_scene() {
   // sunny: Jak 1's Sandover. Saturated greens and blues, warm highlights, shadows lifted toward
   // blue (the sky fills them), a few white clouds
   if (sunny > 0.f) {
-    const float gain[3] = {1.13f, 1.08f, 0.96f};
+    const float gain[3] = {1.1f, 1.06f, 0.96f};
     const float lift[3] = {0.012f, 0.02f, 0.045f};
     auto toward = [&](float& v, float t) { v += (t - v) * std::min(sunny, 1.f); };
     for (int i = 0; i < 3; i++) {
       toward(want.gain[i], gain[i]);
       toward(want.lift[i], lift[i]);
     }
-    toward(want.saturation, 1.6f);
+    toward(want.saturation, 1.45f);
     toward(want.contrast, 0.08f);
-    toward(want.warmth, 0.09f);
+    toward(want.warmth, 0.075f);
     toward(want.clouds, 0.32f);
   }
 

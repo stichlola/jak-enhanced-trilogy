@@ -4465,6 +4465,16 @@ void main() {
     c = mix(c, texture(tex_T0, tex_coord).rgb, (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
   }
 
+  // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
+  // are) and the highlights rolled off, so that nothing burns (not the flames, the game's own)
+  {
+    float top = max(c.r, max(c.g, c.b));
+    float chroma = top > 0.001 ? (top - min(c.r, min(c.g, c.b))) / top : 0.0;
+    vec3 level = mix(vec3(luma(c)), c, 1.0 - 0.2 * smoothstep(0.3, 0.85, chroma));
+    float over = max(top - 0.72, 0.0);
+    level = max(level, 0.0) * (0.72 + over / (1.0 + over / 0.32)) / max(top, 0.72);
+    c = mix(c, level, 0.5 * (1.0 - flame_keep));
+  }
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
   // for an instant, the sky most, and the bolt over the sky
   if (weather2.w > 0.0 || bolt_light > 0.0 || sheet > 0.0) {
