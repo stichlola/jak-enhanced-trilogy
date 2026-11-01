@@ -4340,11 +4340,11 @@ void main() {
       float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
       // (in the morning the faces away from the low sun deep and lilac-brown, the lit ones warm)
       vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.6, 0.54, 0.64), sky_day);
-      // (under the high sun gentler, both ways: the faces burned orange or went near black, their
+      // (in the desert under the high sun gentler, both ways: the faces burned orange or went near black, their
       // texture lost)
-      shade_k = mix(shade_k, vec3(0.95, 0.96, 1.0), noon);
+      shade_k = mix(shade_k, vec3(0.95, 0.96, 1.0), noon * min(sun_haze * 1.25, 1.0));
       vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), sky_day);
-      lit_k = mix(lit_k, vec3(1.2, 1.14, 1.06), noon);
+      lit_k = mix(lit_k, vec3(1.2, 1.14, 1.06), noon * min(sun_haze * 1.25, 1.0));
       vec3 relit = c * mix(shade_k, lit_k, lit);
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
