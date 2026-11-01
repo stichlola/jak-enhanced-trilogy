@@ -3928,7 +3928,7 @@ void main() {
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
         // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
         float low_light = min(golden * 2.0, 1.0);
-        c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + 1.1 * fine), 0.25);
+        c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + mix(1.1, 2.2, noon) * fine), 0.25);
         // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
         // sand's made of)
         c = mix(vec3(luma(c)), c, mix(0.92, 0.9, low_light)) * mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light);
@@ -3951,7 +3951,7 @@ void main() {
         }
         // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
         float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));
-        c = mix(c, c * vec3(1.55, 1.38, 1.12), drift * 0.6 * rock_detail * 2.0);
+        c = mix(c, c * mix(vec3(1.55, 1.38, 1.12), vec3(1.32, 1.24, 1.12), noon), drift * 0.6 * rock_detail * 2.0);
         // (farther, the game's own: its rocky patches out in the sand blend into it at their edges,
         // darkened they showed as hard-edged slabs)
         // (and where the game blends its rocky ground into the sand, the tag is blended too: there
@@ -4446,6 +4446,8 @@ void main() {
     float hl = smoothstep(0.72, 0.95, luma(g));
     g = mix(g, luma(g) * vec3(1.08, 0.96, 0.66) * 0.93, hl * 0.75);
     c = mix(c, g, day_look * ground);
+    // (under the high sun not as rich as the low sun makes it)
+    c = max(mix(vec3(luma(c)), c, 1.0 - 0.2 * noon * day_look * ground), 0.0);
   }
   // sand outside the desert (Sandover's beach): in the shade never darker than the open sky
   // lights it, a soft grey-blue (the game's own morning light there near black)
@@ -4466,13 +4468,13 @@ void main() {
   }
 
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
-  // are) and the highlights rolled off, so that nothing burns (not the flames, the game's own)
+  // are) and the near whites rolled off (above the sand, whose grain they flattened), so that nothing burns (not the flames, the game's own)
   {
     float top = max(c.r, max(c.g, c.b));
     float chroma = top > 0.001 ? (top - min(c.r, min(c.g, c.b))) / top : 0.0;
     vec3 level = mix(vec3(luma(c)), c, 1.0 - 0.2 * smoothstep(0.3, 0.85, chroma));
-    float over = max(top - 0.72, 0.0);
-    level = max(level, 0.0) * (0.72 + over / (1.0 + over / 0.32)) / max(top, 0.72);
+    float over = max(top - 0.82, 0.0);
+    level = max(level, 0.0) * (0.82 + over / (1.0 + over / 0.25)) / max(top, 0.82);
     c = mix(c, level, 0.5 * (1.0 - flame_keep));
   }
   // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
