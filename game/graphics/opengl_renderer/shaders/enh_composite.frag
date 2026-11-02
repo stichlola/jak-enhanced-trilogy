@@ -2003,6 +2003,8 @@ float flare_ghost(vec2 at, float aspect, float rad) {
   return (1.0 - smoothstep(rad * 0.5, rad, d)) * 0.07;
 }
 
+// how much of the sun the shadow map blocks here (the rock's light below asks)
+float rock_sh = 0.0;
 void main() {
   if (cloud_pass == 1) {
     color = cloud_march();
@@ -2803,6 +2805,7 @@ void main() {
       float cs = contact_shadow(from, sun_dir.xyz);
       sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
     }
+    rock_sh = sh;
     sun_lit *= 1.0 - sh;
     // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
     // and fuller (light and shadow apart)
@@ -4337,6 +4340,10 @@ void main() {
       // (the low morning sun grazes most of a peak: the light wraps further round, only the faces
       // turned right away in shade)
       float lit = smoothstep(mix(-0.05, -0.4, sky_day), mix(0.45, 0.3, sky_day), rndl);
+      // (under the desert's high sun most of a cliff stands nearly edge on to it: there the narrow step
+      // above turned the mesh's few normals into black and white patches)
+      float high_sun = noon * min(sun_haze * 1.25, 1.0);
+      lit = mix(lit, smoothstep(-0.6, 0.9, rndl), high_sun);
       float far = smoothstep(30.0, 150.0, length(p) / 4096.0);
       // (in the morning the faces away from the low sun deep and lilac-brown, the lit ones warm)
       vec3 shade_k = mix(vec3(0.8, 0.83, 0.92), vec3(0.6, 0.54, 0.64), sky_day);
@@ -4345,7 +4352,11 @@ void main() {
       shade_k = mix(shade_k, vec3(0.95, 0.96, 1.0), noon * min(sun_haze * 1.25, 1.0));
       vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), sky_day);
       lit_k = mix(lit_k, vec3(1.2, 1.14, 1.06), noon * min(sun_haze * 1.25, 1.0));
-      vec3 relit = c * mix(shade_k, lit_k, lit);
+      vec3 rock_k = mix(shade_k, lit_k, lit);
+      // (and what the shadow map has in shade isn't told apart by its faces: one even light from the
+      // sky, the texture and the game's own shading kept)
+      rock_k = mix(rock_k, mix(vec3(1.6, 1.42, 1.2), rock_k, 1.0 - rock_sh), high_sun);
+      vec3 relit = c * rock_k;
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
