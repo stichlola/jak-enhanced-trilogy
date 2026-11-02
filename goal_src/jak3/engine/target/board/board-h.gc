@@ -5,9 +5,9 @@
 ;; name in dgo: board-h
 ;; dgos: GAME
 
-;; Enhanced: the jetboard is always at hand (R2), without unlocking it and where a level's
-;; settings would leave it out. #f = vanilla.
-(define *enhanced-board-always* #t)
+;; Enhanced: #t = the jetboard is always at hand (R2), without unlocking it and where a level's
+;; settings would leave it out. #f = as the game: from the mission that gives it.
+(define *enhanced-board-always* #f)
 
 ;; Enhanced: the jetboard's throttle. L2 on the ground (as hard as it's pressed, on a pad's trigger)
 ;; builds a boost, let go it fades and the board slows. Held since the ground it goes on working in the
