@@ -4362,6 +4362,11 @@ void main() {
                   desert_noon());
       c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun);
     }
+    if (tag > 0.985 && wsurf == 0.0 && sun_haze > 0.0) {
+      // (under the desert's high sun the walls' pale plaster: the patches of sun near white, the rest
+      // dark, the shape of the shadow map's edge all over them. Closer together)
+      c *= mix(vec3(1.0), mix(vec3(0.72, 0.71, 0.72), vec3(1.6, 1.48, 1.3), rock_sh), noon * min(sun_haze * 1.25, 1.0) * clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - weather.x));
+    }
     // the city's walls the same, milder: the game lights a street's both sides alike, so the faces
     // toward the sun a little brighter and warmer, the others a little cooler (not the characters,
     // the shrubs or the sky: plain scenery only)
