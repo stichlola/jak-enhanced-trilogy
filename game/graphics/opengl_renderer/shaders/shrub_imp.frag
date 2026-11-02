@@ -73,6 +73,11 @@ void main() {
   }
   T0.rgb /= max(T0.a, 1e-3);
   T0.a /= wsum;
+  // (cut at half, where the pictures' mipmaps keep their coverage: lower, a point in any one of the
+  // three pictures stays and the outline grows into all three views, bigger than the model)
+  if (T0.a < 0.5) {
+    discard;
+  }
   // lit as the model: its normals, the side toward the camera (blades show both); without the
   // atlas, mostly up
   n = enh_imp_normals != 0 && dot(n, n) > 1e-4 ? normalize(n) : normalize(vec3(0.0, 0.8, 0.0) + enh_imp_view * 0.4);
@@ -85,7 +90,9 @@ void main() {
   color = fragment_color * T0;
   // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each
   // other, deepest at its foot (the models nearer read dark, their far pictures cream puffs)
-  color.xyz *= mix(0.4, 0.85, smoothstep(0.0, 0.9, enh_imp_tip));
+  // (less of it on a stone: its faces are in the picture, only the foot's contact shade is missing)
+  color.xyz *= enh_stone > 0.5 ? mix(0.75, 1.0, smoothstep(0.0, 0.6, enh_imp_tip))
+                               : mix(0.55, 0.95, smoothstep(0.0, 0.9, enh_imp_tip));
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
   }

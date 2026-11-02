@@ -8,7 +8,7 @@ decimated down to N (the editor's budget per kind: grass small, rocks more). Wri
 own models (tools/blender/grass_variants.py in jak3-ue5 makes them the same way):
   OUT_DIR/NAME.glb        the model
   OUT_DIR/NAME_lod1.glb   its far version (a third of the faces)
-  OUT_DIR/NAME_imp.png    its impostor: pictures from 8x8 directions over the upper hemisphere
+  OUT_DIR/NAME_imp.png    its impostor: pictures from 12x12 directions, most of them low
   OUT_DIR/NAME_nrm.png    the impostor's normals
 The last line printed is "RESULT {json}": faces in and out, materials, size, or "error".
 """
@@ -27,7 +27,7 @@ src, out_dir, name = Path(args[0]).resolve(), Path(args[1]).resolve(), args[2]
 max_faces = int(args[args.index("--max-faces") + 1]) if "--max-faces" in args else 6000
 
 LOD_RATIO = 0.33
-IMP_GRID, IMP_CELL = 8, 128
+IMP_GRID, IMP_CELL = 12, 85
 
 
 def result(**kw) -> None:
@@ -90,11 +90,11 @@ def export(obj: bpy.types.Object, path: Path) -> None:
 
 def hemi_oct_dir(u: float, v: float) -> Vector:
     """The view direction (game space: y up) of a hemi-octahedral grid cell's center (u, v in 0..1),
-    as the game picks it (EnhancedScenery, shrub_imp.vert): the height squared, most views low."""
+    as the game picks it (EnhancedScenery, shrub_imp.vert): the height bent, most views low."""
     px, py = u * 2 - 1, v * 2 - 1
     x, z = (px + py) * 0.5, (px - py) * 0.5
     y = 1 - abs(x) - abs(z)
-    return Vector((x, y * y, z)).normalized()
+    return Vector((x, 0.02 + 0.15 * y, z)).normalized()
 
 
 def impostor_setup() -> None:

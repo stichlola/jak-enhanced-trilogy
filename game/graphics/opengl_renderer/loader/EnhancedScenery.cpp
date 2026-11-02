@@ -38,8 +38,9 @@ namespace {
 constexpr float kMeter = 4096.f;
 constexpr int kFarLods = 1;  // far versions per model, each drawn over one more detailed distance
 constexpr float kImpReach = 500.f;  // m: the impostors (past the far versions) reach this far
+constexpr float kTiltedReach = 250.f;  // m: how far a tilted copy keeps its far version
 constexpr float kThinKeep = 0.5f;  // the share of impostors left at kImpReach (thinned from half way)
-constexpr int kImpGrid = 8;  // impostor atlas: views per side (tools/blender/grass_variants.py)
+constexpr int kImpGrid = 12;  // impostor atlas: views per side (tools/blender/grass_variants.py)
 constexpr float kFarReach = 1.f + kFarLods;  // so they reach this many times the detailed distance
 constexpr int kImp = kFarLods + 1;  // the version that's the impostor
 constexpr float kPlacedReach = 400.f;  // m: how far the objects placed by hand are drawn
@@ -808,7 +809,12 @@ void prepare_tie_tree(tfrag3::TieTree& tree,
   tree.enh_scenery = data;
 }
 
-void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color = false);
+void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color = false, int grid = 0);
+
+// its atlas's pictures per side (a model imported earlier has 8 x 8 of 128 pixels)
+int imp_grid(const Mesh& mesh) {
+  return mesh.imp_w % 128 == 0 ? 8 : kImpGrid;
+}
 
 void make_gl(Mesh& mesh, Library& lib) {
   if (!lib.instance_vbo) {
@@ -860,7 +866,9 @@ void make_gl(Mesh& mesh, Library& lib) {
 // few levels down, so far grass thins out and vanishes (Castano, "Computing alpha mipmaps").
 // keep_color (an impostor's pictures, black around what's in them): each level's colors averaged by
 // their alpha and spread over the empty texels next to them, or thin things go black far away.
-void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color) {
+// (grid: an atlas of grid x grid pictures, each keeps its own coverage: the thin views of an edge-on
+// rock can't hold theirs at a small mip, and a scale for the whole atlas would swell all the others)
+void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color, int grid) {
   auto bleed = [&](std::vector<u8>& px, int pw, int ph) {
     for (int pass = 0; pass < 2; pass++) {
       const std::vector<u8> from = px;
@@ -904,6 +912,16 @@ void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color) {
     return (float)n / std::max<size_t>(px.size() / 4, 1);
   };
   const float want = coverage(rgba, 1.f);
+  std::vector<float> cell_share((size_t)grid * grid, 0.f);
+  for (int y = 0; grid > 0 && y < h; y++) {
+    for (int x = 0; x < w; x++) {
+      cell_share[(size_t)(y * grid / h) * grid + x * grid / w] +=
+          rgba[((size_t)y * w + x) * 4 + 3] > kCut * 255.f ? 1.f : 0.f;
+    }
+  }
+  for (auto& s : cell_share) {
+    s /= (float)w * h / (grid * grid);
+  }
   std::vector<u8> level = rgba, next;
   if (keep_color) {
     bleed(level, w, h);
@@ -952,15 +970,45 @@ void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color) {
     if (keep_color) {
       bleed(level, level_w, level_h);
     }
-    // the alpha scale that keeps the coverage (bisection: coverage grows with the scale)
-    float lo = 0.f, hi = 8.f;
-    for (int it = 0; it < 12; it++) {
-      float mid = 0.5f * (lo + hi);
-      (coverage(level, mid) < want ? lo : hi) = mid;
-    }
     std::vector<u8> scaled = level;
-    for (size_t p = 3; p < scaled.size(); p += 4) {
-      scaled[p] = (u8)std::min(255.f, scaled[p] * hi + 0.5f);
+    if (grid > 0) {
+      // each picture: the alpha scale that leaves its share of pixels above the cut
+      std::vector<u32> hist((size_t)grid * grid * 256, 0);
+      for (int y = 0; y < level_h; y++) {
+        for (int x = 0; x < level_w; x++) {
+          const size_t cell = (size_t)(y * grid / level_h) * grid + x * grid / level_w;
+          hist[cell * 256 + level[((size_t)y * level_w + x) * 4 + 3]]++;
+        }
+      }
+      std::vector<float> scale((size_t)grid * grid, 1.f);
+      for (size_t cell = 0; cell < scale.size(); cell++) {
+        const float n = cell_share[cell] * level_w * level_h / (grid * grid);
+        float seen = 0.f;
+        for (int a = 255; n > 0.f && a > 0; a--) {
+          seen += hist[cell * 256 + a];
+          if (seen >= n) {
+            scale[cell] = std::min((kCut * 255.f + 1.f) / a, 8.f);
+            break;
+          }
+        }
+      }
+      for (int y = 0; y < level_h; y++) {
+        for (int x = 0; x < level_w; x++) {
+          u8& a = scaled[((size_t)y * level_w + x) * 4 + 3];
+          a = (u8)std::min(
+              255.f, a * scale[(size_t)(y * grid / level_h) * grid + x * grid / level_w] + 0.5f);
+        }
+      }
+    } else {
+      // the alpha scale that keeps the coverage (bisection: coverage grows with the scale)
+      float lo = 0.f, hi = 8.f;
+      for (int it = 0; it < 12; it++) {
+        float mid = 0.5f * (lo + hi);
+        (coverage(level, mid) < want ? lo : hi) = mid;
+      }
+      for (size_t p = 3; p < scaled.size(); p += 4) {
+        scaled[p] = (u8)std::min(255.f, scaled[p] * hi + 0.5f);
+      }
     }
     glTexImage2D(GL_TEXTURE_2D, mip, GL_RGBA, level_w, level_h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                  scaled.data());
@@ -1082,7 +1130,7 @@ void make_imp_gl(Mesh& mesh, Library& lib) {
   }
   glGenTextures(1, &mesh.imp_tex);
   glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
-  upload_cutout(mesh.imp_rgba, mesh.imp_w, mesh.imp_h, true);
+  upload_cutout(mesh.imp_rgba, mesh.imp_w, mesh.imp_h, true, imp_grid(mesh));
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   if (!mesh.imp_nrm.empty()) {
@@ -1266,10 +1314,23 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
         continue;
       }
       float d = std::sqrt(d2);
-      int k = std::min((int)(d / step), last);
       GpuInstance inst = b.instances[i];
+      // a tilted copy stays a far version while it's more than a few pixels: its picture, a flat quad,
+      // shows the part the ground hides on the model, and seen from below its own horizon there's
+      // no picture at all
+      int last_here = last;
+      if (last == kImp && d < kTiltedReach * kMeter) {
+        const auto& up = inst.col[1];
+        const float up2 = up[0] * up[0] + up[1] * up[1] + up[2] * up[2];
+        const float seen_y = (up[0] * (cam.x() - inst.col[3][0]) + up[1] * (cam.y() - inst.col[3][1]) +
+                              up[2] * (cam.z() - inst.col[3][2])) / std::max(up2, 1e-6f);
+        if (up[1] * up[1] < 0.989f * up2 || seen_y < (mesh.lo.y() + mesh.hi.y()) * 0.5f) {
+          last_here = kFarLods;
+        }
+      }
+      int k = std::min((int)(d / step), last_here);
       float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
-      if (k < last && into > 0.f) {
+      if (k < last_here && into > 0.f) {
         float f = std::min(into / swap, 1.f);
         inst.col[1][3] = f;
         inst.col[2][3] = -1.f;
@@ -1403,7 +1464,6 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
       glUniform1f(glGetUniformLocation(ish.id(), "enh_wet"), g_enhanced_wind.wet);
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
-      glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)kImpGrid);
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T1"), 1);
     }
     glUniform3f(glGetUniformLocation(ish.id(), "enh_base_rgb"), b.base_rgb[0] * b.tint[0],
@@ -1418,6 +1478,7 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
                 b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
     glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)imp_grid(mesh));
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_IMP);
 
     glBindVertexArray(lib.imp_vao);
@@ -2354,7 +2415,6 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
       glUniform1f(glGetUniformLocation(ish.id(), "enh_wet"), g_enhanced_wind.wet);
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
-      glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)kImpGrid);
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T1"), 1);
     }
     glUniform3f(glGetUniformLocation(ish.id(), "enh_base_rgb"), g.rgb[0], g.rgb[1], g.rgb[2]);
@@ -2368,6 +2428,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
                 mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
     glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)imp_grid(mesh));
     setup_tfrag_shader(render_state, imp_mode, ShaderId::SHRUB_IMP);
 
     glBindVertexArray(lib.imp_vao);

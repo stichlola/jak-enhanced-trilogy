@@ -1,9 +1,9 @@
 #version 410 core
 
 // Enhanced: a detailed model's far picture (impostor, EnhancedScenery), one quad per copy. Its
-// atlas holds the model seen from a grid of directions over the upper hemisphere (hemi-octahedral,
-// tools/blender/grass_variants.py, the height squared: far things are seen nearly edge on, so most
-// views are low). The quad faces the camera, in the copy's own space (so placed,
+// atlas holds the model seen from a grid of directions (hemi-octahedral, tools/blender/grass_variants.py,
+// the height bent: far things are seen nearly edge on, so most views are low, rings from about 1 degree;
+// a copy seen from below its own horizon stays a far version: EnhancedScenery). The quad faces the camera, in the copy's own space (so placed,
 // turned and scaled as the model), and shows the three pictures taken nearest the view, blended
 // by how near: turning around it, no picture snaps to the next. Each picture is read where the
 // quad's point falls in it (an orthographic view: a plain projection on its camera's plane).
@@ -45,7 +45,10 @@ vec3 hemi_oct_dir(vec2 uv) {
   vec2 p = uv * 2.0 - 1.0;
   float x = (p.x + p.y) * 0.5, z = (p.x - p.y) * 0.5;
   float y = 1.0 - abs(x) - abs(z);
-  return normalize(vec3(x, y * y, z));
+  if (enh_imp_grid < 10.0) {  // (an older import's 8 x 8: the plain upper hemisphere)
+    return normalize(vec3(x, y, z));
+  }
+  return normalize(vec3(x, 0.02 + 0.15 * y, z));
 }
 
 // a camera's right and up looking along f (as the bake's)
@@ -60,11 +63,15 @@ void main() {
   vec3 to_cam = normalize(inverse(turn) * (cam_trans.xyz - inst_c3.xyz) - enh_imp.xyz);
   vec3 v = to_cam;
   v.y = max(v.y, 0.0);
-  // (the inverse of hemi_oct_dir: its height y squared, where |x| + |z| = 1 - y)
-  float h = abs(v.x) + abs(v.z);
-  float q = v.y / max(h, 1e-5);
-  float y = 0.5 * (sqrt(q * q + 4.0 * q) - q);
-  v.xz *= (1.0 - y) / max(h, 1e-5);
+  // (the inverse of hemi_oct_dir: its height 0.02 + 0.15 y, where |x| + |z| = 1 - y)
+  if (enh_imp_grid < 10.0) {
+    v /= abs(v.x) + abs(v.y) + abs(v.z);
+  } else {
+    float h = max(abs(v.x) + abs(v.z), 1e-5);
+    float q = v.y / h;
+    float y = max((q - 0.02) / (q + 0.15), 0.0);
+    v.xz *= (1.0 - y) / h;
+  }
   vec2 uv = vec2(v.x + v.z, v.x - v.z) * 0.5 + 0.5;
   // the three picture centers around it (cell centers sit at (i + 0.5) / N) and their weights
   vec2 g = clamp(uv * enh_imp_grid - 0.5, vec2(0.0), vec2(enh_imp_grid - 1.0));

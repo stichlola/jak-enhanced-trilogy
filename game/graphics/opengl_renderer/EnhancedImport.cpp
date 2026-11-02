@@ -19,7 +19,7 @@ namespace {
 
 constexpr float kLodRatio = 0.33f;  // the far version's share of the faces
 constexpr int kLodMin = 300;        // (but never fewer than this, unless the model has fewer)
-constexpr int kImpGrid = 8, kImpCell = 128;
+constexpr int kImpGrid = 12, kImpCell = 85;
 constexpr int kImpSuper = 2;  // samples a pixel across (the edges smooth)
 constexpr int kTexMax = 2048;
 
@@ -600,7 +600,7 @@ bool write_glb(const fs::path& path,
 }
 
 // ---- the impostor: the model drawn (unlit, its texture's colors) from kImpGrid x kImpGrid
-// directions of the upper hemisphere, and its normals, each in its cell of an atlas (as the game
+// directions, most of them low, and its normals, each in its cell of an atlas (as the game
 // picks them: EnhancedScenery, shrub_imp.vert; Blender's scenery_import.py draws the same)
 
 struct V3 {
@@ -624,9 +624,9 @@ V3 norm(V3 a) {
 V3 hemi_oct_dir(float u, float v) {
   const float px = u * 2 - 1, py = v * 2 - 1;
   const float x = (px + py) * 0.5f, z = (px - py) * 0.5f;
-  // (the height squared, as shrub_imp.vert: most views low)
+  // (the height bent, as shrub_imp.vert: most views low)
   const float y = 1 - std::abs(x) - std::abs(z);
-  return norm({x, y * y, z});
+  return norm({x, 0.02f + 0.15f * y, z});
 }
 
 void sample(const Image& img, float u, float v, float out[4]) {

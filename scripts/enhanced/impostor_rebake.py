@@ -18,16 +18,16 @@ args = sys.argv[sys.argv.index("--") + 1:]
 out_dir, models = Path(args[0]).resolve(), [Path(a).resolve() for a in args[1:]]
 out_dir.mkdir(parents=True, exist_ok=True)
 
-IMP_GRID, IMP_CELL = 8, 128
+IMP_GRID, IMP_CELL = 12, 85
 
 
 def hemi_oct_dir(u: float, v: float) -> Vector:
     """The view direction (game space: y up) of a cell's center (u, v in 0..1), as shrub_imp.vert:
-    hemi-octahedral with the height squared, most views low (far things are seen nearly edge on)."""
+    hemi-octahedral, with most views low (far things are seen nearly edge on): rings from about 1 degree."""
     px, py = u * 2 - 1, v * 2 - 1
     x, z = (px + py) * 0.5, (px - py) * 0.5
     y = 1 - abs(x) - abs(z)
-    return Vector((x, y * y, z)).normalized()
+    return Vector((x, 0.02 + 0.15 * y, z)).normalized()
 
 
 def impostor_setup() -> None:
