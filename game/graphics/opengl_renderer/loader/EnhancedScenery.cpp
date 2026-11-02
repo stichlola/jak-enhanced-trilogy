@@ -808,7 +808,7 @@ void prepare_tie_tree(tfrag3::TieTree& tree,
   tree.enh_scenery = data;
 }
 
-void upload_cutout(const std::vector<u8>& rgba, int w, int h);
+void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color = false);
 
 void make_gl(Mesh& mesh, Library& lib) {
   if (!lib.instance_vbo) {
@@ -858,7 +858,43 @@ void make_gl(Mesh& mesh, Library& lib) {
 // A cutout texture with its mipmaps made here: each level's alpha scaled so as much of it passes
 // the cutout as of the full size one. Plain averaging lets thin blades fade below the cutout a
 // few levels down, so far grass thins out and vanishes (Castano, "Computing alpha mipmaps").
-void upload_cutout(const std::vector<u8>& rgba, int w, int h) {
+// keep_color (an impostor's pictures, black around what's in them): each level's colors averaged by
+// their alpha and spread over the empty texels next to them, or thin things go black far away.
+void upload_cutout(const std::vector<u8>& rgba, int w, int h, bool keep_color) {
+  auto bleed = [&](std::vector<u8>& px, int pw, int ph) {
+    for (int pass = 0; pass < 2; pass++) {
+      const std::vector<u8> from = px;
+      for (int y = 0; y < ph; y++) {
+        for (int x = 0; x < pw; x++) {
+          u8* p = &px[((size_t)y * pw + x) * 4];
+          if (p[3] != 0 || (p[0] | p[1] | p[2]) != 0) {
+            continue;
+          }
+          u32 sum[3] = {0, 0, 0}, n = 0;
+          for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+              int sx = x + dx, sy = y + dy;
+              if (sx < 0 || sy < 0 || sx >= pw || sy >= ph) {
+                continue;
+              }
+              const u8* q = &from[((size_t)sy * pw + sx) * 4];
+              if (q[3] != 0 || (q[0] | q[1] | q[2]) != 0) {
+                sum[0] += q[0];
+                sum[1] += q[1];
+                sum[2] += q[2];
+                n++;
+              }
+            }
+          }
+          if (n > 0) {
+            p[0] = (u8)(sum[0] / n);
+            p[1] = (u8)(sum[1] / n);
+            p[2] = (u8)(sum[2] / n);
+          }
+        }
+      }
+    }
+  };
   constexpr float kCut = 0.5f;  // (about where the shrubs' alpha test cuts the texture's alpha)
   auto coverage = [&](const std::vector<u8>& px, float scale) {
     size_t n = 0;
@@ -868,8 +904,11 @@ void upload_cutout(const std::vector<u8>& rgba, int w, int h) {
     return (float)n / std::max<size_t>(px.size() / 4, 1);
   };
   const float want = coverage(rgba, 1.f);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
   std::vector<u8> level = rgba, next;
+  if (keep_color) {
+    bleed(level, w, h);
+  }
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, level.data());
   int level_w = w, level_h = h;
   // the box filter runs on the unscaled levels; only what's uploaded gets its alpha scaled
   for (int mip = 1; level_w > 1 || level_h > 1; mip++) {
@@ -887,11 +926,32 @@ void upload_cutout(const std::vector<u8>& rgba, int w, int h) {
           }
           next[((size_t)y * nw + x) * 4 + c] = (u8)((sum + 2) / 4);
         }
+        if (keep_color) {
+          u32 weight = 0, sum[3] = {0, 0, 0};
+          for (int dy = 0; dy < 2; dy++) {
+            for (int dx = 0; dx < 2; dx++) {
+              int sx = std::min(2 * x + dx, level_w - 1), sy = std::min(2 * y + dy, level_h - 1);
+              const u8* q = &level[((size_t)sy * level_w + sx) * 4];
+              weight += q[3];
+              for (int c = 0; c < 3; c++) {
+                sum[c] += q[c] * (u32)q[3];
+              }
+            }
+          }
+          if (weight > 0) {
+            for (int c = 0; c < 3; c++) {
+              next[((size_t)y * nw + x) * 4 + c] = (u8)(sum[c] / weight);
+            }
+          }
+        }
       }
     }
     level.swap(next);
     level_w = nw;
     level_h = nh;
+    if (keep_color) {
+      bleed(level, level_w, level_h);
+    }
     // the alpha scale that keeps the coverage (bisection: coverage grows with the scale)
     float lo = 0.f, hi = 8.f;
     for (int it = 0; it < 12; it++) {
@@ -1022,7 +1082,7 @@ void make_imp_gl(Mesh& mesh, Library& lib) {
   }
   glGenTextures(1, &mesh.imp_tex);
   glBindTexture(GL_TEXTURE_2D, mesh.imp_tex);
-  upload_cutout(mesh.imp_rgba, mesh.imp_w, mesh.imp_h);
+  upload_cutout(mesh.imp_rgba, mesh.imp_w, mesh.imp_h, true);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   if (!mesh.imp_nrm.empty()) {

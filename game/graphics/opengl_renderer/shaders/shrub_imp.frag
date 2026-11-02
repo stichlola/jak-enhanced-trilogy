@@ -61,7 +61,8 @@ void main() {
     vec2 t = (enh_imp_cell[k] + l * 0.5 + 0.5) / enh_imp_grid;
     t.y = 1.0 - t.y;
     vec4 s = texture(tex_T0, t);
-    T0 += s * enh_imp_weight[k];
+    // (by its alpha: a picture with nothing here takes none of the color, only of the alpha)
+    T0 += vec4(s.rgb * s.a, s.a) * enh_imp_weight[k];
     if (enh_imp_normals != 0) {
       n += (texture(tex_T1, t).xyz * 2.0 - 1.0) * s.a * enh_imp_weight[k];
     }
@@ -70,7 +71,8 @@ void main() {
   if (wsum <= 0.0) {
     discard;
   }
-  T0 /= wsum;
+  T0.rgb /= max(T0.a, 1e-3);
+  T0.a /= wsum;
   // lit as the model: its normals, the side toward the camera (blades show both); without the
   // atlas, mostly up
   n = enh_imp_normals != 0 && dot(n, n) > 1e-4 ? normalize(n) : normalize(vec3(0.0, 0.8, 0.0) + enh_imp_view * 0.4);
