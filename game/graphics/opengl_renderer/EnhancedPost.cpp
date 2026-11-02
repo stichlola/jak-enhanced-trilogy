@@ -1955,7 +1955,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         const float drift_side = 0.18f * std::sin(t * 0.63f) + 0.07f * std::sin(t * 1.9f + 0.4f);
         const float drift_up = 0.14f * std::sin(t * 0.91f + 1.1f) + 0.05f * std::sin(t * 2.7f);
         const float drift_fwd = 0.15f * std::sin(t * 0.47f + 2.3f);
-        const float side = 1.0f + drift_side, up = 2.35f + drift_up, fwd = -0.3f + drift_fwd;
+        // (far enough to the side that trailing him at a run doesn't bring it over him)
+        const float side = 1.7f + drift_side, up = 2.35f + drift_up, fwd = -0.3f + drift_fwd;
         // its place next to Jak (m), where it heads
         const float target[3] = {rx * side + fx * fwd, up, rz * side + fz * fwd};
         // Jak's velocity (m/s): the bulb keeps up with him, but his starts, stops and turns jolt it

@@ -90,10 +90,11 @@ def export(obj: bpy.types.Object, path: Path) -> None:
 
 def hemi_oct_dir(u: float, v: float) -> Vector:
     """The view direction (game space: y up) of a hemi-octahedral grid cell's center (u, v in 0..1),
-    as the game picks it (EnhancedScenery, shrub_imp.vert)."""
+    as the game picks it (EnhancedScenery, shrub_imp.vert): the height squared, most views low."""
     px, py = u * 2 - 1, v * 2 - 1
     x, z = (px + py) * 0.5, (px - py) * 0.5
-    return Vector((x, 1 - abs(x) - abs(z), z)).normalized()
+    y = 1 - abs(x) - abs(z)
+    return Vector((x, y * y, z)).normalized()
 
 
 def impostor_setup() -> None:

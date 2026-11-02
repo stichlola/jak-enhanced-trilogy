@@ -624,7 +624,9 @@ V3 norm(V3 a) {
 V3 hemi_oct_dir(float u, float v) {
   const float px = u * 2 - 1, py = v * 2 - 1;
   const float x = (px + py) * 0.5f, z = (px - py) * 0.5f;
-  return norm({x, 1 - std::abs(x) - std::abs(z), z});
+  // (the height squared, as shrub_imp.vert: most views low)
+  const float y = 1 - std::abs(x) - std::abs(z);
+  return norm({x, y * y, z});
 }
 
 void sample(const Image& img, float u, float v, float out[4]) {
