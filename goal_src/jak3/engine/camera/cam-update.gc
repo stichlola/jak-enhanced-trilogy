@@ -340,6 +340,9 @@
 ;; Enhanced: the field of view in play, times this (the Enhanced menu's setting, percent)
 (define *enhanced-fov-scale* 1.0)
 
+;; Enhanced: and times this (the jetboard's L2 boost opening the view, logic-target.gc)
+(define *enhanced-fov-kick* 1.0)
+
 (defun update-camera ()
   (with-pp
     (let ((gp-0 *math-camera*))
@@ -435,7 +438,7 @@
                                        (-> *camera-combiner* fov)
                                        (begin
                                          (set! *enhanced-fov-scale* (* 0.01 (the float (pc-enhanced-fov))))
-                                         (fmin 23665.777 (* (-> *camera-combiner* fov) *enhanced-fov-scale*))
+                                         (fmin 23665.777 (* (-> *camera-combiner* fov) *enhanced-fov-scale* *enhanced-fov-kick*))
                                          )
                                        )
                      )

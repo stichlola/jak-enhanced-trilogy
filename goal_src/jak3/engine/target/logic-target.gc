@@ -2439,7 +2439,7 @@ capture exactly."
       )
     )
   ;; Enhanced: the jetboard's throttle (board-h.gc): the pad's left trigger as pressed, or L2 held
-  ;; (a keyboard); built up on the ground, kept through a jump, gone off the board
+  ;; (a keyboard); taken up on the ground, working in the air as long as it stays held, gone off the board
   (when *target*
     ;; (the trigger comes back from pc-enhanced-set-player, in the second vector: last frame's)
     (let ((v (-> *enhanced-player-vec* 1)))
@@ -2461,15 +2461,35 @@ capture exactly."
         (cond
           ((not (focus-test? *target* board))
            (set! *enhanced-board-boost* 0.0)
+           (set! *enhanced-board-boost-armed* #f)
            )
-          ((not (time-elapsed? (-> *target* control last-time-on-surface) (seconds 0.15)))
-           (seek! *enhanced-board-boost*
-                  throttle
-                  (* (if (< *enhanced-board-boost* throttle) 1.4 0.8) (seconds-per-frame))
-                  )
-           )
+          (else
+            (cond
+              ((not (time-elapsed? (-> *target* control last-time-on-surface) (seconds 0.15)))
+               ;; (a kick in the pad as it takes)
+               (when (and (< 0.02 throttle) (not *enhanced-board-boost-armed*))
+                 (set! *enhanced-board-boost-armed* #t)
+                 (cpad-set-buzz! (-> *cpad-list* cpads 0) 1 180 (seconds 0.25))
+                 )
+               (if (>= 0.02 throttle)
+                   (set! *enhanced-board-boost-armed* #f)
+                   )
+               )
+              ((>= 0.02 throttle)
+               (set! *enhanced-board-boost-armed* #f)
+               )
+              )
+            (let ((f0-want (if *enhanced-board-boost-armed* throttle 0.0)))
+              (seek! *enhanced-board-boost*
+                     f0-want
+                     (* (if (< *enhanced-board-boost* f0-want) 1.4 0.8) (seconds-per-frame))
+                     )
+              )
+            )
           )
         )
+      ;; (the view opening with it)
+      (set! *enhanced-fov-kick* (+ 1.0 (* 0.18 *enhanced-board-boost*)))
       )
     )
   ;; Enhanced: grass bends away from Jak
