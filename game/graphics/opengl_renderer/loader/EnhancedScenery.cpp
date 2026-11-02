@@ -624,7 +624,9 @@ void prepare_tree(tfrag3::ShrubTree& tree,
   }
   data->impostors = !data->batches.empty();
   for (const auto& b : data->batches) {
-    data->impostors = data->impostors && !lib.meshes[b.mesh].imp_rgba.empty();
+    // (a model already drawn has its pictures on the GPU only, as a level coming in later finds it)
+    const auto& mesh = lib.meshes[b.mesh];
+    data->impostors = data->impostors && (!mesh.imp_rgba.empty() || mesh.imp_tex);
   }
   tree.enh_scenery = data;
 }
@@ -799,7 +801,9 @@ void prepare_tie_tree(tfrag3::TieTree& tree,
   }
   data->impostors = !data->batches.empty();
   for (const auto& b : data->batches) {
-    data->impostors = data->impostors && !lib.meshes[b.mesh].imp_rgba.empty();
+    // (a model already drawn has its pictures on the GPU only, as a level coming in later finds it)
+    const auto& mesh = lib.meshes[b.mesh];
+    data->impostors = data->impostors && (!mesh.imp_rgba.empty() || mesh.imp_tex);
   }
   tree.enh_scenery = data;
 }
