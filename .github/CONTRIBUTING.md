@@ -41,6 +41,19 @@ the short version of how the project works. The long version of every feature is
    `JAK_ENHANCED_POPULATION`, `JAK_ENHANCED_CENSUS` and the others in ENHANCED.md help repeat a test.
 4. Open a pull request with before/after screenshots (the template has a short checklist).
 
+## Modders: working together
+
+Several people already build on this project, some in their own direction (a Jak 1 weather and sky
+mod, for one). To avoid doing the same work twice:
+
+- **Say what you're working on** in [the modders' thread](https://github.com/stichlola/jak-enhanced-trilogy/discussions/2):
+  one post per mod or big feature, with a screenshot. Ask before starting something large.
+- **Your own mod is welcome.** A fork with a new name is fine; keep the credits and link back. If a
+  part of it would help everyone (a fix, a tool, a renderer change), send that part as a pull request.
+- **Small and switchable** pull requests get in fastest (the three rules above).
+- Chat happens in the OpenGOAL modding Discord too, but decisions and plans go in Discussions, where
+  they can be found later.
+
 ## AI assistants
 
 Most of this project was written with Claude Code, and you're welcome to use one too: point it at
