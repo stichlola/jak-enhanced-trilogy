@@ -96,6 +96,10 @@ void main() {
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
   }
+  // (a natural green, as shrub.frag's)
+  if (enh_foliage > 0.5) {
+    color.xyz = mix(vec3(dot(color.xyz, vec3(0.3, 0.59, 0.11))), color.xyz, 0.62) * 0.92;
+  }
   if (enh_wet > 0.0) {
     float w = enh_wet * (enh_foliage > 0.5 ? 1.0 : 0.7);
     color.xyz = mix(color.xyz, color.xyz * color.xyz * 1.8, 0.5 * w) * (1.0 - 0.22 * w);

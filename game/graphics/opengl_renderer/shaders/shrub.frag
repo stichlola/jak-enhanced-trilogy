@@ -94,6 +94,11 @@ void main() {
     discard;
   }
 
+  // Enhanced: grass and leaves a natural green, not a vivid yellow-green (it read as highlighter)
+  if (enh_foliage > 0.5) {
+    color.xyz = mix(vec3(dot(color.xyz, vec3(0.3, 0.59, 0.11))), color.xyz, 0.62) * 0.92;
+  }
+
   // Enhanced: soaked in the rain: grass and leaves darker and deeper in color (dry straw turns
   // brown-green), stones and props darker (the post pass adds their wet sheen)
   if (enh_wet > 0.0) {

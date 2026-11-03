@@ -201,7 +201,9 @@ void main() {
   // of drier yellow-green, each blade its own shade
   // (a deep, saturated green: the composite turns the desert's olive and yellow-greens to sand,
   // a strong green it leaves alone; dry yellow-green tips in some patches)
-  vec3 green = enh_grass_color, dry = enh_grass_dry;
+  // (toned down from the painted green toward a natural, slightly warm one: it read as highlighter)
+  vec3 green = mix(vec3(dot(enh_grass_color, vec3(0.3, 0.59, 0.11))), enh_grass_color, 0.6) * vec3(1.05, 0.88, 0.8);
+  vec3 dry = mix(vec3(dot(enh_grass_dry, vec3(0.3, 0.59, 0.11))), enh_grass_dry, 0.7) * vec3(1.0, 0.92, 0.85);
   vec3 tipc = mix(green, dry, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * 0.6 * t);
   tipc *= mix(0.75, 1.2, rnd(bs, 9u));
   vec3 albedo = mix(tipc * 0.35, tipc, pow(t, 0.6));

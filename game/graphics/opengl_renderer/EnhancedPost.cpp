@@ -5335,9 +5335,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     // the morning (7-10, eased in from 6 and out by 11:30), where the area has a golden look: a
     // clear sky, pink toward the low sun, cream sand (the bright hours wait for it)
     // (from the dawn: its sky the morning's, pink toward the sun)
-    const float morning = ease(hr - 5.f) * (1.f - ease((hr - 10.f) / 1.5f)) *
-                          std::min(m_grade.golden * 2.f, 1.f);
-    const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f)) * (1.f - morning);
+    // (in such an area the morning's look lasts through noon, to the late afternoon's amber: its
+    // noon, a pale glare, read dull)
+    const float golden_area = std::min(m_grade.golden * 2.f, 1.f);
+    const float morning_end = 10.f + 4.5f * golden_area;
+    const float morning = ease(hr - 5.f) * (1.f - ease((hr - morning_end) / 1.5f)) * golden_area;
+    const float noon = ease((hr - 7.5f) / 2.5f) * (1.f - ease((hr - 14.5f) / 2.5f)) * (1.f - morning) *
+                       (1.f - golden_area);
     glUniform1f(glGetUniformLocation(id, "noon"), noon);
     glUniform1f(glGetUniformLocation(id, "morning"), morning);
     // the desert's day (from the dawn at 5, half of it still at the sunset at 18): the morning's
@@ -5349,7 +5353,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     // toward the sun, the clouds lit to match, the shade's open-sky blue)
     const float sky_k = std::max(std::min(m_grade.golden * 2.f, 1.f), m_grade.day_sky);
     glUniform1f(glGetUniformLocation(id, "sky_morning"),
-                ease(hr - 5.f) * (1.f - ease((hr - 10.f) / 1.5f)) * sky_k);
+                ease(hr - 5.f) * (1.f - ease((hr - morning_end) / 1.5f)) * sky_k);
     glUniform1f(glGetUniformLocation(id, "sky_day"),
                 ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) * sky_k);
     glUniform1f(glGetUniformLocation(id, "rock_sun"), m_ssao_ready ? m_grade.rock_sun : 0.f);

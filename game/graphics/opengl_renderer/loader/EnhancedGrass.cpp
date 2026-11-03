@@ -40,7 +40,7 @@ constexpr float kNoFloor = -1e7f;
 // the levels of detail: blades per tile, segments per blade, reach (m)
 constexpr std::array<int, 3> kBlades = {1536, 640, 160};
 constexpr std::array<int, 3> kSegs = {6, 4, 2};
-constexpr std::array<float, 3> kReach = {22.f, 48.f, 100.f};
+constexpr std::array<float, 3> kReach = {26.f, 60.f, 170.f};
 
 struct Zone {
   float x = 0, z = 0, radius = 50;  // m
