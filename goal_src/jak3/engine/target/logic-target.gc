@@ -613,7 +613,8 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   )
 
 ;; Enhanced: JAK_ENHANCED_POSE (test boots, for pictures): "board" on the jetboard, "v<n>" in a new
-;; vehicle of type n, "g<n>" holding out the gun of pickup-type n, ready to fire
+;; vehicle of type n, "g<n>" holding out the gun of pickup-type n, ready to fire; "h" nothing but
+;; the health meter shown (every pose shows it)
 (define *enhanced-pose-buf* (new 'global 'string 64 (the-as string #f)))
 (define *enhanced-pose-wanted* (pc-enhanced-getenv "JAK_ENHANCED_POSE" *enhanced-pose-buf* 64))
 (define *enhanced-pose-frames* 0)
@@ -729,6 +730,8 @@ capture exactly."
       (process-spawn scene-player :init scene-player-init *enhanced-scene-buf* #t #f :name "scene-player")
       )
     (when (and *enhanced-pose-wanted* *target* (>= *enhanced-camlog-frames* 150))
+      ;; (the health and light/dark eco meter shown in every test pose's pictures; "h": only that)
+      (show-hud 'hud-health)
       (let ((kind (-> *enhanced-pose-buf* data 0))
             (n (enhanced-pose-number))
             )
