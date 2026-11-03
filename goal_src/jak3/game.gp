@@ -396,6 +396,8 @@
 (cgo-file "lwassig.gd" common-dep)
 (cgo-file "lwlandm.gd" common-dep)
 (cgo-file "lwstdpck.gd" common-dep)
+;; Enhanced: the Hellcat parked in the desert (its new desert-hellcat.o goes after car.o)
+(cgo-file "deshcat.gd" '("$OUT/obj/car.o" "$OUT/obj/default-menu-pc.o"))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Example Custom Level

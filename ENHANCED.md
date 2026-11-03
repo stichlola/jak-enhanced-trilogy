@@ -108,7 +108,16 @@ each. With both factions out in the streets the vehicles' bank was the one left 
 and bikes were silent: `update-sound-info` (cty-borrow-manager.gc) now puts it first. Names the game
 plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not missing sounds.
 `JAK_ENHANCED_MENU=8:<vehicle type>` puts Jak in a new vehicle (0-2 bikes, needs ctycarb; 3-5 cars,
-ctycara; 7 Hellcat) once its level is in, for testing.
+ctycara; 7 Hellcat, in the desert only) once its level is in, for testing.
+
+Desert Hellcat: a Hellcat (vehicle type 7) is parked about 10 m to the left of `desert-start`; Jak gets in
+and out with triangle and drives it as the city's hover cars (x throttle, square brake). The game never
+had an `h-hellcat` type (only its constants and skeleton group in car.gc), so car.gc now has one, with
+Jak 2's hellcat collision. Its code and art are the `deshcat` level (`dgos/deshcat.gd`: the hover-vehicle
+code as HGA.DGO carries it, car.o, the Hellcat's art and `ctycarc`'s bsp, so `ctycarc.fr3` draws it),
+loaded into wasall's borrow slot 0 (now 464 KB, was 405) while no task wants that slot
+(`enhanced-hellcat-update`, logic-target.gc). `JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up,
+gets in, drives off and gets out by himself, with `[hellcat-test]` log lines for screenshots.
 
 Ambient sounds (`game/sound/common/enhanced_ambience.*`): ten loops in
 `game/assets/enhanced/sounds` (light rain, heavy rain, dripping, night wind, storm wind, crickets,

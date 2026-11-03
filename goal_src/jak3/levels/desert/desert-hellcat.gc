@@ -1,0 +1,47 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: desert-hellcat.gc
+;; name in dgo: desert-hellcat
+;; dgos: DESHCAT
+
+;; Enhanced: the deshcat level (the Hellcat in the desert, see deshcat.gd). Once it's in, vehicle
+;; type 7 (h-hellcat) can be spawned there: enhanced-hellcat-update (logic-target.gc) parks one
+;; near desert-start. Every Hellcat goes before the level's code does.
+
+(defun deshcat-activate ((arg0 level) (arg1 symbol))
+  (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
+  (format 0 "[hellcat] deshcat active, heap ~DK free~%"
+          (/ (&- (-> arg0 heap top) (-> arg0 heap current)) 1024)
+          )
+  0
+  (none)
+  )
+
+(defun deshcat-deactivate ((arg0 level))
+  (when (= (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
+    (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) #f)
+    )
+  ;; Jak out of it first, then no h-hellcat may outlive its code
+  (when (and *target* (focus-test? *target* pilot))
+    (let ((v (handle->process (-> *target* pilot vehicle))))
+      (if (and v (type? v h-hellcat))
+          (send-event *target* 'end-mode 'pilot)
+          )
+      )
+    )
+  (let ((gp-0 (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)))))
+    (when gp-0
+      (deactivate gp-0)
+      )
+    )
+  (set! (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)) (the-as handle #f))
+  (format 0 "[hellcat] deshcat out~%")
+  0
+  (none)
+  )
+
+(defun deshcat-hellcat ()
+  "The Hellcat (vehicle type 7) if there's one."
+  (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)))
+  )

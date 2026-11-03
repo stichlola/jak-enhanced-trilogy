@@ -9051,7 +9051,9 @@
                  :callback-list '((34 . wasall-logout) (36 . wasall-deactivate) (35 . wasall-activate) (33 . wasall-login))
                  :borrow (new 'static 'level-borrow-info
                    :alias #f
-                   :borrow-size (new 'static 'array uint16 5 #x195 #x0 #x0 #x0 #x0)
+                   ;; Enhanced: slot 0 was #x195 (405 KB); the desert Hellcat (deshcat) needs a bit
+                   ;; more, wasall has ~235 KB left over
+                   :borrow-size (new 'static 'array uint16 5 #x1d0 #x0 #x0 #x0 #x0)
                    :borrow-info (new 'static 'array object 5 #f #f #f #f #f)
                    )
                  :bottom-height (meters -10000)
@@ -20807,6 +20809,46 @@
 
 (#when PC_PORT
   (cons! *level-load-list* 'piazza)
+  )
+
+;; Jak Enhanced: the Hellcat parked in the desert (DESHCAT.DGO: the hover-vehicle code, h-hellcat
+;; and the Hellcat's art, with ctycarc's bsp so ctycarc.fr3 draws it). It sits in wasall's borrow
+;; slot 0 while no task wants that slot; enhanced-hellcat-update (logic-target.gc) loads it.
+(define deshcat
+  (new 'static 'level-load-info
+    :name 'deshcat
+    :visname 'deshcat-vis
+    :nickname 'deshcat
+    :dbname 'deshcat
+    :taskname 'desert
+    :index #x12a
+    :task-level #x6
+    :master-level 'wasall
+    :level-flags (level-flags not-physical)
+    :packages '()
+    :run-packages '("common")
+    :memory-mode (level-memory-mode borrow0)
+    :music-bank #f
+    :extra-sound-bank #f
+    :mood-func 'update-mood-copy-parent
+    :special-mood #f
+    :ocean #f
+    :ocean-alpha 1.0
+    :priority 100
+    :draw-priority 10.0
+    :bigmap-id (bigmap-id none)
+    :continues '()
+    :callback-list '((36 . deshcat-deactivate) (35 . deshcat-activate))
+    :borrow #f
+    :bottom-height (meters -10000)
+    :fog-height (meters 80)
+    :max-rain 1.0
+    :fog-mult 1.0
+    :mood-range (new 'static 'mood-range :max-cloud 1.0 :min-fog 0.5 :max-fog 1.0)
+    )
+  )
+(#when PC_PORT
+  (cons! *level-load-list* 'deshcat)
   )
 
 ;; og:preserve-this added test-zone level
