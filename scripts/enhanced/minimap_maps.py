@@ -1,12 +1,12 @@
-"""The district maps of the minimap and of the big map, redrawn at 4x in a modern style (Jak II and 3).
+"""The district maps of the minimap and of the big map, redrawn at 4x (Jak II and 3).
 
-  python scripts/enhanced/minimap_maps.py [--only <name>...] [--preview]
+  python scripts/enhanced/minimap_maps.py [--only <name>...] [--preview] [--restyle]
 
 The maps are the textures "map-..." of the "...-minimap" pages, from the decompiler's texture dump.
 Most are flat 4-bit drawings (Haven's tiles: dark blocks, white streets, blue water, green parks);
-they keep their exact shapes (each color region's edge smoothed at 4x) and get a new look: a calmer
-palette, raised blocks with a lit bevel and a soft shadow on the streets, thin outlines, water deeper
-away from the shore with a light rim. The painted ones (the desert, Spargus...) are enlarged with
+they keep their exact shapes and colors, each color region's edge smoothed at 4x (--restyle: a new
+look instead, a calmer palette, raised blocks with a lit bevel and a soft shadow on the streets, thin
+outlines, water deeper away from the shore with a light rim). The painted ones (the desert, Spargus...) are enlarged with
 Real-ESRGAN (find_esrgan in hd_textures.py). The results go where the game loads them,
 out/enhanced/hud/<game>/<tpage>/<name>.png (EnhancedMapTextures.cpp): made from the games' art,
 so not in git. --preview also writes local/minimap_maps/preview.png, before and after.
@@ -77,7 +77,7 @@ def blur(x, sigma):
     return ndimage.gaussian_filter(x, sigma, mode="nearest")
 
 
-def flat(a):
+def flat(a, restyle=False):
     h, w = a.shape[:2]
     colors, labels = np.unique(a.reshape(-1, 4), axis=0, return_inverse=True)
     labels = labels.reshape(h, w)
@@ -85,6 +85,9 @@ def flat(a):
     cover = np.stack([ndimage.zoom(blur((labels == k).astype(float), 0.7), S, order=1, mode="nearest",
                                    grid_mode=True) for k in range(len(colors))])
     big = np.argmax(cover, axis=0)
+    if not restyle:
+        # the game's own drawing, its colors as they are, only bigger and smooth-edged
+        return colors[big].astype(np.float64)
     kinds = [role(c) for c in colors]
     rgb = np.stack([recolor(c, k) for c, k in zip(colors, kinds)])[big]
     alpha = colors[:, 3][big]
@@ -163,7 +166,7 @@ def main():
     for game, path, a in maps:
         target = OUT / game / path.parent.name / path.name
         if len(np.unique(a.reshape(-1, 4), axis=0)) <= 16:
-            done.append((a, flat(a), target))
+            done.append((a, flat(a, "--restyle" in args), target))
         else:
             to_paint.append((a, target))
     if to_paint:
