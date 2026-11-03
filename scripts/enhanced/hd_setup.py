@@ -66,8 +66,9 @@ def main():
         run(sys.executable, HERE / "hd_textures.py", "--game", game)
         run(sys.executable, HERE / "hd_textures.py", "--game", game, "--hud")
         print(f"[{game}] extracting the levels again with the HD textures...", flush=True)
+        # (Jak 3: the levels' models ripped too, *-lod0.glb: the editor makes the game's own models from them)
         run(decompiler, config, "iso_data", "decompiler_out", "--version", version, "--config-override",
-            json.dumps({"decompile_code": False, "levels_extract": True}))
+            json.dumps({"decompile_code": False, "levels_extract": True, "rip_levels": game == "jak3"}))
     run(sys.executable, HERE / "minimap_maps.py")
     print("HD textures done.")
 
