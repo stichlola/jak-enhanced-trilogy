@@ -1977,7 +1977,60 @@
 ;; *h-hellcat-constants*, and vehicle-spawn names an h-hellcat type, but the type itself was never
 ;; there (vehicle type 7 spawned nothing). The collision is Jak 2's hellcat's (car.gc there).
 (deftype h-hellcat (h-car-base)
-  ()
+  ((enh-altitude  float)  ;; Enhanced: the height Jak flies it at (world, game units)
+   )
+  )
+
+;; Enhanced: free flight. The game's flight level comes from the city's traffic height map, which the
+;; desert doesn't have (R2 never lifted it): the Hellcat holds a height of its own instead. R2 takes off
+;; (12 m up) and lands as in the city, R1 climbs and L1 descends (from the ground, R1 takes off too).
+(defconstant ENHANCED_HELLCAT_CLIMB (meters 12))      ;; per second
+(defconstant ENHANCED_HELLCAT_CEILING (meters 600))   ;; world height
+
+(defmethod vehicle-method-88 ((this h-hellcat) (arg0 vehicle-controls))
+  (when (not *pause-lock*)
+    (let ((y (-> this rbody position y)))
+      (cond
+        ((zero? (-> this flight-level-index))
+         ;; taking off, by R2 (the game's own toggle, below) or R1: a height above where it is now
+         (when (or (cpad-pressed? 0 r2) (cpad-hold? 0 r1))
+           (set! (-> this enh-altitude) (+ y (meters 12)))
+           (set! (-> this flight-level) (-> this enh-altitude))
+           (if (cpad-hold? 0 r1)
+               (hvehicle-method-154 this)
+               )
+           )
+         )
+        (else
+          (let ((climb (* ENHANCED_HELLCAT_CLIMB (seconds-per-frame))))
+            (if (cpad-hold? 0 r1)
+                (+! (-> this enh-altitude) climb)
+                )
+            (if (cpad-hold? 0 l1)
+                (-! (-> this enh-altitude) climb)
+                )
+            )
+          ;; (not far from where it is: held under a ledge or on the ground, it doesn't wind up a height
+          ;; it would shoot up to)
+          (set! (-> this enh-altitude)
+                (fmax (+ y (meters -20)) (fmin (+ y (meters 20)) (fmin ENHANCED_HELLCAT_CEILING (-> this enh-altitude))))
+                )
+          (set! (-> this flight-level) (-> this enh-altitude))
+          )
+        )
+      )
+    )
+  (call-parent-method this arg0)
+  (none)
+  )
+
+(defmethod vehicle-method-117 ((this h-hellcat))
+  (call-parent-method this)
+  ;; (the height map's level replaced by the Hellcat's own while Jak flies it)
+  (if (and (> (-> this flight-level-index) 0) (logtest? (-> this v-flags) (vehicle-flag player-driving)))
+      (set! (-> this flight-level) (-> this enh-altitude))
+      )
+  (none)
   )
 
 

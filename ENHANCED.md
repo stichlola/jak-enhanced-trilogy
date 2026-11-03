@@ -111,7 +111,9 @@ plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not m
 ctycara; 7 Hellcat, in the desert only) once its level is in, for testing.
 
 Desert Hellcat: a Hellcat (vehicle type 7) is parked about 10 m to the left of `desert-start`; Jak gets in
-and out with triangle and drives it as the city's hover cars (x throttle, square brake). The game never
+and out with triangle and drives it as the city's hover cars (x throttle, square brake). It flies freely:
+r2 takes off and lands, r1 climbs, l1 descends (12 m/s, up to 600 m), at a height of its own instead of
+the city's traffic height map, which the desert doesn't have (h-hellcat's methods 88 and 117). The game never
 had an `h-hellcat` type (only its constants and skeleton group in car.gc), so car.gc now has one, with
 Jak 2's hellcat collision. Its code and art are the `deshcat` level (`dgos/deshcat.gd`: the hover-vehicle
 code as HGA.DGO carries it, car.o, the Hellcat's art and `ctycarc`'s bsp, so `ctycarc.fr3` draws it),
