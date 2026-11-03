@@ -118,7 +118,10 @@ void main() {
   scales_vf01.x = scales_vf01.z;  // = sy
   scales_vf01.x *= scales_vf01.w;  // x = sx * sy
   scales_vf01.x *= inv_area;  // x = sx * sy * inv_area (area ratio)
-  fragment_color.w *= min(scales_vf01.x, 1.0);  // is this right? doesn't this stall??
+  // Enhanced: not the 3D (turned) sprites: long and thin, the gun beams faded almost to nothing
+  if (rendermode != 3u) {
+    fragment_color.w *= min(scales_vf01.x, 1.0);  // is this right? doesn't this stall??
+  }
 
 
   // STEP 4: actual vertex transformation
@@ -209,7 +212,8 @@ void main() {
   transformed.y *= SCISSOR_ADJUST * HEIGHT_SCALE;
   gl_Position = transformed;
   // Enhanced: behind the camera (the sun, looking down from the editor): not mirrored onto the screen
-  if (rendermode != 2u && transformed_pos_vf02.w <= 0.0) {
+  // (the 3D sprites' w is negative in front, as pfog0: by the sign of Q, or every gun beam was dropped)
+  if ((rendermode == 1u && transformed_pos_vf02.w <= 0.0) || (rendermode == 3u && Q <= 0.0)) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
 

@@ -899,7 +899,8 @@ void Sprite3::do_block_common(SpriteMode mode,
     m_vertices_3d.at(start_vtx_id + 3).info[2] = 2;
 
     // note that PC swaps the last two vertices
-    if (render_state->version == GameVersion::Jak3) {
+    // (not the 3D sprites: there that word is the quaternion's x, the corners came out shuffled)
+    if (render_state->version == GameVersion::Jak3 && mode != Mode3D) {
       auto flag = m_vec_data_2d[sprite_idx].flag();
       switch (flag & 0x30) {
         case 0x10:
