@@ -159,8 +159,8 @@ uniform vec4 spot_dir[8];
 uniform vec4 lantern;           // Jak's lantern in the desert at night: view space, strength
 uniform vec4 town_glow;         // a town lighting the night sky over it: world x, z, strength
 uniform int beacon_count;       // far glows drawn as points of light: view space + size
-uniform vec4 beacon_pos[24];
-uniform vec4 beacon_color[24];  // rgb, strength
+uniform vec4 beacon_pos[64];
+uniform vec4 beacon_color[64];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform float lens_drops;       // raindrops on the lens in a downpour (0 = off)

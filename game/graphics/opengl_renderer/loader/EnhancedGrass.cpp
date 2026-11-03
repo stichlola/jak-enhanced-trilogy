@@ -1009,7 +1009,7 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   }
   glUniform1f(glGetUniformLocation(id, "enh_time"), now);
   glUniform1f(glGetUniformLocation(id, "enh_wind"),
-              g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+              g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
   const auto& pl = g_enhanced_player;
   glUniform4f(glGetUniformLocation(id, "enh_player"), pl.pos[0], pl.pos[1], pl.pos[2],
               pl.valid && g_enhanced_wind.push ? g_enhanced_wind.push_radius * kMeter : 0.f);

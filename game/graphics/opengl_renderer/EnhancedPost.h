@@ -80,6 +80,8 @@ extern EnhancedMerc g_enhanced_merc;
 struct EnhancedWind {
   bool enabled = true;
   float strength = 1.0f;
+  float gust = 1.0f;         // the weather's, each frame: a calm evening sways little, a storm a lot
+  float now() const { return strength * gust; }
   bool push = true;          // grass bends away from Jak
   float push_radius = 1.3f;  // meters
   float wet = 0.f;           // how soaked grass and leaves look (the weather, each frame)
@@ -485,6 +487,16 @@ class EnhancedPost {
   int m_last_ride_state = 0;
   const FireMemory* note_fire_glow(const float* pos, float size);
   bool is_fire(const FireMemory& f) const;
+  // far lamps seen at the same spot (world, game units): still beacons when the game stops drawing
+  // their glow (its far entities and particles are culled long before the town goes out of view)
+  struct LampMemory {
+    float pos[3];
+    float size;
+    float color[3];
+    double first, last;
+  };
+  std::vector<LampMemory> m_lamps;
+  void remember_lamp(const float* pos, float size, const float* color);
 
   // god rays, half resolution
   void do_shafts(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,

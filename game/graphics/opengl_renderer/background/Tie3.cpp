@@ -845,7 +845,8 @@ void do_wind_math(u16 wind_idx,
   float vf17_z = my_vector[1];
 
   // lqc2 vf16, 12(s3)               # load wind vector
-  math::Vector4f vf16 = work_vector;
+  // Enhanced: the weather's wind (EnhancedWind::gust): a storm sways the trees more
+  math::Vector4f vf16 = work_vector * g_enhanced_wind.gust;
 
   // vmula.xyzw acc, vf16, vf1       # acc = vf16
   // vmsubax.xyzw acc, vf18, vf19    # acc = vf16 - vf18 * wind_const.x

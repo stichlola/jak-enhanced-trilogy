@@ -423,7 +423,7 @@ void Shrub::render_tree(int idx,
     glUniform1i(m_uniforms.decal, draw.mode.get_decal() ? 1 : 0);
     // Enhanced: wind only on cutout (alpha tested) shrubs: grass and leaves, not rocks or props
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_wind"),
-                draw.mode.get_at_enable() && g_enhanced_wind.enabled ? g_enhanced_wind.strength
+                draw.mode.get_at_enable() && g_enhanced_wind.enabled ? g_enhanced_wind.now()
                                                                       : 0.f);
     glUniform1f(glGetUniformLocation(render_state->shaders[ShaderId::SHRUB].id(), "enh_foliage"),
                 draw.mode.get_at_enable() ? 1.f : 0.f);

@@ -251,6 +251,15 @@ bool load_mesh(Mesh& mesh) {
   for (size_t p = 3; p < mesh.rgba.size() && !mesh.cutout; p += 4) {
     mesh.cutout = mesh.rgba[p] < 128;
   }
+  // (Tripo's grass and bushes are modeled blades on an opaque texture: foliage all the same, or
+  // they stood stiff in the wind and under Jak's feet, and were lit as rock)
+  {
+    const auto& file = mesh.file;
+    if (file.find("grass") != std::string::npos ||
+        (file.find("bush") != std::string::npos && file.find("cactus") == std::string::npos)) {
+      mesh.cutout = true;
+    }
+  }
   {
     double sum[3] = {0, 0, 0}, n = 0;
     for (size_t p = 0; p < mesh.rgba.size(); p += 4) {
@@ -1448,7 +1457,7 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
     glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), b.foliage ? 1.f : 0.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), b.stone ? 1.f : 0.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
-                b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+                b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_INST);
 
     glDisable(GL_PRIMITIVE_RESTART);
@@ -1504,7 +1513,7 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
     glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
-                b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+                b.foliage && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
     glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
     glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)imp_grid(mesh));
     setup_tfrag_shader(render_state, b.mode, ShaderId::SHRUB_IMP);
@@ -2485,7 +2494,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), mesh.cutout ? 1.f : 0.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), mesh.cutout ? 0.f : 1.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
-                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
     setup_tfrag_shader(render_state, mesh.cutout ? cut : solid, ShaderId::SHRUB_INST);
     glBindVertexArray(version.vao);
     glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
@@ -2535,7 +2544,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
-                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.strength : 0.f);
+                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
     glUniform1i(glGetUniformLocation(ish.id(), "enh_imp_normals"), mesh.imp_nrm_tex ? 1 : 0);
     glUniform1f(glGetUniformLocation(ish.id(), "enh_imp_grid"), (float)imp_grid(mesh));
     setup_tfrag_shader(render_state, imp_mode, ShaderId::SHRUB_IMP);

@@ -69,10 +69,14 @@ bool glow_math(const SpriteGlowConsts* consts,
   // Enhanced: every glow is a light source for the post pass's dynamic lights
   // (not the sky's: the sun, the moon and the stars are kilometers wide and placed 1 m from the camera,
   // a light there burned the ground around Jak white at night)
-  if (fade > 0.f && rgba.x() + rgba.y() + rgba.z() > 8.f &&
-      std::max(in->size_x, in->size_y) < 1000.f * 4096.f) {
-    g_enhanced_lights.add(in->pos, std::max(in->size_x, in->size_y), rgba.x() / 255.f,
-                          rgba.y() / 255.f, rgba.z() / 255.f);
+  // (with its color before the fade: faded out with distance, it's still a far beacon, Spargus's
+  // gate lamps vanished from the desert)
+  {
+    float k = in->color[3] / 128.f / 255.f;
+    float r = in->color[0] * k, g = in->color[1] * k, b = in->color[2] * k;
+    if ((r + g + b) * 255.f > 8.f && std::max(in->size_x, in->size_y) < 1000.f * 4096.f) {
+      g_enhanced_lights.add(in->pos, std::max(in->size_x, in->size_y), r, g, b, fade);
+    }
   }
 
   // Apply an offset. This moves the point along a line between its original position, and the

@@ -1601,7 +1601,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     const float glow_day =
         g_enhanced_sun.valid ? 1.f - std::max(m_night, night_darkness()) : 0.f;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
-      const auto& l = g_enhanced_lights.lights[i];
+      const auto& raw = g_enhanced_lights.lights[i];
+      auto l = raw;  // as the game draws it, faded with distance: the light it casts
+      for (int k = 0; k < 3; k++) {
+        l.color[k] *= raw.fade;
+      }
       Candidate c;
       for (int col = 0; col < 3; col++) {
         c.pos[col] = 0.f;
@@ -1615,18 +1619,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
       // (not a fire's sparks and embers either: tiny glows)
-      if (dist > 40.f * kMeter && dist < 2500.f * kMeter && c.pos[2] > 0.f &&
-          l.size > 0.6f * kMeter && l.size < 12.f * kMeter) {
-        float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
-        if (peak > 0.f) {
+      // (by its color before the fade: the game fades its lamps out a few hundred meters away)
+      const float raw_peak = std::max(raw.color[0], std::max(raw.color[1], raw.color[2]));
+      const bool lamp_sized = raw.size > 0.6f * kMeter && raw.size < 12.f * kMeter;
+      if (lamp_sized && raw_peak > 0.f && dist < 2500.f * kMeter) {
+        remember_lamp(raw.pos, raw.size, raw.color);
+      }
+      if (dist > 40.f * kMeter && dist < 2500.f * kMeter && lamp_sized) {
+        float peak = raw_peak;
+        if (peak > 0.f && c.pos[2] > 0.f) {
           Beacon b;
           std::memcpy(b.pos, c.pos, sizeof(float) * 3);
-          b.pos[3] = l.size;
+          b.pos[3] = raw.size;
           for (int k = 0; k < 3; k++) {
-            b.color[k] = l.color[k] / peak;
+            b.color[k] = raw.color[k] / peak;
           }
           b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
-          b.score = (l.color[0] + l.color[1] + l.color[2]) / (dist / kMeter);
+          b.score = (raw.color[0] + raw.color[1] + raw.color[2]) / (dist / kMeter);
           beacons.push_back(b);
         }
       }
@@ -1689,6 +1698,39 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (!dup) {
         candidates.push_back(c);
       }
+    }
+    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
+    // seconds; one gone from right in front of the camera was put out or destroyed: forgotten)
+    for (size_t i = 0; on && i < m_lamps.size();) {
+      auto& l = m_lamps[i];
+      float v[3] = {0.f, 0.f, 0.f};
+      for (int col = 0; col < 3; col++) {
+        for (int row = 0; row < 3; row++) {
+          v[col] += (l.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      float dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+      double unseen = m_time - l.last;
+      bool steady = l.last - l.first >= 2.0;
+      if ((dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) || unseen > 900.0) {
+        m_lamps[i] = m_lamps.back();
+        m_lamps.pop_back();
+        continue;
+      }
+      i++;
+      if (!steady || unseen <= 0.0 || dist < 40.f * kMeter || dist > 2500.f * kMeter || v[2] <= 0.f) {
+        continue;
+      }
+      float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+      Beacon b;
+      std::memcpy(b.pos, v, sizeof(float) * 3);
+      b.pos[3] = l.size;
+      for (int k = 0; k < 3; k++) {
+        b.color[k] = l.color[k] / peak;
+      }
+      b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+      b.score = (l.color[0] + l.color[1] + l.color[2]) / (dist / kMeter);
+      beacons.push_back(b);
     }
     // explosions: a bright flash fading in half a second (sorted first: the score is huge)
     {
@@ -2690,7 +2732,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
     {
       // the beacons, the brightest and nearest first, shown as the night falls
-      constexpr int kBeacons = 24;
+      // (a town's every lamp: Spargus's gate and walls are more than twenty)
+      constexpr int kBeacons = 64;
       std::sort(beacons.begin(), beacons.end(),
                 [](const Beacon& a, const Beacon& b) { return a.score > b.score; });
       const float shown = std::max(m_night, night_darkness());
@@ -3463,7 +3506,14 @@ void EnhancedPost::update_scene() {
   ease(m_wind[0], wx, k_wind);
   ease(m_wind[1], wz, k_wind);
   ease(m_wind_speed, speed, k_wind);
-  const float wl = std::max(1e-3f, std::sqrt(m_wind[0] * m_wind[0] + m_wind[1] * m_wind[1]));
+  // the grass and trees sway with it: the wind's speed, a storm or a sandstorm, and slow swells
+  // over a few minutes (calm spells, breezier ones)
+  {
+    const float swell = 0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3);
+    const float rough = std::max(m_storm, std::max(m_dust, 0.7f * m_rain));
+    g_enhanced_wind.gust = std::clamp((m_wind_speed / 9.f + 1.4f * rough) * swell, 0.5f, 3.f);
+  }
+  const float wl =std::max(1e-3f, std::sqrt(m_wind[0] * m_wind[0] + m_wind[1] * m_wind[1]));
   // (wrapped now and then: a pop every few hours of the same wind)
   for (int i = 0; i < 2; i++) {
     m_drift[i] = std::fmod(m_drift[i] + m_wind[i] / wl * m_wind_speed * dt, 1e5);
@@ -6576,6 +6626,36 @@ const EnhancedPost::FireMemory* EnhancedPost::note_fire_glow(const float* pos, f
     m_fires.push_back({{pos[0], pos[1], pos[2]}, size, m_time, m_time, 1});
   }
   return nullptr;
+}
+
+// A far glow this frame: the lamp seen at the same spot, kept up to date (the brightest of its
+// glows), or a new one (a shot moving on leaves short-lived ones, dropped as they age)
+void EnhancedPost::remember_lamp(const float* pos, float size, const float* color) {
+  constexpr float kSame = 2.f * kMeter;
+  for (auto& l : m_lamps) {
+    float dx = l.pos[0] - pos[0], dy = l.pos[1] - pos[1], dz = l.pos[2] - pos[2];
+    if (dx * dx + dy * dy + dz * dz < kSame * kSame) {
+      bool fresh = l.last != m_time;
+      l.last = m_time;
+      if (fresh || color[0] + color[1] + color[2] > l.color[0] + l.color[1] + l.color[2]) {
+        l.size = size;
+        std::memcpy(l.color, color, sizeof(float) * 3);
+      }
+      return;
+    }
+  }
+  // (full: the oldest-seen goes)
+  if (m_lamps.size() >= 512) {
+    auto oldest = std::min_element(m_lamps.begin(), m_lamps.end(),
+                                   [](const auto& a, const auto& b) { return a.last < b.last; });
+    m_lamps.erase(oldest);
+  }
+  LampMemory l;
+  std::memcpy(l.pos, pos, sizeof(float) * 3);
+  l.size = size;
+  std::memcpy(l.color, color, sizeof(float) * 3);
+  l.first = l.last = m_time;
+  m_lamps.push_back(l);
 }
 
 void EnhancedPost::draw_debug_window() {

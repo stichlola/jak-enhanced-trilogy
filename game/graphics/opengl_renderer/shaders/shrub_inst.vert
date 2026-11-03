@@ -78,12 +78,16 @@ void main() {
         }
       }
     }
-    // (by how tall the tuft is: a tall bush lies down as far as a short tuft, its tips near the
-    // ground)
-    float tall = enh_tip.y * length(inst_c1.xyz);
-    float push = tip * tip;
-    world.xz += offset * push * 0.75 * tall;
-    world.y -= press * push * 0.6 * tall;
+    // each blade turned about its own foot, more toward its tip (it bends, its length kept: moved
+    // aside and pressed down apart, the tufts splayed flat like a crushed flower), at most ~35 degrees
+    float len2 = length(offset);
+    if (press > 0.0 && len2 > 1e-4) {
+      vec2 dir = offset / len2;
+      float h = world.y - foot.y;
+      float a = press * 0.6 * tip;
+      world.xz += dir * h * sin(a);
+      world.y = foot.y + h * cos(a);
+    }
   }
 
   vec3 vert = world - cam_trans.xyz;

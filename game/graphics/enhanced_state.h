@@ -164,15 +164,17 @@ extern EnhancedFx g_enhanced_fx;
 // explosions), recorded by the sprite renderer (Sprite3_Glow.cpp), used as point lights by the
 // post pass. World positions in game units, colors 0..~2.
 struct EnhancedLights {
-  static constexpr int kMax = 128;
+  // (room for the far ones faded out too: they took the near lamps' places)
+  static constexpr int kMax = 512;
   struct Light {
     float pos[3];
     float size;   // the glow's size, game units
-    float color[3];
+    float color[3];  // before the game's own fade with distance
+    float fade;      // that fade: 0 = faded out (still a far beacon)
   };
   Light lights[kMax];
   int count = 0;
-  void add(const float* pos, float size, float r, float g, float b) {
+  void add(const float* pos, float size, float r, float g, float b, float fade = 1.f) {
     if (count < kMax) {
       auto& l = lights[count++];
       l.pos[0] = pos[0];
@@ -182,6 +184,7 @@ struct EnhancedLights {
       l.color[0] = r;
       l.color[1] = g;
       l.color[2] = b;
+      l.fade = fade;
     }
   }
 };
