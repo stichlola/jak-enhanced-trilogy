@@ -3263,6 +3263,17 @@ void main() {
     float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
     vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
     c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.3 * desert_noon()), 0.0, 1.0));
+    // a light sand haze far off, always in the air: the far dunes and mountains' feet sink into a
+    // pale sand color, the sun shining through it (bright toward it, the mountains' shadows in it);
+    // at night only a faint grey-blue, the lamps glowing in it (the halos below)
+    {
+      float far_k = 1.0 - exp(-max(dist - 60.0, 0.0) / 700.0);
+      float sand_low = exp(-max(rel + 8.0, 0.0) / 140.0) * (z > 0.0 ? 1.0 : exp(-up * 9.0));
+      vec3 sand_c = vec3(0.9, 0.76, 0.56);
+      vec3 sun_lit = sun_color() * (0.7 + 0.5 * toward * toward + 0.8 * pow(toward, 10.0)) * mix(0.6, 1.0, lit);
+      vec3 sc = sand_c * mix(vec3(0.05, 0.06, 0.08), sun_lit, daylight);
+      c = mix(c, sc, clamp(far_k * sand_low * 0.38 * sun_haze, 0.0, 1.0));
+    }
   }
   // rain mist: the distance goes grey
   if (weather.x > 0.0 && z > 0.0) {
@@ -3582,7 +3593,9 @@ void main() {
   // light is behind something
   // (at night the air always holds some haze: the lamps glow in it, and light the air along the
   // view between them and the scene)
-  float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + clouds.w * 0.35;
+  // (and the desert's sand haze: a torch or a town's lamps glow in it)
+  float air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + clouds.w * 0.35 +
+              sun_haze * 0.45;
   if (air > 0.02 && light_count > 0) {
     vec3 halo = vec3(0.0);
     vec3 shine = vec3(0.0);
@@ -3702,7 +3715,7 @@ void main() {
   // far lights at night: each far glow a point of light with a soft halo that keeps a few pixels
   // however far it is (the game's own glow shrinks to nothing), hidden behind what's in front
   float aspect_px = texel.y / texel.x;
-  float night_air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3;
+  float night_air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + sun_haze * 0.4;
   for (int i = 0; i < beacon_count; i++) {
     vec3 bp = beacon_pos[i].xyz;
     vec2 buv = 0.5 * vec2(proj.z * bp.x, proj.w * bp.y) / bp.z + 0.5;
