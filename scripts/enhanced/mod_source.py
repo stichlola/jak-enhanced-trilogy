@@ -6,7 +6,7 @@ in the launcher (Settings > Mods > add a source) by its raw GitHub URL:
     python scripts/enhanced/mod_source.py --add v0.7   # a new version (newest first), after its release
     python scripts/enhanced/mod_source.py              # only rewrites the mod's texts and checks the file
 
-The version's asset is the release's Jak-Enhanced-Light-<version>.zip (make_release.py --light), the
+The version's asset is the release's windows-jak-enhanced-light-<version>.zip (make_release.py --light), the
 same ZIP for the three games. Checked against the launcher's schema (schemas/mod-source/v1).
 """
 
@@ -65,12 +65,13 @@ def main():
     versions = data.get("mods", {}).get("jak-enhanced-light", {}).get("versions", [])
     if args.add:
         version = args.add.lstrip("v")
-        versions = [v for v in versions if v["version"] != version]
+        # (and a two-part tag replaced by its three-part one: v0.13 by v0.13.0)
+        versions = [v for v in versions if v["version"] != version and v["version"] + ".0" != version]
         versions.insert(0, {
             "version": version,
             "publishedDate": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "assets": {"windows": f"https://github.com/{REPO}/releases/download/{args.add}/"
-                                  f"Jak-Enhanced-Light-{args.add}.zip", "linux": None, "macos": None},
+                                  f"windows-jak-enhanced-light-{args.add}.zip", "linux": None, "macos": None},
             "supportedGames": GAMES,
         })
     out = {

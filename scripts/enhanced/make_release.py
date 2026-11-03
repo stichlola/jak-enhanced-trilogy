@@ -276,8 +276,12 @@ def main():
     if args.light:
         (dest / "data/enhanced-light").write_text(
             "Enhanced Light: the single-game build (common/util/enhanced_light.h)\n", encoding="ascii")
-        zip_path = args.out / f"{LIGHT_NAME}{'-' + args.version if args.version else ''}.zip"
+        # (named as jakmods.dev's mod list reads a release: windows-*.zip, and metadata.json with the
+        # games; its tags are semantic versions, v0.13.0)
+        zip_path = args.out / f"windows-{LIGHT_NAME.lower()}{'-' + args.version if args.version else ''}.zip"
         zip_path.unlink(missing_ok=True)
+        (args.out / "metadata.json").write_text(json.dumps({"supportedGames": ["jak1", "jak2", "jak3"]}),
+                                                encoding="ascii")
         with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
             for f in sorted(dest.rglob("*")):
                 # (no top folder: the launcher wants gk.exe and data/ at the root)
