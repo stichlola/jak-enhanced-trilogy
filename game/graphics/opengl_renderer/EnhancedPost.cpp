@@ -3366,8 +3366,11 @@ void EnhancedPost::update_scene() {
     // (and the morning's: the sun as low, long shadows). The area's own path: the desert's by
     // its late afternoon, the other outdoor areas' by their day sky
     const float path = std::max(std::min(m_grade.golden * 2.f, 1.f), m_grade.day_sky);
-    const float g = std::max(smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)),
-                             smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f))) *
+    // (the desert's sun stays as low all day: overhead at noon its rocks lost their shading)
+    const float golden_area = std::min(m_grade.golden * 2.f, 1.f);
+    const float g = std::max({smooth((hour - 14.5f) / 1.5f) * (1.f - smooth((hour - 18.f) / 1.f)),
+                              smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)),
+                              smooth(hour - 6.f) * (1.f - smooth((hour - 17.f) / 1.f)) * golden_area}) *
                     path;
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;

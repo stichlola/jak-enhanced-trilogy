@@ -103,6 +103,32 @@ struct SceneryTree {
   bool impostors = false;  // every model has one: the game's protos only past kImpReach
 };
 
+// the scenery trees loaded: their stones collide as the placed objects (enhanced_collide_tris);
+// counted again as one comes or goes
+std::mutex g_trees_mutex;
+std::vector<std::weak_ptr<SceneryTree>> g_trees;
+u64 g_trees_version = 0;
+
+void register_tree(const std::shared_ptr<SceneryTree>& t) {
+  std::lock_guard<std::mutex> lock(g_trees_mutex);
+  g_trees.erase(std::remove_if(g_trees.begin(), g_trees.end(), [](const auto& w) { return w.expired(); }),
+                g_trees.end());
+  g_trees.push_back(t);
+  g_trees_version++;
+}
+
+// (a level gone: its trees with it)
+u64 trees_version() {
+  std::lock_guard<std::mutex> lock(g_trees_mutex);
+  const size_t before = g_trees.size();
+  g_trees.erase(std::remove_if(g_trees.begin(), g_trees.end(), [](const auto& w) { return w.expired(); }),
+                g_trees.end());
+  if (g_trees.size() != before) {
+    g_trees_version++;
+  }
+  return g_trees_version;
+}
+
 // the crush map (update_crush)
 struct Crush {
   static constexpr int kCells = 128;
@@ -629,6 +655,7 @@ void prepare_tree(tfrag3::ShrubTree& tree,
     const auto& mesh = lib.meshes[b.mesh];
     data->impostors = data->impostors && (!mesh.imp_rgba.empty() || mesh.imp_tex);
   }
+  register_tree(data);
   tree.enh_scenery = data;
 }
 
@@ -806,6 +833,7 @@ void prepare_tie_tree(tfrag3::TieTree& tree,
     const auto& mesh = lib.meshes[b.mesh];
     data->impostors = data->impostors && (!mesh.imp_rgba.empty() || mesh.imp_tex);
   }
+  register_tree(data);
   tree.enh_scenery = data;
 }
 
@@ -1700,6 +1728,7 @@ namespace {
 // the solid objects' triangles where they stand), built again when the list changes
 constexpr int kCollideTris = 300;            // a model's shape at most
 constexpr float kCollideMinSize = 0.5f;      // m: smaller than this, not solid on its own (pebbles)
+constexpr int kStoneTris = 40;               // a scenery stone's shape at most
 
 struct CollideShape {
   bool ok = false;
@@ -1725,8 +1754,8 @@ struct CollideWorld {
 CollideWorld g_cworld;
 std::mutex g_cworld_mutex;
 
-const CollideShape& collide_shape(const Library& lib, int m) {
-  auto& s = g_shapes[m];
+const CollideShape& collide_shape(const Library& lib, int m, int max_tris = kCollideTris) {
+  auto& s = g_shapes[m * 2 + (max_tris != kCollideTris)];
   if (s.ok) {
     return s;
   }
@@ -1750,14 +1779,16 @@ const CollideShape& collide_shape(const Library& lib, int m) {
   meshopt_remapVertexBuffer(wpos.data(), pos.data(), mesh.verts.size(), sizeof(float) * 3, remap.data());
   std::vector<u32> idx(mesh.indices.size());
   meshopt_remapIndexBuffer(idx.data(), mesh.indices.data(), mesh.indices.size(), remap.data());
-  if (idx.size() > kCollideTris * 3) {
+  if (idx.size() > (size_t)max_tris * 3) {
     std::vector<u32> out(idx.size());
     float err = 0.f;
+    // (a coarse one may lose more of the shape: else the error's limit stopped it at 1000 triangles)
+    const bool coarse = max_tris != kCollideTris;
     size_t n = meshopt_simplify(out.data(), idx.data(), idx.size(), wpos.data(), nv, sizeof(float) * 3,
-                                kCollideTris * 3, 0.05f, meshopt_SimplifyPrune, &err);
-    if (n > kCollideTris * 3 * 2 || n < 3) {
+                                max_tris * 3, coarse ? 0.2f : 0.05f, meshopt_SimplifyPrune, &err);
+    if (n > (size_t)max_tris * 3 * 2 || n < 3) {
       n = meshopt_simplifySloppy(out.data(), idx.data(), idx.size(), wpos.data(), nv, sizeof(float) * 3,
-                                 kCollideTris * 3, 0.05f, &err);
+                                 max_tris * 3, coarse ? 1.f : 0.05f, &err);
     }
     if (n >= 3) {
       out.resize(n);
@@ -1777,7 +1808,8 @@ const CollideShape& collide_shape(const Library& lib, int m) {
     s.tris.push_back(at(idx[flip ? t + 2 : t + 1]));
     s.tris.push_back(at(idx[flip ? t + 1 : t + 2]));
   }
-  lg::info("[enhanced] collision: {} ({} triangles)", mesh.file, s.tris.size() / 3);
+  lg::info("[enhanced] collision: {} ({} triangles{})", mesh.file, s.tris.size() / 3,
+           max_tris != kCollideTris ? ", scenery" : "");
   return s;
 }
 
@@ -1863,6 +1895,78 @@ void build_collide_world(Library& lib, CollideWorld& w) {
       w.objs.push_back(obj);
     }
   }
+
+  // the scenery's stones (the rocks and slabs in the game's protos' places: those had none), the
+  // ones big enough to stand on or bump into
+  std::lock_guard<std::mutex> tlock(g_trees_mutex);
+  int stones = 0;
+  for (const auto& weak : g_trees) {
+    const auto tree = weak.lock();
+    if (!tree) {
+      continue;
+    }
+    for (const auto& b : tree->batches) {
+      if (!b.stone || b.mesh < 0 || !lib.meshes[b.mesh].ok) {
+        continue;
+      }
+      const auto& mesh = lib.meshes[b.mesh];
+      // (a scatter of pebbles and small stones: one coarse shape would be a blob over the gaps)
+      if (mesh.file.find("pebble") != std::string::npos || mesh.file.find("scatter") != std::string::npos) {
+        continue;
+      }
+      // (coarser than a placed one's: many stand together, all in the game's small collide cache)
+      const auto& s = collide_shape(lib, b.mesh, kStoneTris);
+      if (!s.solid) {
+        continue;
+      }
+      // (the shape is around the model's foot, the copies place the model as it is)
+      const Vec3 foot((mesh.lo.x() + mesh.hi.x()) * 0.5f, mesh.foot_y, (mesh.lo.z() + mesh.hi.z()) * 0.5f);
+      for (const auto& inst : b.instances) {
+        const auto& c = inst.col;
+        float scale = 0.f;
+        for (int k = 0; k < 3; k++) {
+          scale = std::max(scale, std::sqrt(c[k][0] * c[k][0] + c[k][1] * c[k][1] + c[k][2] * c[k][2]));
+        }
+        if (s.size * scale < kCollideMinSize * kMeter) {
+          continue;
+        }
+        CollideWorld::Obj obj;
+        obj.first = (u32)(w.tris.size() / 9);
+        for (int k = 0; k < 3; k++) {
+          obj.lo[k] = 1e30f;
+          obj.hi[k] = -1e30f;
+        }
+        for (size_t t = 0; t + 2 < s.tris.size(); t += 3) {
+          float v[3][3];
+          for (int j = 0; j < 3; j++) {
+            const Vec3 l = s.tris[t + j] + foot;
+            for (int r = 0; r < 3; r++) {
+              v[j][r] = c[3][r] + c[0][r] * l.x() + c[1][r] * l.y() + c[2][r] * l.z();
+            }
+          }
+          float lo[3], hi[3];
+          for (int r = 0; r < 3; r++) {
+            lo[r] = std::min({v[0][r], v[1][r], v[2][r]});
+            hi[r] = std::max({v[0][r], v[1][r], v[2][r]});
+            obj.lo[r] = std::min(obj.lo[r], lo[r]);
+            obj.hi[r] = std::max(obj.hi[r], hi[r]);
+          }
+          for (int j = 0; j < 3; j++) {
+            w.tris.insert(w.tris.end(), v[j], v[j] + 3);
+          }
+          w.boxes.insert(w.boxes.end(), {lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]});
+        }
+        obj.count = (u32)(w.tris.size() / 9) - obj.first;
+        if (obj.count) {
+          w.objs.push_back(obj);
+          stones++;
+        }
+      }
+    }
+  }
+  if (stones) {
+    lg::info("[EnhancedScenery] {} stones solid", stones);
+  }
 }
 
 // does a line (from p, by d) come within r of a box?
@@ -1899,10 +2003,12 @@ int enhanced_collide_tris(const float* box, const float* seg, float* out, int st
   {
     // (built again when the list changed, or a little later while models still load; the library
     // busy: the old one this time)
+    // (the placed list's changes and the scenery trees coming and going)
+    const u64 trees = trees_version() << 40;
     u64 version;
     {
       std::lock_guard<std::mutex> plock(g_placed_mutex);
-      version = g_placed_version;
+      version = g_placed_version + trees;
     }
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> clock(g_cworld_mutex);
@@ -1911,7 +2017,7 @@ int enhanced_collide_tris(const float* box, const float* seg, float* out, int st
       std::unique_lock<std::mutex> lock(lib.mutex, std::try_to_lock);
       if (lock.owns_lock()) {
         std::lock_guard<std::mutex> plock(g_placed_mutex);
-        w.version = g_placed_version;
+        w.version = g_placed_version + trees;
         w.tried = now;
         build_collide_world(lib, w);
       }
