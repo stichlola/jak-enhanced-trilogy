@@ -183,6 +183,8 @@ function Invoke-Copy([string]$from, [string]$to) {
 
 $copying = $false
 $cancelled = $false
+$backup = $null
+$old = ''
 $work = Join-Path $env:TEMP 'jak-enhanced-update'
 $name = 'Jak-Enhanced-Trilogy'
 $launcher = Join-Path $Root 'Jak Enhanced Trilogy.bat'
@@ -194,14 +196,31 @@ try {
   Start-Sleep -Seconds 2
   if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
   [void](New-Item -ItemType Directory $work)
-  $zip = Join-Path $work "$name-$Tag.zip"
-  $url = "https://github.com/stichlola/jak-enhanced-trilogy/releases/download/$Tag/$name-$Tag.zip"
-  Get-Download $url $zip
+  # the version installed here: from it, only what changed (make_patch in make_release.py), when the
+  # release has that patch; the whole ZIP otherwise
+  $versionFile = Join-Path $Root 'data\VERSION'
+  $old = if (Test-Path -LiteralPath $versionFile) { ((Get-Content -LiteralPath $versionFile -Raw).Trim() -split '-')[0] } else { '' }
+  $base = "https://github.com/stichlola/jak-enhanced-trilogy/releases/download/$Tag"
+  $patch = $false
+  if ($old) {
+    $zip = Join-Path $work "$name-$Tag-patch-$old.zip"
+    try {
+      Get-Download "$base/$name-$Tag-patch-$old.zip" $zip
+      $patch = $true
+    } catch {
+      Write-Host "(no update from $old alone: the whole new version)"
+    }
+  }
+  if (-not $patch) {
+    $zip = Join-Path $work "$name-$Tag.zip"
+    Get-Download "$base/$name-$Tag.zip" $zip
+  }
   Write-Host 'Unpacking...'
   $unpacked = Join-Path $work 'new'
   Expand-WithProgress $zip $unpacked
   $new = Join-Path $unpacked $name
-  if (-not (Test-Path -LiteralPath (Join-Path $new 'gk.exe'))) { throw 'the download has no gk.exe' }
+  if (-not $patch -and -not (Test-Path -LiteralPath (Join-Path $new 'gk.exe'))) { throw 'the download has no gk.exe' }
+  if (-not (Test-Path -LiteralPath (Join-Path $new 'data\VERSION'))) { throw 'the download has no data\VERSION' }
 
   # nothing may run from the folder while it is replaced
   $found = Get-InstallProcesses
@@ -227,16 +246,52 @@ try {
     }
   }
 
+  # a backup of every file the new version replaces or removes, in backup\<the old version> (only the
+  # last one kept): a copy that stops halfway is put back from it
+  $removedList = Join-Path $new 'data\removed.txt'
+  $removed = @()
+  if (Test-Path -LiteralPath $removedList) {
+    $removed = @(Get-Content -LiteralPath $removedList | Where-Object { $_.Trim() } | ForEach-Object { $_.Replace('/', '\') })
+    Remove-Item -LiteralPath $removedList
+  }
+  $backupRoot = Join-Path $Root 'backup'
+  if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force }
+  $backup = Join-Path $backupRoot $(if ($old) { $old } else { 'previous' })
+  Write-Host "Backing up the files it replaces to $backup..."
+  $newBase = [IO.Path]::GetFullPath($new) + '\'
+  $replaced = @(Get-ChildItem -LiteralPath $new -Recurse -File | ForEach-Object { $_.FullName.Substring($newBase.Length) }) + $removed
+  foreach ($rel in $replaced) {
+    $from = Join-Path $Root $rel
+    if (Test-Path -LiteralPath $from -PathType Leaf) {
+      $to = Join-Path $backup $rel
+      [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($to))
+      Copy-Item -LiteralPath $from -Destination $to -Force
+    }
+  }
+
   Write-Host "Installing over $Root..."
   $copying = $true
   Invoke-Copy $new $Root
+  foreach ($rel in $removed) {
+    $gone = Join-Path $Root $rel
+    if (Test-Path -LiteralPath $gone -PathType Leaf) { Remove-Item -LiteralPath $gone -Force }
+  }
   # data\VERSION last: an update that stops before this is offered again
   Copy-Item -LiteralPath (Join-Path $new 'data\VERSION') -Destination (Join-Path $Root 'data\VERSION') -Force
   Write-Host "Updated to $Tag."
 } catch {
   Write-Host ''
   Write-Host "The update didn't work: $($_.Exception.Message)"
-  if ($copying) {
+  if ($copying -and $backup -and (Test-Path -LiteralPath $backup)) {
+    Write-Host 'It stopped while copying: putting the old files back from the backup...'
+    & robocopy $backup $Root /E /R:3 /W:2 /NDL /NFL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -lt 8) {
+      Write-Host "Done: the game is as it was ($old). You can try again at the next start, or"
+    } else {
+      Write-Host "Putting them back failed too: the old files are in $backup. Start the launcher again and"
+      Write-Host 'press U to finish the update, or'
+    }
+  } elseif ($copying) {
     Write-Host 'It stopped while copying: some files are new, others are still the old ones. Your extracted'
     Write-Host 'games, saves and settings are fine. Start the launcher again and press U to finish it, or'
   } else {

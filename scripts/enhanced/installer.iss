@@ -69,6 +69,7 @@ en.GameStays=Jak Enhanced Trilogy is still open, so nothing was installed. Close
 en.GameStuck=Jak Enhanced Trilogy could not be closed, so nothing was installed. Close it by hand (or restart the computer) and run this setup again.
 en.PlayNow=Play now
 en.Desktop=Create a desktop shortcut
+en.Steam=Add it to Steam (as a non-Steam game; Steam closes for a moment if it is open)
 it.DiscsTitle=I tuoi dischi
 it.DiscsSub=Scegli le immagini (.iso) dei tuoi dischi PS2.
 it.DiscsText=Uno, due o tutti e tre i giochi, in qualsiasi ordine (PAL, NTSC o NTSC-J). Jak Enhanced Trilogy non contiene dati dei giochi: tutto si ricava dai tuoi dischi, 20-40 minuti a gioco, subito dopo l'installazione.
@@ -94,9 +95,11 @@ it.GameStays=Jak Enhanced Trilogy è ancora aperto, quindi non è stato installa
 it.GameStuck=Non è stato possibile chiudere Jak Enhanced Trilogy, quindi non è stato installato nulla. Chiudilo a mano (o riavvia il computer) e riavvia questa installazione.
 it.PlayNow=Gioca ora
 it.Desktop=Crea un collegamento sul desktop
+it.Steam=Aggiungilo a Steam (come gioco non Steam; Steam si chiude un attimo se è aperto)
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:Desktop}"
+Name: "steam"; Description: "{cm:Steam}"; Flags: unchecked
 
 [Files]
 ; (the main world the player edits comes in data\shipped: the launcher puts it in place, keeping their edits)
@@ -117,6 +120,7 @@ Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; Description: "{
 ; what the installer and the launcher made: the extracted discs, the compiled games, the HD textures
 ; (saves and settings stay in %APPDATA%\OpenGOAL, disc images in ISO stay)
 Type: filesandordirs; Name: "{app}\data"
+Type: filesandordirs; Name: "{app}\backup"
 Type: files; Name: "{app}\ISO\iso-paths.txt"
 Type: files; Name: "{app}\install.log"
 
@@ -374,7 +378,15 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code: Integer;
 begin
-  if (CurStep = ssPostInstall) and not WizardSilent then
+  if CurStep <> ssPostInstall then
+    exit;
+  // (Steam's list of non-Steam games: add_to_steam.ps1)
+  if WizardIsTaskSelected('steam') then
+    Exec('powershell.exe', PsParams(ExpandConstant('{app}\data\scripts\enhanced\add_to_steam.ps1'),
+         '-Root ' + PsQuote(ExpandConstant('{app}'))), '', SW_HIDE, ewWaitUntilTerminated, Code);
+  if not WizardSilent then
     MakeGames;
 end;

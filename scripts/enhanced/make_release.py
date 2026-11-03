@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -40,7 +41,7 @@ LIGHT_NAME = "Jak-Enhanced-Light"
 FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py",
              "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1",
              "scripts/enhanced/report.ps1", "scripts/enhanced/apply_shipped.ps1",
-             "scripts/enhanced/refresh_models.ps1"}
+             "scripts/enhanced/refresh_models.ps1", "scripts/enhanced/add_to_steam.ps1"}
 DATA = [
     "decompiler/config",
     "goal_src",
@@ -54,6 +55,7 @@ DATA = [
     "scripts/enhanced/apply_shipped.ps1",  # the main world put in place, keeping the player's edits
     "scripts/enhanced/refresh_models.ps1",  # the levels holding new replacement models made again
     "scripts/enhanced/report.ps1",  # the report window (a crash opens it, the menu button too)
+    "scripts/enhanced/add_to_steam.ps1",  # the setup's "Add to Steam"
 ]
 # Made by hand with Tripo, kept out of git (.gitignore), in every release: a folder and how many files
 # it has to hold at least. Only what is known to be Tripo's or hand-made goes on this list: not
@@ -189,6 +191,34 @@ def move_to_shipped(dest, version):
     print(f"data/shipped: {len(files)} files the player can edit")
 
 
+def make_patch(dest, old_zip, out, version):
+    """<NAME>-<version>-patch-<old version>.zip: only the files new or changed since the old release
+    (by size and CRC, the ZIP's own), plus data/removed.txt for those it had and this one hasn't.
+    update.ps1 takes it when the player has exactly that version, the whole ZIP otherwise."""
+    old_version = old_zip.stem[len(NAME) + 1:]
+    with zipfile.ZipFile(old_zip) as z:
+        old = {i.filename[len(NAME) + 1:]: (i.file_size, i.CRC) for i in z.infolist()
+               if i.filename.startswith(NAME + "/") and not i.is_dir()}
+    changed, new_files = [], set()
+    for f in sorted(dest.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(dest).as_posix()
+        new_files.add(rel)
+        data = f.read_bytes()
+        if old.get(rel) != (len(data), zlib.crc32(data)):
+            changed.append(f)
+    removed = sorted(set(old) - new_files)
+    path = out / f"{NAME}-{version}-patch-{old_version}.zip"
+    path.unlink(missing_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for f in changed:
+            z.write(f, Path(NAME) / f.relative_to(dest))
+        z.writestr(f"{NAME}/data/removed.txt", "\n".join(removed) + "\n")
+    print(f"patch from {old_version}: {len(changed)} files changed, {len(removed)} removed; "
+          f"{path} ({path.stat().st_size / 1e6:.0f} MB)")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bin", type=Path, default=ROOT / "out/build/Release-static/bin")
@@ -196,6 +226,9 @@ def main():
     parser.add_argument("--out", type=Path, default=ROOT / "out/release")
     parser.add_argument("--installer", action="store_true", help="also the setup .exe (Inno Setup 6)")
     parser.add_argument("--light", action="store_true", help="Enhanced Light, the OpenGOAL launcher mod")
+    parser.add_argument("--notes", type=Path, help="the release notes, in the package as CHANGELOG.md")
+    parser.add_argument("--patch-from", type=Path,
+                        help="the previous release's ZIP: also the patch from it (make_patch)")
     parser.add_argument("--skip-shader-check", action="store_true",
                         help="don't stop on shader errors (check_shaders.py: glslang, ASCII only)")
     args = parser.parse_args()
@@ -236,6 +269,9 @@ def main():
                          text=True).stdout.strip()
     version = f"{args.version or 'dev'}-{rev}"
     (dest / "data/VERSION").write_text(version, encoding="ascii")
+    if args.notes:
+        (dest / "CHANGELOG.md").write_text(f"# {args.version or 'dev'}\n\n" + args.notes.read_text(encoding="utf-8"),
+                                           encoding="utf-8", newline="\n")
 
     if args.light:
         (dest / "data/enhanced-light").write_text(
@@ -276,6 +312,8 @@ def main():
         for f in sorted(dest.rglob("*")):
             z.write(f, Path(NAME) / f.relative_to(dest))
     print(f"{count} data files; {zip_path} ({zip_path.stat().st_size / 1e6:.0f} MB)")
+    if args.patch_from:
+        make_patch(dest, args.patch_from, args.out, args.version)
 
     if args.installer:
         # Setup-Jak-Enhanced-Trilogy-<version>.exe from the same folder (installer.iss)
