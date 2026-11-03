@@ -32,7 +32,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "out/enhanced-upscale-cache"
@@ -101,13 +101,30 @@ def translucent(todo):
     return keys
 
 
-def restore_alpha(original, scaled, out):
+def restore_alpha(original, scaled, out, soft=False):
     """The upscaled colors with the original alpha resized smoothly: the upscaler would move and soften
-    the transparency, and cutouts and decals must blend as in the game"""
+    the transparency, and cutouts and decals must blend as in the game. soft (the HUD): the see-through
+    parts' own blotches, hand-painted at a quarter of the size, blurred out (not the cutouts' edges in
+    the levels: the leaves would go soft)"""
     big = Image.open(scaled).convert("RGBA")
-    alpha = Image.open(original).convert("RGBA").getchannel("A").resize(big.size, Image.BICUBIC)
-    big.putalpha(alpha)
-    big.save(out)
+    small = Image.open(original).convert("RGBA")
+    alpha = np.asarray(small.getchannel("A").resize(big.size, Image.BICUBIC)).astype(np.float32)
+    if soft:
+        blurred = np.asarray(Image.fromarray(alpha.clip(0, 255).astype(np.uint8)).filter(
+            ImageFilter.GaussianBlur(6))).astype(np.float32)
+        m = np.clip((100.0 - alpha) / 40.0, 0.0, 1.0) * (alpha > 2)
+        alpha = alpha * (1.0 - m) + blurred * m
+    # (no bicubic overshoot past the original's most opaque: halos where a frame meets glass)
+    alpha = np.minimum(alpha, float(np.asarray(small.getchannel("A")).max()))
+    # where it's see-through, the original colors enlarged smoothly instead of the upscaler's: on
+    # flat glass it invents speckles and blobs, which show over whatever is drawn behind (the HUD's
+    # yin-yang over its white fill)
+    rgb = np.asarray(big.convert("RGB")).astype(np.float32)
+    smooth = np.asarray(small.convert("RGB").resize(big.size, Image.BICUBIC)).astype(np.float32)
+    w = np.clip((120.0 - alpha) / 40.0, 0.0, 1.0)[..., None]
+    rgb = rgb * (1.0 - w) + smooth * w
+    out_img = np.dstack([np.clip(rgb, 0, 255), np.clip(alpha, 0, 255)]).round().astype(np.uint8)
+    Image.fromarray(out_img, "RGBA").save(out)
 
 
 def main():
@@ -168,13 +185,14 @@ def main():
         print(f"  upscaled {min(start + args.batch, len(keys))}/{len(keys)}", flush=True)
 
     # translucent ones: the upscaled colors with the original alpha, cached apart
-    alpha_dir = CACHE / f"{args.model}-alpha"
+    # (v2: the glass's colors from the original, no overshoot; the HUD's alpha softened apart)
+    alpha_dir = CACHE / f"{args.model}-alpha2{'-hud' if args.hud else ''}"
     alpha_dir.mkdir(parents=True, exist_ok=True)
     pending = {key: unique[key][1] for key in see_through
                if not (alpha_dir / f"{key}.png").exists() and (CACHE / args.model / f"{key}.png").exists()}
     if pending:
         for key, png in pending.items():
-            restore_alpha(png, CACHE / args.model / f"{key}.png", alpha_dir / f"{key}.png")
+            restore_alpha(png, CACHE / args.model / f"{key}.png", alpha_dir / f"{key}.png", soft=args.hud)
         print(f"{len(pending)} translucent textures given back their original alpha")
 
     written = 0

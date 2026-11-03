@@ -1729,6 +1729,7 @@ namespace {
 constexpr int kCollideTris = 300;            // a model's shape at most
 constexpr float kCollideMinSize = 0.5f;      // m: smaller than this, not solid on its own (pebbles)
 constexpr int kStoneTris = 40;               // a scenery stone's shape at most
+constexpr bool kStonesSolid = false;         // the scenery's stones collide (build_collide_world)
 
 struct CollideShape {
   bool ok = false;
@@ -1900,6 +1901,8 @@ void build_collide_world(Library& lib, CollideWorld& w) {
   // ones big enough to stand on or bump into
   std::lock_guard<std::mutex> tlock(g_trees_mutex);
   int stones = 0;
+  // (off for now: the placed rocks and slabs are walked through, as the user wants)
+  if (kStonesSolid)
   for (const auto& weak : g_trees) {
     const auto tree = weak.lock();
     if (!tree) {
