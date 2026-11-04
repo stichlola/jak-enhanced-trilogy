@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <array>
+#include <cstring>
 #include <mutex>
 #include <vector>
 #include <string>
@@ -213,8 +214,29 @@ struct EnhancedTimeOfDay {
 };
 extern EnhancedTimeOfDay g_enhanced_tod;
 
-inline const char* const kEnhancedCharacters[] = {"jak", "ashelin"};
-constexpr int kEnhancedCharacterCount = 2;
+// Jak 3: the characters that can be drawn in Jak's place (the menu's "Character", saved as "player"
+// by name, JAK_ENHANCED_PLAYER=<name>). Same names and order as *enhanced-characters* in
+// goal_src/jak3/engine/target/enhanced-player.gc, which has their art, joints and animations.
+struct EnhancedCharacter {
+  const char* name;   // saved and asked for by this
+  const char* label;  // shown in the menu
+};
+inline constexpr EnhancedCharacter kEnhancedCharacterTable[] = {
+    {"jak", "Jak"},
+    {"ashelin", "Ashelin"},
+    {"sig", "Sig"},
+};
+constexpr int kEnhancedCharacterCount =
+    sizeof(kEnhancedCharacterTable) / sizeof(kEnhancedCharacterTable[0]);
+// the index of a character's name, or -1
+inline int enhanced_character_index(const char* name) {
+  for (int i = 0; name && i < kEnhancedCharacterCount; i++) {
+    if (std::strcmp(name, kEnhancedCharacterTable[i].name) == 0) {
+      return i;
+    }
+  }
+  return -1;
+}
 
 struct EnhancedMenu {
   bool open = false;
@@ -229,8 +251,8 @@ struct EnhancedMenu {
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   // Jak 3: the Hellcat parked in the desert (pc-enhanced-desert-hellcat?, enhanced-hellcat-update)
   std::atomic<bool> desert_hellcat = true;
-  // Jak 3: the character drawn in Jak's place, an index in kEnhancedCharacters (enhanced-player.gc
-  // asks JAK_ENHANCED_PLAYER_MENU for its name, live). New characters: a name here and an entry in
+  // Jak 3: the character drawn in Jak's place, an index in kEnhancedCharacterTable (enhanced-player.gc
+  // asks JAK_ENHANCED_PLAYER_MENU for its name, live). New characters: an entry there and in
   // *enhanced-characters* (enhanced-player.gc).
   std::atomic<int> player = 0;
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)

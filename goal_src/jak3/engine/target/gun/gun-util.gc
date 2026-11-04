@@ -8,6 +8,8 @@
 (defmacro pc-check-focus-fix (focusable)
   `(#if PC_PORT (or (not (-> *pc-settings* fix-projectile-focus)) (logtest? (collide-action solid semi-solid) (-> ,focusable root root-prim prim-core action))) #t))
 
+(define-extern enhanced-player-muzzle! (function vector none)) ;; enhanced-player.gc: Sig's gun muzzle
+
 ;; DECOMP BEGINS
 
 (deftype gun-eject (projectile-bounce)
@@ -795,6 +797,8 @@
               )
             )
         (vector<-cspace! (-> (the-as target gp-0) gun fire-point) (joint-node gun-lod0-jg muzzle))
+        ;; Enhanced: Sig's Peacemaker (enhanced-player.gc): the shots leave from his gun's muzzle
+        (enhanced-player-muzzle! (-> (the-as target gp-0) gun fire-point))
         (vector-copy! (-> (the-as target gp-0) gun unk-vec) (-> (the-as target gp-0) gun fire-dir))
         (cond
           ((and (handle->process (-> (the-as target gp-0) gun track-target 0 handle))
@@ -828,6 +832,7 @@
             )
           )
         (vector<-cspace! (-> (the-as target gp-0) gun laser-point) (joint-node gun-lod0-jg laser))
+        (enhanced-player-muzzle! (-> (the-as target gp-0) gun laser-point))
         (vector-copy! (-> (the-as target gp-0) gun unk-vec00) (-> (the-as target gp-0) gun laser-dir))
         (vector-copy! (-> (the-as target gp-0) gun laser-dir) (-> (the-as target gp-0) gun fire-dir-out))
         (if s5-0

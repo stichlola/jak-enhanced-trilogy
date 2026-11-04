@@ -10,6 +10,10 @@
 
 (define-extern *enhanced-red-charge* float)
 (define-extern *enhanced-red-charged-shot* float)
+(define-extern enhanced-player-sig? (function symbol)) ;; enhanced-player.gc: Sig drawn in Jak's place
+;; Enhanced: put the gun away now (Sig: D-pad right again with the Peacemaker out), until it's away
+(define *enhanced-gun-put-away* #f)
+(define-extern enhanced-ashelin-gun-active? (function symbol)) ;; enhanced-ashelin-gun.gc: Ashelin with her own pistol
 
 ;; DECOMP BEGINS
 
@@ -111,6 +115,8 @@
 (defbehavior want-to-gun? process ((arg0 target) (arg1 symbol))
   (local-vars (v1-43 symbol))
   (and (logtest? (-> arg0 game features) (game-feature gun))
+       ;; Enhanced: Ashelin (enhanced-ashelin-gun.gc) has her own pistol: Jak's guns stay away meanwhile
+       (not (enhanced-ashelin-gun-active?))
        (time-elapsed? (-> arg0 gun gun-time) (seconds 0.1))
        (not (focus-test? arg0 dead hit board mech dark teleporting))
        (not (logtest? (surface-flag gun-inactive gun-hide gun-off) (-> arg0 control current-surface flags)))
@@ -1349,6 +1355,30 @@
              )
     (let ((s5-0 (the-as int (-> arg0 gun using-gun-type))))
       (cond
+        ;; Enhanced: Sig (enhanced-player.gc) has only his Peacemaker: D-pad right brings it out and
+        ;; pressed again puts it away; the other directions do nothing (none of Jak's other guns)
+        ((and (or (cpad-pressed? (-> arg0 control cpad number) up)
+                  (cpad-pressed? (-> arg0 control cpad number) down)
+                  (cpad-pressed? (-> arg0 control cpad number) left)
+                  (cpad-pressed? (-> arg0 control cpad number) right)
+                  )
+              (enhanced-player-sig?)
+              )
+         (set! s5-0 0)
+         (when (cpad-pressed? (-> arg0 control cpad number) right)
+           (set! (-> arg0 gun gun-select-time 3) (-> *display* real-clock frame-counter))
+           (cond
+             ((= (-> arg0 gun gun-type) (pickup-type gun-dark-1))
+              ;; out already: right again puts it away
+              (set! (-> arg0 gun put-away?) #t)
+              (set! *enhanced-gun-put-away* #t)
+              )
+             (else
+               (set! s5-0 (the-as int (pickup-type gun-dark-1)))
+               )
+             )
+           )
+         )
         ((cpad-pressed? (-> arg0 control cpad number) down)
          (set! (-> arg0 gun gun-select-time 1) (-> *display* real-clock frame-counter))
          (set! s5-0
@@ -2824,6 +2854,8 @@
          )
        (if (and (or (logtest? (surface-flag gun-hide gun-off) (-> self control current-surface flags))
                     (logtest? (target-flags prevent-gun invisible) (-> self target-flags))
+                    ;; Enhanced: asked to put it away (Sig's D-pad right, target-gun-marking-menu)
+                    (and *enhanced-gun-put-away* (not (cpad-hold? (-> self control cpad number) r1)))
                     (and (or (and (cpad-hold? (-> self control cpad number) up)
                                   (>= (- (-> *display* real-clock frame-counter) (-> self gun gun-select-time 0)) (seconds 0.8))
                                   )

@@ -28,24 +28,75 @@
               :shadow-joint-index 13
               )
 
+;; Sig: the cutscene model (sig-highres-ag, the only Sig with a skeleton made to walk: idle, the
+;; wasdoors idle, walk), from lsig.fr3 (Spargus' Sig NPC level, 32 MB)
+(defskelgroup skel-enhanced-sig sig-highres sig-highres-lod0-jg sig-highres-idle-ja
+              ((sig-highres-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 3.5)
+              :longest-edge (meters 1)
+              :shadow sig-highres-shadow-mg
+              :texture-level 10
+              :sort 1
+              :origin-joint-index 17
+              :shadow-joint-index 3
+              )
+
+;; A character that can be drawn in Jak's place: the menu's "Character" combo (kEnhancedCharacterTable in
+;; enhanced_state.h, same names and order) and JAK_ENHANCED_PLAYER=<name>. "jak" has no art (no skin).
+(deftype enhanced-character (basic)
+  ((name       string)
+   (art-file   string)        ;; its art group, out/jak3/obj/<art-file>.go (loaded into the global heap)
+   (fr3        string)        ;; the level whose fr3 holds its model and textures
+   (skel       skeleton-group) ;; its skeleton group
+   (joints     (array int8))  ;; Jak's joint (node-list index) for each of its joints, -1: its own animation's
+   (main       int8)          ;; its joints put where Jak's main and hips are (so it sits on his seat)
+   (hips       int8)
+   (hand       int8)          ;; its right hand, and its gun joint that goes with it (-1: none)
+   (gun        int8)
+   (idle       int16)         ;; its own animations (art indices), -1: Jak's pose instead
+   (walk       int16)
+   (jog        int16)
+   (run        int16)
+   (walk-speed float)         ;; how fast its feet go at rate 1 (m/s, measured with JAK_ENHANCED_PLAYER_TEST=run)
+   (jog-speed  float)
+   (run-speed  float)
+   (top-speed  float)         ;; above this its own animations stop and it takes Jak's run (when it has no run)
+   (sized      symbol)        ;; #t: on its feet its main and hips go where Jak's are scaled by its size
+                              ;; against his (a taller character), and its legs swing less (stride)
+   (stride     float)         ;; how much of Jak's leg swing it takes (1: all)
+   (big-gun    symbol)        ;; #t: its gun joint is a long gun (Sig's Peacemaker) shown as Jak's gun is:
+                              ;; out, in its right hand pointing where his gun points, and his shots
+                              ;; leave from its muzzle; put away, on its back (enhanced-skin-big-gun)
+   (gun-grip   vector :inline) ;; where the hand holds it, and its muzzle (gun joint's bind space)
+   (gun-muzzle vector :inline)
+   (art        art-group)     ;; loaded, or #f
+   (failed     symbol)        ;; its art isn't there: don't try again
+   )
+  )
+
 (deftype enhanced-skin (process-drawable)
   ((parent     (pointer target) :override)
+   (char       enhanced-character) ;; who is drawn
    (anim       int32)
    (pose-blend float)              ;; 0: her own animation, 1: Jak's pose
-   (saved      matrix 41 :inline)  ;; her bones as her own animation left them
-   (bind-world matrix 41 :inline)  ;; her joints' bind pose (joint to model)
+   (size       float)              ;; its hips' height against Jak's (bind poses), for a sized character
+   (saved      matrix 80 :inline)  ;; her bones as her own animation left them
+   (bind-world matrix 80 :inline)  ;; her joints' bind pose (joint to model)
    )
   (:state-methods
     idle
     )
   )
 
+;; Ashelin's own pistol (enhanced-ashelin-gun.gc): her init, her standing gun animations, her arm and shots
+(define-extern enhanced-ashelin-gun-init (function none :behavior enhanced-skin))
+(define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
+(define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
+
+;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
+;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
 (define *enhanced-player-buf* (new 'global 'string 32 (the-as string #f)))
-(define *enhanced-player-env* (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER" *enhanced-player-buf* 32)
-                                  (string= *enhanced-player-buf* "ashelin")
-                                  #f
-                                  )
-        )
+(define *enhanced-player-env* (pc-enhanced-getenv "JAK_ENHANCED_PLAYER" *enhanced-player-buf* 32))
 ;; JAK_ENHANCED_PLAYER_ANIM=<art index>: Ashelin plays only that one, looping (to look at them)
 (define *enhanced-player-anim-buf* (new 'global 'string 16 (the-as string #f)))
 (define *enhanced-player-anim* (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_ANIM" *enhanced-player-anim-buf* 16)
@@ -72,8 +123,6 @@
 (define *enhanced-skin-cycle-frames* 0)
 (define *enhanced-skin-last-frame* 0.0)
 (define *enhanced-player-menu-buf* (new 'global 'string 16 (the-as string #f)))
-(define *enhanced-ashelin-ag* (the-as art-group #f))
-(define *enhanced-ashelin-failed* #f)
 (define *enhanced-skin-pool* (the-as dead-pool #f))
 ;; her process and its pid (a handle doesn't fit in a symbol's value)
 (define *enhanced-skin-ptr* (the-as (pointer enhanced-skin) #f))
@@ -87,38 +136,12 @@
     )
   )
 
-;; Characters the menu's "Character" combo offers (names match kEnhancedCharacters in enhanced_state.h).
-;; Each entry: (name art-group-file fr3-level), "jak" = no skin. To add one: a name in both tables, a
-;; skelgroup, a joint map like *enhanced-skin-jak-joint* and its own-anim indices (ASHELIN_* constants).
-(define *enhanced-characters* '(("jak" #f #f) ("ashelin" "ashelin-ag" "desoasis")))
-
-(defun enhanced-player-name ()
-  "The selected character's name: the menu's (live), else JAK_ENHANCED_PLAYER, else \"jak\"."
-  (cond
-    ((pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
-     *enhanced-player-menu-buf*)
-    (*enhanced-player-env* "ashelin")
-    (else "jak")
-    )
-  )
-
-(defun enhanced-player-ashelin? ()
-  "Is Ashelin the player's model? The menu's choice (EnhancedPost.cpp answers JAK_ENHANCED_PLAYER_MENU,
-   live), else JAK_ENHANCED_PLAYER (a gk without that menu)."
-  (and (not *enhanced-ashelin-failed*)
-       (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
-           (string= *enhanced-player-menu-buf* "ashelin")
-           *enhanced-player-env*
-           )
-       )
-  )
-
-(defun enhanced-ashelin-art ()
-  "Ashelin's art group, loaded from out/jak3/obj/ashelin-ag.go into the global heap the first time
-   (not while a level links, which uses the same linker), and given to the default level so her skeleton
+(defun enhanced-character-art ((ch enhanced-character))
+  "The character's art group, loaded from out/jak3/obj/<art-file>.go into the global heap the first time
+   (not while a level links, which uses the same linker), and given to the default level so its skeleton
    group finds it. #f until then, or if the file isn't there."
-  (when (and (not *enhanced-ashelin-ag*) (not (load-in-progress? *level*)))
-    ;; always our own copy (the oasis level's would go with that level)
+  (when (and (not (-> ch art)) (not (-> ch failed)) (-> ch art-file) (not (load-in-progress? *level*)))
+    ;; always our own copy (a level's would go with that level)
     (let ((ag (the-as art-group #f))
           (old-lev (-> *level* loading-level))
           (old-heap loading-level)
@@ -127,38 +150,192 @@
       ;; like the bigmap's tpages (bigmap.gc): no level logs it in, it goes to the global heap
       (set! (-> *level* loading-level) #f)
       (set! loading-level global)
-      (set! ag (the-as art-group (loado "ashelin-ag" global)))
+      (set! ag (the-as art-group (loado (-> ch art-file) global)))
       (set! (-> *level* loading-level) old-lev)
       (set! loading-level old-heap)
-      (format 0 "[enhanced-player] ashelin-ag ~A (global heap ~DK free before, ~DK after)~%"
-              ag (/ free 1024) (/ (&- (-> global top-base) (-> global current)) 1024))
+      (format 0 "[enhanced-player] ~A ~A (global heap ~DK free before, ~DK after)~%"
+              (-> ch art-file) ag (/ free 1024) (/ (&- (-> global top-base) (-> global current)) 1024))
       (cond
         ((and ag (type? ag art-group))
          (set-loaded-art (-> *level* level-default art-group) ag)
-         (set! *enhanced-ashelin-ag* ag)
+         (set! (-> ch art) ag)
          )
         (else
           ;; don't try again each frame if it isn't there
-          (set! *enhanced-ashelin-failed* #t)
+          (set! (-> ch failed) #t)
           )
         )
       )
     )
-  *enhanced-ashelin-ag*
+  (-> ch art)
   )
 
-;; her art indices (art-elts.gc)
-(defconstant ASHELIN_IDLE 3)
-(defconstant ASHELIN_WALK 4)
-(defconstant ASHELIN_JOG 5)
-(defconstant ASHELIN_RUN 6)
+;; Jak's joint for each of Ashelin's (node-list indices, joint-nodes.gc), or -1: main, chest, neck, head,
+;; arms (her shoulder is his upper arm: he has a collarbone more), hips and legs. Fingers, hair...
+;; keep what her own animation does with them.
+(define *enhanced-skin-jak-joint*
+  (new 'static 'boxed-array :type int8
+    -1 -1 -1 3 6 7 8          ;; 0-6: -, align, prejoint, main, chest, neck (neckA), head (neckB)
+    17 18 19 26 27 28         ;; 7-12: Lshoulder Lelbow Lhand (Larm Lforarm sk_lhand), the right ones
+    38 39 40 41 42 45 46 47 48 ;; 13-21: hips, Lthigh Lknee Lankle Lball, Rthigh Rknee Rankle Rball
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    )
+  )
+
+;; the same for Sig (sig-highres, 76 joints: JAK_ENHANCED_PLAYER_DUMP=1 lists them). His ears, fingers,
+;; arm plates, skirt, belt bags and water bottle follow their parents as his idle has them.
+(define *enhanced-skin-sig-joint*
+  (new 'static 'boxed-array :type int8
+    -1 -1 -1 3 6 7 8          ;; 0-6: -, align, prejoint, main, chest, neck (neckA), head (neckB)
+    -1 -1 -1 -1               ;; 7-10: ears
+    17 18 19 26 27 28         ;; 11-16: Lshoulder Lelbow Lhand (Larm Lforarm sk_lhand), the right ones
+    38 39 40 41 42 45 46 47 48 ;; 17-25: hips, Lthigh Lknee Lankle Lball, Rthigh Rknee Rankle Rball
+    -1 -1                     ;; 26-27: gun, blast (its muzzle)
+    )
+  )
+
+(defun enhanced-character-new ((name string) (art-file string) (fr3 string) (skel skeleton-group) (joints (array int8)))
+  "A new entry of *enhanced-characters*: no special joints, no own animations (the ...! functions below)."
+  (let ((ch (new 'global 'enhanced-character)))
+    (set! (-> ch name) name)
+    (set! (-> ch art-file) art-file)
+    (set! (-> ch fr3) fr3)
+    (set! (-> ch skel) skel)
+    (set! (-> ch joints) joints)
+    (set! (-> ch main) -1)
+    (set! (-> ch hips) -1)
+    (set! (-> ch hand) -1)
+    (set! (-> ch gun) -1)
+    (set! (-> ch idle) -1)
+    (set! (-> ch walk) -1)
+    (set! (-> ch jog) -1)
+    (set! (-> ch run) -1)
+    (set! (-> ch walk-speed) (meters 1.0))
+    (set! (-> ch jog-speed) (meters 1.0))
+    (set! (-> ch run-speed) (meters 1.0))
+    (set! (-> ch top-speed) 0.0)
+    (set! (-> ch sized) #f)
+    (set! (-> ch stride) 1.0)
+    (set! (-> ch big-gun) #f)
+    (set! (-> ch art) #f)
+    (set! (-> ch failed) #f)
+    ch
+    )
+  )
+
+(defun enhanced-character-bones! ((ch enhanced-character) (main int) (hips int) (hand int) (gun int))
+  (set! (-> ch main) main)
+  (set! (-> ch hips) hips)
+  (set! (-> ch hand) hand)
+  (set! (-> ch gun) gun)
+  ch
+  )
+
+(defun enhanced-character-anims! ((ch enhanced-character) (idle int) (walk int) (jog int) (run int))
+  (set! (-> ch idle) idle)
+  (set! (-> ch walk) walk)
+  (set! (-> ch jog) jog)
+  (set! (-> ch run) run)
+  ch
+  )
+
+(defun enhanced-character-speeds! ((ch enhanced-character) (walk-speed float) (jog-speed float) (run-speed float) (top-speed float))
+  (set! (-> ch walk-speed) walk-speed)
+  (set! (-> ch jog-speed) jog-speed)
+  (set! (-> ch run-speed) run-speed)
+  (set! (-> ch top-speed) top-speed)
+  ch
+  )
+
+;; The characters the menu's "Character" combo offers, in its order (names match kEnhancedCharacterTable in
+;; enhanced_state.h). To add one: an entry there, a skeleton group, a joint map like
+;; *enhanced-skin-jak-joint* and an entry here.
+(define *enhanced-characters* (new 'global 'boxed-array enhanced-character 3))
+(set! (-> *enhanced-characters* 0) (enhanced-character-new "jak" (the-as string #f) (the-as string #f) (the-as skeleton-group #f)
+                                                           (the-as (array int8) #f)))
+;; Ashelin: the oasis mission's AI (ashelin-ag, only DESOASIS.DGO carries it, her model in desoasis.fr3).
+;; Her idle, walk, jog and run (art-elts.gc); measured, her walk covers 2.3 m a second at rate 1, the jog
+;; 3.8, the run 5 (Jak runs at 11.3 m/s: rate 2.26). Her gun (22) stays in her right hand (12).
+(let ((ch (enhanced-character-new "ashelin" "ashelin-ag" "desoasis" skel-enhanced-ashelin *enhanced-skin-jak-joint*)))
+  (enhanced-character-bones! ch 3 13 12 22)
+  (enhanced-character-anims! ch 3 4 5 6)
+  (enhanced-character-speeds! ch (meters 2.3) (meters 3.8) (meters 5.0) 0.0)
+  (set! (-> *enhanced-characters* 1) ch)
+  )
+;; Sig: his cutscene model (sig-highres-ag). Its only animations are his idles (the walk art-elts.gc lists
+;; isn't in any DGO): moving he takes Jak's pose, scaled to his size (he's much taller), his gun (26,
+;; on his prejoint) in his right hand (16).
+(let ((ch (enhanced-character-new "sig" "sig-highres-ag" "lsig" skel-enhanced-sig *enhanced-skin-sig-joint*)))
+  (enhanced-character-bones! ch 3 17 16 26)
+  (enhanced-character-anims! ch 3 -1 -1 -1)
+  (enhanced-character-speeds! ch (meters 1.0) (meters 1.0) (meters 1.0) (meters 0.6))
+  (set! (-> ch sized) #t)
+  (set! (-> ch stride) 1.0)
+  ;; his Peacemaker (sig-highres-lod0.glb): 3.5 m along z around the gun joint, the barrel's end at -z
+  ;; (-1.6 m), a handle under it at z -0.7..-0.55, the big body back to +1.9 m
+  (set! (-> ch big-gun) #t)
+  (set-vector! (-> ch gun-grip) 0.0 (meters -0.3) (meters -0.62) 1.0)
+  (set-vector! (-> ch gun-muzzle) 0.0 (meters -0.33) (meters -1.6) 1.0)
+  (set! (-> *enhanced-characters* 2) ch)
+  )
+
+(defun enhanced-character-get ((name string))
+  "The entry of *enhanced-characters* with that name, or #f."
+  (let ((found (the-as enhanced-character #f)))
+    (dotimes (i (-> *enhanced-characters* length))
+      (if (and (not found) (string= (-> *enhanced-characters* i name) name))
+          (set! found (-> *enhanced-characters* i))
+          )
+      )
+    found
+    )
+  )
+
+(defun enhanced-player-name ()
+  "The selected character's name: the menu's (live, EnhancedPost.cpp answers JAK_ENHANCED_PLAYER_MENU),
+   else JAK_ENHANCED_PLAYER (a gk without that menu), else \"jak\"."
+  (cond
+    ((pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
+     *enhanced-player-menu-buf*)
+    (*enhanced-player-env* *enhanced-player-buf*)
+    (else "jak")
+    )
+  )
+
+(defun enhanced-player-character ()
+  "The character drawn in Jak's place, or #f (Jak himself, or its art isn't there)."
+  (let ((ch (enhanced-character-get (enhanced-player-name))))
+    (if (and ch (-> ch art-file) (not (-> ch failed)))
+        ch
+        )
+    )
+  )
+
+(defun enhanced-player-ashelin? ()
+  "Is Ashelin the player's model?"
+  (let ((ch (enhanced-player-character)))
+    (if (and ch (string= (-> ch name) "ashelin")) #t #f)
+    )
+  )
+
+(defun enhanced-player-sig? ()
+  "Is Sig the player's model?"
+  (let ((ch (enhanced-player-character)))
+    (if (and ch (string= (-> ch name) "sig")) #t #f)
+    )
+  )
 
 (defbehavior enhanced-skin-play enhanced-skin ((idx int) (rate float) (blend time-frame))
-  "Loop Ashelin's animation idx at rate. Between the walk, jog and run she keeps her step: the new one
+  "Loop the character's animation idx at rate. Between the walk, jog and run it keeps its step: the new one
    starts at the same point of its cycle."
-  (let ((anim (the-as art-joint-anim (-> self draw art-group data idx))))
+  (let ((anim (the-as art-joint-anim (-> self draw art-group data idx)))
+        (ch (-> self char))
+        )
     (when (!= idx (-> self anim))
-      (let ((frac (if (and (>= (-> self anim) ASHELIN_WALK) (<= (-> self anim) ASHELIN_RUN) (>= idx ASHELIN_WALK))
+      (let ((frac (if (and (>= (-> self anim) 0)
+                           (or (= (-> self anim) (-> ch walk)) (= (-> self anim) (-> ch jog)) (= (-> self anim) (-> ch run)))
+                           (or (= idx (-> ch walk)) (= idx (-> ch jog)) (= idx (-> ch run)))
+                           )
                       (/ (ja-frame-num 0) (the float (max 1 (+ -1 (ja-num-frames 0)))))
                       0.0
                       )
@@ -175,28 +352,34 @@
   )
 
 (defbehavior enhanced-skin-animate enhanced-skin ()
-  "Pick Ashelin's own animation from Jak's speed on the ground (with some overlap, so she doesn't switch
-   back and forth at a threshold), played as fast as her feet go with Jak: measured (JAK_ENHANCED_PLAYER_TEST=run)
-   her walk covers 2.3 m a second at rate 1, the run 5 m (Jak runs at 11.3 m/s: rate 2.26)."
-  (let* ((tgt (-> self parent 0))
+  "Pick the character's own animation from Jak's speed on the ground (with some overlap, so it doesn't
+   switch back and forth at a threshold), played as fast as its feet go with Jak (walk-speed... in its
+   entry: Ashelin's run at Jak's 11.3 m/s is rate 2.26). With no jog or run, the walk goes on (under Jak's
+   pose, see enhanced-skin-own-anim?)."
+  (let* ((ch (-> self char))
+         (tgt (-> self parent 0))
          (speed (-> tgt control ctrl-xz-vel))
          (cur (-> self anim))
          )
     (cond
       ((>= *enhanced-player-anim* 3)
-       (enhanced-skin-play (min *enhanced-player-anim* 41) 1.0 (seconds 0.1))
+       (enhanced-skin-play (min *enhanced-player-anim* (+ -1 (-> self draw art-group length))) 1.0 (seconds 0.1))
        )
-      ((or (focus-test? tgt pilot) (< speed (if (= cur ASHELIN_IDLE) (meters 0.6) (meters 0.3))))
-       (enhanced-skin-play ASHELIN_IDLE 1.0 (seconds 0.2))
+      ;; Ashelin standing with her gun out: her aiming stance (enhanced-ashelin-gun.gc)
+      ((enhanced-ashelin-gun-animate)
+       #t
        )
-      ((< speed (if (= cur ASHELIN_JOG) (meters 3.5) (meters 4.2)))
-       (enhanced-skin-play ASHELIN_WALK (fmax 0.8 (/ speed (meters 2.3))) (seconds 0.15))
+      ((or (focus-test? tgt pilot) (< (-> ch walk) 0) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
+       (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.2))
        )
-      ((< speed (if (= cur ASHELIN_RUN) (meters 6.8) (meters 7.6)))
-       (enhanced-skin-play ASHELIN_JOG (fmax 1.0 (/ speed (meters 3.8))) (seconds 0.15))
+      ((or (< (-> ch jog) 0) (< speed (if (= cur (-> ch jog)) (meters 3.5) (meters 4.2))))
+       (enhanced-skin-play (-> ch walk) (fmin 2.0 (fmax 0.8 (/ speed (-> ch walk-speed)))) (seconds 0.15))
+       )
+      ((or (< (-> ch run) 0) (< speed (if (= cur (-> ch run)) (meters 6.8) (meters 7.6))))
+       (enhanced-skin-play (-> ch jog) (fmax 1.0 (/ speed (-> ch jog-speed))) (seconds 0.15))
        )
       (else
-        (enhanced-skin-play ASHELIN_RUN (fmin 2.6 (fmax 1.2 (/ speed (meters 5.0)))) (seconds 0.12))
+        (enhanced-skin-play (-> ch run) (fmin 2.6 (fmax 1.2 (/ speed (-> ch run-speed)))) (seconds 0.12))
         )
       )
     )
@@ -204,10 +387,18 @@
   )
 
 (defbehavior enhanced-skin-own-anim? enhanced-skin ()
-  "Can she play her own animation now (Jak standing, walking or running)?"
-  (let ((tgt (-> self parent 0)))
+  "Can it play its own animation now (Jak standing, walking or running, not faster than its own
+   animations go)?"
+  (let ((tgt (-> self parent 0))
+        (top (-> self char top-speed))
+        )
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
+         ;; a big gun out: held as Jak holds his (his gun stances and shots)
+         (not (and (-> self char big-gun) (using-gun? tgt)))
+         (or (= top 0.0)
+             (< (-> tgt control ctrl-xz-vel) (if (< (-> self pose-blend) 0.5) top (* 0.6 top)))
+             )
          (let ((st (-> tgt state)))
            (and st
                 (or (= (-> st name) 'target-stance)
@@ -223,18 +414,6 @@
                 )
            )
          )
-    )
-  )
-
-;; Jak's joint for each of hers (node-list indices, joint-nodes.gc), or -1: main, chest, neck, head,
-;; arms (her shoulder is his upper arm: he has a collarbone more), hips and legs. Fingers, hair...
-;; keep what her own animation does with them.
-(define *enhanced-skin-jak-joint*
-  (new 'static 'boxed-array :type int8
-    -1 -1 -1 3 6 7 8          ;; 0-6: -, align, prejoint, main, chest, neck (neckA), head (neckB)
-    17 18 19 26 27 28         ;; 7-12: Lshoulder Lelbow Lhand (Larm Lforarm sk_lhand), the right ones
-    38 39 40 41 42 45 46 47 48 ;; 13-21: hips, Lthigh Lknee Lankle Lball, Rthigh Rknee Rankle Rball
-    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
     )
   )
 
@@ -257,9 +436,11 @@
    main and hips where his are (so she sits on his seat). Her other joints follow their parents as her
    animation has them; her gun stays in her right hand. Runs on her bones after ja-post, before drawing."
   (let* ((jak (-> self parent 0))
+         (ch (-> self char))
+         (jmap (-> ch joints))
          (nodes (-> self node-list))
          (jnodes (-> jak node-list))
-         (n (min 41 (-> nodes length)))
+         (n (min 80 (-> nodes length)))
          (stride (&- (the-as pointer (-> nodes data 1)) (the-as pointer (-> nodes data 0))))
          (local (new 'stack-no-clear 'matrix))
          (inv (new 'stack-no-clear 'matrix))
@@ -274,14 +455,14 @@
       (let* ((k (- (- n 1) i))
              (cs (-> nodes data k))
              (bone (-> cs bone transform))
-             ;; the gun (22) goes with the right hand (12)
+             ;; the gun goes with the right hand
              (p (cond
-                  ((= k 22) 12)
+                  ((and (>= (-> ch gun) 0) (= k (-> ch gun))) (-> ch hand))
                   ((-> cs parent) (/ (&- (the-as pointer (-> cs parent)) (the-as pointer (-> nodes data 0))) stride))
                   (else -1)
                   )
                 )
-             (j (if (< k (-> *enhanced-skin-jak-joint* length)) (-> *enhanced-skin-jak-joint* k) -1))
+             (j (if (< k (-> jmap length)) (-> jmap k) -1))
              )
         (when (and (> k 0) (>= p 0) (< p n) (!= p k))
           ;; her own local transform: saved[k] = local * saved[p]
@@ -293,11 +474,28 @@
              ;; his skinning matrix (model to world), then her bind pose through it
              (matrix*! skin (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
              (matrix*! rot (-> self bind-world k) skin)
-             (if (or (= k 3) (= k 13))
+             (cond
+               ((not (or (= k (-> ch main)) (= k (-> ch hips))))
+                (vector-copy! (-> rot trans) (-> own trans))
+                )
+               ((and (-> ch sized) (not (focus-test? jak pilot)))
+                ;; a taller one: as far from his feet as Jak's are from his, scaled by its size
+                (let ((root (-> jak control trans)))
+                  (vector-! (-> rot trans) (-> jnodes data j bone position) root)
+                  (vector+float*! (-> rot trans) root (-> rot trans) (-> self size))
+                  (set! (-> rot trans w) 1.0)
+                  )
+                )
+               (else
+                 ;; where Jak's are (on his seat)
                  (vector-copy! (-> rot trans) (-> jnodes data j bone position))
-                 (vector-copy! (-> rot trans) (-> own trans))
                  )
-             (enhanced-matrix-blend-rows! bone own rot w (-> self saved k))
+               )
+             ;; its thighs take only part of his leg swing (a longer stride)
+             (enhanced-matrix-blend-rows! bone own rot
+                                          (if (or (= j 39) (= j 45)) (* w (-> ch stride)) w)
+                                          (-> self saved k)
+                                          )
              )
             (else
               (matrix-copy! bone own)
@@ -305,6 +503,113 @@
             )
           )
         )
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-skin-joint-of ((skin enhanced-skin) (jak-joint int))
+  "Its joint that takes Jak's jak-joint (its joint map), else 0."
+  (let ((jmap (-> skin char joints))
+        (found 0)
+        )
+    (dotimes (k (min (-> jmap length) (-> skin node-list length)))
+      (if (and (zero? found) (= (-> jmap k) jak-joint))
+          (set! found k)
+          )
+      )
+    found
+    )
+  )
+
+;; the big gun's muzzle this frame (world), for Jak's gun process: his shots and aiming laser leave from
+;; it (enhanced-player-muzzle!, gun-util.gc); pid of the skin that set it, 0: none
+(define *enhanced-big-gun-muzzle* (new 'global 'vector))
+(define *enhanced-big-gun-pid* 0)
+;; where the put-away gun's middle sits on its back (model space: a bit right, 1.9 m up, 0.5 m behind)
+(define *enhanced-big-gun-back* (new 'static 'vector :x -409.6 :y 7782.4 :z -2048.0 :w 1.0))
+
+(defbehavior enhanced-skin-big-gun enhanced-skin ()
+  "The big gun joint (Sig's Peacemaker), after its bones are done. Jak's gun out: pointing as his
+   (hidden) gun's muzzle points, the handle in its right hand, the muzzle saved for his shots. Put away (or
+   in a vehicle): on its back, slanted up over its right shoulder, moving with its chest."
+  (let* ((ch (-> self char))
+         (tgt (-> self parent 0))
+         (nodes (-> self node-list))
+         (k (-> ch gun))
+         (s (new 'stack-no-clear 'matrix))
+         (v (new 'stack-no-clear 'vector))
+         (out?(and (using-gun? tgt) (not (focus-test? tgt pilot))))
+         )
+    (when (and (>= k 0) (< (+ k 1) (-> nodes length)))
+      (cond
+        (out?
+         ;; pointing where his shots go (fire-dir-out), level unless he aims up or down, upright
+         ;; (not behind it, and not steeper than 35 degrees: else its facing)
+         (vector-z-quaternion! v (-> self root quat))
+         (vector-copy! (-> s fvec) (-> tgt gun fire-dir-out))
+         (if (or (< (vector-length (-> s fvec)) 0.5)
+                 (< (vector-dot (-> s fvec) v) (* 0.5 (vector-length (-> s fvec))))
+                 )
+             (vector-copy! (-> s fvec) v)
+             )
+         (vector-normalize! (-> s fvec) 1.0)
+         (set! (-> s fvec y) (fmax -0.57 (fmin 0.57 (-> s fvec y))))
+         (vector-normalize! (-> s fvec) 1.0)
+         (set-vector! (-> s uvec) 0.0 1.0 0.0 0.0)
+         (vector-cross! (-> s rvec) (-> s uvec) (-> s fvec))
+         (vector-normalize! (-> s rvec) 1.0)
+         (vector-cross! (-> s uvec) (-> s fvec) (-> s rvec))
+         ;; its barrel is its -z end: turned around
+         (vector-negate! (-> s rvec) (-> s rvec))
+         (vector-negate! (-> s fvec) (-> s fvec))
+         (set! (-> s rvec w) 0.0)
+         (set! (-> s uvec w) 0.0)
+         (set! (-> s fvec w) 0.0)
+         ;; the handle where the hand is
+         (vector-rotate*! v (-> ch gun-grip) s)
+         (vector-! (-> s trans) (-> nodes data (-> ch hand) bone position) v)
+         (set! (-> s trans w) 1.0)
+         (vector-matrix*! *enhanced-big-gun-muzzle* (-> ch gun-muzzle) s)
+         (set! *enhanced-big-gun-pid* (-> self pid))
+         )
+        (else
+          ;; on its back: up and slanted over the right shoulder (model space), carried by the chest
+          (let ((back (new 'stack-no-clear 'matrix))
+                (chest (new 'stack-no-clear 'matrix))
+                (c (max 0 (-> ch main)))
+                )
+            (matrix-identity! back)
+            (set-vector! (-> back fvec) -0.34 0.94 0.0 0.0)
+            (set-vector! (-> back uvec) 0.0 0.0 1.0 0.0)
+            (vector-cross! (-> back rvec) (-> back uvec) (-> back fvec))
+            (vector-copy! (-> back trans) *enhanced-big-gun-back*)
+            (set! (-> back trans w) 1.0)
+            ;; its chest's skinning matrix (model to world)
+            (let ((cj (+ c 1)))
+              (if (-> nodes data cj joint)
+                  (matrix*! chest (-> nodes data cj joint bind-pose) (-> nodes data cj bone transform))
+                  (matrix-copy! chest (-> nodes data cj bone transform))
+                  )
+              )
+            (matrix*! s back chest)
+            )
+          (set! *enhanced-big-gun-pid* 0)
+          )
+        )
+      ;; bone = its bind (joint to model) through s
+      (matrix*! (-> nodes data k bone transform) (-> self bind-world k) s)
+      (matrix-copy! (-> nodes data (+ k 1) bone transform) (-> nodes data k bone transform))
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-player-muzzle! ((dst vector))
+  "Jak's gun process (gun-util.gc): with a big gun out, his fire and laser points are its muzzle."
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (when (and skin (nonzero? *enhanced-big-gun-pid*) (= *enhanced-big-gun-pid* (-> skin pid)))
+      (vector-copy! dst *enhanced-big-gun-muzzle*)
       )
     )
   (none)
@@ -340,8 +645,14 @@
   (ja-post)
   ;; test boots: how far her left ankle goes back and forth along her facing over each cycle of the
   ;; walk, jog and run, and how long a cycle takes (her stride against Jak's speed)
-  (when (and *enhanced-player-test* (>= (-> self anim) ASHELIN_WALK) (<= (-> self anim) ASHELIN_RUN))
-    (let ((d (vector-dot (vector-! (new 'stack-no-clear 'vector) (-> self node-list data 16 bone position) (-> self root trans))
+  (when (and *enhanced-player-test*
+             (>= (-> self anim) 0)
+             (or (= (-> self anim) (-> self char walk)) (= (-> self anim) (-> self char jog)) (= (-> self anim) (-> self char run)))
+             )
+    (let ((d (vector-dot (vector-! (new 'stack-no-clear 'vector)
+                                   (-> self node-list data (enhanced-skin-joint-of self 41) bone position)
+                                   (-> self root trans)
+                                   )
                          (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat))
                          )
              )
@@ -364,6 +675,11 @@
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
       )
+  (if (-> self char big-gun)
+      (enhanced-skin-big-gun)
+      )
+  ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
+  (enhanced-ashelin-gun-post)
   (none)
   )
 
@@ -373,12 +689,43 @@
   :post enhanced-skin-post
   )
 
-(defbehavior enhanced-skin-init-by-other enhanced-skin ()
+;; JAK_ENHANCED_PLAYER_DUMP=1: the character's joints (index, name, parent, bind position) in the log
+(define *enhanced-player-dump-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-player-dump* (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_DUMP" *enhanced-player-dump-buf* 16))
+
+(defun enhanced-skin-dump ((skin enhanced-skin))
+  (let* ((nodes (-> skin node-list))
+         (stride (&- (the-as pointer (-> nodes data 1)) (the-as pointer (-> nodes data 0))))
+         )
+    (format 0 "[player-dump] ~A ~D joints, ~D anims~%" (-> skin char name) (-> nodes length) (-> skin draw art-group length))
+    (dotimes (k (-> nodes length))
+      (let ((cs (-> nodes data k)))
+        (format 0 "[player-dump] ~D ~A parent ~D"
+                k
+                (if (-> cs joint) (-> cs joint name) "-")
+                (if (-> cs parent) (/ (&- (the-as pointer (-> cs parent)) (the-as pointer (-> nodes data 0))) stride) -1)
+                )
+        (if (< k 80)
+            (format 0 " at ~M ~M ~M~%"
+                    (-> skin bind-world k trans x) (-> skin bind-world k trans y) (-> skin bind-world k trans z))
+            (format 0 "~%")
+            )
+        )
+      )
+    (dotimes (i (-> skin draw art-group length))
+      (format 0 "[player-dump] art ~D ~A~%" i (if (-> skin draw art-group data i) (-> skin draw art-group data i name)))
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-skin-init-by-other enhanced-skin ((ch enhanced-character))
   (set! (-> self level) (-> *level* level-default))
+  (set! (-> self char) ch)
   (set! (-> self root) (new 'process 'trsqv))
   (vector-copy! (-> self root trans) (-> self parent 0 control trans))
   (quaternion-copy! (-> self root quat) (-> self parent 0 control quat))
-  (initialize-skeleton self skel-enhanced-ashelin (the-as pair 0))
+  (initialize-skeleton self (-> ch skel) (the-as pair 0))
   ;; her root joint is Jak's, as his own is set up (init-target, logic-target.gc)
   (let ((v1-6 (-> self node-list data)))
     (set! (-> v1-6 0 param0) (the-as (function cspace transformq none) cspace<-transformq+trans!))
@@ -390,7 +737,7 @@
   (logior! (-> self skel status) (joint-control-status sync-math))
   (set! (-> self anim) -1)
   (set! (-> self pose-blend) (if (enhanced-skin-own-anim?) 0.0 1.0))
-  (dotimes (k (min 41 (-> self node-list length)))
+  (dotimes (k (min 80 (-> self node-list length)))
     (let ((jt (-> self node-list data k joint)))
       (if jt
           (matrix-4x4-inverse! (-> self bind-world k) (-> jt bind-pose))
@@ -398,6 +745,24 @@
           )
       )
     )
+  ;; a taller character: its hips' height against Jak's, both standing in their bind pose
+  (set! (-> self size) 1.0)
+  (let ((jt (-> self parent 0 node-list data 38 joint))
+        (m (new 'stack-no-clear 'matrix))
+        )
+    (when (and (-> ch sized) (>= (-> ch hips) 0) jt)
+      (matrix-4x4-inverse! m (-> jt bind-pose))
+      (if (< 0.0 (-> m trans y))
+          (set! (-> self size) (/ (-> self bind-world (-> ch hips) trans y) (-> m trans y)))
+          )
+      (format 0 "[enhanced-player] ~A hips ~M, Jak's ~M: size ~f~%" (-> ch name)
+              (-> self bind-world (-> ch hips) trans y) (-> m trans y) (-> self size))
+      )
+    )
+  (if *enhanced-player-dump*
+      (enhanced-skin-dump self)
+      )
+  (enhanced-ashelin-gun-init)
   (go-virtual idle)
   )
 
@@ -413,14 +778,33 @@
          (when (and skin *target* (zero? (mod t 60)))
            (let ((jn (-> *target* node-list))
                  (an (-> skin node-list))
+                 (head (enhanced-skin-joint-of skin 8))
+                 (hips (enhanced-skin-joint-of skin 38))
                  )
              (format 0 "[player-test] pilot ~A head ~M ~M ~M" (focus-test? *target* pilot)
-                     (-> an data 6 bone position x) (-> an data 6 bone position y) (-> an data 6 bone position z))
+                     (-> an data head bone position x) (-> an data head bone position y) (-> an data head bone position z))
              (format 0 " jak ~M ~M ~M" (-> jn data 8 bone position x) (-> jn data 8 bone position y) (-> jn data 8 bone position z))
-             (format 0 " hips ~M ~M ~M" (-> an data 13 bone position x) (-> an data 13 bone position y) (-> an data 13 bone position z))
+             (format 0 " hips ~M ~M ~M" (-> an data hips bone position x) (-> an data hips bone position y) (-> an data hips bone position z))
              (format 0 " jak ~M ~M ~M~%" (-> jn data 38 bone position x) (-> jn data 38 bone position y) (-> jn data 38 bone position z))
              )
            )
+         )
+       )
+      ((string= *enhanced-player-test-buf* "gun")
+       ;; 10 s in: D-pad right (gun out), fire 3 times, up and left (nothing), right again (away), and
+       ;; the camera turning round from 15 s
+       (set! *enhanced-pad-rightx* (if (> t 900) 200 -1))
+       (case t
+         ((1) (set-ignore-controller-in-bg! *pc-settings* #t))
+         ((600) (set! *enhanced-pad-press* (pad-buttons right)))
+         ((690 780 870) (set! *enhanced-pad-press* (pad-buttons r1)))
+         ((960) (set! *enhanced-pad-press* (pad-buttons up)))
+         ((1000) (set! *enhanced-pad-press* (pad-buttons left)))
+         ((1200) (set! *enhanced-pad-press* (pad-buttons right)))
+         )
+       (when (and *target* (zero? (mod t 30)) (>= t 570))
+         (format 0 "[player-test] ~D gun-type ~D using ~A ammo ~f~%" t (-> *target* gun gun-type)
+                 (using-gun? *target*) (-> *game-info* gun-ammo 3))
          )
        )
       ((string= *enhanced-player-test-buf* "run")
@@ -457,19 +841,65 @@
   (none)
   )
 
+;; the gun features lent to Sig (Jak didn't have them yet), taken back when he isn't Sig any more
+(define *enhanced-sig-lent* 0)
+
+(defun enhanced-sig-gun-update ((sig? symbol))
+  "Sig's Peacemaker is Jak's (gun-dark-1: the same shots, damage and ammo; D-pad right, target-gun.gc).
+   If Jak hasn't got it yet it's lent while Sig plays (with a full clip the first time, if it's empty)."
+  ;; the request to put it away (D-pad right again) is done once it's away
+  (if (and *target* (not (using-gun? *target*)))
+      (set! *enhanced-gun-put-away* #f)
+      )
+  (cond
+    (sig?
+     (let ((need (logclear (game-feature gun gun-dark-1) (-> *game-info* features))))
+       (when (nonzero? need)
+         (logior! (-> *game-info* features) need)
+         (set! *enhanced-sig-lent* (logior *enhanced-sig-lent* (the-as int need)))
+         (if (= (-> *game-info* gun-ammo 3) 0.0)
+             (set! (-> *game-info* gun-ammo 3) (get-max-ammo-for-gun *game-info* (pickup-type ammo-dark)))
+             )
+         (format 0 "[enhanced-player] Sig's Peacemaker lent (~D shots)~%" (the int (-> *game-info* gun-ammo 3)))
+         )
+       )
+     ;; put away, his gun is the Peacemaker (R1 brings out this one too)
+     (when (not (using-gun? *target*))
+       (set! (-> *target* gun using-gun-type) (pickup-type gun-dark-1))
+       (set! (-> *game-info* gun-type) (pickup-type gun-dark-1))
+       )
+     )
+    ((nonzero? *enhanced-sig-lent*)
+     (logclear! (-> *game-info* features) (the-as game-feature *enhanced-sig-lent*))
+     (set! *enhanced-sig-lent* 0)
+     )
+    )
+  (none)
+  )
+
 (defun enhanced-player-update ()
-  "Each frame (the target's flag-setup): Ashelin drawn in Jak's place while she is the player's model."
+  "Each frame (the target's flag-setup): the chosen character drawn in Jak's place."
   (if *enhanced-player-test*
       (enhanced-player-test)
       )
-  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get)))
+        (ch (enhanced-player-character))
+        )
+    ;; another character chosen: the old one goes first (its process is the pool's only one)
+    (when (and skin (!= (-> skin char) ch))
+      (deactivate skin)
+      (set! *enhanced-skin-ptr* #f)
+      (set! skin #f)
+      (format 0 "[enhanced-player] ~A~%" (if ch (-> ch name) "jak"))
+      )
     (cond
-      ((and *target* (enhanced-player-ashelin?) (enhanced-ashelin-art))
+      ((and *target* ch (enhanced-character-art ch))
        (when (not skin)
          (if (not *enhanced-skin-pool*)
-             (set! *enhanced-skin-pool* (new 'global 'dead-pool 1 #x8000 "*enhanced-skin-pool*"))
+             (set! *enhanced-skin-pool* (new 'global 'dead-pool 1 #x10000 "*enhanced-skin-pool*"))
              )
          (let ((pp-skin (process-spawn enhanced-skin
+                                       ch
                                        :init enhanced-skin-init-by-other
                                        :name "enhanced-skin"
                                        :from *enhanced-skin-pool*
@@ -480,10 +910,10 @@
            (set! *enhanced-skin-ptr* pp-skin)
            (set! *enhanced-skin-pid* (if pp-skin (-> pp-skin 0 pid) 0))
            (set! skin (the-as enhanced-skin (enhanced-skin-get)))
-           (format 0 "[enhanced-player] Ashelin ~A~%" skin)
-           ;; its one process is in use (or gone wrong): no Ashelin
+           (format 0 "[enhanced-player] ~A ~A~%" (-> ch name) skin)
+           ;; its one process is in use (or gone wrong): stay Jak
            (if (not skin)
-               (set! *enhanced-ashelin-failed* #t)
+               (set! (-> ch failed) #t)
                )
            )
          )
@@ -500,8 +930,12 @@
         (set! *enhanced-skin-hide* #f)
         )
       )
+    ;; its model and textures: its level's fr3 (desoasis for Ashelin, lsig for Sig)
+    (set! *enhanced-extra-fr3* (if (and *enhanced-skin-hide* ch (not (level-get *level* (string->symbol (-> ch fr3)))))
+                                   (-> ch fr3)
+                                   )
+          )
+    (enhanced-sig-gun-update (if (and *target* *enhanced-skin-hide* ch (string= (-> ch name) "sig")) #t #f))
     )
-  ;; her model and textures: desoasis.fr3
-  (set! *enhanced-extra-fr3* (if (and *enhanced-skin-hide* (not (level-get *level* 'desoasis))) "desoasis"))
   (none)
   )
