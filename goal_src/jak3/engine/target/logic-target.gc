@@ -233,13 +233,15 @@ moves about, so it's Spargus's that are looked for.)"
 (define-extern *enhanced-pad-hold* pad-buttons)
 
 ;; JAK_ENHANCED_HELLCAT_TEST=1 (test boots): Jak goes up to the parked Hellcat, gets in with
-;; triangle, pulls the stick back with x held (off the ground and climbing by the nose), turns right,
-;; fires (r1) flying level, pushes the stick forward down to the ground (landing) and gets out with
-;; triangle again. "[hellcat-test] <step>" lines go to the log for the test script's screenshots.
+;; triangle (it takes off), pulls the stick back with x held (climbing), turns right, fires (r1, l1)
+;; flying level, pushes the stick forward down to its floor over the ground and gets out in flight with
+;; triangle. "[hellcat-test] <step>" lines go to the log for the test script's screenshots.
 (define *enhanced-hellcat-test-buf* (new 'global 'string 8 (the-as string #f)))
 (define *enhanced-hellcat-test* (pc-enhanced-getenv "JAK_ENHANCED_HELLCAT_TEST" *enhanced-hellcat-test-buf* 8))
 (define *enhanced-hellcat-test-t* 0)
 (define *enhanced-hellcat-shots* 0) ;; the Hellcat's shots fired (desert-hellcat.gc)
+(define *enhanced-hellcat-missiles* 0) ;; and its missiles (l1)
+(define *enhanced-hellcat-ground* 0.0) ;; the ground's height under it
 (define-extern *enhanced-pad-leftx* int)
 (define-extern *enhanced-pad-lefty* int)
 
@@ -247,7 +249,10 @@ moves about, so it's Spargus's that are looked for.)"
   (format 0 "[hellcat-test] ~S ~A at ~M ~M ~M" step (focus-test? *target* pilot)
           (-> hellcat root trans x) (-> hellcat root trans y) (-> hellcat root trans z)
           )
-  (format 0 " speed ~M shots ~D pad ~D,~D #x~X up ~,,2f~%" (vector-length (-> hellcat root transv)) *enhanced-hellcat-shots*
+  (format 0 " speed ~M over ground ~M shots ~D missiles ~D" (vector-length (-> hellcat root transv))
+          (- (-> hellcat root trans y) *enhanced-hellcat-ground*) *enhanced-hellcat-shots* *enhanced-hellcat-missiles*
+          )
+  (format 0 " pad ~D,~D #x~X up ~,,2f~%"
           (-> *cpad-list* cpads 0 leftx) (-> *cpad-list* cpads 0 lefty) (-> *cpad-list* cpads 0 button0-abs 0)
           (-> (vector-y-quaternion! (new 'stack-no-clear 'vector) (-> hellcat root quat)) y)
           )
@@ -287,8 +292,13 @@ moves about, so it's Spargus's that are looked for.)"
       ((= t 480)
        (enhanced-hellcat-test-log hellcat "in")
        )
+      ((and (>= t 480) (< t 540))
+       (if (zero? (mod t 15))
+           (enhanced-hellcat-test-log hellcat "launch")
+           )
+       )
       ((and (>= t 540) (< t 900))
-       ;; throttle and the stick pulled back: off the ground, climbing by the nose; a right turn from 6 s
+       ;; throttle and the stick pulled back: climbing; a right turn from 6 s
        (set! *enhanced-pad-hold* (pad-buttons x))
        (set! *enhanced-pad-lefty* 255)
        (set! *enhanced-pad-leftx* (if (< t 720) -1 255))
@@ -296,32 +306,48 @@ moves about, so it's Spargus's that are looked for.)"
            (enhanced-hellcat-test-log hellcat "climbing")
            )
        )
-      ((and (>= t 900) (< t 1080))
-       ;; level, firing
-       (set! *enhanced-pad-hold* (pad-buttons x r1))
+      ((and (>= t 900) (< t 1100))
+       ;; level, firing: r1 tapped (four shots, then one a second), l1 twice (2 s apart)
+       (set! *enhanced-pad-hold* (pad-buttons x))
        (set! *enhanced-pad-lefty* -1)
        (set! *enhanced-pad-leftx* -1)
-       (if (or (= t 912) (= t 930) (= t 960) (= t 1070))
+       (cond
+         ((or (= t 940) (= t 1070))
+          (set! *enhanced-pad-press* (pad-buttons l1))
+          )
+         ((zero? (mod t 10))
+          (set! *enhanced-pad-press* (pad-buttons r1))
+          )
+         )
+       (if (or (= t 912) (= t 930) (= t 960) (= t 1000) (= t 1090))
            (enhanced-hellcat-test-log hellcat "firing")
            )
        )
-      ((and (>= t 1080) (< t 2000))
-       ;; the stick pushed forward: diving down to the ground (throttle the first 10 s), landing
-       (set! *enhanced-pad-hold* (if (< t 1700) (pad-buttons x) (pad-buttons)))
+      ((and (>= t 1100) (< t 1700))
+       ;; the stick pushed forward: down to its floor over the ground
        (set! *enhanced-pad-lefty* 0)
-       (if (zero? (mod (- t 1080) 120))
+       (if (zero? (mod (- t 1100) 120))
            (enhanced-hellcat-test-log hellcat "diving")
            )
        )
-      ((= t 2000)
+      ((= t 1700)
        (set! *enhanced-pad-lefty* -1)
-       (enhanced-hellcat-test-log hellcat "landed")
+       (enhanced-hellcat-test-log hellcat "low")
        )
-      ((= t 2060)
+      ((= t 1760)
+       ;; out in flight (the mission doesn't let him)
+       (set! *enhanced-pad-hold* (pad-buttons))
        (set! *enhanced-pad-press* (pad-buttons triangle))
        )
-      ((= t 2240)
+      ((= t 1900)
        (format 0 "[hellcat-test] out ~A~%" (not (focus-test? *target* pilot)))
+       )
+      ((= t 2200)
+       ;; the empty Hellcat, down on the ground
+       (enhanced-hellcat-test-log hellcat "parked")
+       )
+      ((= t 2260)
+       (format 0 "[hellcat-test] end~%")
        )
       )
     )
@@ -521,7 +547,7 @@ moves about, so it's Spargus's that are looked for.)"
               (vector-reset! (-> params velocity))
               (vector-copy! (-> params position) *enhanced-hellcat-spot*)
               (quaternion-axis-angle! (-> params rotation) 0.0 1.0 0.0 *enhanced-hellcat-yaw*)
-              (let ((v (vehicle-spawn (vehicle-type h-hellcat) params)))
+              (let ((v (vehicle-spawn (vehicle-type h-warf) params)))
                 (format 0 "[hellcat] parked: ~A~%" v)
                 (if v
                     (set! *enhanced-hellcat-parked* #t)
@@ -885,7 +911,7 @@ moves about, so it's Spargus's that are looked for.)"
      (set! *enhanced-blast-every* (string->int *enhanced-menu-buf*))
      )
     ((8)
-     ;; into a new vehicle of this type (vehicle-type: 0-2 bikes, 3-5 cars, 7 hellcat), tried once a second
+     ;; into a new vehicle of this type (vehicle-type: 0-2 bikes, 3-5 cars, 8 hellcat), tried once a second
      ;; until its level is in (test runs: driving sounds and effects)
      (set! *enhanced-vehicle-wanted* (string->int *enhanced-menu-buf*))
      (set! *enhanced-vehicle-frames* 0)

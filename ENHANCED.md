@@ -108,37 +108,36 @@ each. With both factions out in the streets the vehicles' bank was the one left 
 and bikes were silent: `update-sound-info` (cty-borrow-manager.gc) now puts it first. Names the game
 plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not missing sounds.
 `JAK_ENHANCED_MENU=8:<vehicle type>` puts Jak in a new vehicle (0-2 bikes, needs ctycarb; 3-5 cars,
-ctycara; 7 Hellcat, in the desert only) once its level is in, for testing.
+ctycara; 8 Hellcat, in the desert only) once its level is in, for testing.
 
-Desert Hellcat: a Hellcat (vehicle type 7) is parked about 10 m to the left of `desert-start`; Jak gets in
-and out with triangle and flies it like a police ship (h-hellcat, car.gc): x throttle, square brake, left
-stick x turns (it banks into turns: `roll-angle` 30 degrees, the game's is 0), left stick y pitches the nose
-and moves it up and down as the nose points: back climbs, forward dives (the game's own stick convention,
-lean-z), by how far it's pushed and how fast it goes (5 m/s at a standstill, about 29 m/s climbing at the
-game's 30 m/s; it sinks 12 m/s at most: any faster it drops out of its lift thrusters' reach and the tail
-fin, ten times stronger in free fall, tips it nose over). Pulled back on the ground it lifts off, pushed down
-onto the ground it lands; r2 is still the game's quick take-off (12 m up) and landing. Ceiling 600 m. It
-flies at a height of its own instead of the city's traffic height map, which the desert doesn't have
-(methods 88 and 117). r1 fires its guns: the game's Hellcats never fire (only the blow tower's turret, a
-hit-scan gun on the `hellcat-tower` model), so they're the KG's blaster bolts (`guard-shot`, in GAME, as
-the guards and the rhino fire them) as `hellcat-shot` (desert-hellcat.gc), from the front gun, left and
-right in turn, 8 a second, 150 m/s on top of the Hellcat's speed, with the blow tower Hellcat's sounds
-(`hc-gun-fire`, `hellcat-riccos`). Sounds: the engine (`vehicle-engine`, select 8), thrust, ignition,
-take-off and landing are in `citycarh`, the gun's in `blow1` and `blow3h`: while Jak flies it, player-control
-swaps them in through the vehicle manager's `extra-bank`, as the desert cars do, `wasall1` -> `citycarh` +
-`blow3h` (two halves of one slot; `blow3h` counts as a half bank outside the city, level.gc) and `desert2`
--> `blow1` (dflut, firetorch, cactus, waterfall sounds are out while flying), back when he gets out. The
-thruster flames and glow, exhaust smoke, head- and taillights are the game's own vehicle effects
-(vehicle-effects.gc), already there. The game never had an `h-hellcat` type (only its constants and skeleton
-group in car.gc), so car.gc now has one, with Jak 2's hellcat collision. Its code and art are the `deshcat`
-level (`dgos/deshcat.gd`: the hover-vehicle code as HGA.DGO carries it, car.o, the Hellcat's art and
-`ctycarc`'s bsp, so `ctycarc.fr3` draws it), loaded into wasall's borrow slot 0 (now 464 KB, was 405) while
-no task wants that slot (`enhanced-hellcat-update`, logic-target.gc) and Spargus isn't coming in: once one
+Desert Hellcat: the Hellcat Jak flies in the War Factory's sky battle (task `factory-sky-battle`, type
+`h-warf`, vehicle type 8, levels/factory/h-warf.gc and warf-projectile.gc, LFACTORY.DGO) is parked about 10 m to the left
+of `desert-start`; Jak gets in and out with triangle. It's the mission's, handling, guns, thrusters and
+sounds: it takes off with the mission's start (a second at 50 m/s) and never stops, flying at 37.5 to
+50 m/s (x throttle, square brake); left stick x turns it, banking hard; left stick y climbs (back) and dives
+(forward); r1 fires `gun-warf-shot` from the nose, homing on what's ahead (four at once, then one a
+second), l1 the `warf-projectile` missile and its blast (8, one back every 20 s); its own thruster
+flames (parts 2761/2762, copied from fac-part.gc, which is FACTORYA's; faint in daylight, made for the
+factory's dark sky) and its sounds, `hellcat-engine`,
+`-boost`, `-bank`, `-fire`, `-firealt`, damage loops and explosion, all in `factory2`, which player-control
+swaps in for `desert2` through the vehicle manager's `extra-bank` while Jak flies (dflut, firetorch,
+cactus, waterfall sounds are out meanwhile). What the factory's arena had and the desert hasn't is changed in
+deshcat's copy of it only (desert-hellcat.gc; LFACTORY.DGO loads its own): its altitudes are absolute (it
+can't fly below 314 m, climbing fades out from 400 m, `ascention-atten!`, minalt and maxalt), here they're the
+same band over the ground under it (floor 8 m up, ceiling ~120 m over that); its arena (290 m around the
+factory, `*h-warf-center-of-level*`) is gone; Jak can get out (vehicle flag #x400 keeps him in, in the
+mission), even in flight, and the empty Hellcat comes down to the ground and stays there (the mission's has no
+gravity of its own at low speed and blows up when it stops against something); the missile's blast sphere
+gets deshcat as its level (factoryb, in the factory). Its code and art are the `deshcat` level
+(`dgos/deshcat.gd`: the hover-vehicle code as HGA.DGO carries it, warf-projectile.o, h-warf.o, the
+Hellcat's art and the blast sphere's (`hemisplosion`, FACB's), `ctycarc`'s bsp, so `ctycarc.fr3` draws the
+Hellcat; the sphere isn't in it, so only its particles show), loaded into wasall's borrow slot 0 (now 496 KB,
+was 405) while no task wants that slot (`enhanced-hellcat-update`, logic-target.gc) and Spargus isn't coming in: once one
 of its levels (waswide, wascitya, wascityb, wasleapr) is wanted or in, deshcat isn't asked for, and the
 Hellcat goes first (`deshcat-release`: Jak out of it if he's flying, banks back, its shots gone), before
 deshcat unloads (asking for it again at the gate, in the city's level swaps, crashed the game).
-`JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up, gets in, climbs by the stick, turns, fires, dives
-down to land and gets out by himself, with `[hellcat-test]` log lines for screenshots (the test stick is
+`JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up, gets in, climbs by the stick, turns, fires both
+guns, dives down to the floor and gets out in flight by himself, with `[hellcat-test]` log lines for screenshots (the test stick is
 `*enhanced-pad-leftx/lefty*`, drawable.gc; pads in other windows are ignored). `=2` and `=3`: into Spargus
 from the desert in the Hellcat or on foot (the gate's level swap, then carried to wascitya-start), with
 `[spargus-test]` lines.

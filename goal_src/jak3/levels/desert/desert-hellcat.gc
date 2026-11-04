@@ -5,82 +5,211 @@
 ;; name in dgo: desert-hellcat
 ;; dgos: DESHCAT
 
-;; Enhanced: the deshcat level (the Hellcat in the desert, see deshcat.gd). Once it's in, vehicle
-;; type 7 (h-hellcat) can be spawned there: enhanced-hellcat-update (logic-target.gc) parks one
-;; near desert-start. Every Hellcat goes before the level's code does.
+;; Enhanced: the deshcat level (the Hellcat in the desert, see deshcat.gd). It's the Hellcat Jak flies
+;; in the War Factory's sky battle (the factory-sky-battle task): h-warf, with its handling, its guns
+;; (r1 gun-warf-shot, homing on what's ahead; l1 the warf-projectile missile, 8 of them, one back every
+;; 20 s), its thrusters and its sounds (factory2). Once deshcat is in, vehicle type h-warf can be spawned
+;; there: enhanced-hellcat-update (logic-target.gc) parks one near desert-start. Every Hellcat goes
+;; before the level's code does.
+;;
+;; The factory's arena isn't the desert, so a few things change here, in deshcat's copy of h-warf only
+;; (LFACTORY.DGO loads its own):
+;; - the mission's altitudes are absolute (it flies between 314 and 480 m over the factory, it can't
+;;   go lower and climbs no higher than ~430 m): here they're the same band over the ground under it;
+;; - its arena (290 m around the factory, it's steered back in) isn't there;
+;; - Jak can get out (triangle), the mission never lets him; the empty Hellcat comes down to the
+;;   ground instead of hanging in the air, and doesn't blow itself up for standing still there;
+;; - it takes off with the mission's start, a second at 50 m/s, when Jak gets in, not when it's parked.
 
-;; Enhanced: the Hellcat's guns. The game's Hellcats never fire their own (only the blow tower's turret,
-;; a hit-scan gun on another model): these are the KG's blaster bolts (guard-shot, in GAME, the guards'
-;; and the rhino's), fired from the front gun, alternately left and right, where the nose points, with
-;; the blow tower Hellcat's sounds (blow1, blow3h: h-hellcat's player-control loads them).
 (define-extern *enhanced-hellcat-shots* int) ;; logic-target.gc, counted for the test boot
+(define-extern *enhanced-hellcat-missiles* int)
+(define-extern *enhanced-hellcat-ground* float)
+(define-extern enhanced-probe-line (function vector vector float float))
 
-(deftype hellcat-shot (guard-shot)
-  ()
+;; the factory's hud count of l1 shots (factory-manager.gc, not here)
+(defun factory-shotsleft ((arg0 int))
+  0
+  (none)
   )
 
+;; the thruster flames' parts (fac-part.gc, FACTORYA.DGO)
+(defpart 2761
+  :init-specs ((:texture (laser-hit2 level-default-sprite))
+    (:num 1.0)
+    (:z (meters 0))
+    (:scale-x (meters 0))
+    (:rot-x (degrees 0))
+    (:rot-y (degrees 0))
+    (:rot-z (degrees 0))
+    (:scale-y (meters 0))
+    (:r 255.0)
+    (:g 255.0)
+    (:b 255.0)
+    (:a 200.0)
+    (:vel-y (meters 0))
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3))
+    (:conerot-z (degrees 0))
+    (:rotate-x (degrees 90))
+    (:rotate-y (degrees 0))
+    )
+  )
 
-(defmethod play-impact-sound ((this hellcat-shot) (arg0 projectile-options))
-  (let ((v1-0 arg0))
-    (cond
-      ((zero? v1-0)
-       (sound-play "hc-gun-fire")
-       )
-      ((= v1-0 (projectile-options po0))
-       (sound-play "hellcat-riccos")
-       )
+(defpart 2762
+  :init-specs ((:texture (glow level-default-sprite))
+    (:num 3.0)
+    (:scale-x (meters 0))
+    (:scale-y (meters 0))
+    (:r 40.0)
+    (:g 100.0 28.0)
+    (:b 255.0)
+    (:a 30.0 8.0)
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3))
+    (:conerot-z (degrees 0))
+    (:rotate-y (degrees 0))
+    )
+  )
+
+;; the missile's blast sphere, as warf-projectile.gc's but in deshcat (it's factoryb's there, and a
+;; process-drawable with no level crashes)
+(defbehavior warf-explosion-sphere-init-by-other warf-explosion-sphere ((arg0 warf-explosion-sphere-init-params))
+  (set! (-> self root) (new 'process 'trsqv))
+  (set! (-> self level) (level-get *level* 'deshcat))
+  (initialize-skeleton
+    self
+    (the-as
+      skeleton-group
+      (art-group-get-by-name *level* "skel-warf-explosion-sphere" (the-as (pointer level) #f))
+      )
+    (the-as pair 0)
+    )
+  (vector-copy! (-> self root trans) (-> arg0 pos))
+  (quaternion-identity! (-> self root quat))
+  (set! (-> self draw lod-set lod 0 dist) 14336000.0)
+  (set! (-> self expanding?) #t)
+  (go-virtual active)
+  )
+
+;; Jak may get out (vehicle flag #x400 keeps him in, in the mission)
+(set! (-> *h-warf-constants* flags) (logclear (-> *h-warf-constants* flags) #x400))
+
+;; The altitude band: the mission's floor is 314 m (its descent fades out there, h-warf's minalt) and
+;; its ceiling 480 m (maxalt; climbing fades out from 400 m). Here the floor is 8 m over the ground.
+(defconstant H_WARF_FLOOR (meters 314.5)) ;; *h-warf-constants*' minalt (1288192)
+(defconstant H_WARF_ROOF (meters 165.5)) ;; maxalt over it
+(defconstant ENHANCED_WARF_CLEARANCE (meters 8))
+
+(define *enhanced-warf-shift* 0.0) ;; how far below the factory's the desert floor is, under the Hellcat
+
+(define *enhanced-warf-ascention* ascention-atten!)
+
+(defun ascention-atten! ((arg0 float))
+  "As the factory's, for heights over the ground under the Hellcat."
+  (*enhanced-warf-ascention* (- arg0 *enhanced-warf-shift*))
+  )
+
+(defun enhanced-warf-floor ((this h-warf))
+  "The ground under the Hellcat, every few frames, and the mission's altitudes put over it."
+  (when (zero? (logand (-> *display* base-clock integral-frame-counter) 3))
+    (let ((from (new 'stack-no-clear 'vector))
+          (to (new 'stack-no-clear 'vector))
+          )
+      (vector-copy! from (-> this root trans))
+      (vector-copy! to from)
+      (set! (-> to y) (- (-> from y) (meters 600)))
+      (let ((u (enhanced-probe-line from to (meters 1))))
+        (if (>= u 0.0)
+            (set! *enhanced-hellcat-ground* (- (-> from y) (* u (meters 600))))
+            )
+        )
+      )
+    )
+  (let ((floor (+ *enhanced-hellcat-ground* ENHANCED_WARF_CLEARANCE)))
+    (set! *enhanced-warf-shift* (- floor H_WARF_FLOOR))
+    ;; minalt pushes it up hard and kills it flying backwards below: only a guard just over the ground
+    (set! (-> this minalt) (+ *enhanced-hellcat-ground* (meters 1)))
+    (set! (-> this maxalt) (+ floor H_WARF_ROOF))
+    )
+  ;; no arena: its centre always just by it
+  (set! (-> *h-warf-center-of-level* x) (+ (-> this root trans x) (meters 1)))
+  (set! (-> *h-warf-center-of-level* z) (-> this root trans z))
+  (none)
+  )
+
+(define *enhanced-warf-gravity* (the-as (function h-warf float none) (method-of-type h-warf apply-gravity!)))
+
+(defmethod apply-gravity! ((this h-warf) (arg0 float))
+  (enhanced-warf-floor this)
+  (let ((riding? (logtest? (-> this v-flags) (vehicle-flag riding))))
+    (if (not riding?)
+        ;; (no take-off while it's parked: see player-control)
+        (set! (-> this birth) (- (current-time) (seconds 2)))
+        )
+    (*enhanced-warf-gravity* this arg0)
+    (when (not riding?)
+      ;; empty, it comes down to the ground, where its lift thrusters hold it (the mission's never empty
+      ;; and gets no gravity of its own at low speed)
+      (let ((force (new 'stack-no-clear 'vector)))
+        (vector-reset! force)
+        (set! (-> force y) (* -1.0 (-> this info info mass) (-> this info extra gravity)))
+        (add-force! (-> this rbody) force)
+        )
       )
     )
   (none)
   )
 
-(defmethod init-proj-settings! ((this hellcat-shot))
-  (call-parent-method this)
-  (set! (-> this damage) 4.0)
-  (set! (-> this vehicle-damage-factor) 1.0)
-  (set! (-> this vehicle-impulse-factor) 0.5)
-  (set! (-> this timeout) (seconds 1.5))
+(define *enhanced-warf-impact* (the-as (function h-warf rigid-body-impact none) (method-of-type h-warf on-impact)))
+
+(defmethod on-impact ((this h-warf) (arg0 rigid-body-impact))
+  ;; (the mission's blows the Hellcat up when it's stopped against something: not when it's parked)
+  (if (logtest? (-> this v-flags) (vehicle-flag riding))
+      (*enhanced-warf-impact* this arg0)
+      ((method-of-type hvehicle on-impact) this arg0)
+      )
   (none)
   )
 
-(defconstant HELLCAT_SHOT_SPEED (meters 150)) ;; per second, on top of the Hellcat's own
+(define *enhanced-warf-control* (the-as (function h-warf none) (method-of-type h-warf control-hook-player)))
 
-(defun hellcat-fire ((this h-hellcat))
-  (let ((params (new 'stack 'projectile-init-by-other-params))
-        (mat (-> this rbody matrix))
+(defmethod control-hook-player ((this h-warf))
+  ;; the mission's, with its shots counted for the test boot
+  (let ((shots (+ (-> this fire-time 0) (-> this fire-time 1) (-> this fire-time 2) (-> this fire-time 3)))
+        (missile (-> this l1-fire-time))
         )
-    ;; frontgun (joint 4), half a metre to either side
-    (vector<-cspace! (-> params pos) (-> this node-list data 4))
-    (vector+float*! (-> params pos) (-> params pos) (-> mat rvec) (if (logtest? (-> this enh-gun) 1) 2048.0 -2048.0))
-    (+! (-> this enh-gun) 1)
-    (vector-float*! (-> params vel) (-> mat fvec) HELLCAT_SHOT_SPEED)
-    (vector+! (-> params vel) (-> params vel) (-> this rbody lin-velocity))
-    (set! (-> params ent) (-> this entity))
-    (set! (-> params charge) 1.0)
-    (set! (-> params options) (projectile-options))
-    (set! (-> params notify-handle) (the-as handle #f))
-    (set! (-> params owner-handle) (process->handle this))
-    (set! (-> params target-handle) (the-as handle #f))
-    (set! (-> params target-pos quad) (the-as uint128 0))
-    (set! (-> params ignore-handle) (process->handle this))
-    (let* ((v1-0 *game-info*)
-           (a0-1 (+ (-> v1-0 attack-id) 1))
-           )
-      (set! (-> v1-0 attack-id) a0-1)
-      (set! (-> params attack-id) a0-1)
-      )
-    (set! (-> params timeout) (seconds 1.5))
-    (if (spawn-projectile hellcat-shot params *rigid-body-queue-manager* *default-dead-pool*)
+    (*enhanced-warf-control* this)
+    (if (!= shots (+ (-> this fire-time 0) (-> this fire-time 1) (-> this fire-time 2) (-> this fire-time 3)))
         (+! *enhanced-hellcat-shots* 1)
         )
+    (when (!= missile (-> this l1-fire-time))
+      (+! *enhanced-hellcat-missiles* 1)
+      (format 0 "[hellcat] missile, ~D left~%" (-> this bigshotcount))
+      )
     )
   (none)
   )
 
-(set! *enhanced-hellcat-fire* hellcat-fire)
+;; its sounds (engine, boost, bank, guns, damage, explosion) are factory2's, in place of desert2's
+;; (dflut, firetorch, cactus, waterfall sounds are out while flying)
+(define *enhanced-hellcat-banks* '((desert2 factory2)))
+
+(defstate player-control (h-warf)
+  :virtual #t
+  :enter (behavior ()
+    (call-parent-state-handler enter)
+    ;; the mission's start: a second at 50 m/s (apply-gravity!)
+    (set-time! (-> self birth))
+    (send-event *vehicle-manager* 'extra-bank *enhanced-hellcat-banks*)
+    )
+  :exit (behavior ()
+    (send-event *vehicle-manager* 'no-extra-bank)
+    (call-parent-state-handler exit)
+    )
+  )
 
 (defun deshcat-activate ((arg0 level) (arg1 symbol))
-  (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
+  (set! (-> *traffic-info* vehicle-levels (vehicle-type h-warf)) (-> arg0 name))
   (format 0 "[hellcat] deshcat active, heap ~DK free~%"
           (/ (&- (-> arg0 heap top) (-> arg0 heap current)) 1024)
           )
@@ -94,28 +223,29 @@ outlive its code and art. enhanced-hellcat-update calls it before letting deshca
 deactivate again."
   (when (and *target* (focus-test? *target* pilot))
     (let ((v (handle->process (-> *target* pilot vehicle))))
-      (when (and v (type? v h-hellcat))
+      (when (and v (type? v h-warf))
         (send-event *target* 'end-mode 'pilot)
         (send-event *vehicle-manager* 'no-extra-bank)
         )
       )
     )
-  (let ((gp-0 (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)))))
+  (let ((gp-0 (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-warf)))))
     (when gp-0
       (format 0 "[hellcat] Hellcat gone~%")
       (deactivate gp-0)
       )
     )
-  (set! (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)) (the-as handle #f))
-  (set! *enhanced-hellcat-fire* #f)
-  (kill-by-type hellcat-shot *active-pool*)
+  (set! (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-warf)) (the-as handle #f))
+  (kill-by-type gun-warf-shot *active-pool*)
+  (kill-by-type warf-projectile *active-pool*)
+  (kill-by-type warf-explosion-sphere *active-pool*)
   0
   (none)
   )
 
 (defun deshcat-deactivate ((arg0 level))
-  (when (= (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
-    (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) #f)
+  (when (= (-> *traffic-info* vehicle-levels (vehicle-type h-warf)) (-> arg0 name))
+    (set! (-> *traffic-info* vehicle-levels (vehicle-type h-warf)) #f)
     )
   (deshcat-release)
   (format 0 "[hellcat] deshcat out~%")
@@ -124,6 +254,6 @@ deactivate again."
   )
 
 (defun deshcat-hellcat ()
-  "The Hellcat (vehicle type 7) if there's one."
-  (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)))
+  "The Hellcat (h-warf) if there's one."
+  (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-warf)))
   )
