@@ -124,4 +124,26 @@ The credits are the small part. Tripo returns an unrigged textured mesh, so per 
 3. Save `custom_assets/jak3/merc_replacements/<model>.glb` and its json, re-extract, and test
    following [character-models.md](character-models.md).
 
-Nothing here has been tried on a vehicle.
+## The Hellcat without Tripo (tried, does not show yet)
+
+`scripts/enhanced/hellcat_hd_textures.py` and `hellcat_hd.py` rebuild the game's own Hellcat in more
+detail instead of generating a new one: same UVs, joints and silhouette, curves rounded, hard edges
+bevelled, contact shadows in the vertex colours, textures at twice the HD size (4014 -> about 18000
+triangles; the 23 textures go from 0.3-1 MB to 1-8 MB each, ctycarc.fr3 from 36 to about 60 MB):
+
+```
+decompiler ... --config-override "{... \"rip_levels\": true, inputs_file: CTYCARC only}"
+python scripts/enhanced/hellcat_hd_textures.py decompiler_out/jak3/levels/ctycarc/hellcat-lod0.glb <tex dir> --gpu 1
+blender -b --factory-startup -P scripts/enhanced/hellcat_hd.py -- <rip glb> <tex dir> hellcat-lod0.glb
+```
+
+With `{"joints_by_name": true, "all_lods": true}` it extracts cleanly (no joint warnings), but **in game
+the Hellcat is invisible**, and so is the unchanged rip written back the same way, with or without
+its skin. The likely reason: the Hellcat has damage segments (`damage-seg-array` in `h-warf.gc` and
+`car.gc`, applied by `vehicle-method-114` in vehicle-util.gc), each with its own effects, and the
+undamaged state hides some of them. Merc2 draws a replacement only when the game enables the
+original's effect 0 (`current_effect_enable_bits & 1`), so if effect 0 belongs to a hidden damage
+state the whole replacement is hidden. Fixing it needs C++: the extractor putting the replacement in
+an effect that is always on (segment 0 of the merc-ctrl's `seg-table`), or Merc2 following that
+effect instead of effect 0. The wasteland cars switch parts with `setup-masks` too (`wcar-*.gc`):
+the same could hide them.
