@@ -1278,6 +1278,7 @@
       :ground-probe-distance (meters 4.5)
       :cos-ground-effect-angle 0.42261827
       :spring-lift-factor 0.3
+      :roll-angle (degrees 30) ;; Enhanced: banks into turns (the game's is 0)
       :air-drag-factor 1.0
       :steering-thruster-factor 3.0
       :steering-thruster-max-gain 2.0
@@ -1976,44 +1977,87 @@
 ;; Enhanced: the Hellcat as a vehicle Jak can drive. The game has its skeleton group and
 ;; *h-hellcat-constants*, and vehicle-spawn names an h-hellcat type, but the type itself was never
 ;; there (vehicle type 7 spawned nothing). The collision is Jak 2's hellcat's (car.gc there).
+;; Free flight, as a police ship. The game's flight level comes from the city's traffic height map,
+;; which the desert doesn't have: the Hellcat holds a height of its own (enh-altitude) and the left stick
+;; moves it, as the nose points: back climbs, forward dives (the stick also pitches the nose, lean-z, the
+;; game's own convention), by how far it's pushed and how fast the Hellcat goes. Pulled back on the ground
+;; it lifts off, pushed down onto the ground it lands; R2 is still the game's quick take-off / landing.
+;; R1 fires its guns (desert-hellcat.gc, while the deshcat level is in).
 (deftype h-hellcat (h-car-base)
-  ((enh-altitude  float)  ;; Enhanced: the height Jak flies it at (world, game units)
+  ((enh-altitude   float)       ;; Enhanced: the height Jak flies it at (world, game units)
+   (enh-fire-time  time-frame)  ;; Enhanced: the last shot
+   (enh-gun        int32)       ;; Enhanced: which side fires next
    )
   )
 
-;; Enhanced: free flight. The game's flight level comes from the city's traffic height map, which the
-;; desert doesn't have (R2 never lifted it): the Hellcat holds a height of its own instead. R2 takes off
-;; (12 m up) and lands as in the city, R1 climbs and L1 descends (from the ground, R1 takes off too).
-(defconstant ENHANCED_HELLCAT_CLIMB (meters 12))      ;; per second
-(defconstant ENHANCED_HELLCAT_CEILING (meters 600))   ;; world height
+(defconstant ENHANCED_HELLCAT_LIFT (meters 5))     ;; climb per second at a standstill, stick all the way
+(defconstant ENHANCED_HELLCAT_PITCH_CLIMB 0.8)     ;; and this much of its forward speed
+;; the fastest it sinks: any faster and it drops below its lift thrusters' reach, falls free (in-air) and the
+;; tail fin, ten times stronger in the air, tips it nose over
+(defconstant ENHANCED_HELLCAT_MAX_SINK (meters 12))
+(defconstant ENHANCED_HELLCAT_CEILING (meters 600)) ;; world height
+
+;; the city's hover-car sounds (vehicle-engine, bike-thrust...) and the Hellcat's own from the blow tower
+;; (hc-gun-fire, hellcat-riccos), in place of wasall1 (what the desert cars replace too) and desert2
+(define *enhanced-hellcat-banks* '((wasall1 citycarh blow3h) (desert2 blow1)))
+
+;; Enhanced: the guns, set by desert-hellcat.gc (#f without it)
+(define *enhanced-hellcat-fire* (the-as (function h-hellcat none) #f))
 
 (defmethod vehicle-method-88 ((this h-hellcat) (arg0 vehicle-controls))
   (when (not *pause-lock*)
-    (let ((y (-> this rbody position y)))
+    (let ((y (-> this rbody position y))
+          (climb (- (analog-input (the-as int (-> *cpad-list* cpads 0 lefty)) 128.0 48.0 110.0 -1.0)))
+          (moving? (logtest? (vehicle-flag flight-level-transition) (-> this v-flags)))
+          )
       (cond
         ((zero? (-> this flight-level-index))
-         ;; taking off, by R2 (the game's own toggle, below) or R1: a height above where it is now
-         (when (or (cpad-pressed? 0 r2) (cpad-hold? 0 r1))
-           (set! (-> this enh-altitude) (+ y (meters 12)))
-           (set! (-> this flight-level) (-> this enh-altitude))
-           (if (cpad-hold? 0 r1)
-               (hvehicle-method-154 this)
-               )
+         (cond
+           ((cpad-pressed? 0 r2)
+            ;; the game's toggle (the parent, below) takes off to a height 12 m up
+            (set! (-> this enh-altitude) (+ y (meters 12)))
+            (set! (-> this flight-level) (-> this enh-altitude))
+            )
+           ((and (< 0.3 climb) (not moving?))
+            ;; pulled back: off the ground from where it is (straight to flight level 1, the stick climbs)
+            (set! (-> this enh-altitude) (+ y (meters 1)))
+            (set! (-> this flight-level) (-> this enh-altitude))
+            (hvehicle-method-154 this)
+            (sound-play "bike-up")
+            )
            )
          )
         (else
-          (let ((climb (* ENHANCED_HELLCAT_CLIMB (seconds-per-frame))))
-            (if (cpad-hold? 0 r1)
-                (+! (-> this enh-altitude) climb)
+          (let ((fwd (fmax 0.0 (vector-dot (-> this rbody lin-velocity) (-> this rbody matrix fvec))))
+                (ground? (logtest? (-> this v-flags) (vehicle-flag on-ground)))
                 )
-            (if (cpad-hold? 0 l1)
-                (-! (-> this enh-altitude) climb)
+            (cond
+              ((and ground? (< climb -0.3) (not moving?))
+               ;; nose down onto the ground: land
+               (format 0 "[hellcat] landing at ~M~%" y)
+               (hvehicle-method-155 this)
+               )
+              (else
+                (if (not moving?)
+                    (+! (-> this enh-altitude)
+                        (* (fmax (- ENHANCED_HELLCAT_MAX_SINK)
+                                 (* climb (+ ENHANCED_HELLCAT_LIFT (* ENHANCED_HELLCAT_PITCH_CLIMB fwd)))
+                                 )
+                           (seconds-per-frame)
+                           )
+                        )
+                    )
+                ;; over rising ground it rides up the slope rather than into it
+                (if ground?
+                    (set! (-> this enh-altitude) (fmax (-> this enh-altitude) (+ y (meters -1))))
+                    )
                 )
+              )
             )
           ;; (not far from where it is: held under a ledge or on the ground, it doesn't wind up a height
-          ;; it would shoot up to)
+          ;; it would shoot up to, nor one far below it would drop to)
           (set! (-> this enh-altitude)
-                (fmax (+ y (meters -20)) (fmin (+ y (meters 20)) (fmin ENHANCED_HELLCAT_CEILING (-> this enh-altitude))))
+                (fmax (+ y (meters -4)) (fmin (+ y (meters 12)) (fmin ENHANCED_HELLCAT_CEILING (-> this enh-altitude))))
                 )
           (set! (-> this flight-level) (-> this enh-altitude))
           )
@@ -2021,6 +2065,23 @@
       )
     )
   (call-parent-method this arg0)
+  ;; flying, the stick only tips the nose a little (and not at all falling free, see above)
+  (when (> (-> this flight-level-index) 0)
+    (set! (-> arg0 lean-z) (if (logtest? (-> this v-flags) (vehicle-flag in-air))
+                               0.0
+                               (* 0.35 (-> arg0 lean-z))
+                               )
+          )
+    )
+  (when (and (not *pause-lock*)
+             *enhanced-hellcat-fire*
+             (cpad-hold? 0 r1)
+             (-> *setting-control* user-current gun)
+             (time-elapsed? (-> this enh-fire-time) (seconds 0.12))
+             )
+    (set-time! (-> this enh-fire-time))
+    (*enhanced-hellcat-fire* this)
+    )
   (none)
   )
 
@@ -2033,6 +2094,17 @@
   (none)
   )
 
+(defstate player-control (h-hellcat)
+  :virtual #t
+  :enter (behavior ()
+    (call-parent-state-handler enter)
+    (send-event *vehicle-manager* 'extra-bank *enhanced-hellcat-banks*)
+    )
+  :exit (behavior ()
+    (send-event *vehicle-manager* 'no-extra-bank)
+    (call-parent-state-handler exit)
+    )
+  )
 
 (defmethod init-collision! ((this h-hellcat))
   (let ((s5-0 (new 'process 'collide-shape-moving this (collide-list-enum usually-hit-by-player))))

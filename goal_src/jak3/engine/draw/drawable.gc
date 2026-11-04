@@ -10,11 +10,20 @@
 
 (define-extern draw-vortex (function none)) ;; doesn't exist in jak 3!!
 ;; Enhanced: buttons pressed by test scripts (logic-target.gc), as if from pad 0: *enhanced-pad-press*
-;; for one frame, *enhanced-pad-hold* until cleared (x held is also full throttle pressure)
+;; for one frame, *enhanced-pad-hold* until cleared (x held is also full throttle pressure); the left
+;; stick held at *enhanced-pad-leftx* / *enhanced-pad-lefty* (0-255, 128 centre) until set back to -1
 (define *enhanced-pad-press* (the-as pad-buttons 0))
 (define *enhanced-pad-hold* (the-as pad-buttons 0))
+(define *enhanced-pad-leftx* -1)
+(define *enhanced-pad-lefty* -1)
 
 (defun enhanced-test-pad ()
+  (if (>= *enhanced-pad-leftx* 0)
+      (set! (-> *cpad-list* cpads 0 leftx) (the-as uint *enhanced-pad-leftx*))
+      )
+  (if (>= *enhanced-pad-lefty* 0)
+      (set! (-> *cpad-list* cpads 0 lefty) (the-as uint *enhanced-pad-lefty*))
+      )
   (when (or (nonzero? *enhanced-pad-press*) (nonzero? *enhanced-pad-hold*))
     (let ((pad (-> *cpad-list* cpads 0)))
       (logior! (-> pad button0-abs 0) (logior *enhanced-pad-press* *enhanced-pad-hold*))

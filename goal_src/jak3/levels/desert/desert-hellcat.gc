@@ -9,6 +9,76 @@
 ;; type 7 (h-hellcat) can be spawned there: enhanced-hellcat-update (logic-target.gc) parks one
 ;; near desert-start. Every Hellcat goes before the level's code does.
 
+;; Enhanced: the Hellcat's guns. The game's Hellcats never fire their own (only the blow tower's turret,
+;; a hit-scan gun on another model): these are the KG's blaster bolts (guard-shot, in GAME, the guards'
+;; and the rhino's), fired from the front gun, alternately left and right, where the nose points, with
+;; the blow tower Hellcat's sounds (blow1, blow3h: h-hellcat's player-control loads them).
+(define-extern *enhanced-hellcat-shots* int) ;; logic-target.gc, counted for the test boot
+
+(deftype hellcat-shot (guard-shot)
+  ()
+  )
+
+
+(defmethod play-impact-sound ((this hellcat-shot) (arg0 projectile-options))
+  (let ((v1-0 arg0))
+    (cond
+      ((zero? v1-0)
+       (sound-play "hc-gun-fire")
+       )
+      ((= v1-0 (projectile-options po0))
+       (sound-play "hellcat-riccos")
+       )
+      )
+    )
+  (none)
+  )
+
+(defmethod init-proj-settings! ((this hellcat-shot))
+  (call-parent-method this)
+  (set! (-> this damage) 4.0)
+  (set! (-> this vehicle-damage-factor) 1.0)
+  (set! (-> this vehicle-impulse-factor) 0.5)
+  (set! (-> this timeout) (seconds 1.5))
+  (none)
+  )
+
+(defconstant HELLCAT_SHOT_SPEED (meters 150)) ;; per second, on top of the Hellcat's own
+
+(defun hellcat-fire ((this h-hellcat))
+  (let ((params (new 'stack 'projectile-init-by-other-params))
+        (mat (-> this rbody matrix))
+        )
+    ;; frontgun (joint 4), half a metre to either side
+    (vector<-cspace! (-> params pos) (-> this node-list data 4))
+    (vector+float*! (-> params pos) (-> params pos) (-> mat rvec) (if (logtest? (-> this enh-gun) 1) 2048.0 -2048.0))
+    (+! (-> this enh-gun) 1)
+    (vector-float*! (-> params vel) (-> mat fvec) HELLCAT_SHOT_SPEED)
+    (vector+! (-> params vel) (-> params vel) (-> this rbody lin-velocity))
+    (set! (-> params ent) (-> this entity))
+    (set! (-> params charge) 1.0)
+    (set! (-> params options) (projectile-options))
+    (set! (-> params notify-handle) (the-as handle #f))
+    (set! (-> params owner-handle) (process->handle this))
+    (set! (-> params target-handle) (the-as handle #f))
+    (set! (-> params target-pos quad) (the-as uint128 0))
+    (set! (-> params ignore-handle) (process->handle this))
+    (let* ((v1-0 *game-info*)
+           (a0-1 (+ (-> v1-0 attack-id) 1))
+           )
+      (set! (-> v1-0 attack-id) a0-1)
+      (set! (-> params attack-id) a0-1)
+      )
+    (set! (-> params timeout) (seconds 1.5))
+    (if (spawn-projectile hellcat-shot params *rigid-body-queue-manager* *default-dead-pool*)
+        (+! *enhanced-hellcat-shots* 1)
+        )
+    )
+  (none)
+  )
+
+(set! *enhanced-hellcat-fire* hellcat-fire)
+
 (defun deshcat-activate ((arg0 level) (arg1 symbol))
   (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
   (format 0 "[hellcat] deshcat active, heap ~DK free~%"
@@ -18,24 +88,36 @@
   (none)
   )
 
-(defun deshcat-deactivate ((arg0 level))
-  (when (= (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
-    (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) #f)
-    )
-  ;; Jak out of it first, then no h-hellcat may outlive its code
+(defun deshcat-release ()
+  "Jak out of the Hellcat and the Hellcat gone, with its shots and sounds: nothing of deshcat's may
+outlive its code and art. enhanced-hellcat-update calls it before letting deshcat go, the level's
+deactivate again."
   (when (and *target* (focus-test? *target* pilot))
     (let ((v (handle->process (-> *target* pilot vehicle))))
-      (if (and v (type? v h-hellcat))
-          (send-event *target* 'end-mode 'pilot)
-          )
+      (when (and v (type? v h-hellcat))
+        (send-event *target* 'end-mode 'pilot)
+        (send-event *vehicle-manager* 'no-extra-bank)
+        )
       )
     )
   (let ((gp-0 (handle->process (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)))))
     (when gp-0
+      (format 0 "[hellcat] Hellcat gone~%")
       (deactivate gp-0)
       )
     )
   (set! (-> *vehicle-info* handle-by-vehicle-type (vehicle-type h-hellcat)) (the-as handle #f))
+  (set! *enhanced-hellcat-fire* #f)
+  (kill-by-type hellcat-shot *active-pool*)
+  0
+  (none)
+  )
+
+(defun deshcat-deactivate ((arg0 level))
+  (when (= (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) (-> arg0 name))
+    (set! (-> *traffic-info* vehicle-levels (vehicle-type h-hellcat)) #f)
+    )
+  (deshcat-release)
   (format 0 "[hellcat] deshcat out~%")
   0
   (none)

@@ -2997,6 +2997,9 @@
                                    (= v1-0 'vinroomh)
                                    (= v1-0 'ctyprtdh)
                                    (= v1-0 'citybbh)
+                                   ;; Enhanced: half-sized (136 KB) and wanted with citycarh by the desert Hellcat
+                                   ;; (car.gc); the blow tower, in the city, keeps it whole
+                                   (and (= v1-0 'blow3h) (!= *city-mode* 'ctywide))
                                    )
                                5
                                )

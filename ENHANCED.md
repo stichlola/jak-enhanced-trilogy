@@ -111,15 +111,37 @@ plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not m
 ctycara; 7 Hellcat, in the desert only) once its level is in, for testing.
 
 Desert Hellcat: a Hellcat (vehicle type 7) is parked about 10 m to the left of `desert-start`; Jak gets in
-and out with triangle and drives it as the city's hover cars (x throttle, square brake). It flies freely:
-r2 takes off and lands, r1 climbs, l1 descends (12 m/s, up to 600 m), at a height of its own instead of
-the city's traffic height map, which the desert doesn't have (h-hellcat's methods 88 and 117). The game never
-had an `h-hellcat` type (only its constants and skeleton group in car.gc), so car.gc now has one, with
-Jak 2's hellcat collision. Its code and art are the `deshcat` level (`dgos/deshcat.gd`: the hover-vehicle
-code as HGA.DGO carries it, car.o, the Hellcat's art and `ctycarc`'s bsp, so `ctycarc.fr3` draws it),
-loaded into wasall's borrow slot 0 (now 464 KB, was 405) while no task wants that slot
-(`enhanced-hellcat-update`, logic-target.gc). `JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up,
-gets in, drives off and gets out by himself, with `[hellcat-test]` log lines for screenshots.
+and out with triangle and flies it like a police ship (h-hellcat, car.gc): x throttle, square brake, left
+stick x turns (it banks into turns: `roll-angle` 30 degrees, the game's is 0), left stick y pitches the nose
+and moves it up and down as the nose points: back climbs, forward dives (the game's own stick convention,
+lean-z), by how far it's pushed and how fast it goes (5 m/s at a standstill, about 29 m/s climbing at the
+game's 30 m/s; it sinks 12 m/s at most: any faster it drops out of its lift thrusters' reach and the tail
+fin, ten times stronger in free fall, tips it nose over). Pulled back on the ground it lifts off, pushed down
+onto the ground it lands; r2 is still the game's quick take-off (12 m up) and landing. Ceiling 600 m. It
+flies at a height of its own instead of the city's traffic height map, which the desert doesn't have
+(methods 88 and 117). r1 fires its guns: the game's Hellcats never fire (only the blow tower's turret, a
+hit-scan gun on the `hellcat-tower` model), so they're the KG's blaster bolts (`guard-shot`, in GAME, as
+the guards and the rhino fire them) as `hellcat-shot` (desert-hellcat.gc), from the front gun, left and
+right in turn, 8 a second, 150 m/s on top of the Hellcat's speed, with the blow tower Hellcat's sounds
+(`hc-gun-fire`, `hellcat-riccos`). Sounds: the engine (`vehicle-engine`, select 8), thrust, ignition,
+take-off and landing are in `citycarh`, the gun's in `blow1` and `blow3h`: while Jak flies it, player-control
+swaps them in through the vehicle manager's `extra-bank`, as the desert cars do, `wasall1` -> `citycarh` +
+`blow3h` (two halves of one slot; `blow3h` counts as a half bank outside the city, level.gc) and `desert2`
+-> `blow1` (dflut, firetorch, cactus, waterfall sounds are out while flying), back when he gets out. The
+thruster flames and glow, exhaust smoke, head- and taillights are the game's own vehicle effects
+(vehicle-effects.gc), already there. The game never had an `h-hellcat` type (only its constants and skeleton
+group in car.gc), so car.gc now has one, with Jak 2's hellcat collision. Its code and art are the `deshcat`
+level (`dgos/deshcat.gd`: the hover-vehicle code as HGA.DGO carries it, car.o, the Hellcat's art and
+`ctycarc`'s bsp, so `ctycarc.fr3` draws it), loaded into wasall's borrow slot 0 (now 464 KB, was 405) while
+no task wants that slot (`enhanced-hellcat-update`, logic-target.gc) and Spargus isn't coming in: once one
+of its levels (waswide, wascitya, wascityb, wasleapr) is wanted or in, deshcat isn't asked for, and the
+Hellcat goes first (`deshcat-release`: Jak out of it if he's flying, banks back, its shots gone), before
+deshcat unloads (asking for it again at the gate, in the city's level swaps, crashed the game).
+`JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up, gets in, climbs by the stick, turns, fires, dives
+down to land and gets out by himself, with `[hellcat-test]` log lines for screenshots (the test stick is
+`*enhanced-pad-leftx/lefty*`, drawable.gc; pads in other windows are ignored). `=2` and `=3`: into Spargus
+from the desert in the Hellcat or on foot (the gate's level swap, then carried to wascitya-start), with
+`[spargus-test]` lines.
 
 Ambient sounds (`game/sound/common/enhanced_ambience.*`): ten loops in
 `game/assets/enhanced/sounds` (light rain, heavy rain, dripping, night wind, storm wind, crickets,
