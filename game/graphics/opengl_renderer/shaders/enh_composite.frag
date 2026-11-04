@@ -233,8 +233,8 @@ float water_height(vec2 w, float t, float foot) {
     float freq = i == 0 ? 0.12 : i == 1 ? 0.35 : i == 2 ? 0.95 : 2.6;
     float amp = i == 0 ? 0.045 : i == 1 ? 0.016 : i == 2 ? 0.0055 : 0.0018;
     vec2 drift = i == 0 ? vec2(0.35, 0.2) : i == 1 ? vec2(-0.25, 0.4) : i == 2 ? vec2(0.5, -0.3) : vec2(-0.6, -0.45);
-    float fade = 1.0 - smoothstep(0.25, 0.7, foot * freq);
-    h += amp * fade * gnoise(q * freq + drift * t * freq * 2.0 + float(i) * 17.3);
+    float fade = 1.0 - smoothstep(0.3, 1.1, foot * freq);
+    h += amp * fade * gnoise(q * freq + drift * t * freq * 1.1 + float(i) * 17.3);
     q = turn * q;
   }
   return h;
@@ -261,6 +261,23 @@ float wind_sea(vec2 w, vec2 wd, float t) {
     h += group * sin(dot(w, d) * k - t * sqrt(9.8 * k) + bend) / (1.0 + float(i) * 0.6);
   }
   return h * 0.7;
+}
+
+// a storm's big waves (about -1..1, the crests sharp, the troughs broad): two long trains near
+// the wind's direction, their crests bent and broken by noise
+float storm_sea(vec2 w, vec2 wd, float t) {
+  vec2 side = vec2(-wd.y, wd.x);
+  float h = 0.0;
+  for (int i = 0; i < 2; i++) {
+    float ang = i == 0 ? 0.12 : -0.35;
+    float k = i == 0 ? 0.32 : 0.5;  // 20 m and 12 m waves
+    vec2 d = wd * cos(ang) + side * sin(ang);
+    float ph = dot(w, d) * k - t * sqrt(9.8 * k) + 2.5 * gnoise(w * 0.025 + float(i) * 4.1);
+    float s = 0.5 + 0.5 * sin(ph);
+    h += (pow(s, 2.5) * 2.0 - 0.6) * (i == 0 ? 0.65 : 0.35) *
+         (0.6 + 0.4 * gnoise(w * 0.03 + d * t * 0.04 + float(i) * 9.0));
+  }
+  return h;
 }
 
 // caustics: the bright net that waves focus on a shallow sea bed (0..1), two drifting layers
@@ -1417,13 +1434,16 @@ vec4 cloud_volume(vec3 dv, float jitter, vec3 sky) {
   vec3 flash = vec3(0.8, 0.85, 1.0) * (weather2.w * (0.12 + 1.1 * near_bolt) + sheet * 0.9);
   // more steps toward the horizon, where the ray crosses kilometers of slab: long steps there
   // left a per-pixel grain (the jitter) the TAA couldn't smooth, drawn as fine diagonal hatching
+  // (the sun shows, out of rain: the clouds thin out just round it, a soft gap, the disc mostly
+  // clear; a heap may still drift across it)
+  float sun_gap = smoothstep(0.975, 0.997, cosang) * (1.0 - weather.x) * (1.0 - weather2.x) * 0.85;
   int N = int(mix(34.0, 16.0, clamp(wd.y * 2.5, 0.0, 1.0)));
   float dt = (t1 - t0) / float(N);
   vec3 sum = vec3(0.0);
   float trans = 1.0;
   for (int i = 0; i < N; i++) {
     vec3 p = cam_pos / 4096.0 + wd * (t0 + (float(i) + jitter) * dt);
-    float d = cloud_density(p, lo, 3);
+    float d = cloud_density(p, lo, 3) * (1.0 - sun_gap);
     if (d > 0.002) {
       float dl = cloud_density(p + sw * 90.0, lo, 2) * 90.0 + cloud_density(p + sw * 300.0, lo, 2) * 210.0;
       // (the late afternoon's heaps dense: dark cores under the low sun, bright thin rims)
@@ -2296,7 +2316,7 @@ void main() {
     // ripples: the slope of a non-repeating noise height field (finite differences)
     vec2 world = water_world;
     float t = haze.w;
-    float far = 1.0 / (1.0 + z / (60.0 * 4096.0));
+    float far = 1.0 / (1.0 + z / (140.0 * 4096.0));
     float e = 0.08;
     float h0 = water_height(world, t, water_foot);
     vec2 slope = vec2(water_height(world + vec2(e, 0.0), t, water_foot) - h0,
@@ -2306,6 +2326,8 @@ void main() {
     float depth_m = 40.0;
     if (!water_deep && seabed_d > 1e-7) {
       depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
+      // (going out toward where the far sea takes over, as deep as it: no seam between the two)
+      depth_m = mix(depth_m, 40.0, smoothstep(20.0 * 4096.0, 110.0 * 4096.0, z));
     }
     // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
     // water, not the sea around it, which lies at 9 m)
@@ -2322,21 +2344,33 @@ void main() {
     // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth;
     // higher and quicker the rougher the sea, a short wind sea over it when it's rough
     float swell_amt = (pond_here ? 0.0 : water_swell_strength * (0.6 + 1.4 * sea_state)) *
-                      smoothstep(1.0, 6.0, depth_m) * (1.0 - smoothstep(0.3, 1.5, water_foot));
+                      smoothstep(1.0, 6.0, depth_m) * (1.0 - smoothstep(0.6, 3.0, water_foot));
     float crest = 0.0;
+    float wave_hi = 0.0;  // how high on a storm wave (-1..1, 0 calm): crests lighter, troughs darker
     if (swell_amt > 0.0) {
-      float ts = t * (1.0 + 0.5 * sea_state);
+      float ts = t * (0.8 + 0.15 * sea_state);
       float s0 = water_swell(world, ts);
       slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), ts) - s0,
                                 water_swell(world + vec2(0.0, 0.5), ts) - s0) / 0.5;
-      // the wind sea: shorter waves running with the wind
-      float rough = smoothstep(0.5, 1.2, sea_state) * swell_amt;
+      vec2 wd = length(dust_wind.xy) > 0.1 ? normalize(dust_wind.xy) : vec2(0.8, 0.6);
+      // a storm's big waves: long, steep, sharp-crested, marching with the wind, seen far out
+      float storm_k = smoothstep(0.7, 1.6, sea_state) * smoothstep(1.0, 6.0, depth_m) *
+                      (1.0 - smoothstep(1.0, 4.5, water_foot));
+      float big = 0.0;
+      if (storm_k > 0.0) {
+        const float be = 0.4;
+        float tw = t * 0.5;  // (the waves at half speed: at full they raced by)
+        big = storm_sea(world, wd, tw);
+        slope += storm_k * 0.9 * vec2(storm_sea(world + vec2(be, 0.0), wd, tw) - big,
+                                       storm_sea(world + vec2(0.0, be), wd, tw) - big) / be;
+      }
+      // the wind sea: shorter waves running with the wind (gone where they'd be under a pixel)
+      float rough = smoothstep(0.5, 1.2, sea_state) * swell_amt * (1.0 - smoothstep(0.1, 0.5, water_foot));
       if (rough > 0.0) {
-        vec2 wd = length(dust_wind.xy) > 0.1 ? normalize(dust_wind.xy) : vec2(0.8, 0.6);
         const float we = 0.15;
-        float w0 = wind_sea(world, wd, t);
-        float w1 = wind_sea(world + vec2(we, 0.0), wd, t);
-        float w2 = wind_sea(world + vec2(0.0, we), wd, t);
+        float w0 = wind_sea(world, wd, t * 0.5);
+        float w1 = wind_sea(world + vec2(we, 0.0), wd, t * 0.5);
+        float w2 = wind_sea(world + vec2(0.0, we), wd, t * 0.5);
         slope += rough * 0.12 * vec2(w1 - w0, w2 - w0) / we;
         // (a breaking crest: the very top of a wind wave, riding high on the swell, here and
         // there along it)
@@ -2344,6 +2378,12 @@ void main() {
         float breaking = smoothstep(0.2, 0.6, gnoise(world * 0.09 + wd * t * 0.15));
         crest = rough * top * breaking;
       }
+      // (a storm wave's crest breaks along its length, in torn stretches)
+      if (storm_k > 0.0) {
+        crest = max(crest, storm_k * smoothstep(0.62, 0.9, big) *
+                               smoothstep(0.0, 0.5, gnoise(world * 0.05 + wd * t * 0.1) + 0.2));
+      }
+      wave_hi = storm_k * big;
     }
     // wakes: rings spreading from where Jak touched the water lately (each point of his path near
     // this water's height)
@@ -2433,10 +2473,23 @@ void main() {
 
     // reflection. Far away: the screen where the reflected ray vanishes (sky, distant hills).
     // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
+    // (a wave tilted toward the eye reflects a ray going down: it'd see the sea itself or the
+    // rock, dark blots on the water. Kept just over the horizon, it sees the sky low down)
+    vec3 re = r;
+    float re_up = dot(re, up_view);
+    if (re_up < 0.03) {
+      re = normalize(re + up_view * (0.03 - re_up));
+    }
     vec3 refl = fog_color;
-    if (r.z > 1e-3) {
-      vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
+    if (re.z > 1e-3) {
+      vec2 env_uv = clamp(0.5 * vec2(proj.z * re.x, proj.w * re.y) / re.z + 0.5, vec2(0.002), vec2(0.998));
       refl = texture(tex_T0, env_uv).rgb;
+      // (where that lands on the water, the sky's color there instead)
+      float ed = texture(tex_T3, env_uv).r;
+      float efd = texture(tex_T6, env_uv).r;
+      if (texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) {
+        refl = fog_color;
+      }
     }
     vec3 ssr = refl;
     float ssr_hit = 0.0;
@@ -2461,6 +2514,11 @@ void main() {
           continue;  // sky, clouds or the sea itself: not a reflector
         }
         float scene_z = view_z(sd);
+        // (not what stands between the camera and the water, the rock Jak's on: a wave tilted
+        // toward the eye sent the ray back into it, dark blots on the sea)
+        if (scene_z < z * 0.97) {
+          continue;
+        }
         if (q.z > scene_z && q.z - scene_z < step_len + 4096.0) {
           // home in on where the ray meets the surface (halving the last step)
           vec3 lo = q - r * step_len / 1.12;
@@ -2554,6 +2612,8 @@ void main() {
     // a rough sea: greyer under the storm, whitecaps breaking on the crests
     if (sea_state > 0.5) {
       wc = mix(wc, vec3(luma(wc)) * vec3(0.9, 0.97, 1.0), 0.35 * weather2.x);
+      // (the light through a storm wave's thin crest, the shadowed trough before it)
+      wc *= 1.0 + 0.18 * clamp(wave_hi, -1.0, 1.0);
       // (torn foam: fine streaks, not a flat patch)
       float tear = smoothstep(0.1, 0.5, gnoise(world * vec2(3.0, 5.0) + vec2(t * 0.3, 0.0)) * 0.5 +
                                          gnoise(world * 9.0) * 0.25 + 0.25);
