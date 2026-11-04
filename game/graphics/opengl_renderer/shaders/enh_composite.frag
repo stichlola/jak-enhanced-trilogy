@@ -247,6 +247,22 @@ float water_swell(vec2 w, float t) {
          0.06 * sin(dot(w, vec2(0.27, -0.21)) + t * 1.7);
 }
 
+// a rough sea's wind waves (about -1..1): three short trains fanned around the wind, each in
+// drifting patches (groups of waves), their crests bent by noise, so nothing lines up in stripes
+float wind_sea(vec2 w, vec2 wd, float t) {
+  vec2 side = vec2(-wd.y, wd.x);
+  float h = 0.0;
+  for (int i = 0; i < 3; i++) {
+    float ang = i == 0 ? 0.0 : i == 1 ? 0.45 : -0.6;
+    float k = i == 0 ? 1.9 : i == 1 ? 2.7 : 3.6;
+    vec2 d = wd * cos(ang) + side * sin(ang);
+    float group = smoothstep(-0.3, 0.6, gnoise(w * 0.07 + d * t * 0.05 + float(i) * 7.1));
+    float bend = 2.0 * gnoise(w * 0.18 + float(i) * 3.3);
+    h += group * sin(dot(w, d) * k - t * sqrt(9.8 * k) + bend) / (1.0 + float(i) * 0.6);
+  }
+  return h * 0.7;
+}
+
 // caustics: the bright net that waves focus on a shallow sea bed (0..1), two drifting layers
 float caustics(vec2 w, float t) {
   float a = 1.0 - abs(gnoise(w * 1.3 + vec2(t * 0.30, t * 0.17)));
@@ -1046,16 +1062,16 @@ float bolt_jag(float u, float seed) {
           gnoise(vec2(u * 70.0, seed + 11.0)) * 0.006) * (0.4 + u);
 }
 
-float lightning_bolt(vec3 ray_view, float px) {
+// (az: its azimuth, seed: its shape, a: its age, s)
+float lightning_bolt(vec3 ray_view, float px, float az, float seed, float a) {
   // the cloud base where it comes out (sine of the elevation): lower for a farther bolt
   // (a strike: from the cloud base above it down to its foot on the ground; the nearer, the bigger
   // it all is on screen: s scales the channel's sideways angles)
   bool ground = strike.w > 0.0;
-  float top = ground ? strike.y : 0.14 + 0.16 * fract(bolt.y * 0.37);
+  float top = ground ? strike.y : 0.14 + 0.16 * fract(seed * 0.37);
   float bottom = ground ? strike.x : 0.0;
   float s = ground ? clamp(200.0 * 4096.0 / strike.z, 0.5, 10.0) : 1.0;
-  float a = bolt.z;
-  if (bolt.w <= 0.0 || a > 0.42) {
+  if (bolt.w <= 0.0 || a < 0.0 || a > 0.42) {
     return 0.0;
   }
   vec3 wd = world_dir(ray_view);
@@ -1063,7 +1079,7 @@ float lightning_bolt(vec3 ray_view, float px) {
   if (el < bottom - 0.01 || el > top) {
     return 0.0;
   }
-  float da = (mod(atan(wd.x, wd.z) - bolt.x + 3.14159, 6.28318) - 3.14159) / s;
+  float da = (mod(atan(wd.x, wd.z) - az + 3.14159, 6.28318) - 3.14159) / s;
   if (abs(da) > 0.5) {
     return 0.0;
   }
@@ -1074,18 +1090,18 @@ float lightning_bolt(vec3 ray_view, float px) {
     return 0.0;
   }
   float w = max(px * 1.3 / s, 0.0012);
-  float x = da - bolt_jag(u, bolt.y);
+  float x = da - bolt_jag(u, seed);
   float core = exp(-x * x / (w * w));
   float glow = exp(-x * x / 0.0012) * 0.3 + exp(-x * x / 0.015) * 0.08;
   // branches off the channel, reaching sideways and down
   for (int k = 0; k < 3; k++) {
-    float b0 = 0.18 + 0.22 * float(k) + 0.08 * fract(bolt.y * (1.3 + float(k)));
-    float len = 0.2 + 0.1 * fract(bolt.y * 3.7 + float(k));
+    float b0 = 0.18 + 0.22 * float(k) + 0.08 * fract(seed * (1.3 + float(k)));
+    float len = 0.2 + 0.1 * fract(seed * 3.7 + float(k));
     float bu = (u - b0) / len;
     if (bu > 0.0 && bu < 1.0) {
-      float side = fract(bolt.y * 7.1 + float(k) * 0.37) > 0.5 ? 1.0 : -1.0;
-      float bx = da - bolt_jag(b0, bolt.y) - side * bu * len * 0.45 -
-                 gnoise(vec2(u * 40.0, bolt.y + 20.0 + float(k))) * 0.012;
+      float side = fract(seed * 7.1 + float(k) * 0.37) > 0.5 ? 1.0 : -1.0;
+      float bx = da - bolt_jag(b0, seed) - side * bu * len * 0.45 -
+                 gnoise(vec2(u * 40.0, seed + 20.0 + float(k))) * 0.012;
       float fade = 1.0 - bu;
       core += exp(-bx * bx / (w * w * 0.6)) * 0.6 * fade;
       glow += exp(-bx * bx / 0.0006) * 0.12 * fade;
@@ -1104,6 +1120,23 @@ float lightning_bolt(vec3 ray_view, float px) {
   // out of the clouds at the top
   float in_cloud = smoothstep(0.0, 0.06, u);
   return (core + glow) * bright * in_cloud * bolt.w;
+}
+
+// the sky's lightning: often one bolt, sometimes two or three close together in the same flash,
+// each a little after the last (a strike to the ground: just its own)
+float sky_lightning(vec3 ray_view, float px) {
+  float l = lightning_bolt(ray_view, px, bolt.x, bolt.y, bolt.z);
+  if (strike.w > 0.0) {
+    return l;
+  }
+  int extra = (fract(bolt.y * 5.3) > 0.5 ? 1 : 0) + (fract(bolt.y * 9.1) > 0.75 ? 1 : 0);
+  for (int i = 1; i <= extra; i++) {
+    float fi = float(i);
+    float off = (0.12 + 0.35 * fract(bolt.y * (2.3 + fi))) * (fract(bolt.y * 4.7 * fi) > 0.5 ? 1.0 : -1.0);
+    float delay = 0.04 + 0.1 * fract(bolt.y * (6.1 + fi));
+    l += 0.8 * lightning_bolt(ray_view, px, bolt.x + off, bolt.y + 13.7 * fi, bolt.z - delay);
+  }
+  return l;
 }
 
 // the rainbow opposite the sun after the rain: the primary bow at 42 degrees, red outside, and a
@@ -2274,17 +2307,43 @@ void main() {
     if (!water_deep && seabed_d > 1e-7) {
       depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
     }
-    // a pond: murky, the bed gone a few cm down, no swell or caustics
-    bool pond_here = pond != 0;
+    // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
+    // water, not the sea around it, which lies at 9 m)
+    bool pond_here = pond != 0 && abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4;
     float clear_water = exp(-depth_m / (pond_here ? 0.25 : 2.0));
 
-    // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth
-    float swell_amt = (pond_here ? 0.0 : water_swell_strength) * smoothstep(1.0, 6.0, depth_m) *
-                      (1.0 - smoothstep(0.3, 1.5, water_foot));
+    // how rough the sea is: some chop always, rising and falling over minutes, more with rain and
+    // a sandstorm, wild in a thunderstorm (ponds stay still)
+    float sea_state = pond_here ? 0.0
+        : clamp(0.35 + 0.2 * sin(t * 0.011) * sin(t * 0.0047 + 1.7) + 0.45 * weather.x +
+                0.35 * weather.y + 1.3 * weather2.x, 0.0, 2.0);
+    slope *= 1.0 + 0.5 * sea_state;
+
+    // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth;
+    // higher and quicker the rougher the sea, a short wind sea over it when it's rough
+    float swell_amt = (pond_here ? 0.0 : water_swell_strength * (0.6 + 1.4 * sea_state)) *
+                      smoothstep(1.0, 6.0, depth_m) * (1.0 - smoothstep(0.3, 1.5, water_foot));
+    float crest = 0.0;
     if (swell_amt > 0.0) {
-      float s0 = water_swell(world, t);
-      slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), t) - s0,
-                                water_swell(world + vec2(0.0, 0.5), t) - s0) / 0.5;
+      float ts = t * (1.0 + 0.5 * sea_state);
+      float s0 = water_swell(world, ts);
+      slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), ts) - s0,
+                                water_swell(world + vec2(0.0, 0.5), ts) - s0) / 0.5;
+      // the wind sea: shorter waves running with the wind
+      float rough = smoothstep(0.5, 1.2, sea_state) * swell_amt;
+      if (rough > 0.0) {
+        vec2 wd = length(dust_wind.xy) > 0.1 ? normalize(dust_wind.xy) : vec2(0.8, 0.6);
+        const float we = 0.15;
+        float w0 = wind_sea(world, wd, t);
+        float w1 = wind_sea(world + vec2(we, 0.0), wd, t);
+        float w2 = wind_sea(world + vec2(0.0, we), wd, t);
+        slope += rough * 0.12 * vec2(w1 - w0, w2 - w0) / we;
+        // (a breaking crest: the very top of a wind wave, riding high on the swell, here and
+        // there along it)
+        float top = smoothstep(0.55, 0.85, w0) * smoothstep(-0.1, 0.25, s0);
+        float breaking = smoothstep(0.2, 0.6, gnoise(world * 0.09 + wd * t * 0.15));
+        crest = rough * top * breaking;
+      }
     }
     // wakes: rings spreading from where Jak touched the water lately (each point of his path near
     // this water's height)
@@ -2492,17 +2551,85 @@ void main() {
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
       wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
     }
+    // a rough sea: greyer under the storm, whitecaps breaking on the crests
+    if (sea_state > 0.5) {
+      wc = mix(wc, vec3(luma(wc)) * vec3(0.9, 0.97, 1.0), 0.35 * weather2.x);
+      // (torn foam: fine streaks, not a flat patch)
+      float tear = smoothstep(0.1, 0.5, gnoise(world * vec2(3.0, 5.0) + vec2(t * 0.3, 0.0)) * 0.5 +
+                                         gnoise(world * 9.0) * 0.25 + 0.25);
+      float caps = crest * tear;
+      wc = mix(wc, vec3(0.86, 0.9, 0.9) * (0.25 + 0.75 * clamp(sky_sun.w * 2.5, 0.0, 1.0)),
+               caps * 0.45 * (1.0 - smoothstep(0.3, 1.2, water_foot)));
+    }
     if (wake_foam > 0.0) {
       float lace = smoothstep(0.35, 0.75, gnoise(world * 2.2 + vec2(t * 0.3, 0.0)) * 0.5 + 0.5 +
                               (min(wake_foam, 1.0) - 0.5) * 0.8);
       wc = mix(wc, vec3(0.9, 0.93, 0.92) * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0)),
                lace * min(wake_foam, 1.0) * 0.8);
     }
+    // the very edge: the last few cm of water fade into the wet ground beside them (the color of
+    // the dry ground nearby, darkened as the shore band below darkens it), no hard line where the
+    // sand dips under the water
+    if (!water_deep && seabed_d > 1e-7 && depth_m < 0.35) {
+      float r_uv = clamp(0.8 * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 2.0 * texel.y, 0.06);
+      vec3 shore_sum = vec3(0.0);
+      float shore_n = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float a = float(i) * 0.7854 + 0.3;
+        vec2 tuv = uv + vec2(cos(a) * texel.x / texel.y, sin(a)) * r_uv * (i % 2 == 0 ? 1.0 : 0.55);
+        if (textureLod(tex_T5, tuv, 0.0).r <= textureLod(tex_T3, tuv, 0.0).r + 1e-7) {
+          shore_sum += textureLod(tex_T0, tuv, 0.0).rgb;
+          shore_n += 1.0;
+        }
+      }
+      if (shore_n > 0.0) {
+        float edge = smoothstep(0.0, pond_here ? 0.14 : 0.3, depth_m);
+        wc = mix(shore_sum / shore_n * vec3(0.6, 0.6, 0.62), wc, edge);
+      }
+    }
     // the game's effects drawn over the water (foam, splashes, wakes) show through where they're
     // clearly brighter than our water; on a disc lying on the water, anything brighter does
     const vec3 luma = vec3(0.299, 0.587, 0.114);
     float over = dot(c, luma) - dot(wc, luma);
     c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
+  } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0) {
+    // the shore: the ground just above the water is wet, darker and a little glossy, its line
+    // ragged and breathing with the water (the sea's runs up and down with the waves and leaves
+    // a thin line of foam). The water's height: from any water seen within a meter or two.
+    float r_uv = clamp(1.8 * 4096.0 * abs(proj.w) * 0.5 / z, 3.0 * texel.y, 0.1);
+    float above_water = 1e9;
+    for (int i = 0; i < 12; i++) {
+      float a = float(i) * 1.0472 + (i >= 6 ? 0.5236 : 0.0);
+      vec2 tuv = uv + vec2(cos(a) * texel.x / texel.y, sin(a)) * r_uv * (i >= 6 ? 1.0 : 0.45);
+      float twd = textureLod(tex_T5, tuv, 0.0).r;
+      if (twd > textureLod(tex_T3, tuv, 0.0).r + 1e-7) {
+        above_water = dot(up_view, p - view_pos(tuv, twd)) / 4096.0;
+        break;
+      }
+    }
+    if (above_water > -0.05 && above_water < 1.0) {
+      float t = haze.w;
+      vec2 wxz = water_world;
+      bool still = pond != 0 && abs((dot(up_view, p) + cam_pos.y) / 4096.0 - above_water - 9.0) > 0.4;
+      // where the water reaches now (a pond: barely moves; the sea: runs up with the waves)
+      float lap = still ? 0.01 + 0.01 * sin(t * 0.7 + gnoise(wxz * 0.5) * 5.0)
+                        : 0.05 + 0.07 * (0.5 + 0.5 * sin(t * 1.1 + gnoise(wxz * 0.25) * 6.0));
+      float hw = max(above_water - lap, 0.0);
+      // how high the sand stays wet (the sea's higher, where the waves have been), ragged
+      float reach = (still ? 0.22 : 0.55) * (0.65 + 0.7 * (gnoise(wxz * 1.6) * 0.5 + 0.5));
+      float wet = 1.0 - smoothstep(0.0, reach, hw);
+      wet *= wet;
+      c = mix(c, c * vec3(0.6, 0.6, 0.62), wet * 0.9);
+      // just where the water drew back: a glossy film with the sky in it
+      float film = 1.0 - smoothstep(0.0, still ? 0.03 : 0.06, hw);
+      c += night_dim(fog_color) * film * 0.07;
+      // the sea's runup leaves a thin, broken line of foam
+      if (!still) {
+        float lace = smoothstep(0.1, 0.6, gnoise(wxz * 3.1 + vec2(t * 0.2, 0.0)) * 0.5 + 0.5);
+        float line = exp(-sq((above_water - lap) / 0.02)) * lace;
+        c = mix(c, vec3(0.9, 0.92, 0.9) * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0)), line * 0.5);
+      }
+    }
   }
 
   // cutscenes: a real depth of field around what the camera looks at (autofocus on the middle of
@@ -3177,7 +3304,7 @@ void main() {
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
       if (bolt.w > 0.0 && strike.w == 0.0) {
-        bolt_light = d <= 1e-7 ? lightning_bolt(ray, pixel_rad) : 0.0;
+        bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
       }
     }
     c = mix(c, vec3(luma(c)) * 0.8 * vec3(0.82, 0.94, 1.15), weather.x * 0.3);
@@ -3189,7 +3316,7 @@ void main() {
   }
   // a bolt striking the ground: over the sky and whatever is behind it
   if (strike.w > 0.0 && bolt.w > 0.0 && wsurf == 0.0 && (z == 0.0 || z > strike.z * 0.97)) {
-    bolt_light = max(bolt_light, lightning_bolt(ray, pixel_rad));
+    bolt_light = max(bolt_light, sky_lightning(ray, pixel_rad));
   }
   // the night sky: stars, the moon, a city's glow (over the game's sky)
   if (clouds.w > 0.01 && z == 0.0 && wsurf == 0.0) {
@@ -4510,13 +4637,14 @@ void main() {
     level = max(level, 0.0) * (0.82 + over / (1.0 + over / 0.25)) / max(top, 0.82);
     c = mix(c, level, 0.5 * (1.0 - flame_keep));
   }
-  // lightning, after the grade (white, whatever the area's tint): the flash lights everything cold
-  // for an instant, the sky most, and the bolt over the sky
+  // lightning, after the grade (white, whatever the area's tint): the flash lights the sky cold
+  // for an instant (the ground below only faintly: it's far off in the clouds), and the bolt over
+  // the sky
   if (weather2.w > 0.0 || bolt_light > 0.0 || sheet > 0.0) {
     vec3 cold = vec3(0.85, 0.9, 1.0);
-    c += cold * weather2.w * ((z == 0.0 ? 0.04 : 0.03) + c * 0.45);
-    // sheet lightning: the sky glows, the scene below catches it
-    c += cold * sheet * ((z == 0.0 ? 0.22 : 0.035) + c * 0.4);
+    c += cold * weather2.w * (z == 0.0 ? 0.06 + c * 0.6 : 0.005 + c * 0.08);
+    // sheet lightning: the whole sky glows from inside the clouds
+    c += cold * sheet * (z == 0.0 ? 0.26 + c * 0.5 : 0.006 + c * 0.07);
     c += cold * bolt_light * 2.2;
   }
 
