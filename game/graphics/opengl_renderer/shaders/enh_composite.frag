@@ -2324,15 +2324,32 @@ void main() {
 
     // how deep the water is here (meters), from the sea bed seen through it (near sea only)
     float depth_m = 40.0;
+    float depth_real = 40.0;  // (not faded out: the caustics and clearness fade by near_fade instead)
+    float near_fade = 1.0;
     if (!water_deep && seabed_d > 1e-7) {
       depth_m = max(dot(up_view, p - seabed_p), 0.0) / 4096.0;
-      // (going out toward where the far sea takes over, as deep as it: no seam between the two)
-      depth_m = mix(depth_m, 40.0, smoothstep(20.0 * 4096.0, 110.0 * 4096.0, z));
+      depth_real = depth_m;
+      // (going out toward where the far sea takes over, as deep as it: no seam between the two. The
+      // game draws the near sea only on the 24 m cells around the camera's own, and none from high
+      // up: by the horizontal distance and the height over it, gone before its edge, or the clear
+      // shallows and their caustics popped in and out over the beaches and creeks)
+      float wdist = length(vec2(dot(right_view, p), dot(fwd_view, p))) / 4096.0;
+      float whigh = max(-height, 0.0) / 4096.0;
+      // (the clearness itself fades, evenly: fading the depth instead, exp() made it all happen in a
+      // few meters, a visible arc around the camera)
+      near_fade = max(smoothstep(8.0, 22.0, wdist), smoothstep(6.0, 14.0, whigh));
+      depth_m = mix(depth_m, 40.0, near_fade);
     }
     // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
     // water, not the sea around it, which lies at 9 m)
     bool pond_here = pond != 0 && abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4;
-    float clear_water = exp(-depth_m / (pond_here ? 0.25 : 2.0));
+    // (the sea's shallows only half clear: fully clear, they stood out bright and pale against the
+    // deeper water around them)
+    // (the sea: the bed shows only along the very edge, the last half meter. The game draws the near
+    // sea, the only one the bed is seen through, on some cells around the camera and not on others:
+    // any wider clearness showed those cells, square patches moving with the camera)
+    float clear_water = pond_here ? exp(-depth_real / 0.25) * (1.0 - near_fade)
+                                  : exp(-depth_real / 0.35) * 0.6 * (1.0 - near_fade);
 
     // how rough the sea is: some chop always, rising and falling over minutes, more with rain and
     // a sandstorm, wild in a thunderstorm (ponds stay still)
@@ -2344,7 +2361,7 @@ void main() {
     // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth;
     // higher and quicker the rougher the sea, a short wind sea over it when it's rough
     float swell_amt = (pond_here ? 0.0 : water_swell_strength * (0.6 + 1.4 * sea_state)) *
-                      smoothstep(1.0, 6.0, depth_m) * (1.0 - smoothstep(0.6, 3.0, water_foot));
+                      smoothstep(1.0, 6.0, depth_m) * (1.0 - smoothstep(1.5, 7.0, water_foot));
     float crest = 0.0;
     float wave_hi = 0.0;  // how high on a storm wave (-1..1, 0 calm): crests lighter, troughs darker
     if (swell_amt > 0.0) {
@@ -2451,8 +2468,9 @@ void main() {
       }
       if (sun_dir.w > 0.0 && seabed_level && water_caustics > 0.0 && !pond_here) {
         vec2 bed = vec2(dot(right_view, seabed_p) + cam_pos.x, dot(fwd_view, seabed_p) + cam_pos.z) / 4096.0;
-        float k = caustics(bed, t) * water_caustics * sun_dir.w * smoothstep(0.05, 0.4, depth_m) *
-                  exp(-depth_m / 3.0) * (1.0 - smoothstep(0.3, 1.0, water_foot));
+        float k = caustics(bed, t) * water_caustics * sun_dir.w * smoothstep(0.05, 0.4, depth_real) *
+                  exp(-depth_real / 3.0) * (1.0 - smoothstep(0.3, 1.0, water_foot)) * (1.0 - near_fade) *
+                  0.35 * clear_water;  // (faint, and only where the bed shows: the edge)
         c += c * k * vec3(0.9, 1.0, 0.95);
       }
     }
@@ -2648,6 +2666,28 @@ void main() {
       if (shore_n > 0.0) {
         float edge = smoothstep(0.0, pond_here ? 0.14 : 0.3, depth_m);
         wc = mix(shore_sum / shore_n * vec3(0.6, 0.6, 0.62), wc, edge);
+      }
+    }
+    // a puddle or a creek's edge where the game draws only the far sea (no near sea there, so no
+    // bed seen through it): close by, ringed by ground, it takes that ground's color, darkened,
+    // instead of the open sea's deep blue
+    if (water_deep && !pond_here && z < 30.0 * 4096.0) {
+      float r_uv = clamp(1.5 * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 3.0 * texel.y, 0.08);
+      vec3 land_sum = vec3(0.0);
+      float land_n = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float a = float(i) * 0.7854 + 0.3;
+        vec2 tuv = uv + vec2(cos(a) * texel.x / texel.y, sin(a)) * r_uv * (i % 2 == 0 ? 1.0 : 0.5);
+        float td = textureLod(tex_T3, tuv, 0.0).r;
+        if (td > 1e-7 && abs(textureLod(tex_T6, tuv, 0.0).r - td) > 1e-7 &&
+            textureLod(tex_T5, tuv, 0.0).r <= td + 1e-7) {
+          land_sum += textureLod(tex_T0, tuv, 0.0).rgb;
+          land_n += 1.0;
+        }
+      }
+      if (land_n > 0.0) {
+        float k = smoothstep(0.0, 4.0, land_n) * (1.0 - smoothstep(18.0, 30.0, z / 4096.0)) * 0.7;
+        wc = mix(wc, land_sum / land_n * vec3(0.5, 0.56, 0.58), k);
       }
     }
     // the game's effects drawn over the water (foam, splashes, wakes) show through where they're
