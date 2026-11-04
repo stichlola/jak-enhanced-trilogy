@@ -442,10 +442,10 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 ;; triangle like any vehicle, and out again with triangle. Its code and art are the deshcat level
 ;; (level-info.gc), in wasall's borrow slot 0: wanted while wasall is in and no task has given
 ;; that slot to one of its own levels (Sig's, the missions'), let go the moment one does.
-;; (open sand by the Spargus wall, facing the canyon; its height is the ground's,
-;; probed when it's parked)
-(define *enhanced-hellcat-spot* (new 'static 'vector :x (meters 2276.0) :y (meters 31.0) :z (meters 250.0) :w 1.0))
-(define *enhanced-hellcat-yaw* (degrees 20.0)) ;; its nose toward (sin, cos) in x, z
+;; (in front of the Spargus gate, by the desert start, where the user chose; its height is the
+;; ground's, probed when it's parked)
+(define *enhanced-hellcat-spot* (new 'static 'vector :x (meters 2309.0) :y (meters 31.0) :z (meters 266.8) :w 1.0))
+(define *enhanced-hellcat-yaw* (degrees 60.0)) ;; its nose toward (sin, cos) in x, z
 (define *enhanced-hellcat-frames* 0) ;; since deshcat came in
 (define *enhanced-hellcat-parked* #f) ;; spawned once since deshcat came in
 (define-extern deshcat-hellcat (function process)) ;; desert-hellcat.gc, while deshcat is in
