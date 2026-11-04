@@ -1759,6 +1759,10 @@ void add_merc(const tfrag3::Level& level,
       prim.attributes["WEIGHTS_0"] = weights_accessor;
       prim.attributes["NORMAL"] = normal_buffer_accessor;
       prim.mode = TINYGLTF_MODE_TRIANGLES;
+      // Enhanced: which effect the draw belongs to (the game can hide effects, e.g. damage)
+      tinygltf::Value::Object extras;
+      extras["effect"] = tinygltf::Value((int)effect_idx);
+      prim.extras = tinygltf::Value(extras);
     }
   }
 

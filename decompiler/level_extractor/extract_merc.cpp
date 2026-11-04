@@ -1962,6 +1962,14 @@ void extract_merc(const ObjectFileData& ag_data,
             auto it = std::find_if(out.merc_data.models.begin(), out.merc_data.models.end(),
                                    [&](const auto& m) { return m.name == ctrl.name; });
             auto options = read_merc_replacement_options(mdl_path);
+            if (ctrl.seg_table.size() > 1) {
+              // (to know which of the original's effects show: a segment hides its effects)
+              std::string segs;
+              for (auto m : ctrl.seg_table) {
+                segs += fmt::format(" {:x}", m);
+              }
+              lg::info("{} seg-table (segment -> effects):{}", ctrl.name, segs);
+            }
             if (art_data) {
               // (lods can share the -lod0's skeleton)
               auto joints = art_data->find(ctrl.name);
