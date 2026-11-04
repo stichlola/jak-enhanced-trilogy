@@ -6161,6 +6161,16 @@ void EnhancedPost::draw_menu() {
       g_enhanced_menu.minimap_size = map_size;
     }
     ImGui::EndDisabled();
+    if (g_game_version == GameVersion::Jak3) {
+      // (off: none parked, and one left out goes once Jak is out of it; enhanced-hellcat-update)
+      bool hellcat = g_enhanced_menu.desert_hellcat;
+      if (ImGui::Checkbox("Hellcat in the desert", &hellcat)) {
+        g_enhanced_menu.desert_hellcat = hellcat;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("The War Factory's Hellcat, parked by the Spargus wall: triangle to get in");
+      }
+    }
     // (not in Enhanced Light: the game plays as it was, see pc_enhanced_storm_drag and the rest)
     bool play_weather = g_enhanced_play_weather.enabled;
     if (!enhanced_light()) {
@@ -6376,6 +6386,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
+  j["desert_hellcat"] = g_enhanced_menu.desert_hellcat.load();
   j["weather_affects_play"] = g_enhanced_play_weather.enabled.load();
   j["enhanced_balance"] = g_enhanced_balance.load();
   auto keys = nlohmann::json::array();
@@ -6484,6 +6495,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   g_enhanced_menu.minimap = map;
   int map_size = g_enhanced_menu.minimap_size;
   get("minimap_size", map_size);
+  bool hellcat = true;
+  get("desert_hellcat", hellcat);
+  g_enhanced_menu.desert_hellcat = hellcat;
   bool play_weather = true;
   get("weather_affects_play", play_weather);
   g_enhanced_play_weather.enabled = play_weather;

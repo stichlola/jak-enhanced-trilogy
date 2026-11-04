@@ -224,6 +224,8 @@ struct EnhancedMenu {
   // window on release, unless Select + R3 opened this menu meanwhile)
   std::atomic<int> opens = 0;
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
+  // Jak 3: the Hellcat parked in the desert (pc-enhanced-desert-hellcat?, enhanced-hellcat-update)
+  std::atomic<bool> desert_hellcat = true;
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
   // the subtitles' size, percent of Enhanced's default (pc-enhanced-subtitle-size): 100 small,
   // 120 medium, 138 large (the PS2 size), 170 extra large

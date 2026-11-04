@@ -121,6 +121,12 @@
         (goto cfg-8)
         )
       )
+    ;; Enhanced: the parked Hellcat's level stays (enhanced-hellcat-update, logic-target.gc, wants it
+    ;; and lets it go): the desert's streaming lists dropped it, and the loader sometimes discarded it
+    ;; before it was wanted again, the Hellcat gone from under Jak
+    (if (= (-> this want v1-0 name) 'deshcat)
+        (goto cfg-8)
+        )
     (set! (-> this want v1-0 name) #f)
     (label cfg-8)
     )

@@ -1352,6 +1352,11 @@ u64 pc_enhanced_minimap() {
                         !g_enhanced_menu.blank_world);
 }
 
+// Enhanced: Jak 3's parked Hellcat in the desert, the menu's "Hellcat in the desert"
+u64 pc_enhanced_desert_hellcat() {
+  return bool_to_symbol(g_enhanced_menu.desert_hellcat);
+}
+
 // Enhanced: a marked bed within 3 m of pos (a vector, game units; and 2 m up or down): its place
 // written to out, #f when there's none (g_enhanced_beds)
 u64 pc_enhanced_bed(u32 pos, u32 out) {
@@ -1732,6 +1737,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-fire", (void*)pc_enhanced_fire);
   make_func_symbol_func("pc-enhanced-poll-request", (void*)pc_enhanced_poll_request);
   make_func_symbol_func("pc-enhanced-minimap?", (void*)pc_enhanced_minimap);
+  make_func_symbol_func("pc-enhanced-desert-hellcat?", (void*)pc_enhanced_desert_hellcat);
   make_func_symbol_func("pc-enhanced-balance?", (void*)pc_enhanced_balance);
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
   make_func_symbol_func("pc-enhanced-light?", (void*)pc_enhanced_light);

@@ -111,15 +111,27 @@ plays that no bank has (`guard-hit`, `damage-pops`...) are just leftovers, not m
 ctycara; 8 Hellcat, in the desert only) once its level is in, for testing.
 
 Desert Hellcat: the Hellcat Jak flies in the War Factory's sky battle (task `factory-sky-battle`, type
-`h-warf`, vehicle type 8, levels/factory/h-warf.gc and warf-projectile.gc, LFACTORY.DGO) is parked about 10 m to the left
-of `desert-start`; Jak gets in and out with triangle. It's the mission's, handling, guns, thrusters and
+`h-warf`, vehicle type 8, levels/factory/h-warf.gc and warf-projectile.gc, LFACTORY.DGO) is parked on the open sand by
+the Spargus wall (2544.8, 222.4 m, nose toward the canyon, on the ground probed there); Jak gets in
+and out with triangle. The menu's "Hellcat in the desert" (City section, Jak 3, saved as `desert_hellcat`,
+`pc-enhanced-desert-hellcat?`) turns it off: no deshcat, none parked; one Jak is flying goes once he's out. It's the mission's, handling, guns, thrusters and
 sounds: it takes off with the mission's start (a second at 50 m/s) and never stops, flying at 37.5 to
 50 m/s (x throttle, square brake); left stick x turns it, banking hard; left stick y climbs (back) and dives
 (forward); r1 fires `gun-warf-shot` from the nose, homing on what's ahead (four at once, then one a
-second), l1 the `warf-projectile` missile and its blast (8, one back every 20 s); its own thruster
-flames (parts 2761/2762, copied from fac-part.gc, which is FACTORYA's; faint in daylight, made for the
-factory's dark sky) and its sounds, `hellcat-engine`,
-`-boost`, `-bank`, `-fire`, `-firealt`, damage loops and explosion, all in `factory2`, which player-control
+second), l1 the `warf-projectile` missile and its blast (8, one back every 20 s); circle lands it: it stops and
+comes down level (its own leveling torque in place of the mission's, which pitches it along its path) to rest
+hovering on the ground with Jak in it, flying as the empty one meanwhile (none of the mission's thrust, which
+never lets it go under 37.5 m/s); x or the stick back takes off again with the mission's start
+(`[hellcat] landed by circle at <y> ground <g>` in the log). Its thruster flames are fac-part.gc's 2761/2762
+and the missile's trail and muzzle flash warf-projectile.gc's, as GAME copies (parts 5450-5460, group 1690,
+logic-target.gc), and drawn so they show: the game launches them as 2D sprites, and those drew nothing here
+(day or night; 3D sprites and glows do), so the flame is a 3D sprite facing back along the exhaust
+(`*particle-quat*`, birth-func-set-quat), the blue around it and a glow on the missile (the factory's unused
+2909, 5461) use the glow flag, and a 3D streak (the gun's beam, 5462) follows the missile; its blast also sets
+off the KG robots' explosion (group 219), the hemisplosion sphere's art not being drawn here. Its sounds, `hellcat-engine`,
+`-boost`, `-bank`, `-fire`, `-firealt`, damage loops and explosion, all in `factory2` (the engine, boost and bank loops
+lost their ids each time the ship went back to waiting, h-warf's vehicle-method-106, and stayed silent: parked first,
+ours always did; they get new ones), which player-control
 swaps in for `desert2` through the vehicle manager's `extra-bank` while Jak flies (dflut, firetorch,
 cactus, waterfall sounds are out meanwhile). What the factory's arena had and the desert hasn't is changed in
 deshcat's copy of it only (desert-hellcat.gc; LFACTORY.DGO loads its own): its altitudes are absolute (it
@@ -135,9 +147,11 @@ Hellcat; the sphere isn't in it, so only its particles show), loaded into wasall
 was 405) while no task wants that slot (`enhanced-hellcat-update`, logic-target.gc) and Spargus isn't coming in: once one
 of its levels (waswide, wascitya, wascityb, wasleapr) is wanted or in, deshcat isn't asked for, and the
 Hellcat goes first (`deshcat-release`: Jak out of it if he's flying, banks back, its shots gone), before
-deshcat unloads (asking for it again at the gate, in the city's level swaps, crashed the game).
+deshcat unloads (asking for it again at the gate, in the city's level swaps, crashed the game). `want-levels`
+(load-state.gc) keeps deshcat wanted: the desert's streaming lists dropped it, and now and then the loader discarded
+it before it was asked for again, the Hellcat gone from under Jak.
 `JAK_ENHANCED_HELLCAT_TEST=1` (test boots): Jak walks up, gets in, climbs by the stick, turns, fires both
-guns, dives down to the floor and gets out in flight by himself, with `[hellcat-test]` log lines for screenshots (the test stick is
+guns, lands with circle and takes off, dives down to the floor and gets out in flight by himself, with `[hellcat-test]` log lines for screenshots (the test stick is
 `*enhanced-pad-leftx/lefty*`, drawable.gc; pads in other windows are ignored). `=2` and `=3`: into Spargus
 from the desert in the Hellcat or on foot (the gate's level swap, then carried to wascitya-start), with
 `[spargus-test]` lines.
