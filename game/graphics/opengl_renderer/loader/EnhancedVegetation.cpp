@@ -188,6 +188,36 @@ class Ground {
     return found;
   }
 
+  // DEBUG: this level's own floor at (x, z) within 8 m of hy but not at hy (NAN if none)
+  float own_off(float x, float z, float hy) const {
+    auto it = m_cells.find(key(cell(x), cell(z)));
+    float best = NAN;
+    if (it == m_cells.end()) {
+      return best;
+    }
+    for (u32 id : it->second) {
+      const Vec3& a = m_tris[id * 3];
+      const Vec3& b = m_tris[id * 3 + 1];
+      const Vec3& c = m_tris[id * 3 + 2];
+      float d = (b.z() - c.z()) * (a.x() - c.x()) + (c.x() - b.x()) * (a.z() - c.z());
+      if (std::abs(d) < 1e-3f) {
+        continue;
+      }
+      float l0 = ((b.z() - c.z()) * (x - c.x()) + (c.x() - b.x()) * (z - c.z())) / d;
+      float l1 = ((c.z() - a.z()) * (x - c.x()) + (a.x() - c.x()) * (z - c.z())) / d;
+      float l2 = 1.f - l0 - l1;
+      if (l0 < -1e-4f || l1 < -1e-4f || l2 < -1e-4f) {
+        continue;
+      }
+      float y = l0 * a.y() + l1 * b.y() + l2 * c.y();
+      if (std::abs(y - hy) < 8.f * kMeter && std::abs(y - hy) > 0.15f * kMeter &&
+          (std::isnan(best) || std::abs(y - hy) < std::abs(best - hy))) {
+        best = y;
+      }
+    }
+    return best;
+  }
+
   size_t size() const { return m_tex.size(); }
   std::shared_ptr<const std::vector<float>> hfrag;
   const Vec3* tri(u32 id) const { return &m_tris[id * 3]; }
@@ -426,6 +456,7 @@ u32 place(std::vector<tfrag3::ShrubGpuVertex>& verts,
 
 struct Stats {
   int plants = 0, copies = 0, strewn = 0, tufts = 0, habitats = 0, vine_sources = 0, vines = 0;
+  int dbg1 = 0, dbg2 = 0;  // DEBUG
 };
 
 void add_to_tree(tfrag3::ShrubTree& tree,
@@ -571,6 +602,20 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       if (ground.hfrag && y < kSeaTop) {
         continue;  // (in the desert's sea)
       }
+      {  // DEBUG
+        float hy;
+        if (ground.hfrag && hfrag_height(*ground.hfrag, x, z, &hy) && std::abs(hy - y) < 1.f) {
+          float off = ground.own_off(x, z, hy);
+          if (!std::isnan(off)) {
+            stats->dbg1++;
+            if (stats->dbg1 <= 25) {
+              lg::info("[vegdbg] copy {} on hfrag at {:.1f} {:.1f} {:.1f}, own floor {:.2f} m off, src base {:.2f} r {:.2f} {}",
+                       tree.proto_names[p.proto], x / kMeter, y / kMeter, z / kMeter,
+                       (off - hy) / kMeter, p.base / kMeter, p.radius / kMeter, p.stone ? "stone" : "plant");
+            }
+          }
+        }
+      }
       float yaw = 6.2831853f * rnd(tree_idx, g, k * 7 + 3);
       float scale = 0.75f + 0.45f * rnd(tree_idx, g, k * 7 + 4);
       if (p.stone && p.radius > 1.5f * kMeter) {
@@ -676,6 +721,17 @@ void add_to_tree(tfrag3::ShrubTree& tree,
           continue;
         }
         const auto& p = plants[g];
+        {  // DEBUG
+          float off = ground.own_off(x, z, hy);
+          if (!std::isnan(off)) {
+            stats->dbg2++;
+            if (stats->dbg2 <= 25) {
+              lg::info("[vegdbg] strewn {} at {:.1f} {:.1f} {:.1f}, own floor {:.2f} m off",
+                       tree.proto_names[p.proto], x / kMeter, y / kMeter, z / kMeter,
+                       (off - hy) / kMeter);
+            }
+          }
+        }
         int tier = rnd(tree_idx, id, 507) < 0.5f ? 1 : 2;
         float yaw = 6.2831853f * rnd(tree_idx, id, 508);
         u32 offset = place(verts, p.first_vert, p.end_vert, p.cx, p.cz, p.base, x, y, z, yaw, scale);
@@ -1103,4 +1159,6 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
            "grassy floors, {} wall vines with {} copies{}",
            name, ground.size(), stats.plants, stats.copies, stats.strewn, stats.tufts, stats.habitats,
            stats.vine_sources, stats.vines, ground.hfrag ? " (and the height field)" : "");
+  lg::info("[vegdbg] {}: {} copies and {} strewn on the height field where the level has a floor of its own",
+           name, stats.dbg1, stats.dbg2);  // DEBUG
 }

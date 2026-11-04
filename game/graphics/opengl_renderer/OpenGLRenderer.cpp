@@ -345,6 +345,19 @@ void OpenGLRenderer::init_bucket_renderers_jak3() {
                                                  BucketId::GMERC2_LCOM_PRIS, m_generic2,
                                                  Generic2::Mode::PRIM);
 
+    // 456. Enhanced: a model with pris2 textures drawn in the default level (Sig as the player's
+    // model, enhanced-player.gc: his cutscene model is pris2) goes here; unused by the game itself
+    init_bucket_renderer<TextureUploadHandler>("tex-lcom-pris2", BucketCategory::TEX,
+                                               BucketId::TEX_LCOM_PRIS2, m_texture_animator);
+    init_bucket_renderer<Merc2BucketRenderer>("merc-lcom-pris2", BucketCategory::MERC,
+                                              BucketId::MERC_LCOM_PRIS2, m_merc2);
+    init_bucket_renderer<Generic2BucketRenderer>("gmerc-lcom-pris2", BucketCategory::GENERIC,
+                                                 BucketId::GMERC_LCOM_PRIS2, m_generic2,
+                                                 Generic2::Mode::NORMAL);
+    init_bucket_renderer<Generic2BucketRenderer>("gmerc2-lcom-pris2", BucketCategory::GENERIC,
+                                                 BucketId::GMERC2_LCOM_PRIS2, m_generic2,
+                                                 Generic2::Mode::PRIM);
+
     // 461
     init_bucket_renderer<TextureUploadHandler>("tex-lcom-sky-post", BucketCategory::TEX,
                                                BucketId::TEX_LCOM_SKY_POST, m_texture_animator);

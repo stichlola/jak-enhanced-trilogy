@@ -6170,13 +6170,17 @@ void EnhancedPost::draw_menu() {
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("The War Factory's Hellcat, parked by the Spargus wall: triangle to get in");
       }
-      static const char* const kCharacterLabels[kEnhancedCharacterCount] = {"Jak", "Ashelin"};
       int character = g_enhanced_menu.player;
-      if (ImGui::Combo("Character", &character, kCharacterLabels, kEnhancedCharacterCount)) {
+      if (ImGui::Combo(
+              "Character", &character,
+              [](void*, int i) { return kEnhancedCharacterTable[i].label; }, nullptr,
+              kEnhancedCharacterCount)) {
         g_enhanced_menu.player = character;
       }
       if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Swap character: Ashelin in Jak's place (moves, jumps, vehicles), switched live");
+        ImGui::SetTooltip(
+            "Swap character: Ashelin or Sig in Jak's place (moves, jumps, vehicles), switched live.\n"
+            "Sig: D-pad right brings out his Peacemaker");
       }
     }
     // (not in Enhanced Light: the game plays as it was, see pc_enhanced_storm_drag and the rest)
@@ -6395,7 +6399,10 @@ std::string EnhancedPost::menu_settings_json() const {
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   j["desert_hellcat"] = g_enhanced_menu.desert_hellcat.load();
-  j["player"] = kEnhancedCharacters[g_enhanced_menu.player.load()];
+  {
+    int player = g_enhanced_menu.player.load();
+    j["player"] = kEnhancedCharacterTable[(player >= 0 && player < kEnhancedCharacterCount) ? player : 0].name;
+  }
   j["weather_affects_play"] = g_enhanced_play_weather.enabled.load();
   j["enhanced_balance"] = g_enhanced_balance.load();
   auto keys = nlohmann::json::array();
@@ -6509,12 +6516,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   g_enhanced_menu.desert_hellcat = hellcat;
   std::string player_name = "jak";
   get("player", player_name);
-  g_enhanced_menu.player = 0;
-  for (int i = 0; i < kEnhancedCharacterCount; i++) {
-    if (player_name == kEnhancedCharacters[i]) {
-      g_enhanced_menu.player = i;
-    }
-  }
+  g_enhanced_menu.player = std::max(0, enhanced_character_index(player_name.c_str()));
   bool play_weather = true;
   get("weather_affects_play", play_weather);
   g_enhanced_play_weather.enabled = play_weather;
