@@ -3540,16 +3540,17 @@ void EnhancedPost::update_scene() {
     int deg = (int)(m_bolt[0] * 57.2958f) % 360;
     g_enhanced_thunder = m_thunder_kind * 1000 + deg;
   }
-  // lightning that strikes the ground, now and then in a strong storm: mostly far from Jak
-  // (60-250 m), sometimes nearer (25-60), rarely close (6-20). The game finds the ground and sets
-  // off a blast there (pc-enhanced-strike); when it says where, the bolt comes down to that spot
+  // lightning that strikes the ground, rarely, in a strong storm (a minute or three apart; the
+  // rest stays up in the sky): mostly far from Jak (60-250 m), sometimes nearer (25-60), rarely
+  // close (6-20). The game finds the ground and sets off a blast there (pc-enhanced-strike); when
+  // it says where, the bolt comes down to that spot
   if (m_next_strike == 0) {
-    m_next_strike = m_time + 8.0;
+    m_next_strike = m_time + 45.0;
   }
   if (m_storm > 0.5f && m_time >= m_next_strike && g_enhanced_player.valid) {
     static std::mt19937 rng{std::random_device{}()};
     std::uniform_real_distribution<float> u(0.f, 1.f);
-    m_next_strike = m_time + (6.0 + 16.0 * u(rng)) / m_storm;
+    m_next_strike = m_time + (60.0 + 120.0 * u(rng)) / m_storm;
     const float r = u(rng);
     float dist = r < 0.04f ? 6.f + 14.f * u(rng) : r < 0.2f ? 25.f + 35.f * u(rng) : 60.f + 190.f * u(rng);
     float ang = u(rng) * 6.2832f;
