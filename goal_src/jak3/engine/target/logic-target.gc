@@ -10,6 +10,13 @@
 (define-extern enhanced-unlock-all (function none))
 (define-extern enhanced-unlocked? (function symbol))
 
+;; Enhanced: is Jak flying the desert's Hellcat (the War Factory's h-warf, desert-hellcat.gc)?
+(defun enhanced-piloting-hellcat? ()
+  (let ((v (handle->process (-> *target* pilot vehicle))))
+    (and v (= (-> v type symbol) 'h-warf))
+    )
+  )
+
 ;; Enhanced: is the water's surface (the levels' water regions) within 2 m under this point?
 (defun enhanced-over-water? ((pos vector))
   (let ((spheres (new 'stack-no-clear 'inline-array 'water-sphere 1))
@@ -2879,6 +2886,8 @@ capture exactly."
     (let ((v (-> *enhanced-player-vec* 0)))
       (vector-copy! v (-> *target* control trans))
       (set! (-> v w) (cond
+                       ;; (the desert's Hellcat hovers high: no dust, ruts or spray off it)
+                       ((and (focus-test? *target* pilot) (enhanced-piloting-hellcat?)) 7.0)
                        ((and (focus-test? *target* pilot board) (enhanced-over-water? v)) 5.0)
                        ((focus-test? *target* pilot) (if (> *enhanced-vehicle-in-air* 0) 7.0 2.0))
                        ((focus-test? *target* board)
