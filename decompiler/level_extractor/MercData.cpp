@@ -452,6 +452,23 @@ void MercCtrl::from_ref(TypedRef tr, const DecompilerTypeSystem& dts, GameVersio
     effects.emplace_back().from_ref(eff_ref, dts, header);
     eff_ref.ref.byte_offset += 32;  //
   }
+
+  // Enhanced: the seg-table (array uint64), when there is one
+  try {
+    Ref seg_ref = get_field_ref(tr, "seg-table", dts);
+    const auto& word = seg_ref.data->words_by_seg.at(seg_ref.seg).at(seg_ref.byte_offset / 4);
+    if (word.kind() == LinkedWord::PTR) {
+      Ref arr = deref_label(seg_ref);
+      const u32 length = deref_u32(arr, 0);
+      Ref data = arr;
+      data.byte_offset += 12;  // (length, allocated-length, content-type, data)
+      for (u32 i = 0; i < length && i < 64; i++) {
+        seg_table.push_back(deref_u64(data, i));
+      }
+    }
+  } catch (const std::exception&) {
+    seg_table.clear();
+  }
 }
 
 TypedRef MercBlendCtrl::from_ref(TypedRef tr,

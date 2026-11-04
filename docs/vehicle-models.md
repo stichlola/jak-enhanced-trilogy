@@ -124,7 +124,7 @@ The credits are the small part. Tripo returns an unrigged textured mesh, so per 
 3. Save `custom_assets/jak3/merc_replacements/<model>.glb` and its json, re-extract, and test
    following [character-models.md](character-models.md).
 
-## The Hellcat without Tripo (tried, does not show yet)
+## The Hellcat without Tripo
 
 `scripts/enhanced/hellcat_hd_textures.py` and `hellcat_hd.py` rebuild the game's own Hellcat in more
 detail instead of generating a new one: same UVs, joints and silhouette, curves rounded, hard edges
@@ -137,13 +137,19 @@ python scripts/enhanced/hellcat_hd_textures.py decompiler_out/jak3/levels/ctycar
 blender -b --factory-startup -P scripts/enhanced/hellcat_hd.py -- <rip glb> <tex dir> hellcat-lod0.glb
 ```
 
-With `{"joints_by_name": true, "all_lods": true}` it extracts cleanly (no joint warnings), but **in game
-the Hellcat is invisible**, and so is the unchanged rip written back the same way, with or without
-its skin. The likely reason: the Hellcat has damage segments (`damage-seg-array` in `h-warf.gc` and
-`car.gc`, applied by `vehicle-method-114` in vehicle-util.gc), each with its own effects, and the
-undamaged state hides some of them. Merc2 draws a replacement only when the game enables the
-original's effect 0 (`current_effect_enable_bits & 1`), so if effect 0 belongs to a hidden damage
-state the whole replacement is hidden. Fixing it needs C++: the extractor putting the replacement in
-an effect that is always on (segment 0 of the merc-ctrl's `seg-table`), or Merc2 following that
-effect instead of effect 0. The wasteland cars switch parts with `setup-masks` too (`wcar-*.gc`):
-the same could hide them.
+Install it as `custom_assets/jak3/merc_replacements/hellcat-lod0.glb` with a `.json` of
+`{"joints_by_name": true, "all_lods": true}` and re-extract the levels that hold `hellcat-ag`
+(ctycarc, which also draws the desert one, desoasis, factorya, towercst).
+
+The Hellcat has damage segments (`damage-seg-array` in `h-warf.gc`, applied by `vehicle-method-114`
+with `setup-masks`): each segment hides its own effects, and effect 0 is one of them. Merc2 draws a
+Jak 3 replacement only while the game enables the original's effect 0
+(`current_effect_enable_bits & 1`), so at first the replaced Hellcat was invisible. The extractor now
+reads each merc-ctrl's `seg-table` and, when effect 0 can be hidden, moves the replacement onto the
+first effect that no segment hides, in the bucket of most of the model (the Hellcat: effect 12 of 14,
+lod0 and lod1), with empty no_strip draws in the slots before it (`place_replacement_in_visible_effects`
+in `extract_merc.cpp`). No gk change. The wasteland cars switch parts with `setup-masks` too
+(`wcar-*.gc`), so their replacements get the same treatment.
+
+Not handled: damage looks. The replacement is one mesh, so the Hellcat no longer shows its damaged
+panels.

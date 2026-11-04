@@ -241,6 +241,8 @@ struct MercCtrl {
   s32 num_joints;
   MercCtrlHeader header;
   std::vector<MercEffect> effects;
+  // Enhanced: segment -> mask of its effects (the game hides a segment's effects, e.g. damage)
+  std::vector<u64> seg_table;
 
   void from_ref(TypedRef tr, const DecompilerTypeSystem& dts, GameVersion version);
   std::string print();

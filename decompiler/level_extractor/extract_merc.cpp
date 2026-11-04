@@ -1724,6 +1724,75 @@ void share_replacement_with_lods(tfrag3::Level& lvl,
   }
 }
 
+// Enhanced: in Jak 3, Merc2 shows a replacement (all of it, from effect 0) only while the game
+// draws the model's effect 0. Models with damage (the Hellcat: segments that hide effects) can
+// have effect 0 hidden all the time, so the replacement would never show. Move the replacement's
+// effects onto effects that no segment ever hides, in the bucket of most of the model, and put
+// empty no_strip draws in the slots before them (Merc2 still sees a replacement at effect 0).
+void place_replacement_in_visible_effects(tfrag3::MercModel& model, const MercCtrl& ctrl) {
+  if (model.effects.empty() || model.effects[0].all_draws.empty() ||
+      !model.effects[0].all_draws[0].no_strip || ctrl.seg_table.size() < 2) {
+    return;
+  }
+  const size_t n = std::min<size_t>(ctrl.effects.size(), 64);
+  u64 hideable = 0;
+  for (size_t s = 1; s < ctrl.seg_table.size(); s++) {
+    hideable |= ctrl.seg_table[s];
+  }
+  if ((hideable & 1) == 0) {
+    return;  // effect 0 always shows: nothing to do
+  }
+  // the bucket (texture index) of most of the model's triangles
+  std::map<int, int> tris_by_bucket;
+  for (size_t i = 0; i < n; i++) {
+    tris_by_bucket[ctrl.effects[i].texture_index] += ctrl.effects[i].tri_count;
+  }
+  int bucket = -1, most = -1;
+  for (auto& [b, t] : tris_by_bucket) {
+    if (t > most) {
+      most = t;
+      bucket = b;
+    }
+  }
+  std::vector<size_t> slots;
+  for (size_t i = 0; i < n; i++) {
+    if (!(hideable & (1ull << i)) && ctrl.effects[i].texture_index == bucket &&
+        ctrl.effects[i].tri_count > 0) {
+      slots.push_back(i);
+    }
+  }
+  if (slots.empty() || slots[0] == 0) {
+    lg::warn("{}: no always visible effect for its replacement", model.name);
+    return;
+  }
+
+  tfrag3::MercEffect placeholder;
+  tfrag3::MercDraw empty = model.effects[0].all_draws[0];
+  empty.first_index = 0;
+  empty.index_count = 0;
+  empty.num_triangles = 0;
+  empty.eye_id = 0xff;
+  placeholder.all_draws.push_back(empty);
+
+  std::vector<tfrag3::MercEffect> effects;
+  size_t next = 0;
+  for (auto& e : model.effects) {
+    const size_t at = next < slots.size() ? slots[next++] : std::max(effects.size(), n);
+    while (effects.size() < at) {
+      effects.push_back(placeholder);
+      model.max_draws++;
+    }
+    effects.push_back(e);
+  }
+  std::string where;
+  for (size_t i = 0; i < std::min(next, slots.size()); i++) {
+    where += fmt::format(" {}", slots[i]);
+  }
+  lg::info("{}: effect 0 can be hidden (segments), replacement moved to effect(s){} of {}",
+           model.name, where, n);
+  model.effects = std::move(effects);
+}
+
 void add_custom_model_to_level(tfrag3::Level& lvl,
                                const std::string& name,
                                const fs::path& mdl_path) {
@@ -1938,5 +2007,23 @@ void extract_merc(const ObjectFileData& ag_data,
                               file_util::get_jak_project_dir() / "custom_assets" /
                                   game_version_names[version] / "merc_replacements",
                               swapped_info);
+
+  if (version == GameVersion::Jak3) {
+    for (u32 mi = first_model; mi < out.merc_data.models.size(); mi++) {
+      auto& model = out.merc_data.models[mi];
+      const auto at = model.name.rfind("-lod");
+      const std::string lod0 =
+          at == std::string::npos ? model.name : model.name.substr(0, at) + "-lod0";
+      if (!swapped_info.should_swap(model.name) && !swapped_info.should_swap(lod0)) {
+        continue;
+      }
+      for (const auto& ctrl : ctrls) {
+        if (ctrl.name == model.name) {
+          place_replacement_in_visible_effects(model, ctrl);
+          break;
+        }
+      }
+    }
+  }
 }
 }  // namespace decompiler
