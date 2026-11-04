@@ -444,8 +444,8 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 ;; that slot to one of its own levels (Sig's, the missions'), let go the moment one does.
 ;; (open sand by the Spargus wall, facing the canyon; its height is the ground's,
 ;; probed when it's parked)
-(define *enhanced-hellcat-spot* (new 'static 'vector :x (meters 2544.8) :y (meters 31.0) :z (meters 222.4) :w 1.0))
-(define *enhanced-hellcat-yaw* (degrees -58.0)) ;; its nose toward (sin, cos) in x, z
+(define *enhanced-hellcat-spot* (new 'static 'vector :x (meters 2276.0) :y (meters 31.0) :z (meters 250.0) :w 1.0))
+(define *enhanced-hellcat-yaw* (degrees 20.0)) ;; its nose toward (sin, cos) in x, z
 (define *enhanced-hellcat-frames* 0) ;; since deshcat came in
 (define *enhanced-hellcat-parked* #f) ;; spawned once since deshcat came in
 (define-extern deshcat-hellcat (function process)) ;; desert-hellcat.gc, while deshcat is in
@@ -799,9 +799,22 @@ moves about, so it's Spargus's that are looked for.)"
        (let ((hellcat (deshcat-hellcat)))
          (cond
            (hellcat
-             (if (and *enhanced-hellcat-test* (!= (-> *enhanced-hellcat-test-buf* data 0) #x33))
-                 (enhanced-hellcat-test (the-as process-drawable hellcat))
-                 )
+             (cond
+               ((not *enhanced-hellcat-test*)
+                )
+               ((= (-> *enhanced-hellcat-test-buf* data 0) #x34)
+                ;; 4: only walked up to it and in, then the player flies it
+                (when (< *enhanced-hellcat-test-t* 340)
+                  (if (= *enhanced-hellcat-test-t* 1)
+                      (+! *enhanced-hellcat-test-t* 1)
+                      (enhanced-hellcat-test (the-as process-drawable hellcat))
+                      )
+                  )
+                )
+               ((!= (-> *enhanced-hellcat-test-buf* data 0) #x33)
+                (enhanced-hellcat-test (the-as process-drawable hellcat))
+                )
+               )
              )
            ((and
               ;; a few seconds in, so the ground under the spot is there too

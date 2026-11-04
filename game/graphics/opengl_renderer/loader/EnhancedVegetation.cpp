@@ -20,6 +20,7 @@ int g_enhanced_vegetation = [] {
 namespace {
 
 constexpr float kMeter = 4096.f;
+constexpr float kSeaTop = 9.6f * kMeter;  // the desert's sea (9 m) and its waves
 constexpr u32 kNoTex = UINT32_MAX;
 
 using Vec3 = math::Vector3f;
@@ -567,6 +568,9 @@ void add_to_tree(tfrag3::ShrubTree& tree,
                          0.4f * kMeter, &y_mid)) {
         continue;  // no floor there, or not the same floor (an edge, water, a step, a wall)
       }
+      if (ground.hfrag && y < kSeaTop) {
+        continue;  // (in the desert's sea)
+      }
       float yaw = 6.2831853f * rnd(tree_idx, g, k * 7 + 3);
       float scale = 0.75f + 0.45f * rnd(tree_idx, g, k * 7 + 4);
       if (p.stone && p.radius > 1.5f * kMeter) {
@@ -637,6 +641,9 @@ void add_to_tree(tfrag3::ShrubTree& tree,
             !ground.height(x, z, hy, 0.5f * kMeter, 1.f * kMeter, &y) ||
             !ground.height(x + 1.f * kMeter, z, y, 0.3f * kMeter, 0.3f * kMeter, &y2)) {
           continue;  // off the desert, or an edge or a step
+        }
+        if (y < kSeaTop) {
+          continue;  // (the dunes under the sea: no stones floating on it)
         }
         // (rockiness: 1 at the foot of rock faces and by the big rocks, a half a bit farther)
         float rock = walls.rock_near(x, z, 10.f) || big_near(x, z) ? 1.f
