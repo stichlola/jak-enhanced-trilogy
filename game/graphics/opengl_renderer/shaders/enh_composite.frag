@@ -3101,7 +3101,7 @@ void main() {
         float reach = min(d - 3.0 * 4096.0, 12.0 * 4096.0);
         lit *= 1.0 - light_shadow * light_blocked_by(from, spot_pos[i].xyz, jitter, reach, 10);
       }
-      added += vec3(1.0, 0.9, 0.72) * lit * 2.6;
+      added += vec3(1.0, 0.9, 0.72) * lit * 4.0;
     }
     vec3 glints = vec3(0.0);  // the lights' highlights on wet ground
     bool full_day = night_dark.x <= 0.0 && sky_sun.w > 0.05 && clouds.w < 0.3 && weather.x <= 0.0;
@@ -3123,7 +3123,7 @@ void main() {
         if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5 && !full_day) {
           lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter);
         }
-        added += light_color[i].rgb * (k * k) * lit;
+        added += light_color[i].rgb * (k * k) * lit * 1.35;
         if (wet > 0.0) {
           vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
           glints += light_color[i].rgb * k * pow(max(dot(nn, hv), 0.0), 70.0) * lit;
@@ -3770,7 +3770,7 @@ void main() {
       }
     }
     // (faint near the lamp: the beam shows down the road, not as a ball of light on the car)
-    c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.02;
+    c += vec3(1.0, 0.9, 0.75) * beam * min(air_b, 1.2) * 0.012;
     // dust hanging in the beams: always a little, a lot in the desert's dust, some in the rain
     if (spot_pos[0].w > 0.0) {
       float motes = beam_motes(ray, z, pixel_rad);
@@ -3810,13 +3810,15 @@ void main() {
       // (capped: a bright light passing right by the ray, a dark eco blast in the rain, would
       // otherwise flood the view in its color)
       float inte = min((atan((t1 - tc) / hs) - atan((t0 - tc) / hs)) * lr / hs, 6.0);
+      // (not the lights by the camera: a vehicle's own engines and lamps fogged the whole view in
+      // front of it, and their flicker, the engines' glows changing size every frame, flashed it)
       shine += light_color[i].rgb * inte * (1.0 - smoothstep(lr * 0.5, lr * 1.5, h)) *
-               smoothstep(2.0 * 4096.0, 6.0 * 4096.0, length(lp));
+               smoothstep(10.0 * 4096.0, 25.0 * 4096.0, length(lp));
     }
-    shine *= min(air, 1.0) * 0.012;
+    shine *= min(air, 1.0) * 0.008;
     // all of them together at most a soft glow (scaled down, its hue kept)
     float shine_max = max(shine.r, max(shine.g, shine.b));
-    c += shine * min(1.0, 0.3 / max(shine_max, 1e-4));
+    c += shine * min(1.0, 0.15 / max(shine_max, 1e-4));
     for (int i = 0; i < min(light_count, 16); i++) {
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);
