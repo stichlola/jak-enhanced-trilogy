@@ -9,6 +9,7 @@
 
 (define-extern enhanced-unlock-all (function none))
 (define-extern enhanced-unlocked? (function symbol))
+(define-extern enhanced-player-update (function none)) ;; enhanced-player.gc: Ashelin as the player's model
 
 ;; Enhanced: is Jak flying the desert's Hellcat (the War Factory's h-warf, desert-hellcat.gc)?
 (defun enhanced-piloting-hellcat? ()
@@ -3111,6 +3112,7 @@ capture exactly."
   (enhanced-probe-update)
   (enhanced-piazza-autoload)
   (enhanced-hellcat-update)
+  (enhanced-player-update)
   (enhanced-review-update)
   (enhanced-menu-update)
   (enhanced-gameplay-update)

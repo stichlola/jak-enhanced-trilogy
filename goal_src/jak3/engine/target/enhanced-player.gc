@@ -1,0 +1,478 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: enhanced-player.gc
+;; name in dgo: enhanced-player
+;; dgos: GAME
+
+;; Enhanced: Ashelin as the player's model (the menu's "Character", or JAK_ENHANCED_PLAYER=ashelin).
+;; Jak's target process stays as it is (moves, jumps, vehicles, the Hellcat): only what is drawn changes.
+;; Jak, Daxter and his gun aren't drawn (dma-add-process-drawable, drawable.gc) and an enhanced-skin process,
+;; a child of the target, draws Ashelin at Jak's root joint.
+;; On her feet (standing, walking, running) she plays her own animations, picked by Jak's speed; for the
+;; rest (jumps, falls, landings, sitting in a vehicle, ducking, grabbing ledges...) she has none (ashelin-ag
+;; is an AI's: idle, walk, jog, run, hits and dodges), so she takes Jak's pose: each of her main joints
+;; turns as his does (enhanced-skin-retarget), blended in and out.
+;; Her art group is the oasis mission's (ashelin-ag, only DESOASIS.DGO carries it): its file is loaded into
+;; the global heap the first time (252 KB), and her model and textures come from desoasis.fr3, which the
+;; renderer is asked to keep loaded (*enhanced-extra-fr3*, level.gc).
+
+(defskelgroup skel-enhanced-ashelin ashelin ashelin-lod0-jg ashelin-idle0-ja
+              ((ashelin-lod0-mg (meters 999999)))
+              :bounds (static-spherem 0 0 0 2.7)
+              :longest-edge (meters 1)
+              :shadow ashelin-shadow-mg
+              :texture-level 10
+              :sort 1
+              :origin-joint-index 13
+              :shadow-joint-index 13
+              )
+
+(deftype enhanced-skin (process-drawable)
+  ((parent     (pointer target) :override)
+   (anim       int32)
+   (pose-blend float)              ;; 0: her own animation, 1: Jak's pose
+   (saved      matrix 41 :inline)  ;; her bones as her own animation left them
+   (bind-world matrix 41 :inline)  ;; her joints' bind pose (joint to model)
+   )
+  (:state-methods
+    idle
+    )
+  )
+
+(define *enhanced-player-buf* (new 'global 'string 32 (the-as string #f)))
+(define *enhanced-player-env* (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER" *enhanced-player-buf* 32)
+                                  (string= *enhanced-player-buf* "ashelin")
+                                  #f
+                                  )
+        )
+;; JAK_ENHANCED_PLAYER_ANIM=<art index>: Ashelin plays only that one, looping (to look at them)
+(define *enhanced-player-anim-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-player-anim* (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_ANIM" *enhanced-player-anim-buf* 16)
+                                   (string->int *enhanced-player-anim-buf*)
+                                   -1
+                                   )
+        )
+;; JAK_ENHANCED_PLAYER_RETARGET=all: Ashelin always takes Jak's pose
+(define *enhanced-player-retarget-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-player-retarget* (if (and (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_RETARGET" *enhanced-player-retarget-buf* 16)
+                                            (string= *enhanced-player-retarget-buf* "all")
+                                            )
+                                       'all
+                                       #f
+                                       )
+        )
+;; JAK_ENHANCED_PLAYER_TEST (test boots): "run" runs, jumps running and standing, double jumps;
+;; "orbit" turns the camera around (right stick), e.g. with JAK_ENHANCED_HELLCAT_TEST=4 or a POSE vehicle
+(define *enhanced-player-test-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-player-test* (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_TEST" *enhanced-player-test-buf* 16))
+(define *enhanced-player-test-frames* 0)
+(define *enhanced-skin-foot-min* 1000000.0)
+(define *enhanced-skin-foot-max* -1000000.0)
+(define *enhanced-skin-cycle-frames* 0)
+(define *enhanced-skin-last-frame* 0.0)
+(define *enhanced-player-menu-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-ashelin-ag* (the-as art-group #f))
+(define *enhanced-ashelin-failed* #f)
+(define *enhanced-skin-pool* (the-as dead-pool #f))
+;; her process and its pid (a handle doesn't fit in a symbol's value)
+(define *enhanced-skin-ptr* (the-as (pointer enhanced-skin) #f))
+(define *enhanced-skin-pid* 0)
+
+(defun enhanced-skin-get ()
+  (let ((pp *enhanced-skin-ptr*))
+    (if (and pp (= (-> pp 0 pid) *enhanced-skin-pid*) (= (-> pp 0 type) enhanced-skin))
+        (-> pp 0)
+        )
+    )
+  )
+
+(defun enhanced-player-ashelin? ()
+  "Is Ashelin the player's model? The menu's choice (EnhancedPost.cpp answers JAK_ENHANCED_PLAYER_MENU,
+   live), else JAK_ENHANCED_PLAYER (a gk without that menu)."
+  (and (not *enhanced-ashelin-failed*)
+       (if (pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
+           (string= *enhanced-player-menu-buf* "ashelin")
+           *enhanced-player-env*
+           )
+       )
+  )
+
+(defun enhanced-ashelin-art ()
+  "Ashelin's art group, loaded from out/jak3/obj/ashelin-ag.go into the global heap the first time
+   (not while a level links, which uses the same linker), and given to the default level so her skeleton
+   group finds it. #f until then, or if the file isn't there."
+  (when (and (not *enhanced-ashelin-ag*) (not (load-in-progress? *level*)))
+    ;; always our own copy (the oasis level's would go with that level)
+    (let ((ag (the-as art-group #f))
+          (old-lev (-> *level* loading-level))
+          (old-heap loading-level)
+          (free (&- (-> global top-base) (-> global current)))
+          )
+      ;; like the bigmap's tpages (bigmap.gc): no level logs it in, it goes to the global heap
+      (set! (-> *level* loading-level) #f)
+      (set! loading-level global)
+      (set! ag (the-as art-group (loado "ashelin-ag" global)))
+      (set! (-> *level* loading-level) old-lev)
+      (set! loading-level old-heap)
+      (format 0 "[enhanced-player] ashelin-ag ~A (global heap ~DK free before, ~DK after)~%"
+              ag (/ free 1024) (/ (&- (-> global top-base) (-> global current)) 1024))
+      (cond
+        ((and ag (type? ag art-group))
+         (set-loaded-art (-> *level* level-default art-group) ag)
+         (set! *enhanced-ashelin-ag* ag)
+         )
+        (else
+          ;; don't try again each frame if it isn't there
+          (set! *enhanced-ashelin-failed* #t)
+          )
+        )
+      )
+    )
+  *enhanced-ashelin-ag*
+  )
+
+;; her art indices (art-elts.gc)
+(defconstant ASHELIN_IDLE 3)
+(defconstant ASHELIN_WALK 4)
+(defconstant ASHELIN_JOG 5)
+(defconstant ASHELIN_RUN 6)
+
+(defbehavior enhanced-skin-play enhanced-skin ((idx int) (rate float) (blend time-frame))
+  "Loop Ashelin's animation idx at rate. Between the walk, jog and run she keeps her step: the new one
+   starts at the same point of its cycle."
+  (let ((anim (the-as art-joint-anim (-> self draw art-group data idx))))
+    (when (!= idx (-> self anim))
+      (let ((frac (if (and (>= (-> self anim) ASHELIN_WALK) (<= (-> self anim) ASHELIN_RUN) (>= idx ASHELIN_WALK))
+                      (/ (ja-frame-num 0) (the float (max 1 (+ -1 (ja-num-frames 0)))))
+                      0.0
+                      )
+                  )
+            )
+        (set! (-> self anim) idx)
+        (ja-channel-push! 1 blend)
+        (ja :group! anim :num! (identity (* frac (the float (+ -1 (-> anim frames num-frames))))))
+        )
+      )
+    (ja :num! (loop! rate))
+    )
+  (none)
+  )
+
+(defbehavior enhanced-skin-animate enhanced-skin ()
+  "Pick Ashelin's own animation from Jak's speed on the ground (with some overlap, so she doesn't switch
+   back and forth at a threshold), played as fast as her feet go with Jak: measured (JAK_ENHANCED_PLAYER_TEST=run)
+   her walk covers 2.3 m a second at rate 1, the run 5 m (Jak runs at 11.3 m/s: rate 2.26)."
+  (let* ((tgt (-> self parent 0))
+         (speed (-> tgt control ctrl-xz-vel))
+         (cur (-> self anim))
+         )
+    (cond
+      ((>= *enhanced-player-anim* 3)
+       (enhanced-skin-play (min *enhanced-player-anim* 41) 1.0 (seconds 0.1))
+       )
+      ((< speed (if (= cur ASHELIN_IDLE) (meters 0.6) (meters 0.3)))
+       (enhanced-skin-play ASHELIN_IDLE 1.0 (seconds 0.2))
+       )
+      ((< speed (if (= cur ASHELIN_JOG) (meters 3.5) (meters 4.2)))
+       (enhanced-skin-play ASHELIN_WALK (fmax 0.8 (/ speed (meters 2.3))) (seconds 0.15))
+       )
+      ((< speed (if (= cur ASHELIN_RUN) (meters 6.8) (meters 7.6)))
+       (enhanced-skin-play ASHELIN_JOG (fmax 1.0 (/ speed (meters 3.8))) (seconds 0.15))
+       )
+      (else
+        (enhanced-skin-play ASHELIN_RUN (fmin 2.6 (fmax 1.2 (/ speed (meters 5.0)))) (seconds 0.12))
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-skin-own-anim? enhanced-skin ()
+  "Can she play her own animation now (Jak standing, walking or running)?"
+  (let ((tgt (-> self parent 0)))
+    (and (not (= *enhanced-player-retarget* 'all))
+         (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
+         (let ((st (-> tgt state)))
+           (and st
+                (or (= (-> st name) 'target-stance)
+                    (= (-> st name) 'target-walk)
+                    (= (-> st name) 'target-turn-around)
+                    (= (-> st name) 'target-stance-ambient)
+                    (= (-> st name) 'target-stance-look-around)
+                    (= (-> st name) 'target-look-around)
+                    (= (-> st name) 'target-startup)
+                    (= (-> st name) 'target-gun-stance)
+                    (= (-> st name) 'target-gun-walk)
+                    )
+                )
+           )
+         )
+    )
+  )
+
+;; Jak's joint for each of hers (node-list indices, joint-nodes.gc), or -1: main, chest, neck, head,
+;; arms (her shoulder is his upper arm: he has a collarbone more), hips and legs. Fingers, hair...
+;; keep what her own animation does with them.
+(define *enhanced-skin-jak-joint*
+  (new 'static 'boxed-array :type int8
+    -1 -1 -1 3 6 7 8          ;; 0-6: -, align, prejoint, main, chest, neck (neckA), head (neckB)
+    17 18 19 26 27 28         ;; 7-12: Lshoulder Lelbow Lhand (Larm Lforarm sk_lhand), the right ones
+    38 39 40 41 42 45 46 47 48 ;; 13-21: hips, Lthigh Lknee Lankle Lball, Rthigh Rknee Rankle Rball
+    -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+    )
+  )
+
+(defun enhanced-matrix-blend-rows! ((dst matrix) (a matrix) (b matrix) (w float) (len matrix))
+  "dst = a and b blended by w (rows), each turn row scaled back to len's (keeps a bone's scale)."
+  (dotimes (r 4)
+    (vector-lerp! (-> dst vector r) (-> a vector r) (-> b vector r) w)
+    )
+  (dotimes (r 3)
+    (vector-normalize! (-> dst vector r) (vector-length (-> len vector r)))
+    (set! (-> dst vector r w) 0.0)
+    )
+  (set! (-> dst trans w) 1.0)
+  dst
+  )
+
+(defbehavior enhanced-skin-retarget enhanced-skin ((w float))
+  "Pose Ashelin as Jak is, by w (0-1): each of her mapped joints turned as his is from his bind pose
+   (both are bound standing the same way), placed at the end of her own parent bone (her proportions),
+   main and hips where his are (so she sits on his seat). Her other joints follow their parents as her
+   animation has them; her gun stays in her right hand. Runs on her bones after ja-post, before drawing."
+  (let* ((jak (-> self parent 0))
+         (nodes (-> self node-list))
+         (jnodes (-> jak node-list))
+         (n (min 41 (-> nodes length)))
+         (stride (&- (the-as pointer (-> nodes data 1)) (the-as pointer (-> nodes data 0))))
+         (local (new 'stack-no-clear 'matrix))
+         (inv (new 'stack-no-clear 'matrix))
+         (skin (new 'stack-no-clear 'matrix))
+         (rot (new 'stack-no-clear 'matrix))
+         (own (new 'stack-no-clear 'matrix))
+         )
+    (dotimes (k n)
+      (matrix-copy! (-> self saved k) (-> nodes data k bone transform))
+      )
+    (countdown (i (- n 1))
+      (let* ((k (- (- n 1) i))
+             (cs (-> nodes data k))
+             (bone (-> cs bone transform))
+             ;; the gun (22) goes with the right hand (12)
+             (p (cond
+                  ((= k 22) 12)
+                  ((-> cs parent) (/ (&- (the-as pointer (-> cs parent)) (the-as pointer (-> nodes data 0))) stride))
+                  (else -1)
+                  )
+                )
+             (j (if (< k (-> *enhanced-skin-jak-joint* length)) (-> *enhanced-skin-jak-joint* k) -1))
+             )
+        (when (and (> k 0) (>= p 0) (< p n) (!= p k))
+          ;; her own local transform: saved[k] = local * saved[p]
+          (matrix-inverse-of-rot-trans! inv (-> self saved p))
+          (matrix*! local (-> self saved k) inv)
+          (matrix*! own local (-> nodes data p bone transform))
+          (cond
+            ((and (>= j 0) (-> cs joint) (< j (-> jnodes length)) (-> jnodes data j joint))
+             ;; his skinning matrix (model to world), then her bind pose through it
+             (matrix*! skin (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
+             (matrix*! rot (-> self bind-world k) skin)
+             (if (or (= k 3) (= k 13))
+                 (vector-copy! (-> rot trans) (-> jnodes data j bone position))
+                 (vector-copy! (-> rot trans) (-> own trans))
+                 )
+             (enhanced-matrix-blend-rows! bone own rot w (-> self saved k))
+             )
+            (else
+              (matrix-copy! bone own)
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-skin-post enhanced-skin ()
+  (let ((tgt (-> self parent 0)))
+    (vector-copy! (-> self root trans) (-> tgt control trans))
+    (quaternion-copy! (-> self root quat) (-> tgt control quat))
+    (set! (-> self draw light-index) (-> tgt draw light-index))
+    (set! (-> self draw level-index) (-> tgt draw level-index))
+    ;; hidden when Jak would be (cutscenes, warps...)
+    (if (logtest? (-> tgt draw status) (draw-control-status no-draw))
+        (logior! (-> self draw status) (draw-control-status no-draw))
+        (logclear! (-> self draw status) (draw-control-status no-draw))
+        )
+    ;; into Jak's pose in 0.1 s, out of it in 0.2 s (straight away in or out of a vehicle)
+    (let ((own? (enhanced-skin-own-anim?)))
+      (cond
+        ((focus-test? tgt pilot)
+         (set! (-> self pose-blend) 1.0)
+         )
+        (own?
+          (seek! (-> self pose-blend) 0.0 (* 5.0 (seconds-per-frame)))
+          )
+        (else
+          (seek! (-> self pose-blend) 1.0 (* 10.0 (seconds-per-frame)))
+          )
+        )
+      )
+    )
+  (enhanced-skin-animate)
+  (ja-post)
+  ;; test boots: how far her left ankle goes back and forth along her facing over each cycle of the
+  ;; walk, jog and run, and how long a cycle takes (her stride against Jak's speed)
+  (when (and *enhanced-player-test* (>= (-> self anim) ASHELIN_WALK) (<= (-> self anim) ASHELIN_RUN))
+    (let ((d (vector-dot (vector-! (new 'stack-no-clear 'vector) (-> self node-list data 16 bone position) (-> self root trans))
+                         (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat))
+                         )
+             )
+          )
+      (set! *enhanced-skin-foot-min* (fmin *enhanced-skin-foot-min* d))
+      (set! *enhanced-skin-foot-max* (fmax *enhanced-skin-foot-max* d))
+      (+! *enhanced-skin-cycle-frames* 1)
+      (when (< (ja-frame-num 0) *enhanced-skin-last-frame*)
+        (format 0 "[player-test] anim ~D frames ~D cycle ~D game frames foot ~M speed ~M rate ~f~%"
+                (-> self anim) (ja-num-frames 0) *enhanced-skin-cycle-frames*
+                (- *enhanced-skin-foot-max* *enhanced-skin-foot-min*)
+                (-> self parent 0 control ctrl-xz-vel) (-> self skel root-channel 0 param 0))
+        (set! *enhanced-skin-foot-min* 1000000.0)
+        (set! *enhanced-skin-foot-max* -1000000.0)
+        (set! *enhanced-skin-cycle-frames* 0)
+        )
+      (set! *enhanced-skin-last-frame* (ja-frame-num 0))
+      )
+    )
+  (if (< 0.0 (-> self pose-blend))
+      (enhanced-skin-retarget (-> self pose-blend))
+      )
+  (none)
+  )
+
+(defstate idle (enhanced-skin)
+  :virtual #t
+  :code sleep-code
+  :post enhanced-skin-post
+  )
+
+(defbehavior enhanced-skin-init-by-other enhanced-skin ()
+  (set! (-> self level) (-> *level* level-default))
+  (set! (-> self root) (new 'process 'trsqv))
+  (vector-copy! (-> self root trans) (-> self parent 0 control trans))
+  (quaternion-copy! (-> self root quat) (-> self parent 0 control quat))
+  (initialize-skeleton self skel-enhanced-ashelin (the-as pair 0))
+  ;; her root joint is Jak's, as his own is set up (init-target, logic-target.gc)
+  (let ((v1-6 (-> self node-list data)))
+    (set! (-> v1-6 0 param0) (the-as (function cspace transformq none) cspace<-transformq+trans!))
+    (set! (-> v1-6 0 param1) (the-as basic (-> self parent 0 control trans)))
+    (set! (-> v1-6 0 param2) (the-as basic (-> self parent 0 control cspace-offset)))
+    )
+  (set! (-> self draw shadow-ctrl) *target-shadow-control*)
+  (set! (-> self draw lod-set max-lod) 0)
+  (logior! (-> self skel status) (joint-control-status sync-math))
+  (set! (-> self anim) -1)
+  (set! (-> self pose-blend) (if (enhanced-skin-own-anim?) 0.0 1.0))
+  (dotimes (k (min 41 (-> self node-list length)))
+    (let ((jt (-> self node-list data k joint)))
+      (if jt
+          (matrix-4x4-inverse! (-> self bind-world k) (-> jt bind-pose))
+          (matrix-identity! (-> self bind-world k))
+          )
+      )
+    )
+  (go-virtual idle)
+  )
+
+(defun enhanced-player-test ()
+  "JAK_ENHANCED_PLAYER_TEST: a run with jumps, or the camera turning, with [player-test] lines."
+  (let ((t *enhanced-player-test-frames*))
+    (+! *enhanced-player-test-frames* 1)
+    (cond
+      ((string= *enhanced-player-test-buf* "orbit")
+       (set! *enhanced-pad-rightx* (if (> t 600) 200 -1))
+       )
+      ((string= *enhanced-player-test-buf* "run")
+       ;; on the open sand by the parked Hellcat; 10 s in: walk 2 s, run 4 s with a jump at 3 s; stand,
+       ;; jump at 9 s; double jump at 12 s
+       (case t
+         ((1) (set-ignore-controller-in-bg! *pc-settings* #t))
+         ((540)
+          (let ((pos (new 'stack-no-clear 'vector)))
+            (vector-copy! pos *enhanced-hellcat-spot*)
+            (+! (-> pos x) (meters -30.0))
+            (+! (-> pos z) (meters 20.0))
+            (+! (-> pos y) (meters 1.0))
+            (move-to-point! (-> *target* control) pos)
+            )
+          )
+         ((780) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] run-jump~%"))
+         ((960) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] jump~%"))
+         ((1140) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] double-jump~%"))
+         ((1170) (set! *enhanced-pad-press* (pad-buttons x)))
+         )
+       (set! *enhanced-pad-lefty* (cond
+                                    ((and (> t 600) (< t 720)) 90)
+                                    ((and (>= t 720) (< t 900)) 0)
+                                    (else -1)
+                                    )
+             )
+       (if (= t 600)
+           (format 0 "[player-test] run~%")
+           )
+       )
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-player-update ()
+  "Each frame (the target's flag-setup): Ashelin drawn in Jak's place while she is the player's model."
+  (if *enhanced-player-test*
+      (enhanced-player-test)
+      )
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (cond
+      ((and *target* (enhanced-player-ashelin?) (enhanced-ashelin-art))
+       (when (not skin)
+         (if (not *enhanced-skin-pool*)
+             (set! *enhanced-skin-pool* (new 'global 'dead-pool 1 #x8000 "*enhanced-skin-pool*"))
+             )
+         (let ((pp-skin (process-spawn enhanced-skin
+                                       :init enhanced-skin-init-by-other
+                                       :name "enhanced-skin"
+                                       :from *enhanced-skin-pool*
+                                       :to *target*
+                                       )
+                        )
+               )
+           (set! *enhanced-skin-ptr* pp-skin)
+           (set! *enhanced-skin-pid* (if pp-skin (-> pp-skin 0 pid) 0))
+           (set! skin (the-as enhanced-skin (enhanced-skin-get)))
+           (format 0 "[enhanced-player] Ashelin ~A~%" skin)
+           ;; its one process is in use (or gone wrong): no Ashelin
+           (if (not skin)
+               (set! *enhanced-ashelin-failed* #t)
+               )
+           )
+         )
+       (set! *enhanced-skin-proc* skin)
+       (set! *enhanced-skin-hide* (if skin *target*))
+       )
+      (else
+        (when skin
+          (deactivate skin)
+          (set! *enhanced-skin-ptr* #f)
+          (format 0 "[enhanced-player] Jak~%")
+          )
+        (set! *enhanced-skin-proc* #f)
+        (set! *enhanced-skin-hide* #f)
+        )
+      )
+    )
+  ;; her model and textures: desoasis.fr3
+  (set! *enhanced-extra-fr3* (if (and *enhanced-skin-hide* (not (level-get *level* 'desoasis))) "desoasis"))
+  (none)
+  )

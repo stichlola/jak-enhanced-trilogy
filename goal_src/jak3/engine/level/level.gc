@@ -3618,6 +3618,9 @@
   (none)
   )
 
+;; Enhanced: an fr3 the renderer keeps loaded with no level of its own (level-update), or #f
+(define *enhanced-extra-fr3* (the-as string #f))
+
 (defmethod level-update ((this level-group))
   "Per-frame update of the level system."
   (local-vars (v1-109 symbol))
@@ -3920,6 +3923,23 @@
           (set! (-> lev-names i) (symbol->string (bsp-name (-> this level i))))
           (if (-> this level i display?)
               (set! (-> active-lev-names i) (-> lev-names i)))
+          )
+        )
+      )
+    ;; Enhanced: one more fr3 for the renderer, with no level (enhanced-player.gc: Ashelin's model)
+    (when *enhanced-extra-fr3*
+      (let ((free -1))
+        (dotimes (i 10)
+          (if (string= (-> lev-names i) *enhanced-extra-fr3*)
+              (set! free 100)
+              )
+          (if (and (< free 0) (string= (-> lev-names i) "none"))
+              (set! free i)
+              )
+          )
+        (when (and (>= free 0) (< free 10))
+          (set! (-> lev-names free) *enhanced-extra-fr3*)
+          (set! (-> active-lev-names free) *enhanced-extra-fr3*)
           )
         )
       )
