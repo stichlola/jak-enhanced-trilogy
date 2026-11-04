@@ -2348,7 +2348,8 @@ void main() {
     float crest = 0.0;
     float wave_hi = 0.0;  // how high on a storm wave (-1..1, 0 calm): crests lighter, troughs darker
     if (swell_amt > 0.0) {
-      float ts = t * (0.8 + 0.15 * sea_state);
+      // (slow: the long swell's crests crawl, they raced across at 5-6 m/s)
+      float ts = t * 0.4;
       float s0 = water_swell(world, ts);
       slope += swell_amt * vec2(water_swell(world + vec2(0.5, 0.0), ts) - s0,
                                 water_swell(world + vec2(0.0, 0.5), ts) - s0) / 0.5;
@@ -2359,7 +2360,7 @@ void main() {
       float big = 0.0;
       if (storm_k > 0.0) {
         const float be = 0.4;
-        float tw = t * 0.5;  // (the waves at half speed: at full they raced by)
+        float tw = t * 0.3;  // (the waves slowed down: at full speed they raced by)
         big = storm_sea(world, wd, tw);
         slope += storm_k * 0.9 * vec2(storm_sea(world + vec2(be, 0.0), wd, tw) - big,
                                        storm_sea(world + vec2(0.0, be), wd, tw) - big) / be;
@@ -2368,9 +2369,9 @@ void main() {
       float rough = smoothstep(0.5, 1.2, sea_state) * swell_amt * (1.0 - smoothstep(0.1, 0.5, water_foot));
       if (rough > 0.0) {
         const float we = 0.15;
-        float w0 = wind_sea(world, wd, t * 0.5);
-        float w1 = wind_sea(world + vec2(we, 0.0), wd, t * 0.5);
-        float w2 = wind_sea(world + vec2(0.0, we), wd, t * 0.5);
+        float w0 = wind_sea(world, wd, t * 0.35);
+        float w1 = wind_sea(world + vec2(we, 0.0), wd, t * 0.35);
+        float w2 = wind_sea(world + vec2(0.0, we), wd, t * 0.35);
         slope += rough * 0.12 * vec2(w1 - w0, w2 - w0) / we;
         // (a breaking crest: the very top of a wind wave, riding high on the swell, here and
         // there along it)
@@ -2433,7 +2434,9 @@ void main() {
                      (1.0 - smoothstep(350.0 * 4096.0, 600.0 * 4096.0, z));
       }
       rain_hits *= rain_amt;
-      vec2 rw = world / clamp(water_foot * 4.0, 0.08, 2.0) + vec2(t * 2.0, -t * 1.7);
+      // (the rain's chop drifts slowly in the world: drifting in screen terms it raced across the
+      // far water, its pattern there meters wide)
+      vec2 rw = (world + vec2(t * 0.3, -t * 0.25)) / clamp(water_foot * 4.0, 0.08, 2.0);
       slope += vec2(gnoise(rw), gnoise(rw + 5.3)) * 0.08 * rain_amt * (1.0 - rings) * far;
     }
     vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
