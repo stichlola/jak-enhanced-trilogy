@@ -213,6 +213,9 @@ struct EnhancedTimeOfDay {
 };
 extern EnhancedTimeOfDay g_enhanced_tod;
 
+inline const char* const kEnhancedCharacters[] = {"jak", "ashelin"};
+constexpr int kEnhancedCharacterCount = 2;
+
 struct EnhancedMenu {
   bool open = false;
   // the trilogy's start menu (the launcher asks for it, JAK_ENHANCED_START_MENU): the three games,
@@ -226,6 +229,10 @@ struct EnhancedMenu {
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   // Jak 3: the Hellcat parked in the desert (pc-enhanced-desert-hellcat?, enhanced-hellcat-update)
   std::atomic<bool> desert_hellcat = true;
+  // Jak 3: the character drawn in Jak's place, an index in kEnhancedCharacters (enhanced-player.gc
+  // asks JAK_ENHANCED_PLAYER_MENU for its name, live). New characters: a name here and an entry in
+  // *enhanced-characters* (enhanced-player.gc).
+  std::atomic<int> player = 0;
   std::atomic<int> fov = 100;        // the field of view in play, percent (pc-enhanced-fov)
   // the subtitles' size, percent of Enhanced's default (pc-enhanced-subtitle-size): 100 small,
   // 120 medium, 138 large (the PS2 size), 170 extra large

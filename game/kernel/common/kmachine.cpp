@@ -1572,6 +1572,28 @@ u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
   if (std::strcmp(Ptr<String>(var).c()->data(), "JAK_ENHANCED_HAS_PIAZZA") == 0) {
     return bool_to_symbol(enhanced_has_piazza());
   }
+  // (not a real variable either: the menu's "Character" name, live; JAK_ENHANCED_PLAYER=<name>
+  // overrides it once at the start, enhanced-player.gc)
+  if (std::strcmp(Ptr<String>(var).c()->data(), "JAK_ENHANCED_PLAYER_MENU") == 0) {
+    static bool env_applied = false;
+    if (!env_applied) {
+      env_applied = true;
+      const char* env = std::getenv("JAK_ENHANCED_PLAYER");
+      for (int i = 0; env && i < kEnhancedCharacterCount; i++) {
+        if (std::strcmp(env, kEnhancedCharacters[i]) == 0) {
+          g_enhanced_menu.player = i;
+        }
+      }
+    }
+    int player = g_enhanced_menu.player;
+    if (player < 0 || player >= kEnhancedCharacterCount) {
+      player = 0;
+    }
+    auto* data = Ptr<String>(dest).c()->data();
+    strncpy(data, kEnhancedCharacters[player], max_len - 1);
+    data[max_len - 1] = '\0';
+    return bool_to_symbol(true);
+  }
   const char* name = std::getenv(Ptr<String>(var).c()->data());
   if (!name || !*name) {
     return bool_to_symbol(false);

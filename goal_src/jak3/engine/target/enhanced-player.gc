@@ -87,6 +87,21 @@
     )
   )
 
+;; Characters the menu's "Character" combo offers (names match kEnhancedCharacters in enhanced_state.h).
+;; Each entry: (name art-group-file fr3-level), "jak" = no skin. To add one: a name in both tables, a
+;; skelgroup, a joint map like *enhanced-skin-jak-joint* and its own-anim indices (ASHELIN_* constants).
+(define *enhanced-characters* '(("jak" #f #f) ("ashelin" "ashelin-ag" "desoasis")))
+
+(defun enhanced-player-name ()
+  "The selected character's name: the menu's (live), else JAK_ENHANCED_PLAYER, else \"jak\"."
+  (cond
+    ((pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
+     *enhanced-player-menu-buf*)
+    (*enhanced-player-env* "ashelin")
+    (else "jak")
+    )
+  )
+
 (defun enhanced-player-ashelin? ()
   "Is Ashelin the player's model? The menu's choice (EnhancedPost.cpp answers JAK_ENHANCED_PLAYER_MENU,
    live), else JAK_ENHANCED_PLAYER (a gk without that menu)."
@@ -171,7 +186,7 @@
       ((>= *enhanced-player-anim* 3)
        (enhanced-skin-play (min *enhanced-player-anim* 41) 1.0 (seconds 0.1))
        )
-      ((< speed (if (= cur ASHELIN_IDLE) (meters 0.6) (meters 0.3)))
+      ((or (focus-test? tgt pilot) (< speed (if (= cur ASHELIN_IDLE) (meters 0.6) (meters 0.3))))
        (enhanced-skin-play ASHELIN_IDLE 1.0 (seconds 0.2))
        )
       ((< speed (if (= cur ASHELIN_JOG) (meters 3.5) (meters 4.2)))
@@ -393,6 +408,20 @@
     (cond
       ((string= *enhanced-player-test-buf* "orbit")
        (set! *enhanced-pad-rightx* (if (> t 600) 200 -1))
+       ;; where her head and hips are against his (in a vehicle: is she sitting where he would?)
+       (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+         (when (and skin *target* (zero? (mod t 60)))
+           (let ((jn (-> *target* node-list))
+                 (an (-> skin node-list))
+                 )
+             (format 0 "[player-test] pilot ~A head ~M ~M ~M" (focus-test? *target* pilot)
+                     (-> an data 6 bone position x) (-> an data 6 bone position y) (-> an data 6 bone position z))
+             (format 0 " jak ~M ~M ~M" (-> jn data 8 bone position x) (-> jn data 8 bone position y) (-> jn data 8 bone position z))
+             (format 0 " hips ~M ~M ~M" (-> an data 13 bone position x) (-> an data 13 bone position y) (-> an data 13 bone position z))
+             (format 0 " jak ~M ~M ~M~%" (-> jn data 38 bone position x) (-> jn data 38 bone position y) (-> jn data 38 bone position z))
+             )
+           )
+         )
        )
       ((string= *enhanced-player-test-buf* "run")
        ;; on the open sand by the parked Hellcat; 10 s in: walk 2 s, run 4 s with a jump at 3 s; stand,
