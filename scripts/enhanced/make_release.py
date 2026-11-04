@@ -65,6 +65,9 @@ HANDMADE = [
     ("custom_assets/jak3/texture_remade/_all", 1),  # tools/tripo/tasks.json in jak3-ue5: tex-*, tex2-*
     ("custom_assets/jak3/merc_replacements", 2),  # the same file: spargus_market
 ]
+# in those folders but made from the game's own data, so never in a release: the HD Hellcat
+# (scripts/enhanced/hellcat_hd.py rebuilds the game's model)
+NOT_HANDMADE = ["hellcat-lod0.*"]
 # the same, by name in a folder shared with what git tracks: the editor's Tripo kits (rocks, slabs,
 # pebbles, trees, with their far versions), in its library even where the main world doesn't use them
 HANDMADE_FILES = ["custom_assets/jak3/scenery/desert_*", "custom_assets/jak3/scenery/rock_big_*",
@@ -112,7 +115,8 @@ def copy_handmade(dest):
     count = 0
     for folder, at_least in HANDMADE:
         source = ROOT / folder
-        files = sorted(f for f in source.rglob("*") if f.is_file()) if source.is_dir() else []
+        files = sorted(f for f in source.rglob("*") if f.is_file()
+                       and not any(f.match(p) for p in NOT_HANDMADE)) if source.is_dir() else []
         if len(files) < at_least:
             sys.exit(f"{folder}: {len(files)} files, at least {at_least} expected. Stopped: this release "
                      "would miss what's made by hand")
