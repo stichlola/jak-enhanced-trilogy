@@ -1394,6 +1394,14 @@
           )
         )
       )
+    ;; Enhanced: a character's own gun: Jak's arrows off, one lit arrow up (D-pad up: hers), as Jak's menu
+    ;; shows the guns he has
+    (when (nonzero? (enhanced-character-gun-hud))
+      (dotimes (v1-201 12)
+        (set! (-> this sprites (+ v1-201 2) scale-x) 0.0)
+        )
+      (hud-sprite-method-11 (-> this sprites 10) (-> *gun-arrow-table* 1) (-> sv-64 pos) 0 0)
+      )
     (format (clear (-> this strings 0 text)) "~D/~D" (-> this values 1 current) sv-72)
     )
   (if (and *target*
@@ -1406,12 +1414,9 @@
   (if (and (-> *setting-control* user-current gun-special-mode) (= (-> this values 0 current) 29))
       (clear (-> this strings 0 text))
       )
-  ;; Enhanced: a character's own gun: its icon alone (no ammo, no arrows for Jak's guns)
+  ;; Enhanced: a character's own gun: no ammo count (it has none)
   (when (nonzero? (enhanced-character-gun-hud))
     (clear (-> this strings 0 text))
-    (dotimes (v1-200 12)
-      (set! (-> this sprites (+ v1-200 2) scale-x) 0.0)
-      )
     )
   ((method-of-type hud draw) this)
   0
