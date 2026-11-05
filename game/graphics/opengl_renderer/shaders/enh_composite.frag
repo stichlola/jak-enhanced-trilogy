@@ -2352,10 +2352,12 @@ void main() {
                                   : exp(-depth_real / 0.35) * 0.6 * (1.0 - near_fade);
 
     // how rough the sea is: some chop always, rising and falling over minutes, more with rain and
-    // a sandstorm, wild in a thunderstorm (ponds stay still)
+    // a sandstorm (ponds stay still). In a thunderstorm the water looks as in clear weather: no
+    // storm waves, no rain on it (the user's choice)
+    float storm_off = 1.0 - clamp(weather2.x * 4.0, 0.0, 1.0);
     float sea_state = pond_here ? 0.0
-        : clamp(0.35 + 0.2 * sin(t * 0.011) * sin(t * 0.0047 + 1.7) + 0.45 * weather.x +
-                0.35 * weather.y + 1.3 * weather2.x, 0.0, 2.0);
+        : clamp(0.35 + 0.2 * sin(t * 0.011) * sin(t * 0.0047 + 1.7) + 0.45 * weather.x * storm_off +
+                0.35 * weather.y, 0.0, 2.0);
     slope *= 1.0 + 0.5 * sea_state;
 
     // the swell: long waves in open water, faded out with distance (they'd shimmer) and depth;
@@ -2432,8 +2434,8 @@ void main() {
     // rain on the water: rings where the drops land (two staggered layers) and their small
     // splashes up close; further out, where the rings would shimmer, the surface just roughened
     float rain_hits = 0.0;
-    if (weather.x > 0.01) {
-      float rain_amt = min(weather.x, 1.5);
+    if (weather.x * storm_off > 0.01) {
+      float rain_amt = min(weather.x * storm_off, 1.5);
       float rings = 1.0 - smoothstep(0.03, 0.08, water_foot);
       vec2 w2 = world * 1.6 + vec2(3.7, 1.3);
       if (rings > 0.0) {
@@ -2632,7 +2634,7 @@ void main() {
     }
     // a rough sea: greyer under the storm, whitecaps breaking on the crests
     if (sea_state > 0.5) {
-      wc = mix(wc, vec3(luma(wc)) * vec3(0.9, 0.97, 1.0), 0.35 * weather2.x);
+      wc = mix(wc, vec3(luma(wc)) * vec3(0.9, 0.97, 1.0), 0.35 * weather2.x * storm_off);
       // (the light through a storm wave's thin crest, the shadowed trough before it)
       wc *= 1.0 + 0.18 * clamp(wave_hi, -1.0, 1.0);
       // (torn foam: fine streaks, not a flat patch)
