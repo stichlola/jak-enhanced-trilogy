@@ -917,6 +917,13 @@
       (set! (-> self gun fire-delay)
             (the-as uint (the int (/ (the float (-> self gun fire-delay)) *enhanced-gun-fire-rate*)))
             )
+      ;; Enhanced: Sig's Peacemaker recovers longer after each shot (the shot itself, its charge and its
+      ;; animation are Jak's): 4.5 times the delay, so with the time a shot takes anyway he fires a third
+      ;; as often as Jak (measured: a shot every 3 s against 1 s); but each one kills up to 10 around it
+      ;; (gun-dark-shot.gc)
+      (if (and (= (the-as int arg0) (pickup-type gun-dark-1)) (enhanced-player-sig?))
+          (set! (-> self gun fire-delay) (/ (* (-> self gun fire-delay) 9) 2))
+          )
       (quat<-gun! (the-as quaternion (-> self gun top-anim-twist-targ)) (the-as quaternion arg0))
       (set! (-> self skel top-anim frame-post-blend) 0.1333333)
       ((lambda :behavior target
