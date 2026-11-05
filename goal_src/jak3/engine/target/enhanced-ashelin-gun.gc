@@ -7,13 +7,16 @@
 
 ;; Enhanced: Ashelin's own pistol while she is the player's model (enhanced-player.gc draws her).
 ;; Holstered by default (the gun joint sits on her right thigh, where her holster strap is). D-pad up takes
-;; it out and puts it away (R1 also takes it out); R1 fires, held for a shot every 0.25 s. The shots are the
-;; game's yellow blaster shots (gun-yellow-shot, in GAME), owned by Jak's target, so enemies take them as
+;; it out and puts it away (R1 also takes it out); R1 fires, held for a shot every 0.25 s. The shots look and
+;; sound like the oasis AI's (ash-shot.gc: red beam and burst, ashelin-fire from DESERT4.SBK) but are Jak's
+;; yellow blaster shots underneath (gun-yellow-shot, in GAME), owned by Jak's target, so enemies take them as
 ;; his: same damage, same reactions. They leave from her gun joint toward the nearest enemy (or crate) in
 ;; front of her, the way Jak's guns track, else straight ahead; standing, she turns toward it.
-;; Her pose: standing still she plays her own aiming stance and shot (ashelin-standing-idle-ja and
-;; ashelin-standing-fire-ja, the oasis AI's); walking, running or jumping her right arm takes that stance's
-;; pose over her own animation (or Jak's retargeted one), and the arm turns toward what she aims at.
+;; Her own clips (ashelin-ag) for the gun, standing: waiting-to-standing (takeout), standing-idle (aiming),
+;; standing-fire (each shot), standing-to-waiting (putaway). Walking, running or jumping, her right arm takes
+;; the aiming stance's pose over her own animation (or Jak's retargeted one) and turns toward what she aims
+;; at. Unarmed, her own idle/walk/jog/run hold the gun up: her arms hang as Jak's do (retargeted), the right
+;; one turned out a little so her hand clears the holster, the left one in a little.
 ;; Jak's own guns are off while she plays (want-to-gun?, target-gun.gc), so nothing changes for Jak.
 ;; Hooks in enhanced-player.gc: enhanced-ashelin-gun-init (her process's init), -animate (picks her
 ;; standing gun animations) and -post (her pose, the controls and the shots, after her bones are done).
@@ -42,8 +45,8 @@
    (blend      float)        ;; how much her right arm takes the aiming pose (0-1)
    (aim-weight float)        ;; how much the arm turns toward the aim point (0-1)
    (rest-weight float)       ;; how much the arm takes Jak's relaxed one (unarmed, 0-1)
-   (sound-bank symbol)
-   (trans-anim int32)        ;; her takeout or putaway clip playing (standing), else -1       ;; Jak's yellow gun's sound bank asked for (modeguy1: the shots' sounds)
+   (sound-bank symbol)       ;; her gun's sound bank asked for (desert4: ashelin-fire)
+   (trans-anim int32)        ;; her takeout or putaway clip playing (standing), else -1
    (aimed      symbol)       ;; something to aim at
    (fire-time  time-frame)
    (test-frame int32)
@@ -225,7 +228,7 @@
 
 ;; Her shots look like the oasis AI's (ash-shot.gc, DESOASIS only): a red beam, a red flash at the gun and
 ;; a red burst where they land. Its particles, copied under ids of their own (5371-5383, group 1641), since
-;; that level's go with it when it unloads. The rest is Jak's yellow shot (damage, collision, its sounds).
+;; that level's go with it when it unloads. The rest is Jak's yellow shot (damage, collision); the sounds are hers.
 (defpart 5371
   :init-specs ((:texture (gun-yellow-beam level-default-sprite))
     (:birth-func 'birth-func-set-quat)
@@ -478,6 +481,20 @@
         )
     hit?
     )
+  )
+
+(defmethod play-impact-sound ((this enhanced-ashelin-shot) (arg0 projectile-options))
+  "Her own gun's sounds, as the oasis AI's shot plays them (ash-shot.gc): ashelin-fire is in DESERT4.SBK,
+   loaded while her gun is out (enhanced-ashelin-gun-post)."
+  (cond
+    ((zero? arg0)
+     (sound-play "ashelin-fire")
+     )
+    ((= arg0 (projectile-options po0))
+     (sound-play "ashelin-shot-hi")
+     )
+    )
+  (none)
   )
 
 (defmethod projectile-method-24 ((this enhanced-ashelin-shot))
@@ -792,12 +809,13 @@
           (seek! (-> st blend) (if (and arm-on? (not own-gun-anim?)) 1.0 0.0) (* 6.7 (seconds-per-frame)))
           (seek! (-> st aim-weight) (if arm-on? 1.0 0.0) (* 5.0 (seconds-per-frame)))
           (seek! (-> st rest-weight) (if (or (-> st out) (>= (-> st trans-anim) 0)) 0.0 1.0) (* 5.0 (seconds-per-frame)))
-          ;; the shots' sounds are in Jak's yellow gun's bank, loaded while he has it out: so while hers is
-          ;; (a setting of her process, gone with it)
+          ;; her gun's sound (ashelin-fire) is in the oasis mission's bank, DESERT4.SBK (99 KB, smaller than
+          ;; the mode banks Jak's guns, board and mech load the same way): asked for as the mode sound bank
+          ;; while her gun is out (a setting of her process, gone with it)
           (when (!= (-> st sound-bank) (-> st out))
             (set! (-> st sound-bank) (-> st out))
             (if (-> st out)
-                (add-setting! 'mode-sound-bank 'modeguy1 0.0 0)
+                (add-setting! 'mode-sound-bank 'desert4 0.0 0)
                 (remove-setting! 'mode-sound-bank)
                 )
             )
