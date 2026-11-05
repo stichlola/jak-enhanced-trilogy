@@ -271,11 +271,11 @@
   (enhanced-character-speeds! ch (meters 1.0) (meters 1.0) (meters 1.0) (meters 0.6))
   (set! (-> ch sized) #t)
   (set! (-> ch stride) 1.0)
-  ;; his Peacemaker (sig-highres-lod0.glb): 3.5 m along z around the gun joint, the barrel's end at -z
-  ;; (-1.6 m), a handle under it at z -0.7..-0.55, the big body back to +1.9 m
+  ;; his Peacemaker (sig-highres-lod0.glb): 3.5 m along +z around the gun joint, the clawed emitter at
+  ;; the front (+z 0.8..1.9 m), the stock back to -1.6 m, the pistol grip under it at z -0.7..-0.55
   (set! (-> ch big-gun) #t)
   (set-vector! (-> ch gun-grip) 0.0 (meters -0.3) (meters -0.62) 1.0)
-  (set-vector! (-> ch gun-muzzle) 0.0 (meters -0.33) (meters -1.6) 1.0)
+  (set-vector! (-> ch gun-muzzle) 0.0 (meters 0.1) (meters 1.9) 1.0)
   (set! (-> *enhanced-characters* 2) ch)
   )
 
@@ -526,8 +526,8 @@
 ;; it (enhanced-player-muzzle!, gun-util.gc); pid of the skin that set it, 0: none
 (define *enhanced-big-gun-muzzle* (new 'global 'vector))
 (define *enhanced-big-gun-pid* 0)
-;; where the put-away gun's middle sits on its back (model space: a bit right, 1.9 m up, 0.5 m behind)
-(define *enhanced-big-gun-back* (new 'static 'vector :x -409.6 :y 7782.4 :z -2048.0 :w 1.0))
+;; where the put-away gun's middle sits on its back (model space: a bit right, 2.2 m up, 0.5 m behind)
+(define *enhanced-big-gun-back* (new 'static 'vector :x -409.6 :y 9011.2 :z -2048.0 :w 1.0))
 
 (defbehavior enhanced-skin-big-gun enhanced-skin ()
   "The big gun joint (Sig's Peacemaker), after its bones are done. Jak's gun out: pointing as his
@@ -560,9 +560,6 @@
          (vector-cross! (-> s rvec) (-> s uvec) (-> s fvec))
          (vector-normalize! (-> s rvec) 1.0)
          (vector-cross! (-> s uvec) (-> s fvec) (-> s rvec))
-         ;; its barrel is its -z end: turned around
-         (vector-negate! (-> s rvec) (-> s rvec))
-         (vector-negate! (-> s fvec) (-> s fvec))
          (set! (-> s rvec w) 0.0)
          (set! (-> s uvec w) 0.0)
          (set! (-> s fvec w) 0.0)
@@ -864,8 +861,8 @@
          )
        )
      ;; put away, his gun is the Peacemaker (R1 brings out this one too)
+     ;; (only the saved type: a nonzero using-gun-type with the gun away brings it out again)
      (when (not (using-gun? *target*))
-       (set! (-> *target* gun using-gun-type) (pickup-type gun-dark-1))
        (set! (-> *game-info* gun-type) (pickup-type gun-dark-1))
        )
      )

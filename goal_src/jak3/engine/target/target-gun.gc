@@ -1365,8 +1365,11 @@
               (enhanced-player-sig?)
               )
          (set! s5-0 0)
+         ;; (so a tap doesn't put it away: holding a direction 0.8 s does, as for Jak)
+         (dotimes (i 4)
+           (set! (-> arg0 gun gun-select-time i) (-> *display* real-clock frame-counter))
+           )
          (when (cpad-pressed? (-> arg0 control cpad number) right)
-           (set! (-> arg0 gun gun-select-time 3) (-> *display* real-clock frame-counter))
            (cond
              ((= (-> arg0 gun gun-type) (pickup-type gun-dark-1))
               ;; out already: right again puts it away
