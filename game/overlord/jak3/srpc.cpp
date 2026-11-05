@@ -483,6 +483,12 @@ void* RPC_Loader(unsigned int, void* msg, int size) {
               info->loaded = 0;
               info->in_use = 0;
             }
+            // Enhanced: which slot a bank went to (and whether it loaded)
+            lg::info("[sound] bank {} in slot {}: {}", cmd->bank_name.data, info->m_name2,
+                     info->loaded ? "loaded" : "FAILED");
+          } else {
+            lg::warn("[sound] bank {} (mode {}): no free slot, not loaded", cmd->bank_name.data,
+                     cmd->mode);
             g_LoadingSoundBank = nullptr;
           }
         }

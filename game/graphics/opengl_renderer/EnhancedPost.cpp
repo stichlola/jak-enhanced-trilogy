@@ -1377,7 +1377,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const bool have_scene = m_ssao_ready;
   update_scene();
   if (have_scene) {
-    enhanced_editor_levels(render_state->loader->get_in_use_levels());
+    // (and the common level: the HUD's textures are there, enhanced_character_hud)
+    auto levels = render_state->loader->get_in_use_levels();
+    if (auto* common = render_state->loader->get_common_level()) {
+      levels.push_back(common);
+    }
+    enhanced_editor_levels(levels);
     enhanced_editor_frame(w, h, m_depth_fbo, cam, m_last_proj.data());
   }
   if (have_scene) {

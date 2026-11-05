@@ -1107,6 +1107,17 @@
          (set! sv-48 -153)
          )
         )
+      ;; Enhanced: a character's own gun is one whole picture, grip and all (Jak's mode icons are only the
+      ;; front of a gun whose body, with the grip, is the common piece): no body, the picture larger,
+      ;; where Jak's whole gun is
+      (when (nonzero? (enhanced-character-gun-hud))
+        (set! (-> this sprites 0 scale-x) 0.0)
+        ;; (as wide as Jak's whole gun, its barrel across the reticle as his is)
+        (set! (-> this sprites 1 scale-x) 2.0)
+        (set! (-> this sprites 1 scale-y) 2.0)
+        (set! sv-48 -112)
+        (set! sv-56 -3)
+        )
       (set-hud-piece-position!
         sv-64
         (- (the int (+ 507.0 (* 130.0 (-> this offset)))) (the int (* 80.0 (-> *video-params* relative-x-scale))))

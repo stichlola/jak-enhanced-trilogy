@@ -94,7 +94,10 @@ SoundBankInfo* AllocateBankName(const char* name, u32 mode) {
     if (!gBanks[0]->in_use) {
       bank = gBanks[0];
     }
-  } else if (memcmp(name, "mode", 4) == 0) {
+  } else if (memcmp(name, "mode", 4) == 0 || mode == 3) {
+    // Enhanced: also any bank the game asks for as its mode bank (mode 3, the 'mode-sound-bank
+    // setting), not only the modeguy ones: Ashelin's pistol loads DESERT4 there for ashelin-fire
+    // (enhanced-ashelin-gun.gc). The game only ever loads mode* banks with mode 3, so nothing else changes
     if (!gBanks[1]->in_use) {
       bank = gBanks[1];
     }
