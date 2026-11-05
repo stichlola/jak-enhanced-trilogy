@@ -54,6 +54,9 @@
    (aim-local  matrix 4 :inline)  ;; right shoulder, elbow, hand, gun in the aiming stance (to their parents)
    (holster    matrix :inline)    ;; the gun to her right thigh, holstered
    (before     matrix 64 :inline) ;; her bones before the arm is posed
+   (rest-src   matrix 7 :inline)  ;; Jak's arm turns last seen in his plain stance (slots 0-6, world)
+   (rest-src-ok symbol)           ;; rest-src holds them
+   (test-state basic)             ;; JAK_ENHANCED_ASHELIN_GUN_TEST=idle: Jak's state last logged
    )
   )
 
@@ -590,6 +593,15 @@
          (changed 0)
          ;; the rest pose's turns, per slot (0-2 right upper arm, forearm, hand; 4-6 the left ones)
          (q-rest (new 'stack-no-clear 'inline-array 'quaternion 7))
+         ;; Jak in one of his long-idle variations (she just loops her own idle)
+         (fidget (let ((s (-> self parent 0 state)))
+                   (and s (or (= (-> s name) 'target-stance-ambient)
+                              (= (-> s name) 'target-stance-look-around)
+                              (= (-> s name) 'target-look-around)
+                              )
+                        )
+                   )
+                 )
          )
     (dotimes (k n)
       (matrix-copy! (-> st before k) (-> nodes data k bone transform))
@@ -656,7 +668,20 @@
                ;; unarmed: Jak's relaxed right arm instead of her animation's (it holds a gun up),
                ;; turned as his is from his bind pose (as enhanced-skin-retarget does)
                (when (and (< 0.0 rest-w) (< k ASHELIN_GUN_JOINT) (< j (-> jnodes length)) (-> jnodes data j joint))
-                 (matrix*! inv (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
+                 ;; no fidgets: while Jak plays his long-idle variations (ambient, looking around) her
+                 ;; arms keep his plain stance's, as last seen
+                 (cond
+                   ((and fidget (-> st rest-src-ok))
+                    (matrix-copy! inv (-> st rest-src slot))
+                    )
+                   (else
+                     (matrix*! inv (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
+                     (when (not fidget)
+                       (matrix-copy! (-> st rest-src slot) inv)
+                       (if (= slot 6) (set! (-> st rest-src-ok) #t))
+                       )
+                     )
+                   )
                  (matrix*! mixed (-> self bind-world k) inv)
                  (vector-copy! (-> mixed trans) (-> bone trans))
                  (dotimes (r 3)
@@ -741,6 +766,19 @@
     (if (= t 1)
         (set-ignore-controller-in-bg! *pc-settings* #t)
         )
+    ;; =idle: hands off, her animation and Jak's state logged as they change (long idle: no fidgets)
+    (when (string= *enhanced-ashelin-gun-test-buf* "idle")
+      (when (!= (-> tgt state) (-> st test-state))
+        (set! (-> st test-state) (-> tgt state))
+        (format 0 "[ashelin-gun] idle test ~,,1f s: jak ~A, her anim ~D~%"
+                (/ (the float t) 60.0) (if (-> tgt state) (-> tgt state name) 'none) (-> (the-as enhanced-skin *enhanced-skin-proc*) anim)
+                )
+        )
+      (if (zero? (mod t 600))
+          (format 0 "[ashelin-gun] idle test ~D s: her anim ~D~%" (/ t 60) (-> (the-as enhanced-skin *enhanced-skin-proc*) anim))
+          )
+      (return (the-as none 0))
+      )
     (case t
       ((720) (set! *enhanced-pad-press* (pad-buttons up)) (format 0 "[ashelin-gun] test: d-pad up (take out)~%"))
       ((840) (format 0 "[ashelin-gun] test: fire standing~%"))
