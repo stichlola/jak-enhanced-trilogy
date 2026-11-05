@@ -577,8 +577,8 @@
 
 (defbehavior enhanced-ashelin-gun-pose enhanced-skin ((w float) (aim-w float) (rest-w float))
   "Her arms over what her bones have now (what hangs from them following): by rest-w Jak's relaxed arms
-   (unarmed: her own animations hold the gun up), the right one a little away from her side (her hand
-   clears the holster) and the left one a little closer, so they hang alike; by w the aiming stance's right
+   (unarmed: her own animations hold the gun up), upper arms at her sides, elbows bent and hands at the
+   front of her thighs (the right one in front of the holster); by w the aiming stance's right
    arm, then turned at the shoulder toward the aim point by aim-w (at most 70 degrees)."
   (let* ((st *enhanced-ashelin-gun*)
          (nodes (-> self node-list))
@@ -588,33 +588,53 @@
          (mixed (new 'stack-no-clear 'matrix))
          (arm 0)
          (changed 0)
-         (q-right (new 'stack-no-clear 'quaternion))
-         (q-left (new 'stack-no-clear 'quaternion))
+         ;; the rest pose's turns, per slot (0-2 right upper arm, forearm, hand; 4-6 the left ones)
+         (q-rest (new 'stack-no-clear 'inline-array 'quaternion 7))
          )
     (dotimes (k n)
       (matrix-copy! (-> st before k) (-> nodes data k bone transform))
       )
-    ;; the rest pose's turns: down toward her right (left shoulder to right shoulder) by 16 degrees for the
-    ;; right arm (out), by 4 for the left one (in)
+    ;; the rest pose's turns, from hanging straight down: sideways (toward her right, left shoulder to right
+    ;; shoulder) and forward. Upper arms close to her sides (the right one a little out, over the holster),
+    ;; elbows bent: forearms and hands forward and in, so her hands rest at the front of her thighs.
     (when (< 0.0 rest-w)
       (let ((right (vector-! (new 'stack-no-clear 'vector)
                              (-> st before ASHELIN_GUN_RSHOULDER trans)
                              (-> st before 7 trans)
                              )
                    )
+            (fwd (new 'stack-no-clear 'vector))
             (down (new 'stack-no-clear 'vector))
             (to (new 'stack-no-clear 'vector))
             )
         (set! (-> right w) 0.0)
         (vector-flatten! right right *up-vector*)
         (vector-normalize! right 1.0)
+        (vector-z-quaternion! fwd (-> self root quat))
+        (set! (-> fwd w) 0.0)
+        (vector-flatten! fwd fwd *up-vector*)
+        (vector-normalize! fwd 1.0)
         (set-vector! down 0.0 -1.0 0.0 0.0)
-        (vector+float*! to down right (tan (degrees 16)))
-        (vector-normalize! to 1.0)
-        (quaternion-from-two-vectors-partial! q-right down to rest-w)
-        (vector+float*! to down right (tan (degrees 4)))
-        (vector-normalize! to 1.0)
-        (quaternion-from-two-vectors-partial! q-left down to rest-w)
+        (dotimes (slot 7)
+          (when (!= slot 3)
+            (let ((side (case slot
+                          ((0) (degrees 3))      ;; right upper arm: a little out (the holster)
+                          ((1 2) (degrees -6))   ;; right forearm, hand: in, toward the thigh's front
+                          ((4) (degrees 6))      ;; left upper arm: in, against her side
+                          (else (degrees 16))    ;; left forearm, hand: in
+                          )
+                        )
+                  ;; (Jak's forearms already reach forward: only a little more)
+                  (ahead (if (or (= slot 0) (= slot 4)) (degrees 0) (degrees 8)))
+                  )
+              (vector-copy! to down)
+              (vector+float*! to to right (tan side))
+              (vector+float*! to to fwd (tan ahead))
+              (vector-normalize! to 1.0)
+              (quaternion-from-two-vectors-partial! (-> q-rest slot) down to rest-w)
+              )
+            )
+          )
         )
       )
     (dotimes (k n)
@@ -641,7 +661,7 @@
                  (vector-copy! (-> mixed trans) (-> bone trans))
                  (dotimes (r 3)
                    (let ((w0 (-> mixed vector r w)))
-                     (vector-orient-by-quat! (-> mixed vector r) (-> mixed vector r) (if (< k ASHELIN_GUN_RSHOULDER) q-left q-right))
+                     (vector-orient-by-quat! (-> mixed vector r) (-> mixed vector r) (-> q-rest slot))
                      (set! (-> mixed vector r w) w0)
                      )
                    )
