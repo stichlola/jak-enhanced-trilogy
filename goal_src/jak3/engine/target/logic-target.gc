@@ -49,6 +49,10 @@
 (define *enhanced-hour-buf* (new 'global 'string 64 (the-as string #f)))
 (define *enhanced-hour-wanted* (pc-enhanced-getenv "JAK_ENHANCED_HOUR" *enhanced-hour-buf* 64))
 
+;; Enhanced: JAK_ENHANCED_UNLOCK=1 unlocks every gun, upgrade, board and dark/light power on a test boot
+(define *enhanced-unlock-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-unlock-wanted* (pc-enhanced-getenv "JAK_ENHANCED_UNLOCK" *enhanced-unlock-buf* 8))
+
 ;; routes: start floor height, then x z pairs (meters)
 (define *enhanced-probe-routes*
   (new 'static 'boxed-array :type (array float)
@@ -1393,6 +1397,12 @@ capture exactly."
     )
   (when (nonzero? (length *enhanced-start-name*))
     (+! *enhanced-camlog-frames* 1)
+    (when (and *enhanced-unlock-wanted* (= *enhanced-camlog-frames* 60))
+      (set! *enhanced-unlock-wanted* #f)
+      ;; (every feature from the gun up; the low five are unnamed)
+      (logior! (-> *game-info* features) (the-as game-feature (lognot #x1f)))
+      (format 0 "[enhanced] everything unlocked~%")
+      )
     (when (and *enhanced-hour-wanted* (= *enhanced-camlog-frames* 60) *time-of-day*)
       (set! *enhanced-hour-wanted* #f)
       (let ((hour 0))
