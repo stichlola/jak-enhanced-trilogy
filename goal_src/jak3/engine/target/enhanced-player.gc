@@ -71,6 +71,14 @@
    (gun-muzzle vector :inline)
    (art        art-group)     ;; loaded, or #f
    (failed     symbol)        ;; its art isn't there: don't try again
+   ;; an animation of its own that the game streams (.STR) instead of keeping in its art group: loaded
+   ;; once (enhanced-sig.gc) and put in its art group's empty slot stream-slot (as the game links them)
+   (stream-spool string)      ;; the stream (e.g. "museum-2-anims", MU2ANIMS.STR), #f: none
+   (stream-part  int32)
+   (stream-anim  string)      ;; its animation in it
+   (stream-slot  int16)
+   (stream-clip  basic)       ;; the loader's clip (enhanced-sig-clip)
+   (idle-variations symbol)   ;; #f: standing long it keeps its idle (no fidgets, Jak's or its own)
    )
   )
 
@@ -92,6 +100,10 @@
 (define-extern enhanced-ashelin-gun-init (function none :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
+;; Sig's streamed clips (enhanced-sig.gc): his walk and his cutscenes' poses
+(define-extern enhanced-sig-animate (function symbol :behavior enhanced-skin))
+(define-extern enhanced-sig-own? (function symbol :behavior enhanced-skin))
+(define-extern enhanced-sig-post (function none :behavior enhanced-skin))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -219,6 +231,12 @@
     (set! (-> ch big-gun) #f)
     (set! (-> ch art) #f)
     (set! (-> ch failed) #f)
+    (set! (-> ch stream-spool) #f)
+    (set! (-> ch stream-part) 0)
+    (set! (-> ch stream-anim) #f)
+    (set! (-> ch stream-slot) -1)
+    (set! (-> ch stream-clip) #f)
+    (set! (-> ch idle-variations) #f)
     ch
     )
   )
@@ -267,8 +285,12 @@
 ;; on his prejoint) in his right hand (16).
 (let ((ch (enhanced-character-new "sig" "sig-highres-ag" "lsig" skel-enhanced-sig *enhanced-skin-sig-joint*)))
   (enhanced-character-bones! ch 3 17 16 26)
-  (enhanced-character-anims! ch 3 -1 -1 -1)
-  (enhanced-character-speeds! ch (meters 1.0) (meters 1.0) (meters 1.0) (meters 0.6))
+  ;; his walk: the museum's (streamed, MU2ANIMS.STR), in his art group's slot 5 once loaded
+  (enhanced-character-anims! ch 3 5 -1 -1)
+  (set! (-> ch stream-spool) "museum-2-anims")
+  (set! (-> ch stream-anim) "sig-highres-sig-walk")
+  (set! (-> ch stream-slot) 5)
+  (enhanced-character-speeds! ch (meters 2.0) (meters 1.0) (meters 1.0) (meters 4.0))
   (set! (-> ch sized) #t)
   (set! (-> ch stride) 1.0)
   ;; his Peacemaker (sig-highres-lod0.glb): 3.5 m along +z around the gun joint, the clawed emitter at
@@ -360,6 +382,9 @@
          (tgt (-> self parent 0))
          (speed (-> tgt control ctrl-xz-vel))
          (cur (-> self anim))
+         (ag (-> self draw art-group))
+         ;; (a streamed one may not be there yet)
+         (walk? (and (>= (-> ch walk) 0) (< (-> ch walk) (-> ag length)) (-> ag data (-> ch walk))))
          )
     (cond
       ((>= *enhanced-player-anim* 3)
@@ -369,7 +394,11 @@
       ((enhanced-ashelin-gun-animate)
        #t
        )
-      ((or (focus-test? tgt pilot) (< (-> ch walk) 0) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
+      ;; Sig's streamed clips (enhanced-sig.gc)
+      ((enhanced-sig-animate)
+       #t
+       )
+      ((or (focus-test? tgt pilot) (not walk?) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
        (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.2))
        )
       ((or (< (-> ch jog) 0) (< speed (if (= cur (-> ch jog)) (meters 3.5) (meters 4.2))))
@@ -392,6 +421,7 @@
   (let ((tgt (-> self parent 0))
         (top (-> self char top-speed))
         )
+    (or (enhanced-sig-own?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
          ;; a big gun out: held as Jak holds his (his gun stances and shots)
@@ -414,6 +444,7 @@
                 )
            )
          )
+    )
     )
   )
 
@@ -669,6 +700,7 @@
       (set! *enhanced-skin-last-frame* (ja-frame-num 0))
       )
     )
+  (enhanced-sig-post)
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
       )

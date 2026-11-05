@@ -6743,6 +6743,10 @@ void enhanced_editor_ui() {
   }
   script_test();
   enhanced_remade_switch(g_levels);
+  if (g_game_version == GameVersion::Jak3) {
+    const int who = g_enhanced_menu.player;
+    enhanced_character_hud(g_levels, kEnhancedCharacterTable[(who >= 0 && who < kEnhancedCharacterCount) ? who : 0].name);
+  }
   level_wait_update(e);
   // a level from scratch: Jak under his own ground (the ground raised over him, or the rim passed): back on top
   if (e.level_blank && g_enhanced_player.valid && e.level_wait.empty() && ImGui::GetTime() - e.ground_lift_t > 1.0) {

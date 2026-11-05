@@ -3,13 +3,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
+#include <sstream>
 
 #include "common/log/log.h"
 #include "common/versions/versions.h"
 
+#include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 #include "game/runtime.h"
 
 #include "third-party/imgui/imgui.h"
@@ -711,6 +714,125 @@ void enhanced_remade_switch(const std::vector<LevelData*>& levels) {
   dl->AddText(ImGui::GetFont(), 48.f, ImVec2(42.f, 42.f), IM_COL32(0, 0, 0, 220), text);
   dl->AddText(ImGui::GetFont(), 48.f, ImVec2(40.f, 40.f),
               remade ? IM_COL32(120, 255, 140, 255) : IM_COL32(255, 190, 90, 255), text);
+}
+
+void enhanced_character_hud(const std::vector<LevelData*>& levels, const char* character) {
+  struct Swap {
+    std::string who, tpage, name, picture;
+  };
+  struct Picture {
+    std::vector<u32> px;
+    int w = 0, h = 0;
+  };
+  static bool read = false;
+  static std::vector<Swap> swaps;
+  static std::map<std::string, Picture> pictures;
+  static std::map<GLuint, std::string> shown;  // a texture's GL copy -> the character it shows
+  static std::string last;
+  static int frames = 0;
+  const auto dir = file_util::get_jak_project_dir() / "game" / "assets" / "enhanced" / "hud" /
+                   version_to_game_name(g_game_version) / "characters";
+  if (!read) {
+    read = true;
+    std::ifstream f(dir / "characters.txt");
+    std::string line;
+    while (std::getline(f, line)) {
+      std::istringstream in(line);
+      Swap s;
+      if (line.empty() || line[0] == '#' || !(in >> s.who >> s.tpage >> s.name >> s.picture)) {
+        continue;
+      }
+      swaps.push_back(s);
+    }
+    lg::info("[enhanced] character HUD pictures: {}", swaps.size());
+  }
+  const std::string who = character ? character : "";
+  // when the character changes, and now and then (the levels that came in since)
+  if (swaps.empty() || (who == last && ++frames % 30 != 0)) {
+    return;
+  }
+  last = who;
+  std::vector<u32> px;
+  for (const auto& s : swaps) {
+    std::vector<GLuint> gls;
+    const auto* tex = find_texture(levels, s.tpage, s.name, &gls);
+    if (!tex) {
+      continue;
+    }
+    // this texture's character now: the first swap of it listed for them, else the game's own
+    const Swap* use = nullptr;
+    for (const auto& o : swaps) {
+      if (o.tpage == s.tpage && o.name == s.name && o.who == who) {
+        use = &o;
+        break;
+      }
+    }
+    if (use && use != &s) {
+      continue;  // (done by that line)
+    }
+    const std::string want = use ? who : "";
+    for (GLuint gl : gls) {
+      auto it = shown.find(gl);
+      const std::string now = it == shown.end() ? "" : it->second;
+      if (now == want) {
+        continue;
+      }
+      int w = tex->w, h = tex->h;
+      const u32* data = tex->data.data();
+      if (use) {
+        auto& pic = pictures[use->picture];
+        if (pic.px.empty()) {
+          // the HD picture (<picture>-hd.png) if there is one, any whole multiple of the texture's size,
+          // in the PS2's alpha (128 opaque) like the other HD HUD pictures
+          for (const char* suffix : {"-hd.png", ".png"}) {
+            int pw, ph;
+            u8* d = stbi_load((dir / (use->picture + suffix)).string().c_str(), &pw, &ph, nullptr, 4);
+            if (!d) {
+              continue;
+            }
+            const bool fits = pw % tex->w == 0 && ph % tex->h == 0 && pw / tex->w == ph / tex->h;
+            if (fits) {
+              pic.w = pw;
+              pic.h = ph;
+              pic.px.resize((size_t)pw * ph);
+              std::memcpy(pic.px.data(), d, pic.px.size() * 4);
+            } else {
+              lg::error("[enhanced] {}{}: {}x{} is not a multiple of {}x{}", use->picture, suffix, pw, ph,
+                        tex->w, tex->h);
+            }
+            stbi_image_free(d);
+            if (fits) {
+              break;
+            }
+          }
+        }
+        if (pic.px.empty()) {
+          continue;
+        }
+        w = pic.w;
+        h = pic.h;
+        data = pic.px.data();
+      } else {
+        // back to the game's, as the loader had it (its own HD picture if it has one)
+        int scale = 1;
+        if (enhanced_hd_screen_texture(*tex, px, scale)) {
+          w = tex->w * scale;
+          h = tex->h * scale;
+          data = px.data();
+        }
+      }
+      glBindTexture(GL_TEXTURE_2D, gl);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, data);
+      if (w == tex->w) {
+        enhanced_forget_texture(gl);
+      } else {
+        enhanced_set_texel_scale(gl, (float)w / tex->w);
+      }
+      shown[gl] = want;
+      lg::info("[enhanced] {} {}: {}", s.tpage, s.name, use ? use->picture + " (" + who + ")" : "the game's");
+    }
+  }
+  glBindTexture(GL_TEXTURE_2D, 0);
 }
 
 void enhanced_open_file(const fs::path& path) {

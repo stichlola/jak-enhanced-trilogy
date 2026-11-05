@@ -1,0 +1,6 @@
+# A character's own HUD pictures in place of Jak's, while that character is played (the menu's Character):
+# <character> <tpage> <texture it replaces> <picture in this folder: <picture>-hd.png, else <picture>.png>
+# (enhanced_character_hud, EnhancedTextures.cpp; the picture any whole multiple of the texture's size, PS2 alpha)
+#
+# Ashelin's pistol (drawn by the user), in the gun HUD as the red gun's second mode (hud-gunred-02a, 64x32)
+ashelin level-default-minimap hud-gunred-02a hud-gunashelin-01a

@@ -1,0 +1,237 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: enhanced-sig.gc
+;; name in dgo: enhanced-sig
+;; dgos: GAME
+
+;; Enhanced: Sig's own animations that the game streams from .STR files instead of keeping them in his art
+;; group (sig-highres-ag has only his idles): his walk (the museum's, MU2ANIMS.STR "museum-2-anims") and his
+;; parts of the cutscenes he is in (one art group per chunk of a cutscene, "sig-highres-<scene>" in it).
+;; Each clip is loaded once into a buffer of its own (global heap) and kept there, not linked into his art
+;; group: enhanced-player.gc plays it on Sig's process (enhanced-sig-animate).
+;; JAK_ENHANCED_SIG_CLIP=<spool>:<part> (test boots): Sig loops that clip standing (to look at his cutscenes'
+;; poses), with [sig-clip] log lines (its frame every half second).
+
+(deftype enhanced-sig-clip (basic)
+  ((spool      string)               ;; the stream's name (its .STR file is made from it, ISONameFromAnimationName)
+   (part       int32)                ;; its chunk
+   (anim-name  string)               ;; Sig's animation in that chunk
+   (buffer     external-art-buffer)  ;; its own, kept
+   (anim       art-joint-anim)       ;; loaded, or #f
+   (failed     symbol)
+   )
+  )
+
+;; one buffer's size (a chunk of a cutscene is at most the game's own buffers', #x3dc00)
+(defconstant ENHANCED_SIG_CLIP_SIZE #x3e000)
+
+(defun enhanced-sig-clip-new ((spool string) (part int) (anim-name string))
+  (let ((clip (new 'global 'enhanced-sig-clip)))
+    (set! (-> clip spool) spool)
+    (set! (-> clip part) part)
+    (set! (-> clip anim-name) anim-name)
+    (set! (-> clip buffer) #f)
+    (set! (-> clip anim) #f)
+    (set! (-> clip failed) #f)
+    clip
+    )
+  )
+
+(defun enhanced-sig-clip-update ((clip enhanced-sig-clip) (owner process))
+  "Load the clip (call each frame until it's there): its own buffer, the chunk streamed into it, Sig's
+   animation found in it. Its art group stays locked in the buffer (never linked: his art group has no slot
+   for it). Returns the animation, or #f."
+  (when (and (not (-> clip anim)) (not (-> clip failed)))
+    (when (not (-> clip buffer))
+      (let ((buf (new 'global 'external-art-buffer 9 (lambda ((arg0 external-art-buffer)) 0) #t))
+            (mem (kmalloc global ENHANCED_SIG_CLIP_SIZE (kmalloc-flags) "heap"))
+            )
+        (set! (-> buf heap base) mem)
+        (set! (-> buf heap current) mem)
+        (set! (-> buf heap top-base) (&+ mem ENHANCED_SIG_CLIP_SIZE))
+        (set! (-> buf heap top) (-> buf heap top-base))
+        ;; locked: once loaded it stays as it is (no linking to his art group, no unloading)
+        (set! (-> buf locked?) #t)
+        (set! (-> clip buffer) buf)
+        )
+      )
+    (let ((buf (-> clip buffer)))
+      (if (or (not (name= (-> buf pending-load-file) (-> clip spool))) (!= (-> buf pending-load-file-part) (-> clip part)))
+          (set-pending-file buf (-> clip spool) (-> clip part) (process->handle owner) -1.0)
+          )
+      (set! (-> buf pending-load-file-owner) (process->handle owner))
+      (update buf)
+      (case (file-status buf (-> clip spool) (-> clip part))
+        (('locked 'active)
+         (let ((ag (-> buf art-group)))
+           (when ag
+             (dotimes (i (-> ag length))
+               (let ((a (-> ag data i)))
+                 (if (and a (type? a art-joint-anim) (string= (-> a name) (-> clip anim-name)))
+                     (set! (-> clip anim) (the-as art-joint-anim a))
+                     )
+                 )
+               )
+             )
+           (format 0 "[enhanced-sig] ~A part ~D: ~A ~A~%" (-> clip spool) (-> clip part) (-> clip anim-name) (-> clip anim))
+           (if (not (-> clip anim))
+               (set! (-> clip failed) #t)
+               )
+           )
+         )
+        (('error)
+         (format 0 "[enhanced-sig] ~A part ~D: not loaded~%" (-> clip spool) (-> clip part))
+         (set! (-> clip failed) #t)
+         )
+        )
+      )
+    )
+  (-> clip anim)
+  )
+
+;; JAK_ENHANCED_SIG_CLIP=<spool> (and JAK_ENHANCED_SIG_PART=<chunk>, else 0)
+(define *enhanced-sig-view-buf* (new 'global 'string 64 (the-as string #f)))
+(define *enhanced-sig-part-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-sig-view* (the-as enhanced-sig-clip #f))
+(define *enhanced-sig-view-frames* 0)
+(when (pc-enhanced-getenv "JAK_ENHANCED_SIG_CLIP" *enhanced-sig-view-buf* 64)
+  (let ((name (new 'global 'string 80 (the-as string #f))))
+    (if (string= *enhanced-sig-view-buf* "museum-2-anims")
+        (format name "sig-highres-sig-walk")
+        (format name "sig-highres-~S" *enhanced-sig-view-buf*)
+        )
+    (set! *enhanced-sig-view*
+          (enhanced-sig-clip-new *enhanced-sig-view-buf*
+                                 (if (pc-enhanced-getenv "JAK_ENHANCED_SIG_PART" *enhanced-sig-part-buf* 16)
+                                     (string->int *enhanced-sig-part-buf*)
+                                     0
+                                     )
+                                 name
+                                 )
+          )
+    )
+  )
+
+(defbehavior enhanced-sig-view? enhanced-skin ()
+  "Is Sig looping a clip to look at (JAK_ENHANCED_SIG_CLIP)?"
+  (if (and *enhanced-sig-view* (string= (-> self char name) "sig")) #t #f)
+  )
+
+(defbehavior enhanced-sig-own? enhanced-skin ()
+  "Is he on his own streamed clip (not Jak's pose)?"
+  (enhanced-sig-view?)
+  )
+
+(defbehavior enhanced-skin-stream-update enhanced-skin ()
+  "The character's streamed animation (its entry's stream-...): loaded once, then put in its art group's
+   empty slot, where its walk... index finds it."
+  (let ((ch (-> self char)))
+    (when (and (-> ch stream-spool) (>= (-> ch stream-slot) 0))
+      (if (not (-> ch stream-clip))
+          (set! (-> ch stream-clip) (enhanced-sig-clip-new (-> ch stream-spool) (-> ch stream-part) (-> ch stream-anim)))
+          )
+      (let ((a (enhanced-sig-clip-update (the-as enhanced-sig-clip (-> ch stream-clip)) self))
+            (ag (-> self draw art-group))
+            )
+        (when (and a (< (-> ch stream-slot) (-> ag length)) (not (-> ag data (-> ch stream-slot))))
+          (set! (-> ag data (-> ch stream-slot)) a)
+          (format 0 "[enhanced-sig] ~A in ~A's slot ~D~%" a (-> ch name) (-> ch stream-slot))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-sig-animate enhanced-skin ()
+  "Sig's streamed clips. Returns #t when it picked his animation."
+  (enhanced-skin-stream-update)
+  (when (enhanced-sig-view?)
+    (let* ((clip *enhanced-sig-view*)
+           (a (enhanced-sig-clip-update clip self))
+           )
+      (cond
+        ((and (not a) (-> clip failed))
+         ;; past its last chunk: from the first again
+         (when (> (-> clip part) 0)
+           (set! (-> clip part) 0)
+           (set! (-> clip failed) #f)
+           )
+         )
+        ((and a (string= (-> clip spool) "museum-2-anims"))
+         ;; his walk: looping
+         (when (!= (-> self anim) 100)
+           (set! (-> self anim) 100)
+           (ja-channel-push! 1 0)
+           (ja :group! a :num! min)
+           )
+         (ja :num! (loop!))
+         )
+        (a
+          ;; a cutscene: each chunk's start, a third and two thirds in, held 1.5 s each, then the next
+          ;; chunk ([sig-clip] show lines: when to look)
+          (let* ((n (ja-num-frames 0))
+                 (k (/ *enhanced-sig-view-frames* 90))
+                 )
+            (when (!= (-> self anim) 100)
+              (set! (-> self anim) 100)
+              (set! *enhanced-sig-view-frames* 0)
+              (set! k 0)
+              (ja-channel-set! 1)
+              (ja :group! a :num! min)
+              (set! n (ja-num-frames 0))
+              )
+            (cond
+              ((>= k 3)
+               ;; the next chunk (into the same buffer: off this one first, onto his idle)
+               (+! (-> clip part) 1)
+               (set! (-> clip anim) #f)
+               (set! (-> self anim) -1)
+               (ja-channel-set! 1)
+               (ja :group! (-> self draw art-group data (-> self char idle)) :num! min)
+               )
+              (else
+                (let ((f (the float (/ (* k (+ n -1)) 3))))
+                  (ja :num-func num-func-identity :frame-num f)
+                  (if (zero? (mod *enhanced-sig-view-frames* 90))
+                      (format 0 "[sig-clip] show ~A part ~D frame ~f of ~D~%" (-> clip spool) (-> clip part) f n)
+                      )
+                  )
+                )
+              )
+            (+! *enhanced-sig-view-frames* 1)
+            )
+          )
+        )
+      )
+    #t
+    )
+  )
+
+(defbehavior enhanced-sig-post enhanced-skin ()
+  "After ja-post: a cutscene clip moves him around the scene; keep him where Jak is (his main joint over
+   Jak's position)."
+  (when (enhanced-sig-view?)
+    (let* ((nodes (-> self node-list))
+           (main (-> self char main))
+           (d (vector-! (new 'stack-no-clear 'vector) (-> self root trans) (-> nodes data main bone position)))
+           )
+      ;; (and up or down so his main joint is as high over Jak's feet as in his bind pose)
+      (+! (-> d y) (-> self bind-world main trans y))
+      (set! (-> d w) 0.0)
+      (if (zero? (mod *enhanced-sig-view-frames* 90))
+          (format 0 "[sig-clip] moved by ~M ~M ~M~%" (-> d x) (-> d y) (-> d z))
+          )
+      (dotimes (k (-> nodes length))
+        (vector+! (-> nodes data k bone transform trans) (-> nodes data k bone transform trans) d)
+        )
+      ;; (its bounds too, or it's culled where the scene had him)
+      (let ((w (-> self draw origin w)))
+        (vector+! (-> self draw origin) (-> self draw origin) d)
+        (set! (-> self draw origin w) w)
+        )
+      )
+    )
+  (none)
+  )

@@ -78,6 +78,21 @@
     )
   )
 
+(defun enhanced-character-gun-hud ()
+  "The gun HUD (hud-gun, hud-classes.gc) for a character's own gun: the gun type whose icon slot shows it,
+   0: Jak's guns as always. Ashelin's pistol, out: the red gun's second mode, hud-gunred-02a, whose
+   picture is hers while she is played (game/assets/enhanced/hud/jak3/characters/characters.txt).
+   (Another character's own gun: one more case here, and a line there.)"
+  (cond
+    ((and (enhanced-ashelin-gun-active?) (-> *enhanced-ashelin-gun* out))
+     (the-as int (pickup-type gun-red-2))
+     )
+    (else
+      0
+      )
+    )
+  )
+
 (defun enhanced-ashelin-gun-slot ((k int))
   "Her arms' joints this file poses: the right arm's and the gun's index in aim-local (0-3), the left
    arm's 4-6 (only for the unarmed rest pose), else -1."

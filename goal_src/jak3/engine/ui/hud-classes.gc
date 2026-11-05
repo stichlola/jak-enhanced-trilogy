@@ -953,6 +953,11 @@
                             )
         )
 
+;; Enhanced: a character's own gun in this HUD (enhanced-ashelin-gun.gc): the gun type whose icon
+;; slot shows it (the picture swapped in for that character, game/assets/enhanced/hud/jak3/characters),
+;; 0: none (Jak's guns as always). Its ammo, shells and Jak's gun arrows are not shown
+(define-extern enhanced-character-gun-hud (function int))
+
 (defmethod draw ((this hud-gun))
   (let ((sv-32 0)
         (sv-40 0)
@@ -1141,7 +1146,7 @@
               (if (and (zero? s5-0) (nonzero? (-> this values 1 current)))
                   (set! s5-0 1)
                   )
-              (when (not (-> *setting-control* user-current gun-special-mode))
+              (when (and (not (-> *setting-control* user-current gun-special-mode)) (zero? (enhanced-character-gun-hud)))
                 (with-dma-buffer-add-bucket ((s3-0 (-> *display* frames (-> *display* on-screen) global-buf))
                                              (bucket-id hud-draw-hud-alpha)
                                              )
@@ -1390,6 +1395,13 @@
   (if (and (-> *setting-control* user-current gun-special-mode) (= (-> this values 0 current) 29))
       (clear (-> this strings 0 text))
       )
+  ;; Enhanced: a character's own gun: its icon alone (no ammo, no arrows for Jak's guns)
+  (when (nonzero? (enhanced-character-gun-hud))
+    (clear (-> this strings 0 text))
+    (dotimes (v1-200 12)
+      (set! (-> this sprites (+ v1-200 2) scale-x) 0.0)
+      )
+    )
   ((method-of-type hud draw) this)
   0
   (none)
@@ -1397,6 +1409,18 @@
 
 (defmethod update-values! ((this hud-gun))
   (cond
+    ((nonzero? (enhanced-character-gun-hud))
+     (let ((v1-0 (-> this values 0 target)))
+       (set! (-> this values 0 target) (enhanced-character-gun-hud))
+       (if (!= v1-0 (-> this values 0 target))
+           (sound-play "gun-switch")
+           )
+       )
+     ;; (no ammo: the shells and count hidden, draw)
+     (set! (-> this values 1 target) 0)
+     (logclear! (-> this flags) (hud-flags disable))
+     (logior! (-> this flags) (hud-flags show))
+     )
     ((focus-test? *target* gun)
      (let ((v1-2 (-> this values 0 target)))
        (set! (-> this values 0 target) (the-as int (-> *target* gun using-gun-type)))

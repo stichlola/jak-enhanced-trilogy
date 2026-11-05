@@ -79,5 +79,13 @@ bool enhanced_remade_has_relief();
 // with the name of what's showing on screen (to compare them; every frame)
 void enhanced_remade_switch(const std::vector<LevelData*>& levels);
 
+// Jak 3: a character's own HUD pictures in place of Jak's (Ashelin's pistol in the gun HUD...), listed
+// in game/assets/enhanced/hud/<game>/characters/characters.txt, lines "<character> <tpage> <texture>
+// <picture>": while that character is played, <picture>-hd.png (or <picture>.png) of that folder, any
+// whole multiple of the texture's size, PS2 alpha, is on the GPU in the texture's place; the game's
+// own (its HD picture if any) is back for the others. Every frame (cheap: works when the character
+// changes and every 30 frames, for the levels that came in)
+void enhanced_character_hud(const std::vector<LevelData*>& levels, const char* character);
+
 // a file opened with the program the system has for it (a PNG: the user's paint program)
 void enhanced_open_file(const fs::path& path);
