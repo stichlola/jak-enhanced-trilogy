@@ -45,6 +45,7 @@
    (blend      float)        ;; how much her right arm takes the aiming pose (0-1)
    (aim-weight float)        ;; how much the arm turns toward the aim point (0-1)
    (rest-weight float)       ;; how much the arm takes Jak's relaxed one (unarmed, 0-1)
+   (idle-weight float)       ;; how much she takes the hand-made idle pose (standing unarmed, 0-1)
    (sound-bank symbol)       ;; her gun's sound bank asked for (desert4: ashelin-fire)
    (trans-anim int32)        ;; her takeout or putaway clip playing (standing), else -1
    (aimed      symbol)       ;; something to aim at
@@ -123,6 +124,7 @@
       (set! (-> st blend) 0.0)
       (set! (-> st aim-weight) 0.0)
       (set! (-> st rest-weight) 1.0)
+      (set! (-> st idle-weight) 0.0)
       (set! (-> st sound-bank) #f)
       (set! (-> st trans-anim) -1)
       (set! (-> st aimed) #f)
@@ -578,11 +580,67 @@
   (none)
   )
 
-(defbehavior enhanced-ashelin-gun-pose enhanced-skin ((w float) (aim-w float) (rest-w float))
-  "Her arms over what her bones have now (what hangs from them following): by rest-w Jak's relaxed arms
-   (unarmed: her own animations hold the gun up), upper arms at her sides, elbows bent and hands at the
-   front of her thighs (the right one in front of the holster); by w the aiming stance's right
-   arm, then turned at the shoulder toward the aim point by aim-w (at most 70 degrees)."
+;; Her unarmed idle as the user posed it by hand in Blender (out/ashelin-pose/ashelin_idle_pose.blend,
+;; made on her idle0's first frame): for each joint changed there, its turn from idle0's first frame, in
+;; its own frame (E transposed, rows: new local rows = these 3x3 times her animation's local rows), so
+;; it goes on top of her idle (she still breathes). Made by ashpose.py from the .blend's bone dump and
+;; ashelin-lod0.glb (game joint = glb joint + 1); chest, hips, both arms and three finger bones.
+(defconstant ASHELIN_IDLE_TURNS 11)
+(define *enhanced-ashelin-idle-joints* (new 'static 'array int32 11 4 7 8 9 10 11 12 13 31 34 35))
+(define *enhanced-ashelin-idle-turns* (new 'static 'array float 99
+  0.999764 0.003657 0.021398 -0.001221 0.993599 -0.112928 -0.021676 0.112877 0.993368  ;; 4 chest
+  0.996841 0.067457 -0.041833 -0.077669 0.937679 -0.338705 0.016380 0.340882 0.939960  ;; 7 Lshoulder
+  0.896304 0.385772 0.218675 -0.443412 0.785243 0.432174 -0.004991 -0.484323 0.874872  ;; 8 Lelbow
+  0.900828 -0.429867 0.061072 0.429866 0.863223 -0.264699 0.061062 0.264698 0.962398  ;; 9 Lhand
+  0.999856 -0.012281 0.011440 0.006302 0.906558 0.422015 -0.015561 -0.421881 0.906510  ;; 10 Rshoulder
+  0.995121 0.009316 0.098178 -0.097423 -0.059405 0.993363 0.015119 -0.998086 -0.058201  ;; 11 Relbow
+  0.982867 0.179750 -0.040737 -0.111036 0.753770 0.647508 0.147096 -0.631884 0.760821  ;; 12 Rhand
+  0.999346 -0.036149 -0.000171 0.036146 0.999330 -0.005758 0.000379 0.005749 0.999983  ;; 13 hips
+  0.995873 -0.089503 0.015047 0.090575 0.990676 -0.101773 -0.005797 0.102717 0.994694  ;; 31 LmiddleB
+  0.998481 -0.011421 0.052524 0.029798 0.931281 -0.362741 -0.044889 0.363763 0.930334  ;; 34 RmiddleA
+  0.998177 -0.033116 0.050454 0.049740 0.925011 -0.376663 -0.034184 0.378503 0.924971  ;; 35 RmiddleB
+  ))
+
+(defun enhanced-ashelin-idle-turn ((k int))
+  "Joint k's row in *enhanced-ashelin-idle-turns*, -1: not posed."
+  (let ((found -1))
+    (dotimes (i ASHELIN_IDLE_TURNS)
+      (if (= (-> *enhanced-ashelin-idle-joints* i) k)
+          (set! found i)
+          )
+      )
+    found
+    )
+  )
+
+(defun enhanced-ashelin-idle-turn! ((local matrix) (row int) (wt float))
+  "local (a joint to its parent) turned as the hand-made idle has it, by wt."
+  (let ((m (new 'stack-no-clear 'matrix))
+        (len (new 'stack-no-clear 'matrix))
+        (e (+ (* row 9) 0))
+        )
+    (matrix-copy! m local)
+    (dotimes (i 3)
+      (dotimes (c 3)
+        (set! (-> m vector i data c)
+              (+ (* (-> *enhanced-ashelin-idle-turns* (+ e (* i 3) 0)) (-> local vector 0 data c))
+                 (* (-> *enhanced-ashelin-idle-turns* (+ e (* i 3) 1)) (-> local vector 1 data c))
+                 (* (-> *enhanced-ashelin-idle-turns* (+ e (* i 3) 2)) (-> local vector 2 data c))
+                 )
+              )
+        )
+      )
+    (enhanced-matrix-blend-rows! local (matrix-copy! len local) m wt len)
+    )
+  local
+  )
+
+(defbehavior enhanced-ashelin-gun-pose enhanced-skin ((w float) (aim-w float) (rest-w float) (idle-w float))
+  "Her arms over what her bones have now (what hangs from them following): by idle-w her hand-made
+   idle (standing, unarmed: *enhanced-ashelin-idle-turns* on her idle0); by rest-w (moving, unarmed) Jak's
+   relaxed arms (her own animations hold the gun up), upper arms at her sides, elbows bent; by w the aiming
+   stance's right arm, then turned at the shoulder toward the aim point by aim-w (at most 70 degrees)."
+  (set! rest-w (* rest-w (- 1.0 idle-w)))
   (let* ((st *enhanced-ashelin-gun*)
          (nodes (-> self node-list))
          (n (min 64 (-> nodes length)))
@@ -658,6 +716,11 @@
             ((>= slot 0)
              (matrix-4x4-inverse! inv (-> st before p))
              (matrix*! local (-> st before k) inv)
+             (let ((row (enhanced-ashelin-idle-turn k)))
+               (if (and (< 0.0 idle-w) (>= row 0))
+                   (enhanced-ashelin-idle-turn! local row idle-w)
+                   )
+               )
              (let ((bone (-> nodes data k bone transform))
                    (jnodes (-> self parent 0 node-list))
                    ;; Jak's Rarm, Rforarm, sk_rhand for her 10, 11, 12; Larm, Lforarm, sk_lhand for 7, 8, 9
@@ -700,6 +763,17 @@
                )
              (set! changed (logior changed (ash 1 k)))
              (if (or (= k ASHELIN_GUN_RSHOULDER) (logtest? arm (ash 1 p)))
+                 (set! arm (logior arm (ash 1 k)))
+                 )
+             )
+            ;; the hand-made idle's other joints (chest, hips, fingers)
+            ((and (< 0.0 idle-w) (>= (enhanced-ashelin-idle-turn k) 0))
+             (matrix-4x4-inverse! inv (-> st before p))
+             (matrix*! local (-> st before k) inv)
+             (enhanced-ashelin-idle-turn! local (enhanced-ashelin-idle-turn k) idle-w)
+             (matrix*! (-> nodes data k bone transform) local (-> nodes data p bone transform))
+             (set! changed (logior changed (ash 1 k)))
+             (if (logtest? arm (ash 1 p))
                  (set! arm (logior arm (ash 1 k)))
                  )
              )
@@ -867,6 +941,14 @@
           (seek! (-> st blend) (if (and arm-on? (not own-gun-anim?)) 1.0 0.0) (* 6.7 (seconds-per-frame)))
           (seek! (-> st aim-weight) (if arm-on? 1.0 0.0) (* 5.0 (seconds-per-frame)))
           (seek! (-> st rest-weight) (if (or (-> st out) (>= (-> st trans-anim) 0)) 0.0 1.0) (* 5.0 (seconds-per-frame)))
+          ;; standing unarmed in her own idle: the hand-made idle pose (moving: Jak's relaxed arms)
+          (seek! (-> st idle-weight)
+                 (if (and (not (-> st out)) (< (-> st trans-anim) 0) (= (-> self anim) (-> self char idle)))
+                     (- 1.0 (-> self pose-blend))
+                     0.0
+                     )
+                 (* 5.0 (seconds-per-frame))
+                 )
           ;; her gun's sound (ashelin-fire) is in the oasis mission's bank, DESERT4.SBK (99 KB, smaller than
           ;; the mode banks Jak's guns, board and mech load the same way): asked for as the mode sound bank
           ;; while her gun is out (a setting of her process, gone with it)
@@ -906,8 +988,8 @@
               )
             )
           ;; her arm, then the gun: in her hand while out, else in the holster
-          (if (or (< 0.0 (-> st blend)) (< 0.0 (-> st aim-weight)) (< 0.0 (-> st rest-weight)))
-              (enhanced-ashelin-gun-pose (-> st blend) (if (-> st out) (-> st aim-weight) 0.0) (-> st rest-weight))
+          (if (or (< 0.0 (-> st blend)) (< 0.0 (-> st aim-weight)) (< 0.0 (-> st rest-weight)) (< 0.0 (-> st idle-weight)))
+              (enhanced-ashelin-gun-pose (-> st blend) (if (-> st out) (-> st aim-weight) 0.0) (-> st rest-weight) (-> st idle-weight))
               )
           (when (and (not (-> st out)) (< (-> st trans-anim) 0))
             (matrix*! (-> self node-list data ASHELIN_GUN_JOINT bone transform)
