@@ -27,6 +27,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -68,10 +69,10 @@ HANDMADE = [
 # in those folders but made from the game's own data, so never in a release: the HD Hellcat
 # (scripts/enhanced/hellcat_hd.py rebuilds the game's model)
 NOT_HANDMADE = ["hellcat-lod0.*"]
-# the same, by name in a folder shared with what git tracks: the editor's Tripo kits (rocks, slabs,
-# pebbles, trees, with their far versions), in its library even where the main world doesn't use them
-HANDMADE_FILES = ["custom_assets/jak3/scenery/desert_*", "custom_assets/jak3/scenery/rock_big_*",
-                  "custom_assets/jak3/scenery/tree_*"]
+# The replacement models every player gets are the ones scenery.json names (tracked in git, so in the
+# release with custom_assets): checked to be there. The editor's own Tripo kits live outside the repo
+# (local/editor-kit, EDITOR_KIT_DIR in EnhancedEditor.cpp) and never ship.
+SCENERY_JSON = ["custom_assets/jak3/scenery/scenery.json"]
 # What the player can edit in the game (F4): placed_path, manual_lights_path, grass_paint, kTerrain
 # (the terrain's pictures, which the Terrain window replaces) in the source
 SHIPPED = [
@@ -127,16 +128,14 @@ def copy_handmade(dest):
             shutil.copy2(f, target)
             count += 1
         print(f"{folder}: {len(files)} files, {taken / 1e6:.1f} MB")
-    for pattern in HANDMADE_FILES:
-        files = sorted(f for f in ROOT.glob(pattern) if f.is_file() and not f.name.endswith("_preview.png"))
-        if not files:
-            sys.exit(f"{pattern}: no files. Stopped: this release would miss what's made by hand")
-        for f in files:
-            target = dest / "data" / f.relative_to(ROOT)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(f, target)
-            count += 1
-        print(f"{pattern}: {len(files)} files, {sum(f.stat().st_size for f in files) / 1e6:.1f} MB")
+    for rel in SCENERY_JSON:
+        # (the models it names: in git, so already copied with custom_assets)
+        folder = (ROOT / rel).parent
+        names = re.findall(r'"([\w.-]+\.glb)"', (ROOT / rel).read_text(encoding="utf-8"))
+        missing = sorted(n for n in set(names) if not (dest / "data" / folder.relative_to(ROOT) / n).exists())
+        if missing:
+            sys.exit(f"{rel}: models not in the release: {', '.join(missing)}. Stopped: add them to git")
+        print(f"{rel}: {len(set(names))} replacement models, all in")
     return count
 
 

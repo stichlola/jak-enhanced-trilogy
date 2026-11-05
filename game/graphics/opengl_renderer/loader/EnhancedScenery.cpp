@@ -165,12 +165,28 @@ fs::path scenery_dir() {
          game_version_names[g_game_version] / "scenery";
 }
 
+// the editor's own kits (Tripo models for placing by hand): outside the repo, never in a release
+fs::path editor_kit_dir() {
+  return file_util::get_jak_project_dir() / "local" / "editor-kit" /
+         game_version_names[g_game_version] / "scenery";
+}
+
+// a model file (or its _lod/_imp/_nrm): the shipped replacements first, then the editor's kits
+fs::path scenery_file(const std::string& name) {
+  auto shipped = scenery_dir() / name;
+  if (fs::exists(shipped)) {
+    return shipped;
+  }
+  auto kit = editor_kit_dir() / name;
+  return fs::exists(kit) ? kit : shipped;
+}
+
 // every triangle of every node, in the glb's own meters turned into game units
 bool load_mesh(Mesh& mesh) {
   tinygltf::TinyGLTF loader;
   tinygltf::Model model;
   std::string err, warn;
-  auto path = (scenery_dir() / mesh.file).string();
+  auto path = scenery_file(mesh.file).string();
   if (!loader.LoadBinaryFromFile(&model, &err, &warn, path)) {
     lg::warn("[enhanced] scenery: can't read {}: {}", path, err);
     return false;
@@ -302,7 +318,7 @@ bool load_mesh(Mesh& mesh) {
 // its impostor, if it has one (<file>_imp.png, <file>_nrm.png)
 void load_impostor(Mesh& mesh) {
   const auto stem = fs::path(mesh.file).stem().string();
-  auto imp_path = scenery_dir() / (stem + "_imp.png");
+  auto imp_path = scenery_file(stem + "_imp.png");
   if (!mesh.ok || !fs::exists(imp_path)) {
     return;
   }
@@ -315,7 +331,7 @@ void load_impostor(Mesh& mesh) {
   mesh.imp_h = h;
   mesh.imp_rgba.assign(px, px + (size_t)w * h * 4);
   stbi_image_free(px);
-  auto nrm_path = scenery_dir() / (stem + "_nrm.png");
+  auto nrm_path = scenery_file(stem + "_nrm.png");
   int nw = 0, nh = 0;
   u8* npx = fs::exists(nrm_path) ? stbi_load(nrm_path.string().c_str(), &nw, &nh, nullptr, 4) : nullptr;
   if (npx && nw == w && nh == h) {
@@ -331,7 +347,7 @@ std::vector<Mesh> load_far_versions(const std::string& file) {
   std::vector<Mesh> out;
   for (int k = 1; k <= kFarLods; k++) {
     auto far_file = fmt::format("{}_lod{}.glb", fs::path(file).stem().string(), k);
-    if (!fs::exists(scenery_dir() / far_file)) {
+    if (!fs::exists(scenery_file(far_file))) {
       break;
     }
     Mesh lod;
@@ -1624,16 +1640,23 @@ int placed_mesh(Library& lib, const std::string& model) {
 }
 }  // namespace
 
+std::string enhanced_scenery_file(const std::string& name) {
+  return scenery_file(name).string();
+}
+
 std::vector<std::string> enhanced_scenery_models() {
   std::vector<std::string> out;
   std::error_code ec;
-  for (const auto& e : fs::directory_iterator(scenery_dir(), ec)) {
-    const auto name = e.path().filename().string();
-    if (e.path().extension() == ".glb" && name.find("_lod") == std::string::npos) {
-      out.push_back(name);
+  for (const auto& dir : {scenery_dir(), editor_kit_dir()}) {
+    for (const auto& e : fs::directory_iterator(dir, ec)) {
+      const auto name = e.path().filename().string();
+      if (e.path().extension() == ".glb" && name.find("_lod") == std::string::npos) {
+        out.push_back(name);
+      }
     }
   }
   std::sort(out.begin(), out.end());
+  out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
 }
 

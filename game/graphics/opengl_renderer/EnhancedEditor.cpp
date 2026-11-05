@@ -1018,7 +1018,7 @@ bool open_level(Editor& e, const std::string& id) {
   // (the game's own models come from your copy of the game: they never travel in an export)
   int missing = 0;
   for (const auto& p : f.st.objects) {
-    missing += !fs::exists(scenery_files_dir() / p.model);
+    missing += !fs::exists(enhanced_scenery_file(p.model));
   }
   e.level_msg = missing ? fmt::format("{} objects use models you don't have yet: File > Import Model", missing) : "";
   lg::info("[enhanced] level {}: {} objects, {} missing", id, f.st.objects.size(), missing);
@@ -1090,13 +1090,13 @@ std::vector<std::string> model_files(const std::string& model) {
   const auto stem = fs::path(model).stem().string();
   for (int k = 1; k < 10; k++) {
     const auto far_file = fmt::format("{}_lod{}.glb", stem, k);
-    if (!fs::exists(scenery_files_dir() / far_file)) {
+    if (!fs::exists(enhanced_scenery_file(far_file))) {
       break;
     }
     out.push_back(far_file);
   }
   for (const char* tail : {"_imp.png", "_nrm.png"}) {
-    if (fs::exists(scenery_files_dir() / (stem + tail))) {
+    if (fs::exists(enhanced_scenery_file(stem + tail))) {
       out.push_back(stem + tail);
     }
   }
@@ -1139,8 +1139,8 @@ void export_level(Editor& e, const std::string& path) {
         continue;
       }
       for (const auto& f : model_files(p.model)) {
-        if (fs::exists(scenery_files_dir() / f)) {
-          const auto bytes = file_util::read_binary_file(scenery_files_dir() / f);
+        if (fs::exists(enhanced_scenery_file(f))) {
+          const auto bytes = file_util::read_binary_file(enhanced_scenery_file(f));
           put_file(f, bytes.data(), bytes.size());
         }
       }
@@ -1215,7 +1215,7 @@ std::string import_level(Editor& e, const std::string& path) {
       const auto stem = fs::path(p.model).stem().string();
       std::string new_stem = stem;
       const auto mine = files[p.model];
-      const auto have = scenery_files_dir() / p.model;
+      const auto have = enhanced_scenery_file(p.model);
       if (fs::exists(have)) {
         const auto bytes = file_util::read_binary_file(have);
         if (bytes.size() != mine.second || memcmp(bytes.data(), data.data() + mine.first, mine.second) != 0) {

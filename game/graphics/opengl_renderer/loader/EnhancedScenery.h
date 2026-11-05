@@ -113,8 +113,11 @@ inline void enhanced_placed_axes(const EnhancedPlaced& o, float cols[3][3]) {
   }
 }
 
-// the models in the scenery folder that can be placed (.glb, not the far versions)
+// the models in the scenery folder and the editor's kits that can be placed (.glb, not the far
+// versions)
 std::vector<std::string> enhanced_scenery_models();
+// where a model file is: custom_assets/<game>/scenery (shipped) or local/editor-kit/<game>/scenery
+std::string enhanced_scenery_file(const std::string& name);
 
 // the objects to draw from now on (copied)
 void enhanced_set_placed(const std::vector<EnhancedPlaced>& placed);
