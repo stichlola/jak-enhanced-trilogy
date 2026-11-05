@@ -454,6 +454,9 @@ u32 place(std::vector<tfrag3::ShrubGpuVertex>& verts,
   return offset;
 }
 
+// the floating stones investigation's logging (off for releases)
+constexpr bool kVegDebug = false;
+
 struct Stats {
   int plants = 0, copies = 0, strewn = 0, tufts = 0, habitats = 0, vine_sources = 0, vines = 0;
   int dbg1 = 0, dbg2 = 0;  // DEBUG
@@ -602,7 +605,7 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       if (ground.hfrag && y < kSeaTop) {
         continue;  // (in the desert's sea)
       }
-      {  // DEBUG
+      if (kVegDebug) {  // DEBUG
         float hy;
         if (ground.hfrag && hfrag_height(*ground.hfrag, x, z, &hy) && std::abs(hy - y) < 1.f) {
           float off = ground.own_off(x, z, hy);
@@ -721,7 +724,7 @@ void add_to_tree(tfrag3::ShrubTree& tree,
           continue;
         }
         const auto& p = plants[g];
-        {  // DEBUG
+        if (kVegDebug) {  // DEBUG
           float off = ground.own_off(x, z, hy);
           if (!std::isnan(off)) {
             stats->dbg2++;
@@ -1159,6 +1162,8 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
            "grassy floors, {} wall vines with {} copies{}",
            name, ground.size(), stats.plants, stats.copies, stats.strewn, stats.tufts, stats.habitats,
            stats.vine_sources, stats.vines, ground.hfrag ? " (and the height field)" : "");
-  lg::info("[vegdbg] {}: {} copies and {} strewn on the height field where the level has a floor of its own",
-           name, stats.dbg1, stats.dbg2);  // DEBUG
+  if (kVegDebug) {
+    lg::info("[vegdbg] {}: {} copies and {} strewn on the height field where the level has a floor of its own",
+             name, stats.dbg1, stats.dbg2);  // DEBUG
+  }
 }
