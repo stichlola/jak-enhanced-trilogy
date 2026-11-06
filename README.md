@@ -11,6 +11,7 @@ this repository.
 
 > **Jak Enhanced is 100% free**, and always will be. I make it on my own in my spare time: if you'd
 > like to support my work, you can buy me a coffee on PayPal:
+> [🍬 1 €](https://paypal.me/mymusicminis/1EUR) ·
 > [☕ 3 €](https://paypal.me/mymusicminis/3EUR) ·
 > [☕☕ 5 €](https://paypal.me/mymusicminis/5EUR) ·
 > [🍕 10 €](https://paypal.me/mymusicminis/10EUR) ·
