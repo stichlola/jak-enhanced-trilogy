@@ -17,8 +17,6 @@ to support my work, you can buy me a coffee. Donations are entirely optional and
 <p>
   <a href="https://paypal.me/mymusicminis/1EUR"><img alt="Donate 1 € with PayPal: a sweet" src="https://img.shields.io/badge/1%20%E2%82%AC-%F0%9F%8D%AC%20a%20sweet-0070BA?style=for-the-badge&logo=paypal&logoColor=white&labelColor=003087"></a><br>
   <a href="https://paypal.me/mymusicminis/3EUR"><img alt="Donate 3 € with PayPal: a coffee" src="https://img.shields.io/badge/3%20%E2%82%AC-%E2%98%95%20a%20coffee-0070BA?style=for-the-badge&logo=paypal&logoColor=white&labelColor=003087"></a><br>
-  <a href="https://paypal.me/mymusicminis/5EUR"><img alt="Donate 5 € with PayPal: two coffees" src="https://img.shields.io/badge/5%20%E2%82%AC-%E2%98%95%E2%98%95%20two%20coffees-0070BA?style=for-the-badge&logo=paypal&logoColor=white&labelColor=003087"></a><br>
-  <a href="https://paypal.me/mymusicminis/10EUR"><img alt="Donate 10 € with PayPal: a pizza" src="https://img.shields.io/badge/10%20%E2%82%AC-%F0%9F%8D%95%20a%20pizza-0070BA?style=for-the-badge&logo=paypal&logoColor=white&labelColor=003087"></a><br>
   <a href="https://paypal.me/mymusicminis"><img alt="Donate any amount with PayPal" src="https://img.shields.io/badge/any%20amount-%E2%9C%A8%20your%20choice-0070BA?style=for-the-badge&logo=paypal&logoColor=white&labelColor=003087"></a>
 </p>
 
