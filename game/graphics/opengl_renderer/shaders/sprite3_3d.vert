@@ -212,8 +212,9 @@ void main() {
   transformed.y *= SCISSOR_ADJUST * HEIGHT_SCALE;
   gl_Position = transformed;
   // Enhanced: behind the camera (the sun, looking down from the editor): not mirrored onto the screen
-  // (the 3D sprites' w is negative in front, as pfog0: by the sign of Q, or every gun beam was dropped)
-  if ((rendermode == 1u && transformed_pos_vf02.w <= 0.0) || (rendermode == 3u && Q <= 0.0)) {
+  // (w is negative in front, as pfog0, for the 2D sprites too: by the sign of Q, or every gun beam and
+  // every particle in front of the camera was dropped, the arena's light orbs among them)
+  if (rendermode != 2u && Q <= 0.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
 
