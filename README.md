@@ -9,6 +9,11 @@ HD textures, and an in-game menu that turns every change on and off.
 Unofficial and free. You need **your own disc images** (.iso) of the PS2 games: no game data is in
 this repository.
 
+> **Jak Enhanced is 100% free**, and always will be. I make it on my own in my spare time: if you'd
+> like to support my work, you can leave a small donation
+> [here (PayPal)](https://www.paypal.com/donate/?business=mymusicminis%40gmail.com&currency_code=EUR).
+> Donations are entirely optional and don't unlock anything.
+
 ## Install (players)
 
 1. Download **`Setup-Jak-Enhanced-Trilogy-<version>.exe`** from the
@@ -126,4 +131,5 @@ Jak 3 are © Sony Interactive Entertainment / Naughty Dog. This project is unoff
 game assets; the HD textures are made on your computer from your discs. OpenGOAL's license applies
 to the code ([LICENSE](LICENSE)).
 
-**No donations of any kind are accepted for this project.** It is free and stays free.
+The project is free and stays free. Optional donations support the author's own time and code only:
+they don't pay for or unlock any game content.
