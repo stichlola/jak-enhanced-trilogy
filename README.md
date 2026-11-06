@@ -11,7 +11,7 @@ this repository.
 
 > **Jak Enhanced is 100% free**, and always will be. I make it on my own in my spare time: if you'd
 > like to support my work, you can leave a small donation
-> [here (PayPal)](https://www.paypal.com/donate/?business=mymusicminis%40gmail.com&currency_code=EUR).
+> [here (PayPal)](https://www.paypal.biz/mymusicminis).
 > Donations are entirely optional and don't unlock anything.
 
 ## Install (players)
