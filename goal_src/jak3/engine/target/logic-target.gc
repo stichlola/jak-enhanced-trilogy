@@ -467,7 +467,8 @@ moves about, so it's Spargus's that are looked for.)"
         )
     (dotimes (i 10)
       (case (-> ls want i name)
-        (('waswide 'wascitya 'wascityb 'wasleapr)
+        ;; (warpcast: the air train out of the desert, wasall about to go)
+        (('waswide 'wascitya 'wascityb 'wasleapr 'warpcast)
          (set! city (-> ls want i name))
          )
         )
@@ -734,15 +735,22 @@ moves about, so it's Spargus's that are looked for.)"
         (lev (level-get *level* 'deshcat))
         (ls *load-state*)
         (slot -1)
+        (host-wanted? #f)
         (desert? (enhanced-hellcat-desert?))
         )
     (dotimes (i 10)
       (if (= (-> ls want i name) 'deshcat)
           (set! slot i)
           )
+      ;; wasall still in but no longer wanted (leaving the desert, e.g. the air train to Haven): it is
+      ;; about to unload, deshcat must not come back in (unloading a master under it crashes)
+      (if (= (-> ls want i name) 'wasall)
+          (set! host-wanted? #t)
+          )
       )
     (let ((want? (and *target*
                       host
+                      host-wanted?
                       desert?
                       ;; the menu's "Hellcat in the desert" (off: it goes, but not from under Jak)
                       (or (pc-enhanced-desert-hellcat?)

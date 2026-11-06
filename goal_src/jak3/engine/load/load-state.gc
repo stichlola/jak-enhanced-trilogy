@@ -113,7 +113,15 @@
     )
   )
 
+(define *enhanced-want-wasall* #f) ;; want-levels: is wasall in the new list (looked up before the list is cleared)
+
 (defmethod want-levels ((this load-state) (arg0 (pointer symbol)))
+  (set! *enhanced-want-wasall* #f)
+  (dotimes (a0-0 10)
+    (if (= (-> arg0 a0-0) 'wasall)
+        (set! *enhanced-want-wasall* #t)
+        )
+    )
   (dotimes (v1-0 10)
     (dotimes (a0-1 10)
       (when (= (-> this want v1-0 name) (-> arg0 a0-1))
@@ -123,8 +131,10 @@
       )
     ;; Enhanced: the parked Hellcat's level stays (enhanced-hellcat-update, logic-target.gc, wants it
     ;; and lets it go): the desert's streaming lists dropped it, and the loader sometimes discarded it
-    ;; before it was wanted again, the Hellcat gone from under Jak
-    (if (= (-> this want v1-0 name) 'deshcat)
+    ;; before it was wanted again, the Hellcat gone from under Jak. Only while its master wasall stays:
+    ;; leaving the desert (the air train's warpcast) wasall goes, and deshcat in without it crashes.
+    ;; (wasall looked up before this loop: a wasall already kept in an earlier slot is cleared from arg0)
+    (if (and (= (-> this want v1-0 name) 'deshcat) *enhanced-want-wasall*)
         (goto cfg-8)
         )
     (set! (-> this want v1-0 name) #f)
