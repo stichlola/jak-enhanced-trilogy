@@ -73,10 +73,12 @@ function Send-Zip([string]$zip, [string]$note) {
   $client = New-Object System.Net.Http.HttpClient
   $client.Timeout = [TimeSpan]::FromSeconds(60)
   $form = New-Object System.Net.Http.MultipartFormDataContent
-  $form.Add((New-Object System.Net.Http.StringContent([string]$note)), 'note')
-  $form.Add((New-Object System.Net.Http.StringContent([string]$version)), 'version')
-  $form.Add((New-Object System.Net.Http.StringContent([string]$game)), 'game')
-  $form.Add((New-Object System.Net.Http.ByteArrayContent(, [IO.File]::ReadAllBytes($zip))), 'report', 'report.zip')
+  # names in quotes: .NET Framework (PowerShell 5.1) writes name=note bare, and the worker's
+  # formData() rejects that ("Expected a form with the report ZIP.")
+  $form.Add((New-Object System.Net.Http.StringContent([string]$note)), '"note"')
+  $form.Add((New-Object System.Net.Http.StringContent([string]$version)), '"version"')
+  $form.Add((New-Object System.Net.Http.StringContent([string]$game)), '"game"')
+  $form.Add((New-Object System.Net.Http.ByteArrayContent(, [IO.File]::ReadAllBytes($zip))), '"report"', '"report.zip"')
   $answer = $client.PostAsync($ReportUrl, $form).Result
   return $answer.IsSuccessStatusCode
 }
