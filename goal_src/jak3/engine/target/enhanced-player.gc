@@ -64,11 +64,9 @@
    (sized      symbol)        ;; #t: on its feet its main and hips go where Jak's are scaled by its size
                               ;; against his (a taller character), and its legs swing less (stride)
    (stride     float)         ;; how much of Jak's leg swing it takes (1: all)
-   (big-gun    symbol)        ;; #t: its gun joint is a long gun (Sig's Peacemaker) shown as Jak's gun is:
-                              ;; out, in its right hand pointing where his gun points, and his shots
-                              ;; leave from its muzzle; put away, on its back (enhanced-skin-big-gun)
-   (gun-grip   vector :inline) ;; where the hand holds it, and its muzzle (gun joint's bind space)
-   (gun-muzzle vector :inline)
+   (big-gun    symbol)        ;; #t: its gun joint is a long gun (Sig's Peacemaker) brought out as Jak's gun
+                              ;; is: put away, on its back (enhanced-skin-big-gun); out, in its right hand
+                              ;; as its NPC holds it, Jak's shots leaving from its muzzle (enhanced-sig.gc)
    (art        art-group)     ;; loaded, or #f
    (failed     symbol)        ;; its art isn't there: don't try again
    ;; an animation of its own that the game streams (.STR) instead of keeping in its art group: loaded
@@ -104,6 +102,9 @@
 (define-extern enhanced-sig-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-sig-own? (function symbol :behavior enhanced-skin))
 (define-extern enhanced-sig-post (function none :behavior enhanced-skin))
+;; Sig's Peacemaker (enhanced-sig.gc): his init, his arms and the gun from his back to his hand
+(define-extern enhanced-sig-gun-init (function none :behavior enhanced-skin))
+(define-extern enhanced-sig-gun-post (function none :behavior enhanced-skin))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -280,9 +281,9 @@
   (enhanced-character-speeds! ch (meters 2.3) (meters 3.8) (meters 5.0) 0.0)
   (set! (-> *enhanced-characters* 1) ch)
   )
-;; Sig: his cutscene model (sig-highres-ag). Its only animations are his idles (the walk art-elts.gc lists
-;; isn't in any DGO): moving he takes Jak's pose, scaled to his size (he's much taller), his gun (26,
-;; on his prejoint) in his right hand (16).
+;; Sig: his cutscene model (sig-highres-ag): his idle, the wasdoors idle (his Peacemaker held upright,
+;; his gun stance) and his walk; running, jumping and the rest he takes Jak's pose, scaled to his size
+;; (he's much taller). His gun (26, on his prejoint) goes with his right hand (16) when out.
 (let ((ch (enhanced-character-new "sig" "sig-highres-ag" "lsig" skel-enhanced-sig *enhanced-skin-sig-joint*)))
   (enhanced-character-bones! ch 3 17 16 26)
   ;; his walk: the museum's (streamed, MU2ANIMS.STR), in his art group's slot 5 once loaded
@@ -293,11 +294,8 @@
   (enhanced-character-speeds! ch (meters 2.0) (meters 1.0) (meters 1.0) (meters 4.0))
   (set! (-> ch sized) #t)
   (set! (-> ch stride) 1.0)
-  ;; his Peacemaker (sig-highres-lod0.glb): 3.5 m along +z around the gun joint, the clawed emitter at
-  ;; the front (+z 0.8..1.9 m), the stock back to -1.6 m, the pistol grip under it at z -0.7..-0.55
+  ;; his Peacemaker: Jak's gun-dark-1 underneath (D-pad right), drawn by enhanced-sig.gc
   (set! (-> ch big-gun) #t)
-  (set-vector! (-> ch gun-grip) 0.0 (meters -0.3) (meters -0.62) 1.0)
-  (set-vector! (-> ch gun-muzzle) 0.0 (meters 0.1) (meters 1.9) 1.0)
   (set! (-> *enhanced-characters* 2) ch)
   )
 
@@ -424,8 +422,6 @@
     (or (enhanced-sig-own?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
-         ;; a big gun out: held as Jak holds his (his gun stances and shots)
-         (not (and (-> self char big-gun) (using-gun? tgt)))
          (or (= top 0.0)
              (< (-> tgt control ctrl-xz-vel) (if (< (-> self pose-blend) 0.5) top (* 0.6 top)))
              )
@@ -561,70 +557,36 @@
 (define *enhanced-big-gun-back* (new 'static 'vector :x -409.6 :y 9011.2 :z -2048.0 :w 1.0))
 
 (defbehavior enhanced-skin-big-gun enhanced-skin ()
-  "The big gun joint (Sig's Peacemaker), after its bones are done. Jak's gun out: pointing as his
-   (hidden) gun's muzzle points, the handle in its right hand, the muzzle saved for his shots. Put away (or
-   in a vehicle): on its back, slanted up over its right shoulder, moving with its chest."
+  "The big gun joint (Sig's Peacemaker), after its bones are done: on its back, slanted up over its right
+   shoulder, moving with its chest. Out, enhanced-sig-gun-post then brings it from there to its right hand
+   (and saves its muzzle for Jak's shots)."
   (let* ((ch (-> self char))
-         (tgt (-> self parent 0))
          (nodes (-> self node-list))
          (k (-> ch gun))
          (s (new 'stack-no-clear 'matrix))
-         (v (new 'stack-no-clear 'vector))
-         (out?(and (using-gun? tgt) (not (focus-test? tgt pilot))))
          )
     (when (and (>= k 0) (< (+ k 1) (-> nodes length)))
-      (cond
-        (out?
-         ;; pointing where his shots go (fire-dir-out), level unless he aims up or down, upright
-         ;; (not behind it, and not steeper than 35 degrees: else its facing)
-         (vector-z-quaternion! v (-> self root quat))
-         (vector-copy! (-> s fvec) (-> tgt gun fire-dir-out))
-         (if (or (< (vector-length (-> s fvec)) 0.5)
-                 (< (vector-dot (-> s fvec) v) (* 0.5 (vector-length (-> s fvec))))
-                 )
-             (vector-copy! (-> s fvec) v)
-             )
-         (vector-normalize! (-> s fvec) 1.0)
-         (set! (-> s fvec y) (fmax -0.57 (fmin 0.57 (-> s fvec y))))
-         (vector-normalize! (-> s fvec) 1.0)
-         (set-vector! (-> s uvec) 0.0 1.0 0.0 0.0)
-         (vector-cross! (-> s rvec) (-> s uvec) (-> s fvec))
-         (vector-normalize! (-> s rvec) 1.0)
-         (vector-cross! (-> s uvec) (-> s fvec) (-> s rvec))
-         (set! (-> s rvec w) 0.0)
-         (set! (-> s uvec w) 0.0)
-         (set! (-> s fvec w) 0.0)
-         ;; the handle where the hand is
-         (vector-rotate*! v (-> ch gun-grip) s)
-         (vector-! (-> s trans) (-> nodes data (-> ch hand) bone position) v)
-         (set! (-> s trans w) 1.0)
-         (vector-matrix*! *enhanced-big-gun-muzzle* (-> ch gun-muzzle) s)
-         (set! *enhanced-big-gun-pid* (-> self pid))
-         )
-        (else
-          ;; on its back: up and slanted over the right shoulder (model space), carried by the chest
-          (let ((back (new 'stack-no-clear 'matrix))
-                (chest (new 'stack-no-clear 'matrix))
-                (c (max 0 (-> ch main)))
-                )
-            (matrix-identity! back)
-            (set-vector! (-> back fvec) -0.34 0.94 0.0 0.0)
-            (set-vector! (-> back uvec) 0.0 0.0 1.0 0.0)
-            (vector-cross! (-> back rvec) (-> back uvec) (-> back fvec))
-            (vector-copy! (-> back trans) *enhanced-big-gun-back*)
-            (set! (-> back trans w) 1.0)
-            ;; its chest's skinning matrix (model to world)
-            (let ((cj (+ c 1)))
-              (if (-> nodes data cj joint)
-                  (matrix*! chest (-> nodes data cj joint bind-pose) (-> nodes data cj bone transform))
-                  (matrix-copy! chest (-> nodes data cj bone transform))
-                  )
-              )
-            (matrix*! s back chest)
+      ;; on its back: up and slanted over the right shoulder (model space), carried by the chest
+      (let ((back (new 'stack-no-clear 'matrix))
+            (chest (new 'stack-no-clear 'matrix))
+            (c (max 0 (-> ch main)))
             )
-          (set! *enhanced-big-gun-pid* 0)
+        (matrix-identity! back)
+        (set-vector! (-> back fvec) -0.34 0.94 0.0 0.0)
+        (set-vector! (-> back uvec) 0.0 0.0 1.0 0.0)
+        (vector-cross! (-> back rvec) (-> back uvec) (-> back fvec))
+        (vector-copy! (-> back trans) *enhanced-big-gun-back*)
+        (set! (-> back trans w) 1.0)
+        ;; its chest's skinning matrix (model to world)
+        (let ((cj (+ c 1)))
+          (if (-> nodes data cj joint)
+              (matrix*! chest (-> nodes data cj joint bind-pose) (-> nodes data cj bone transform))
+              (matrix-copy! chest (-> nodes data cj bone transform))
+              )
           )
+        (matrix*! s back chest)
         )
+      (set! *enhanced-big-gun-pid* 0)
       ;; bone = its bind (joint to model) through s
       (matrix*! (-> nodes data k bone transform) (-> self bind-world k) s)
       (matrix-copy! (-> nodes data (+ k 1) bone transform) (-> nodes data k bone transform))
@@ -704,9 +666,11 @@
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
       )
-  (if (-> self char big-gun)
-      (enhanced-skin-big-gun)
-      )
+  (when (-> self char big-gun)
+    (enhanced-skin-big-gun)
+    ;; Sig's arms and his Peacemaker out (enhanced-sig.gc)
+    (enhanced-sig-gun-post)
+    )
   ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
   (enhanced-ashelin-gun-post)
   (none)
@@ -792,6 +756,7 @@
       (enhanced-skin-dump self)
       )
   (enhanced-ashelin-gun-init)
+  (enhanced-sig-gun-init)
   (go-virtual idle)
   )
 

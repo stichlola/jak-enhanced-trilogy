@@ -12,6 +12,14 @@
 ;; group: enhanced-player.gc plays it on Sig's process (enhanced-sig-animate).
 ;; JAK_ENHANCED_SIG_CLIP=<spool>:<part> (test boots): Sig loops that clip standing (to look at his cutscenes'
 ;; poses), with [sig-clip] log lines (its frame every half second).
+;; His Peacemaker (the end of this file) is Jak's gun-dark-1 underneath (D-pad right, target-gun.gc: Jak's
+;; shots, sounds and ammo), drawn as his NPC holds it: upright in his right hand like a staff, as in his
+;; wasdoors idle (sig-highres-idle-wasdoors, Spargus' gate). Standing, he plays that idle; moving, his right
+;; arm takes its pose over his walk (or Jak's run). Out and away, the gun goes between his back and his hand
+;; in 0.3 s; charging and firing, his forearm and hand tip it forward along Jak's shot. Unarmed, standing,
+;; his arms rest closer to his body than his idle has them.
+;; JAK_ENHANCED_SIG_GUN_TEST=1 (test boots): idle front and side, a walk, out, firing standing and walking,
+;; away, with [sig-gun] log lines ("[sig-gun] shot <name>": when to take a screenshot).
 
 (deftype enhanced-sig-clip (basic)
   ((spool      string)               ;; the stream's name (its .STR file is made from it, ISONameFromAnimationName)
@@ -144,9 +152,58 @@
   (none)
   )
 
+;; his joints and animations (sig-highres-ag, art-elts.gc)
+(defconstant SIG_LSHOULDER 11)
+(defconstant SIG_LELBOW 12)
+(defconstant SIG_RSHOULDER 14)
+(defconstant SIG_RELBOW 15)
+(defconstant SIG_RHAND 16)
+(defconstant SIG_GUN 26)
+(defconstant SIG_BLAST 27)    ;; the Peacemaker's muzzle (child of the gun)
+(defconstant SIG_IDLE_ARMED 4) ;; sig-highres-idle-wasdoors: the gun upright in his right hand
+
+(deftype enhanced-sig-gun-state (structure)
+  ((pid         int32)              ;; his enhanced-skin process (0: none)
+   (out-blend   float)              ;; the gun from his back (0) to his hand (1)
+   (aim-weight  float)              ;; how much the gun tips forward along the shot (0-1)
+   (rest-weight float)              ;; how much his arms take the rest turns (standing unarmed, 0-1)
+   (was-out     symbol)             ;; for the log
+   (test-frame  int32)
+   (hold-local  matrix 4 :inline)   ;; the wasdoors idle: right shoulder, elbow, hand to their parents, the gun to his hand
+   (blast-local matrix :inline)     ;; the muzzle to the gun
+   (before      matrix 80 :inline)  ;; his bones before the arms are posed
+   (moved       uint8 80)           ;; per joint: posed this frame
+   (chain       uint8 80)           ;; per joint: hangs from the joint being turned
+   )
+  )
+
+(define *enhanced-sig-gun* (new 'global 'enhanced-sig-gun-state))
+(set! (-> *enhanced-sig-gun* pid) 0)
+
+(define *enhanced-sig-gun-test-buf* (new 'global 'string 16 (the-as string #f)))
+(define *enhanced-sig-gun-test* (pc-enhanced-getenv "JAK_ENHANCED_SIG_GUN_TEST" *enhanced-sig-gun-test-buf* 16))
+
+(defbehavior enhanced-sig-gun-stand? enhanced-skin ()
+  "Sig standing with his Peacemaker out: his wasdoors idle (his NPC's way of holding it)."
+  (let ((st *enhanced-sig-gun*)
+        (tgt (-> self parent 0))
+        )
+    (and (= (-> self pid) (-> st pid))
+         (using-gun? tgt)
+         (not (focus-test? tgt pilot in-air))
+         (< (-> tgt control ctrl-xz-vel) (if (= (-> self anim) SIG_IDLE_ARMED) (meters 0.6) (meters 0.3)))
+         )
+    )
+  )
+
 (defbehavior enhanced-sig-animate enhanced-skin ()
-  "Sig's streamed clips. Returns #t when it picked his animation."
+  "Sig's streamed clips, and his wasdoors idle standing with his gun out. Returns #t when it picked his
+   animation."
   (enhanced-skin-stream-update)
+  (when (and (not (enhanced-sig-view?)) (enhanced-sig-gun-stand?))
+    (enhanced-skin-play SIG_IDLE_ARMED 1.0 (seconds 0.15))
+    (return #t)
+    )
   (when (enhanced-sig-view?)
     (let* ((clip *enhanced-sig-view*)
            (a (enhanced-sig-clip-update clip self))
@@ -230,6 +287,343 @@
       (let ((w (-> self draw origin w)))
         (vector+! (-> self draw origin) (-> self draw origin) d)
         (set! (-> self draw origin w) w)
+        )
+      )
+    )
+  (none)
+  )
+
+;; ---- his Peacemaker ----
+
+(defun enhanced-sig-gun-parent ((nodes cspace-array) (k int))
+  "Joint k's parent (the gun goes with his right hand), or -1."
+  (if (= k SIG_GUN)
+      SIG_RHAND
+      (let ((cs (-> nodes data k))
+            (stride (&- (the-as pointer (-> nodes data 1)) (the-as pointer (-> nodes data 0))))
+            )
+        (if (-> cs parent)
+            (/ (&- (the-as pointer (-> cs parent)) (the-as pointer (-> nodes data 0))) stride)
+            -1
+            )
+        )
+      )
+  )
+
+(defun enhanced-sig-hold-slot ((k int))
+  "The right arm's joints and the gun: their index in hold-local (0-3), else -1."
+  (case k
+    ((14) 0)
+    ((15) 1)
+    ((16) 2)
+    ((26) 3)
+    (else -1)
+    )
+  )
+
+(defun enhanced-sig-rest-slot ((k int))
+  "The rest pose's joints: right upper arm 0, right forearm 1, left upper arm 2, left forearm 3, else -1."
+  (case k
+    ((14) 0)
+    ((15) 1)
+    ((11) 2)
+    ((12) 3)
+    (else -1)
+    )
+  )
+
+(defbehavior enhanced-sig-gun-init enhanced-skin ()
+  "His process's init: is it Sig? Then his NPC's hold, once: the wasdoors idle's right arm and gun."
+  (let ((st *enhanced-sig-gun*)
+        (nodes (-> self node-list))
+        (inv (new 'stack-no-clear 'matrix))
+        )
+    (set! (-> st pid) 0)
+    (when (and (string= (-> self char name) "sig")
+               (> (-> nodes length) SIG_BLAST)
+               (> (-> self draw art-group length) SIG_IDLE_ARMED)
+               (-> self draw art-group data SIG_IDLE_ARMED)
+               )
+      (set! (-> st pid) (-> self pid))
+      (set! (-> st out-blend) 0.0)
+      (set! (-> st aim-weight) 0.0)
+      (set! (-> st rest-weight) 0.0)
+      (set! (-> st was-out) #f)
+      (ja-channel-set! 1)
+      (ja :group! (the-as art-joint-anim (-> self draw art-group data SIG_IDLE_ARMED)) :num! min)
+      (ja-post)
+      (dotimes (k (min 80 (-> nodes length)))
+        (let ((slot (enhanced-sig-hold-slot k))
+              (p (enhanced-sig-gun-parent nodes k))
+              )
+          (when (and (>= slot 0) (>= p 0))
+            (matrix-4x4-inverse! inv (-> nodes data p bone transform))
+            (matrix*! (-> st hold-local slot) (-> nodes data k bone transform) inv)
+            )
+          )
+        )
+      (matrix-4x4-inverse! inv (-> nodes data SIG_GUN bone transform))
+      (matrix*! (-> st blast-local) (-> nodes data SIG_BLAST bone transform) inv)
+      (format 0 "[sig-gun] ready~%")
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-sig-gun-tip! enhanced-skin ((j int) (dir vector) (w float))
+  "Joint j and all that hangs from it (with the gun, in his hand) turned about j, so the gun points along
+   dir by w (at most 120 degrees)."
+  (let* ((st *enhanced-sig-gun*)
+         (nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (pivot (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data j bone transform trans)))
+         (d0 (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data SIG_GUN bone transform fvec)))
+         (q (new 'stack-no-clear 'quaternion))
+         (tmp (new 'stack-no-clear 'vector))
+         )
+    (set! (-> pivot w) 1.0)
+    (set! (-> d0 w) 0.0)
+    (vector-normalize! d0 1.0)
+    (when (< (vector-dot d0 dir) 0.9999)
+      (quaternion-from-two-vectors-max-angle-partial! q d0 dir (degrees 120) w)
+      (dotimes (k n)
+        (let ((p (enhanced-sig-gun-parent nodes k)))
+          (set! (-> st chain k) (if (or (= k j) (and (> k 0) (>= p 0) (< p k) (nonzero? (-> st chain p)))) 1 0))
+          )
+        (when (nonzero? (-> st chain k))
+          (let ((m (-> nodes data k bone transform)))
+            (dotimes (r 3)
+              (let ((w0 (-> m vector r w)))
+                (vector-orient-by-quat! (-> m vector r) (-> m vector r) q)
+                (set! (-> m vector r w) w0)
+                )
+              )
+            (vector-! tmp (-> m trans) pivot)
+            (set! (-> tmp w) 0.0)
+            (vector-orient-by-quat! tmp tmp q)
+            (vector+! (-> m trans) pivot tmp)
+            (set! (-> m trans w) 1.0)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-sig-gun-pose enhanced-skin ((out-w float) (aim-w float) (rest-w float) (aim-dir vector))
+  "His arms and gun over what his bones have now (what hangs from them following): by rest-w (standing
+   unarmed) his arms in closer to his body, the left forearm forward; by out-w the wasdoors idle's right
+   arm and the gun from his back to his hand; by aim-w the gun tipped forward along aim-dir (his forearm a
+   little, his hand the rest)."
+  (let* ((st *enhanced-sig-gun*)
+         (nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (local (new 'stack-no-clear 'matrix))
+         (inv (new 'stack-no-clear 'matrix))
+         (mixed (new 'stack-no-clear 'matrix))
+         ;; the rest pose's turns, per rest slot
+         (q-rest (new 'stack-no-clear 'inline-array 'quaternion 4))
+         )
+    (dotimes (k n)
+      (matrix-copy! (-> st before k) (-> nodes data k bone transform))
+      (set! (-> st moved k) 0)
+      )
+    ;; the rest pose's turns: his idle's arms hang straight down from his wide shoulders, the left forearm
+    ;; back. Upper arms in toward his sides, the left forearm forward (his hands at his thighs).
+    (when (< 0.0 rest-w)
+      (let ((right (vector-! (new 'stack-no-clear 'vector) (-> st before SIG_RSHOULDER trans) (-> st before SIG_LSHOULDER trans)))
+            (fwd (new 'stack-no-clear 'vector))
+            (down (new 'stack-no-clear 'vector))
+            (to (new 'stack-no-clear 'vector))
+            )
+        (set! (-> right w) 0.0)
+        (vector-flatten! right right *up-vector*)
+        (vector-normalize! right 1.0)
+        (vector-z-quaternion! fwd (-> self root quat))
+        (set! (-> fwd w) 0.0)
+        (vector-flatten! fwd fwd *up-vector*)
+        (vector-normalize! fwd 1.0)
+        (set-vector! down 0.0 -1.0 0.0 0.0)
+        (dotimes (slot 4)
+          (let ((side (case slot
+                        ((0) (degrees -5))   ;; right upper arm: in (toward his left)
+                        ((2) (degrees 5))    ;; left upper arm: in
+                        (else (degrees 0))
+                        )
+                      )
+                (ahead (case slot
+                         ((1) (degrees 4))   ;; right forearm: already forward, a little more
+                         ((3) (degrees 18))  ;; left forearm: from back to along his side
+                         (else (degrees 0))
+                         )
+                       )
+                )
+            (vector-copy! to down)
+            (vector+float*! to to right (tan side))
+            (vector+float*! to to fwd (tan ahead))
+            (vector-normalize! to 1.0)
+            (quaternion-from-two-vectors-partial! (-> q-rest slot) down to rest-w)
+            )
+          )
+        )
+      )
+    (dotimes (k n)
+      (let ((p (enhanced-sig-gun-parent nodes k))
+            (slot (enhanced-sig-hold-slot k))
+            (rest (enhanced-sig-rest-slot k))
+            )
+        (when (and (> k 0) (>= p 0) (< p k))
+          (cond
+            ((= k SIG_GUN)
+             ;; from where enhanced-skin-big-gun put it (his back) to his hand, as the wasdoors idle holds it
+             (when (< 0.0 out-w)
+               (matrix*! mixed (-> st hold-local 3) (-> nodes data SIG_RHAND bone transform))
+               (enhanced-matrix-blend-rows! (-> nodes data k bone transform) (-> st before k) mixed out-w (-> st before k))
+               (set! (-> st moved k) 1)
+               )
+             )
+            ((= k SIG_BLAST)
+             (when (nonzero? (-> st moved SIG_GUN))
+               (matrix*! (-> nodes data k bone transform) (-> st blast-local) (-> nodes data SIG_GUN bone transform))
+               (set! (-> st moved k) 1)
+               )
+             )
+            ((or (and (>= slot 0) (< 0.0 out-w)) (and (>= rest 0) (< 0.0 rest-w)) (nonzero? (-> st moved p)))
+             (let ((bone (-> nodes data k bone transform)))
+               ;; its own, where its parent is now
+               (matrix-4x4-inverse! inv (-> st before p))
+               (matrix*! local (-> st before k) inv)
+               (matrix*! bone local (-> nodes data p bone transform))
+               ;; unarmed, standing: the rest turn (about the joint)
+               (when (and (>= rest 0) (< 0.0 rest-w))
+                 (dotimes (r 3)
+                   (let ((w0 (-> bone vector r w)))
+                     (vector-orient-by-quat! (-> bone vector r) (-> bone vector r) (-> q-rest rest))
+                     (set! (-> bone vector r w) w0)
+                     )
+                   )
+                 )
+               ;; armed: the wasdoors idle's right arm
+               (when (and (>= slot 0) (< 0.0 out-w))
+                 (matrix*! mixed (-> st hold-local slot) (-> nodes data p bone transform))
+                 (enhanced-matrix-blend-rows! bone (matrix-copy! local bone) mixed out-w local)
+                 )
+               )
+             (set! (-> st moved k) 1)
+             )
+            )
+          )
+        )
+      )
+    ;; charging and firing: the gun tipped forward along the shot, his forearm part of the way, his hand the rest
+    (when (and (< 0.0 aim-w) (< 0.5 out-w))
+      (enhanced-sig-gun-tip! SIG_RELBOW aim-dir (* 0.4 aim-w))
+      (enhanced-sig-gun-tip! SIG_RHAND aim-dir aim-w)
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-sig-gun-test-step ((tgt target))
+  "JAK_ENHANCED_SIG_GUN_TEST: a step toward the camera (his front), one sideways (his side), a walk away;
+   D-pad right (out), a step sideways, fire standing, walk firing; D-pad right (away)."
+  (let* ((st *enhanced-sig-gun*)
+         (t (-> st test-frame))
+         )
+    (+! (-> st test-frame) 1)
+    (case t
+      ((1) (set-ignore-controller-in-bg! *pc-settings* #t))
+      ((400) (format 0 "[sig-gun] shot idle-front~%"))
+      ((640) (format 0 "[sig-gun] shot idle-side~%"))
+      ((900) (format 0 "[sig-gun] shot walk~%"))
+      ((1080) (set! *enhanced-pad-press* (pad-buttons right)) (format 0 "[sig-gun] test: d-pad right (out)~%"))
+      ((1260) (format 0 "[sig-gun] shot armed~%"))
+      ((1300) (format 0 "[sig-gun] test: fire standing~%"))
+      ((1370) (format 0 "[sig-gun] shot fire~%"))
+      ((1600) (format 0 "[sig-gun] test: walk firing~%"))
+      ((1900) (set! *enhanced-pad-press* (pad-buttons right)) (format 0 "[sig-gun] test: d-pad right (away)~%"))
+      ((2100) (format 0 "[sig-gun] test: done~%"))
+      )
+    (set! *enhanced-pad-hold* (if (or (and (>= t 1300) (< t 1390)) (and (>= t 1450) (< t 1540))
+                                      (and (>= t 1620) (< t 1700)) (and (>= t 1740) (< t 1820))
+                                      )
+                                  (pad-buttons r1)
+                                  (pad-buttons)
+                                  )
+          )
+    ;; a step toward the camera (he turns to face it), one to his side, a walk away from it
+    (set! *enhanced-pad-lefty* (cond
+                                 ((and (>= t 200) (< t 215)) 255)
+                                 ((or (and (>= t 700) (< t 1000)) (and (>= t 1600) (< t 1850))) 90)
+                                 (else -1)
+                                 )
+          )
+    ;; (and with the gun out, one to his side: the hold and the shots seen from the side)
+    (set! *enhanced-pad-leftx* (if (or (and (>= t 480) (< t 492)) (and (>= t 1150) (< t 1162))) 255 -1))
+    )
+  (none)
+  )
+
+(defbehavior enhanced-sig-gun-post enhanced-skin ()
+  "Each frame after his bones are done (enhanced-skin-post, after enhanced-skin-big-gun put the gun on his
+   back): his arms, the gun out in his hand, its muzzle for Jak's shots (enhanced-player-muzzle!)."
+  (let ((st *enhanced-sig-gun*)
+        (tgt (-> self parent 0))
+        )
+    (when (= (-> self pid) (-> st pid))
+      (if *enhanced-sig-gun-test*
+          (enhanced-sig-gun-test-step tgt)
+          )
+      (let* ((out? (and (nonzero? (-> tgt gun)) (using-gun? tgt) (not (focus-test? tgt pilot))))
+             ;; charging (R1 held) or just fired
+             (aim? (and out?
+                        (or (cpad-hold? (-> tgt control cpad number) r1)
+                            (not (time-elapsed? (-> tgt gun fire-time) (seconds 0.8)))
+                            )
+                        )
+                   )
+             (fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+             (dir (new 'stack-no-clear 'vector))
+             )
+        ;; out of and onto his back in 0.3 s (as Jak takes his out)
+        (seek! (-> st out-blend) (if out? 1.0 0.0) (* 3.3 (seconds-per-frame)))
+        (seek! (-> st aim-weight) (if aim? 1.0 0.0) (* 5.0 (seconds-per-frame)))
+        (seek! (-> st rest-weight)
+               (if (and (not out?) (= (-> self anim) (-> self char idle))) (- 1.0 (-> self pose-blend)) 0.0)
+               (* 5.0 (seconds-per-frame))
+               )
+        (when (!= out? (-> st was-out))
+          (set! (-> st was-out) out?)
+          (format 0 "[sig-gun] ~A~%" (if out? "out" "away"))
+          )
+        ;; where the shot goes: Jak's gun's fire direction (not behind him), else ahead
+        (set! (-> fwd w) 0.0)
+        (vector-normalize! fwd 1.0)
+        (vector-copy! dir (if (nonzero? (-> tgt gun)) (-> tgt gun fire-dir-out) fwd))
+        (set! (-> dir w) 0.0)
+        (if (or (< (vector-length dir) 0.5) (< (vector-dot dir fwd) (* 0.3 (vector-length dir))))
+            (vector-copy! dir fwd)
+            )
+        (vector-normalize! dir 1.0)
+        (if (or (< 0.0 (-> st out-blend)) (< 0.0 (-> st rest-weight)))
+            (enhanced-sig-gun-pose (-> st out-blend) (-> st aim-weight) (-> st rest-weight) dir)
+            )
+        ;; Jak's shots leave from its muzzle
+        (cond
+          ((< 0.5 (-> st out-blend))
+           (vector-copy! *enhanced-big-gun-muzzle* (-> self node-list data SIG_BLAST bone transform trans))
+           (set! *enhanced-big-gun-pid* (-> self pid))
+           )
+          (else
+            (set! *enhanced-big-gun-pid* 0)
+            )
+          )
+        (if (and *enhanced-sig-gun-test* (< 0.5 (-> st aim-weight)) (zero? (mod (-> st test-frame) 30)))
+            (format 0 "[sig-gun] aim ~,,2f gun-along-shot ~,,2f~%" (-> st aim-weight)
+                    (vector-dot dir (vector-normalize-copy! (new 'stack-no-clear 'vector) (-> self node-list data SIG_GUN bone transform fvec) 1.0))
+                    )
+            )
         )
       )
     )
