@@ -233,8 +233,9 @@ def main():
     parser.add_argument("--installer", action="store_true", help="also the setup .exe (Inno Setup 6)")
     parser.add_argument("--light", action="store_true", help="Enhanced Light, the OpenGOAL launcher mod")
     parser.add_argument("--notes", type=Path, help="the release notes, in the package as CHANGELOG.md")
-    parser.add_argument("--patch-from", type=Path,
-                        help="the previous release's ZIP: also the patch from it (make_patch)")
+    parser.add_argument("--patch-from", type=Path, nargs="+", default=[],
+                        help="earlier releases' ZIPs: also a patch from each (make_patch), so that a"
+                             " player of any of them downloads only what changed")
     parser.add_argument("--skip-shader-check", action="store_true",
                         help="don't stop on shader errors (check_shaders.py: glslang, ASCII only)")
     args = parser.parse_args()
@@ -323,8 +324,8 @@ def main():
         for f in sorted(dest.rglob("*")):
             z.write(f, Path(NAME) / f.relative_to(dest))
     print(f"{count} data files; {zip_path} ({zip_path.stat().st_size / 1e6:.0f} MB)")
-    if args.patch_from:
-        make_patch(dest, args.patch_from, args.out, args.version)
+    for old_zip in args.patch_from:
+        make_patch(dest, old_zip, args.out, args.version)
 
     if args.installer:
         # Setup-Jak-Enhanced-Trilogy-<version>.exe from the same folder (installer.iss)
