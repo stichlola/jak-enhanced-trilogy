@@ -1584,8 +1584,7 @@ u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
       }
     }
     int player = g_enhanced_menu.player;
-    // (only one that can be chosen: Sig is unfinished, enhanced_character_selectable)
-    if (player < 0 || player >= enhanced_character_selectable()) {
+    if (player < 0 || player >= kEnhancedCharacterCount) {
       player = 0;
     }
     auto* data = Ptr<String>(dest).c()->data();

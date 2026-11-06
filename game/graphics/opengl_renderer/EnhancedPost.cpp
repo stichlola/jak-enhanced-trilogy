@@ -6179,13 +6179,14 @@ void EnhancedPost::draw_menu() {
       if (ImGui::Combo(
               "Character", &character,
               [](void*, int i) { return kEnhancedCharacterTable[i].label; }, nullptr,
-              enhanced_character_selectable())) {
+              kEnhancedCharacterCount)) {
         g_enhanced_menu.player = character;
       }
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
-            "Swap character: Ashelin in Jak's place (moves, jumps, vehicles), switched live.\n"
-            "Ashelin: D-pad up takes out her pistol");
+            "Swap character: Ashelin or Sig in Jak's place (moves, jumps, vehicles), switched live.\n"
+            "Ashelin: D-pad up takes out her pistol\n"
+            "Sig: D-pad right takes out his Peacemaker");
       }
     }
     // (not in Enhanced Light: the game plays as it was, see pc_enhanced_storm_drag and the rest)

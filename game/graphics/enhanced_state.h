@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <array>
-#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -229,16 +228,9 @@ inline constexpr EnhancedCharacter kEnhancedCharacterTable[] = {
 };
 constexpr int kEnhancedCharacterCount =
     sizeof(kEnhancedCharacterTable) / sizeof(kEnhancedCharacterTable[0]);
-// the ones that can be chosen (menu, saved "player", JAK_ENHANCED_PLAYER): the first ones of the table.
-// Sig is unfinished: left out unless JAK_ENHANCED_UNFINISHED_CHARACTERS is set (his code stays)
-constexpr int kEnhancedCharacterFinished = 2;
-inline int enhanced_character_selectable() {
-  static const bool all = std::getenv("JAK_ENHANCED_UNFINISHED_CHARACTERS") != nullptr;
-  return all ? kEnhancedCharacterCount : kEnhancedCharacterFinished;
-}
-// the index of a character's name, or -1 (also for one that can't be chosen)
+// the index of a character's name, or -1
 inline int enhanced_character_index(const char* name) {
-  for (int i = 0; name && i < enhanced_character_selectable(); i++) {
+  for (int i = 0; name && i < kEnhancedCharacterCount; i++) {
     if (std::strcmp(name, kEnhancedCharacterTable[i].name) == 0) {
       return i;
     }
