@@ -270,20 +270,23 @@ begin
   DonateTrust.Caption := CustomMessage('Trust');
 end;
 
-procedure CurPageChanged(CurPageID: Integer);
+// the buttons on a page (the welcome page and the finished page share them), from Top down
+// (WithHead: the welcome page already says it in its text, and has no room for it)
+procedure PlaceDonate(Page: TNewNotebookPage; Left, Top, Width: Integer; WithHead: Boolean);
 var
-  i, Top, Left, Width: Integer;
+  i: Integer;
 begin
-  if CurPageID <> wpFinished then
-    exit;
-  Left := WizardForm.FinishedLabel.Left;
-  Width := WizardForm.FinishedLabel.Width;
-  Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height;
-  if WizardForm.RunList.Visible then
-    Top := WizardForm.RunList.Top + WizardForm.RunList.Height;
-  Top := Top + ScaleY(14);
-  DonateHead.SetBounds(Left, Top, Width, DonateHead.Height);
-  Top := Top + DonateHead.Height + ScaleY(6);
+  DonateHead.Parent := Page;
+  for i := 1 to 3 do
+    DonatePanel[i].Parent := Page;
+  DonateLock.Parent := Page;
+  DonateTrust.Parent := Page;
+  DonateHead.Visible := WithHead;
+  if WithHead then
+  begin
+    DonateHead.SetBounds(Left, Top, Width, DonateHead.Height);
+    Top := Top + DonateHead.Height + ScaleY(6);
+  end;
   for i := 1 to 3 do
   begin
     DonatePanel[i].Left := Left;
@@ -292,6 +295,28 @@ begin
   end;
   DonateLock.SetBounds(Left, Top + ScaleY(3), ScaleY(12), ScaleY(12));
   DonateTrust.SetBounds(Left + ScaleX(16), Top + ScaleY(2), Width - ScaleX(16), ScaleY(44));
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Top: Integer;
+begin
+  if CurPageID = wpWelcome then
+  begin
+    // (the label fills the page by default: down to its own text first)
+    WizardForm.WelcomeLabel2.AdjustHeight;
+    PlaceDonate(WizardForm.WelcomePage, WizardForm.WelcomeLabel2.Left,
+      WizardForm.WelcomeLabel2.Top + WizardForm.WelcomeLabel2.Height + ScaleY(10),
+      WizardForm.WelcomeLabel2.Width, False);
+  end
+  else if CurPageID = wpFinished then
+  begin
+    Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height;
+    if WizardForm.RunList.Visible then
+      Top := WizardForm.RunList.Top + WizardForm.RunList.Height;
+    PlaceDonate(WizardForm.FinishedPage, WizardForm.FinishedLabel.Left, Top + ScaleY(14),
+      WizardForm.FinishedLabel.Width, True);
+  end;
 end;
 
 procedure InitializeWizard;
