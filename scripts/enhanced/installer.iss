@@ -26,7 +26,7 @@ DefaultGroupName=Jak Enhanced Trilogy
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
 OutputBaseFilename=Setup-Jak-Enhanced-Trilogy-{#MyVersion}
-; the art: cover_art.py compose (the game wheel's portraits) -> game/assets/enhanced/art
+; the art: cover_art.py compose (the start menu's pictures, wheel/menuN.jpg + title.png) -> game/assets/enhanced/art
 SetupIconFile=..\..\game\assets\enhanced\art\jak-enhanced.ico
 WizardImageFile=..\..\game\assets\enhanced\art\wizard-164x314.bmp,..\..\game\assets\enhanced\art\wizard-328x628.bmp
 WizardSmallImageFile=..\..\game\assets\enhanced\art\wizard-small-55x55.bmp,..\..\game\assets\enhanced\art\wizard-small-110x110.bmp

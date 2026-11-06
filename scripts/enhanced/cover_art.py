@@ -4,7 +4,7 @@
   python scripts/enhanced/cover_art.py image cover|icon  # one painted by Tripo (~5 credits each)
   python scripts/enhanced/cover_art.py image wheel1|wheel2|wheel3  # the game wheel's portraits
   python scripts/enhanced/cover_art.py image menu1|menu2|menu3     # the start menu's, from local/cover_art/menuN_ref.png
-  python scripts/enhanced/cover_art.py compose           # title, banner, installer pictures, .ico
+  python scripts/enhanced/cover_art.py compose           # cover, banner, installer pictures, .ico from the start menu's cards
 
 `ref` poses Jak 1 (Daxter on his shoulder), Jak II and Jak 3 (each with the Morph Gun) from the games'
 models (the decompiler's glbs; Jak 3 from jak3-ue5's staging) and renders them in Blender
@@ -475,20 +475,31 @@ def save_bmp(img, path, size):
 
 
 WHEEL = ROOT / "game/assets/enhanced/wheel"
-# where each portrait's Jak stands (its middle across, 0..1): Jak 1 with Daxter beside him
-PORTRAIT_X = (0.47, 0.56, 0.5)
-# the banner's panels (2560 x 1280): each portrait's size, its Jak's middle across and its top, so that
-# all three whole faces stand on one line under the title
-BANNER_PLACES = ((1900, 0.455, -440), (2000, 0.56, -70), (2000, 0.5, -80))
+# the start menu's pictures (EnhancedPost::draw_start_menu): the three cards and the title lettering
+PORTRAITS = [WHEEL / f"menu{n}.jpg" for n in (1, 2, 3)]
+TITLE_PNG = WHEEL / "title.png"
+# the cover's panels (2000 x 1500): each card's size, the middle across (0..1) of Jak with Daxter and
+# its top, the faces under the title
+COVER_PLACES = ((1300, 0.52, 250), (1300, 0.43, 250), (1300, 0.58, 250))
+# the banner's panels (2560 x 1280)
+BANNER_PLACES = ((1250, 0.52, 190), (1250, 0.43, 190), (1250, 0.58, 190))
+
+
+def title_art(width):
+    """The start menu's lettering (wheel/title.png) at this width; our drawn block without it."""
+    if not TITLE_PNG.exists():
+        return title_block(width)
+    t = Image.open(TITLE_PNG).convert("RGBA")
+    return t.resize((width, round(t.height * width / t.width)), Image.LANCZOS)
 
 
 def portrait_art(W=W, H=H, places=None, shade_to=None):
-    """The three game-wheel portraits (game/assets/enhanced/wheel) as three panels, split by slanted
-    glowing seams, darkened at the top for the title; None without them."""
-    paths = [WHEEL / f"jak{n}.png" for n in (1, 2, 3)]
+    """The start menu's three cards (game/assets/enhanced/wheel/menuN.jpg) as three panels, split by
+    slanted glowing seams, darkened at the top for the title; None without them."""
+    paths = PORTRAITS
     if not all(p.exists() for p in paths):
         return None
-    places = places or [(H, x, 0) for x in PORTRAIT_X]
+    places = places or COVER_PLACES
     shade_to = shade_to or TITLE * 1.6
     art = Image.new("RGBA", (W, H), (0, 0, 0, 255))
     slant = 90
@@ -526,42 +537,52 @@ def portrait_art(W=W, H=H, places=None, shade_to=None):
     return art
 
 
+WIZARD_X = 0.6  # the installer's side picture: the middle across of Jak 3's card it keeps
+ICON_BOX = (410, 20, 870, 480)  # Jak 3's head with Daxter's in the start menu's card
+
+
 def portrait_icon():
-    """Jak 3's face (the wheel's portrait), square."""
-    pic = Image.open(WHEEL / "jak3.png").convert("RGBA")
-    return pic.crop((222, 70, 802, 650)).resize((1024, 1024), Image.LANCZOS)
+    """Jak 3's face with Daxter (the start menu's card), square."""
+    pic = Image.open(PORTRAITS[2]).convert("RGBA")
+    return pic.crop(ICON_BOX).resize((1024, 1024), Image.LANCZOS)
 
 
 def cmd_compose():
     dest = OUT / "out"
     dest.mkdir(parents=True, exist_ok=True)
-    art = portrait_art()
+    art = portrait_art(shade_to=0.22)
     if art is None:
         src, painted = latest("cover")
         if not painted:
             print(f"no painting yet: composing the reference ({src.name}) to check the layout")
         art = cover_crop(Image.open(src).convert("RGBA"), W / H).resize((W, H), Image.LANCZOS)
     cover = art.copy()
-    title = title_block(int(W * 0.86))
-    cover.alpha_composite(title, ((W - title.width) // 2, int(H * TITLE / 2 - title.height / 2) + 10))
+    title = title_art(int(W * 0.92))
+    cover.alpha_composite(title, ((W - title.width) // 2, 60))
     cover.convert("RGB").save(dest / "cover.png")
     cover.convert("RGB").save(dest / "cover.jpg", quality=92)
     # the social banner (2:1): its own panels, the 4:3 cover's would lose the faces' chins
-    wide = portrait_art(2560, 1280, BANNER_PLACES, 0.4)
+    wide = portrait_art(2560, 1280, BANNER_PLACES, 0.22)
     if wide is None:
         wide = cover.resize((2560, 1920), Image.LANCZOS).crop((0, 40, 2560, 1320))
     else:
-        title = title_block(1800)
-        wide.alpha_composite(title, ((2560 - title.width) // 2, 24))
+        title = title_art(2300)
+        wide.alpha_composite(title, ((2560 - title.width) // 2, 20))
     wide.resize((1280, 640), Image.LANCZOS).convert("RGB").save(dest / "banner-1280x640.png")
     # the installer's side picture (welcome and last page, 164 x 314 at 100%, 328 x 628 at 200%):
-    # the middle panel, no title
-    tall = art.crop((W // 2 - 400, int(H * TITLE) - 120, W // 2 + 400, H))
-    tall = cover_crop(tall, 164 / 314)
+    # Jak 3's card whole (head to feet), no title
+    if PORTRAITS[2].exists():
+        pic = Image.open(PORTRAITS[2]).convert("RGBA")
+        tw = round(pic.height * 164 / 314)
+        cx = min(max(int(pic.width * WIZARD_X), tw // 2), pic.width - tw // 2)
+        tall = pic.crop((cx - tw // 2, 0, cx - tw // 2 + tw, pic.height))
+    else:
+        tall = art.crop((W // 2 - 400, int(H * TITLE) - 120, W // 2 + 400, H))
+        tall = cover_crop(tall, 164 / 314)
     save_bmp(tall, dest / "wizard-164x314.bmp", (164, 314))
     save_bmp(tall, dest / "wizard-328x628.bmp", (328, 628))
     # the icon: the painted (or reference) head, rounded corners
-    if (WHEEL / "jak3.png").exists():
+    if PORTRAITS[2].exists():
         ic = portrait_icon()
     else:
         src, painted_icon = latest("icon")
