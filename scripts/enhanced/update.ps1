@@ -1,13 +1,14 @@
 # Jak Enhanced Trilogy: installs a newer release over this one, then starts the launcher again.
-#   update.ps1 -Root <the release folder> -Tag v0.6.2
+#   update.ps1 -Root <the release folder> -Tag v0.6.2 [-Gui]
 #   update.ps1 -Root <the release folder> -CheckOnly    exit code 10 if the game is open from there, else 0
 #   update.ps1 -Root <the release folder> -CloseOnly    closes it without asking; 0 closed, 11 couldn't
-# The launcher runs it (and quits) when the player says yes to a new version; the installer uses the
-# last two (it asks in its own window). The release ZIP holds only the programs and data\: the
+# The launcher runs it (and quits) when the player says yes to a new version, -Gui in a progress window
+# (no console: its log in data\log\update.log); the installer uses the last two (it asks in its own window). The release ZIP holds only the programs and data\: the
 # extracted discs (data\out), the ISO folder and the HD textures are not in it, so copying it over the
 # folder keeps them, and what the player can edit (the main world) comes in data\shipped, for the
 # launcher to apply file by file (apply_shipped.ps1); saves and settings live in %APPDATA%\OpenGOAL.
-param([Parameter(Mandatory = $true)][string]$Root, [string]$Tag, [switch]$CheckOnly, [switch]$CloseOnly)
+param([Parameter(Mandatory = $true)][string]$Root, [string]$Tag, [switch]$CheckOnly, [switch]$CloseOnly,
+      [switch]$Gui)
 $ErrorActionPreference = 'Stop'
 $Root = $Root.TrimEnd('\')
 
@@ -24,7 +25,7 @@ function Get-InstallProcesses {
       # (the launcher writes an apostrophe of the path doubled)
       $line = $p.CommandLine.Replace("''", "'")
       if ($line.IndexOf($inside, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-          $line -match 'Jak Enhanced Trilogy\.bat|Report a problem\.bat|report\.ps1|gk\.exe') {
+          $line -match 'Jak Enhanced Trilogy\.bat|Report a problem\.bat|report\.ps1|launcher\.ps1|ask\.ps1|gk\.exe') {
         $helpers += $p
       }
     }
@@ -72,7 +73,61 @@ if ($CloseOnly) {
 }
 if (-not $Tag) { throw 'update.ps1: -Tag is needed' }
 
-function Write-Line([string]$text) { Write-Host ("`r" + $text.PadRight(70)) -NoNewline }
+# -Gui: a window with what it does, the progress line under it and a bar (the console's lines too, for the log)
+$ui = $null
+if ($Gui) {
+  Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+  [Windows.Forms.Application]::EnableVisualStyles()
+  $ui = New-Object Windows.Forms.Form
+  $ui.Text = 'Jak Enhanced Trilogy'
+  try { $ui.Icon = New-Object Drawing.Icon (Join-Path $Root 'data\game\assets\enhanced\art\jak-enhanced.ico') } catch { }
+  $ui.FormBorderStyle = 'FixedDialog'
+  $ui.ControlBox = $false
+  $ui.StartPosition = 'CenterScreen'
+  $ui.ClientSize = New-Object Drawing.Size 480, 118
+  $ui.Font = [Drawing.SystemFonts]::MessageBoxFont
+  $uiStatus = New-Object Windows.Forms.Label
+  $uiStatus.SetBounds(14, 12, 452, 40)
+  $uiBar = New-Object Windows.Forms.ProgressBar
+  $uiBar.SetBounds(14, 56, 452, 18)
+  $uiBar.Style = 'Marquee'
+  $uiBar.MarqueeAnimationSpeed = 30
+  $uiLine = New-Object Windows.Forms.Label
+  $uiLine.SetBounds(14, 82, 452, 30)
+  $uiLine.ForeColor = [Drawing.SystemColors]::GrayText
+  $ui.Controls.AddRange(@($uiStatus, $uiBar, $uiLine))
+  try {
+    [void][IO.Directory]::CreateDirectory((Join-Path $Root 'data\log'))
+    Start-Transcript -Path (Join-Path $Root 'data\log\update.log') -Force | Out-Null
+  } catch { }
+}
+
+function Update-Ui { if ($ui) { [Windows.Forms.Application]::DoEvents() } }
+
+# what it does now: a line in the console, the window's headline
+function Write-Step([string]$text) {
+  Write-Host $text
+  if ($ui) {
+    $uiStatus.Text = $text
+    $uiLine.Text = ''
+    $uiBar.Style = 'Marquee'
+    if (-not $ui.Visible) { $ui.Show(); $ui.Activate() }
+    Update-Ui
+  }
+}
+
+# its progress, rewritten in place; with a percentage, the bar
+function Write-Line([string]$text, [int]$percent = -1) {
+  Write-Host ("`r" + $text.PadRight(70)) -NoNewline
+  if ($ui) {
+    $uiLine.Text = $text.Trim()
+    if ($percent -ge 0) {
+      $uiBar.Style = 'Continuous'
+      $uiBar.Value = [Math]::Max(0, [Math]::Min(100, $percent))
+    }
+    Update-Ui
+  }
+}
 
 function Test-Room([string]$path, [long]$bytes, [string]$what) {
   try { $free = (New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($path))).AvailableFreeSpace } catch { return }
@@ -90,6 +145,7 @@ function Get-Download([string]$url, [string]$file) {
     $response = $request.GetResponse()
   } catch {
     $web = $_.Exception.InnerException
+    # (HTTP 404, no such file: a patch the release doesn't have, the whole ZIP then)
     if ($web -and $web.Response) { throw "the server doesn't have this version's file (HTTP $([int]$web.Response.StatusCode))" }
     throw "couldn't reach the server: check your connection"
   }
@@ -98,9 +154,9 @@ function Get-Download([string]$url, [string]$file) {
     if ($total -gt 0) {
       Test-Room $file ($total * 3) 'the download and its unpacked files'
       Test-Room $Root ($total * 2) 'the new files'
-      Write-Host ("Downloading Jak Enhanced Trilogy {0} ({1} MB)..." -f $Tag, [int]($total / 1MB))
+      Write-Step ("Downloading Jak Enhanced Trilogy {0} ({1} MB)..." -f $Tag, [int]($total / 1e6))
     } else {
-      Write-Host "Downloading Jak Enhanced Trilogy $Tag..."
+      Write-Step "Downloading Jak Enhanced Trilogy $Tag..."
     }
     $in = $response.GetResponseStream()
     $out = [IO.File]::Create($file)
@@ -114,11 +170,12 @@ function Get-Download([string]$url, [string]$file) {
         $done += $n
         if ($clock.ElapsedMilliseconds - $shown -ge 500) {
           $shown = $clock.ElapsedMilliseconds
-          $speed = $done / 1MB / [Math]::Max($clock.Elapsed.TotalSeconds, 0.1)
+          $speed = $done / 1e6 / [Math]::Max($clock.Elapsed.TotalSeconds, 0.1)
           if ($total -gt 0) {
-            Write-Line ("  {0} of {1} MB ({2}%), {3:0.0} MB/s" -f [int]($done / 1MB), [int]($total / 1MB), [int](100 * $done / $total), $speed)
+            $part = [int](100 * $done / $total)
+            Write-Line ("  {0} of {1} MB ({2}%), {3:0.0} MB/s" -f [int]($done / 1e6), [int]($total / 1e6), $part, $speed) $part
           } else {
-            Write-Line ("  {0} MB, {1:0.0} MB/s" -f [int]($done / 1MB), $speed)
+            Write-Line ("  {0} MB, {1:0.0} MB/s" -f [int]($done / 1e6), $speed)
           }
         }
       }
@@ -128,7 +185,7 @@ function Get-Download([string]$url, [string]$file) {
     }
     Write-Host ''
     if ($total -gt 0 -and $done -ne $total) {
-      throw ("the download stopped early: {0} of {1} MB" -f [int]($done / 1MB), [int]($total / 1MB))
+      throw ("the download stopped early: {0} of {1} MB" -f [int]($done / 1e6), [int]($total / 1e6))
     }
   } finally {
     $response.Close()
@@ -159,7 +216,7 @@ function Expand-WithProgress([string]$zipFile, [string]$destination) {
         [void][IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($target))
         [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $target, $true)
       }
-      if ($i % 100 -eq 0 -or $i -eq $count) { Write-Line ("  {0} of {1} files" -f $i, $count) }
+      if ($i % 100 -eq 0 -or $i -eq $count) { Write-Line ("  {0} of {1} files" -f $i, $count) ([int](100 * $i / $count)) }
     }
     Write-Host ''
   } finally {
@@ -190,6 +247,7 @@ $name = 'Jak-Enhanced-Trilogy'
 $launcher = Join-Path $Root 'Jak Enhanced Trilogy.bat'
 try {
   try { $Host.UI.RawUI.WindowTitle = "Jak Enhanced Trilogy: updating to $Tag" } catch { }
+  Write-Step "Updating Jak Enhanced Trilogy to $Tag..."
   # GitHub only answers over TLS 1.2 or newer
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
   # the launcher has to be gone before its own file is replaced (cmd reads a .bat as it runs it)
@@ -208,6 +266,8 @@ try {
       Get-Download "$base/$name-$Tag-patch-$old.zip" $zip
       $patch = $true
     } catch {
+      # only when the release has no patch from it: no connection stays an error (20 MB don't become 400)
+      if ($_.Exception.Message -notmatch 'HTTP 404') { throw }
       Write-Host "(no update from $old alone: the whole new version)"
     }
   }
@@ -215,7 +275,7 @@ try {
     $zip = Join-Path $work "$name-$Tag.zip"
     Get-Download "$base/$name-$Tag.zip" $zip
   }
-  Write-Host 'Unpacking...'
+  Write-Step 'Unpacking...'
   $unpacked = Join-Path $work 'new'
   Expand-WithProgress $zip $unpacked
   $new = Join-Path $unpacked $name
@@ -229,12 +289,19 @@ try {
     Write-Host ''
     Write-Host "Still open: $($names -join ', ')."
     Write-Host 'They have to close before the update. Save your game first: what is not saved is lost.'
-    $answer = Read-Host 'Press Enter to close them and update, or type N and Enter to cancel'
+    if ($ui) {
+      $answer = [Windows.Forms.MessageBox]::Show($ui, ("Still open: $($names -join ', ').`r`n`r`nThey have to close " +
+        "before the update. Save your game first: what is not saved is lost.`r`n`r`nClose them and update?"),
+        'Jak Enhanced Trilogy', 'OKCancel', 'Warning')
+      $answer = if ($answer -eq 'OK') { '' } else { 'n' }
+    } else {
+      $answer = Read-Host 'Press Enter to close them and update, or type N and Enter to cancel'
+    }
     if ($answer -match '^\s*[nN]') {
       $cancelled = $true
       throw 'you cancelled it, the game stays open'
     }
-    Write-Host 'Closing...'
+    Write-Step 'Closing...'
     if (-not (Close-Install)) { throw 'the game could not be closed: close it by hand' }
   }
   # (a program's file can still be held for a moment, or by something else: before anything is copied)
@@ -257,7 +324,7 @@ try {
   $backupRoot = Join-Path $Root 'backup'
   if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force }
   $backup = Join-Path $backupRoot $(if ($old) { $old } else { 'previous' })
-  Write-Host "Backing up the files it replaces to $backup..."
+  Write-Step "Backing up the files it replaces to $backup..."
   $newBase = [IO.Path]::GetFullPath($new) + '\'
   $replaced = @(Get-ChildItem -LiteralPath $new -Recurse -File | ForEach-Object { $_.FullName.Substring($newBase.Length) }) + $removed
   foreach ($rel in $replaced) {
@@ -269,7 +336,7 @@ try {
     }
   }
 
-  Write-Host "Installing over $Root..."
+  Write-Step "Installing over $Root..."
   $copying = $true
   Invoke-Copy $new $Root
   foreach ($rel in $removed) {
@@ -280,28 +347,54 @@ try {
   Copy-Item -LiteralPath (Join-Path $new 'data\VERSION') -Destination (Join-Path $Root 'data\VERSION') -Force
   Write-Host "Updated to $Tag."
 } catch {
+  # (the same words in the console and, -Gui, in a window)
+  $said = New-Object Collections.Generic.List[string]
+  function Say([string]$text) { Write-Host $text; $said.Add($text) }
   Write-Host ''
-  Write-Host "The update didn't work: $($_.Exception.Message)"
+  Say "The update didn't work: $($_.Exception.Message)"
   if ($copying -and $backup -and (Test-Path -LiteralPath $backup)) {
-    Write-Host 'It stopped while copying: putting the old files back from the backup...'
+    Say 'It stopped while copying: putting the old files back from the backup...'
     & robocopy $backup $Root /E /R:3 /W:2 /NDL /NFL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -lt 8) {
-      Write-Host "Done: the game is as it was ($old). You can try again at the next start, or"
+      Say "Done: the game is as it was ($old). You can try again at the next start, or"
     } else {
-      Write-Host "Putting them back failed too: the old files are in $backup. Start the launcher again and"
-      Write-Host 'press U to finish the update, or'
+      Say "Putting them back failed too: the old files are in $backup. Start the launcher again and"
+      Say 'choose Update now to finish the update, or'
     }
   } elseif ($copying) {
-    Write-Host 'It stopped while copying: some files are new, others are still the old ones. Your extracted'
-    Write-Host 'games, saves and settings are fine. Start the launcher again and press U to finish it, or'
+    Say 'It stopped while copying: some files are new, others are still the old ones. Your extracted'
+    Say 'games, saves and settings are fine. Start the launcher again and choose Update now to finish it, or'
   } else {
-    Write-Host 'Nothing was changed: the game is as it was. You can try again at the next start, or'
+    Say 'Nothing was changed: the game is as it was. You can try again at the next start, or'
   }
-  Write-Host 'download the new version by hand from https://github.com/stichlola/jak-enhanced-trilogy/releases/latest'
-  Read-Host 'Press Enter to carry on'
+  Say 'download the new version by hand from https://github.com/stichlola/jak-enhanced-trilogy/releases/latest'
+  if ($ui) {
+    $ui.Hide()
+    $text = ($said -join "`r`n") + "`r`n`r`nWhat it did is in " + (Join-Path $Root 'data\log\update.log')
+    [void][Windows.Forms.MessageBox]::Show($text, 'Jak Enhanced Trilogy', 'OK', 'Error', 'Button1', 'DefaultDesktopOnly')
+  } else {
+    Read-Host 'Press Enter to carry on'
+  }
 } finally {
   # (a failed download doesn't stay on the disk)
   if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
 }
+if ($ui) {
+  try { Stop-Transcript | Out-Null } catch { }
+  $ui.Close()
+}
 # (the game the player chose to keep open isn't started a second time)
-if (-not $cancelled) { Start-Process -FilePath $launcher -WorkingDirectory $Root }
+if (-not $cancelled) {
+  # -Gui: the launcher hidden too (launcher.ps1, without the .bat's moment of console), when this version has it
+  $hidden = Join-Path $Root 'data\scripts\enhanced\launcher.ps1'
+  if ($Gui -and -not $env:JAK_ENHANCED_CONSOLE -and (Test-Path -LiteralPath $hidden)) {
+    $command = "& ([scriptblock]::Create([IO.File]::ReadAllText('{0}'))) -Root '{1}'" -f $hidden.Replace("'", "''"), $Root.Replace("'", "''")
+    $psi = New-Object Diagnostics.ProcessStartInfo 'powershell.exe', ('-NoProfile -Command "' + $command + '"')
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.WorkingDirectory = $Root
+    [void][Diagnostics.Process]::Start($psi)
+  } else {
+    Start-Process -FilePath $launcher -WorkingDirectory $Root
+  }
+}
