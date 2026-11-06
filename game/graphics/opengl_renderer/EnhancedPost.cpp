@@ -220,6 +220,11 @@ struct World {
 };
 World g_world;
 
+// Enhanced's own fog (the distance fog, the ground mist, the morning fog) is off for now: it gave
+// trouble in all three games. Off, the weather never brings it and the menu doesn't offer it; the
+// game's own fog is untouched.
+constexpr bool kFogOff = true;
+
 // the weather presets of the menu (the order is kept: saved settings and test scripts use the
 // index). Values as in Settings::weather_mix; "Changing" has none (the zones decide)
 struct WeatherPreset {
@@ -283,6 +288,9 @@ void weather_menu(EnhancedPost::Settings& s, const char* id) {
   ImGui::SetNextItemWidth(200);
   if (ImGui::BeginCombo(id, kWeatherPresets[std::clamp(s.weather, 0, kWeatherCount - 1)].name)) {
     for (int i = 0; i < kWeatherCount; i++) {
+      if (kFogOff && std::strstr(kWeatherPresets[i].name, "fog")) {
+        continue;
+      }
       if (ImGui::Selectable(kWeatherPresets[i].name, s.weather == i)) {
         s.weather = i;
         if (i != 1 && i != kWeatherCustom) {
@@ -306,6 +314,9 @@ void weather_menu(EnhancedPost::Settings& s, const char* id) {
   const float top[9] = {1.5f, 1.f, 1.f, 1.f, 1.5f, 1.f, 1.f, 1.f, 1.f};
   ImGui::Indent();
   for (int i = 0; i < 9; i++) {
+    if (kFogOff && (i == 2 || i == 3)) {
+      continue;  // fog, ground mist
+    }
     ImGui::SetNextItemWidth(160);
     float v = s.weather_mix[i];
     const float lo = i == 8 ? -0.01f : 0.f;  // wet ground below 0: as wet as it rains
@@ -3432,6 +3443,11 @@ void EnhancedPost::update_scene() {
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
   ease(m_storm, storm, k_weather);
+  if (kFogOff) {
+    fog = 0.f;
+    mist = 0.f;
+    m_dawn_fog = 0.f;
+  }
   ease(m_mist, mist, k_weather);
   // fog comes and goes slowly (half a minute)
   ease(m_fog, fog, 1.f - std::exp(-dt / 10.f));
@@ -6727,18 +6743,22 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("TAA", &m_settings.taa);
     ImGui::SliderFloat("TAA history (still)", &m_settings.taa_history, 0.5f, 0.97f);
     ImGui::SliderFloat("TAA history (fast)", &m_settings.taa_history_fast, 0.3f, 0.95f);
-    ImGui::SliderFloat("Fog density (/m)", &m_settings.fog_density, 0.f, 0.01f, "%.4f");
-    ImGui::SliderFloat("Fog height falloff (/m)", &m_settings.fog_height, 0.f, 0.2f);
-    ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
+    if (!kFogOff) {
+      ImGui::SliderFloat("Fog density (/m)", &m_settings.fog_density, 0.f, 0.01f, "%.4f");
+      ImGui::SliderFloat("Fog height falloff (/m)", &m_settings.fog_height, 0.f, 0.2f);
+      ImGui::SliderFloat("Fog amount", &m_settings.fog_amount, 0.f, 1.f);
+    }
     ImGui::SliderFloat("Heat haze", &m_settings.haze_strength, 0.f, 0.005f, "%.4f");
-    ImGui::Checkbox("Volumetric mist", &m_settings.volume);
-    ImGui::SliderFloat("Mist density (/m)", &m_settings.mist_density, 0.f, 0.1f, "%.4f");
-    ImGui::SliderFloat("Mist height (m)", &m_settings.mist_height, 0.5f, 30.f);
-    ImGui::SliderFloat("Mist distance (m)", &m_settings.mist_distance, 20.f, 400.f);
-    ImGui::SliderFloat("Mist ground below camera (m)", &m_settings.mist_ground, -5.f, 20.f);
-    ImGui::SliderFloat("Mist patches", &m_settings.mist_noise, 0.f, 1.f);
-    ImGui::SliderFloat("Mist sunlight", &m_settings.mist_sun, 0.f, 4.f);
-    ImGui::SliderFloat("Mist forward scattering", &m_settings.mist_aniso, 0.f, 0.95f);
+    if (!kFogOff) {
+      ImGui::Checkbox("Volumetric mist", &m_settings.volume);
+      ImGui::SliderFloat("Mist density (/m)", &m_settings.mist_density, 0.f, 0.1f, "%.4f");
+      ImGui::SliderFloat("Mist height (m)", &m_settings.mist_height, 0.5f, 30.f);
+      ImGui::SliderFloat("Mist distance (m)", &m_settings.mist_distance, 20.f, 400.f);
+      ImGui::SliderFloat("Mist ground below camera (m)", &m_settings.mist_ground, -5.f, 20.f);
+      ImGui::SliderFloat("Mist patches", &m_settings.mist_noise, 0.f, 1.f);
+      ImGui::SliderFloat("Mist sunlight", &m_settings.mist_sun, 0.f, 4.f);
+      ImGui::SliderFloat("Mist forward scattering", &m_settings.mist_aniso, 0.f, 0.95f);
+    }
     ImGui::SliderFloat("Motion blur", &m_settings.motion_blur, 0.f, 1.f);
     ImGui::SliderFloat("Sun relight", &m_settings.relight, 0.f, 2.f);
     ImGui::Checkbox("Dynamic lights (glows)", &m_settings.lights);
@@ -6784,7 +6804,9 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("Walls repeat less", &m_settings.wall_notile);
     ImGui::SliderFloat("Effects detail", &m_settings.fx_detail, 0.f, 1.f);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
-    ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
+    if (!kFogOff) {
+      ImGui::SliderFloat("Morning fog", &m_settings.dawn_fog, 0.f, 1.f);
+    }
     ImGui::SliderFloat("Rays through clouds", &m_settings.cloud_rays, 0.f, 1.f);
     ImGui::SliderFloat("Drops on the lens", &m_settings.lens_drops, 0.f, 1.f);
     ImGui::SliderFloat("Sharpen", &m_settings.sharpen, 0.f, 1.f);
