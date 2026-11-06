@@ -42,7 +42,8 @@ LIGHT_NAME = "Jak-Enhanced-Light"
 FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py",
              "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1",
              "scripts/enhanced/report.ps1", "scripts/enhanced/apply_shipped.ps1",
-             "scripts/enhanced/refresh_models.ps1", "scripts/enhanced/add_to_steam.ps1"}
+             "scripts/enhanced/refresh_models.ps1", "scripts/enhanced/add_to_steam.ps1",
+             "scripts/enhanced/launcher.ps1", "scripts/enhanced/ask.ps1"}
 DATA = [
     "decompiler/config",
     "goal_src",
@@ -57,6 +58,8 @@ DATA = [
     "scripts/enhanced/refresh_models.ps1",  # the levels holding new replacement models made again
     "scripts/enhanced/report.ps1",  # the report window (a crash opens it, the menu button too)
     "scripts/enhanced/add_to_steam.ps1",  # the setup's "Add to Steam"
+    "scripts/enhanced/launcher.ps1",  # the launcher without its console: status window, errors in windows
+    "scripts/enhanced/ask.ps1",  # the launcher's questions in windows (a new version, the HD textures)
 ]
 # Made by hand with Tripo, kept out of git (.gitignore), in every release: a folder and how many files
 # it has to hold at least. Only what is known to be Tripo's or hand-made goes on this list: not
@@ -303,7 +306,8 @@ def main():
         "Jak Enhanced Trilogy " + args.version + "\r\n\r\n"
         "1. Put your own disc images (.iso) in the ISO folder: Jak and Daxter: The Precursor Legacy,\r\n"
         "   Jak II, Jak 3 (one, two or all three).\r\n"
-        "2. Double-click \"Jak Enhanced Trilogy.bat\".\r\n\r\n"
+        "2. Double-click \"Jak Enhanced Trilogy.bat\" (no console: windows say what it does, and its\r\n"
+        "   messages are in data\\log\\launcher.log; JAK_ENHANCED_CONSOLE=1 shows them in a console).\r\n\r\n"
         "The first time you play a game it extracts your disc (20-40 minutes, only once), then asks\r\n"
         "whether to make the HD textures from it (optional: 30 minutes to 2 hours a game).\r\n"
         "In the game: F1 (or \\, or Select + R3 on a pad) opens the Enhanced menu; Select (View on an\r\n"

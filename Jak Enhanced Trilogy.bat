@@ -2,10 +2,21 @@
 rem (a "!" in the folder's name can't work below: delayed expansion takes it)
 set "ROOT=%~dp0"
 if not "%ROOT:!=%"=="%ROOT%" (
+  if exist "%~dp0gk.exe" if not defined JAK_ENHANCED_CONSOLE (
+    powershell -NoProfile -Command "Add-Type -AssemblyName System.Windows.Forms; [void][Windows.Forms.MessageBox]::Show('This folder''s path has an exclamation mark (!) in it, which the launcher can''t handle: move Jak Enhanced Trilogy to a folder without it.', 'Jak Enhanced Trilogy', 'OK', 'Error')" && exit /b 1
+  )
   echo This folder's path has a "!" in it, which the launcher can't handle:
   echo Move Jak Enhanced Trilogy to a folder without it.
   pause
   exit /b 1
+)
+rem Players don't see this console: in the release the launcher runs again hidden, its messages in
+rem data\log\launcher.log, with windows for the questions, the long steps and the errors
+rem (scripts\enhanced\launcher.ps1). JAK_ENHANCED_CONSOLE=1 keeps it all here, as the source code does
+rem (no gk.exe next to this file). If the hidden one can't start, this console carries on.
+set "ROOTQ=%ROOT:'=''%"
+if not defined JAK_ENHANCED_CONSOLE if not defined JAK_ENHANCED_HIDDEN if exist "%~dp0gk.exe" if exist "%~dp0data\scripts\enhanced\launcher.ps1" (
+  powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%ROOTQ%data\scripts\enhanced\launcher.ps1'))) -Root '%ROOTQ%' -Detach" && exit /b 0
 )
 rem Jak Enhanced Trilogy: put your own disc images (.iso) in the ISO folder, then double-click this
 rem file. The first time it extracts your discs (20-40 minutes a game); after that it starts the game
@@ -71,18 +82,32 @@ rem extracted discs and starts this launcher again; nothing is downloaded withou
 if defined VER (
   set "LATEST="
   set "LATEST_MB="
-  rem (its tag and its ZIP's real size; a release whose ZIP isn't up yet isn't offered)
-  for /f "usebackq tokens=1,2" %%L in (`powershell -NoProfile -Command "try { $r = Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest'; $a = @($r.assets | Where-Object { $_.name -eq ('Jak-Enhanced-Trilogy-' + $r.tag_name + '.zip') }); if ($a.Count) { $r.tag_name + ' ' + [int]($a[0].size / 1MB) } } catch {}"`) do (
+  set "MINE="
+  for /f "delims=-" %%V in ("!VER!") do set "MINE=%%V"
+  rem (its tag and the size of what update.ps1 downloads: the patch from this version when the release
+  rem has one, its whole ZIP otherwise; a release whose ZIP isn't up yet isn't offered)
+  for /f "usebackq tokens=1,2" %%L in (`powershell -NoProfile -Command "try { $r = Invoke-RestMethod -TimeoutSec 4 -Uri 'https://api.github.com/repos/stichlola/jak-enhanced-trilogy/releases/latest'; $n = 'Jak-Enhanced-Trilogy-' + $r.tag_name; $a = @($r.assets | Where-Object { $_.name -eq ($n + '.zip') }); $p = @($r.assets | Where-Object { $_.name -eq ($n + '-patch-' + $env:MINE + '.zip') }); if ($p.Count) { $a = $p }; if ($a.Count) { $r.tag_name + ' ' + [Math]::Max(1, [int]($a[0].size / 1e6)) } } catch {}"`) do (
     set "LATEST=%%L"
     set "LATEST_MB=%%M"
   )
-  for /f "delims=-" %%V in ("!VER!") do set "MINE=%%V"
   if defined LATEST if /i not "!LATEST!"=="!MINE!" (
     powershell -NoProfile -Command "$v = { param($s) $p = @($s.TrimStart('v') -split '\.') + @('0','0','0'); [version]($p[0..2] -join '.') }; if ((& $v '!LATEST!') -gt (& $v '!MINE!')) { exit 1 }" || (
       echo.
       echo A new version is out: !LATEST! ^(you have !MINE!^).
-      choice /c UC /t 10 /d C /m "U updates now, !LATEST_MB! MB to download, your games are kept; C carries on"
-      if not errorlevel 2 (
+      rem in a window (scripts\enhanced\ask.ps1: 10 update now, 11 later); in the console when it can't
+      rem (hidden, there is none: later)
+      powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\ask.ps1'))) -Update -Latest '!LATEST!' -Mine '!MINE!' -MB '!LATEST_MB!' -Icon '%PROJQ%\game\assets\enhanced\art\jak-enhanced.ico'; exit $LASTEXITCODE"
+      set "ASKED=!errorlevel!"
+      if "!ASKED!"=="10" (set "ASKED=1") else if "!ASKED!"=="11" (set "ASKED=2") else if defined JAK_ENHANCED_HIDDEN (set "ASKED=2") else (
+        choice /c UC /t 10 /d C /m "U updates now, !LATEST_MB! MB to download, your games are kept; C carries on"
+        set "ASKED=!errorlevel!"
+      )
+      if "!ASKED!"=="1" (
+        rem (hidden: launcher.ps1 starts it, in a progress window)
+        if defined JAK_ENHANCED_HIDDEN (
+          echo @@update !LATEST!
+          exit /b 0
+        )
         start "Jak Enhanced Trilogy update" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\update.ps1'))) -Root '%ROOTQ%' -Tag '!LATEST!'"
         exit /b 0
       )
@@ -95,7 +120,11 @@ rem version, keeping what the player edited (scripts\enhanced\apply_shipped.ps1)
 if defined VER if exist "%PROJ%\shipped\manifest.json" (
   set "APPLIED="
   if exist "%PROJ%\shipped\applied-version.txt" set /p APPLIED=<"%PROJ%\shipped\applied-version.txt"
-  if not "!APPLIED!"=="!VER!" powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\apply_shipped.ps1'))) -Proj '%PROJQ%'"
+  if not "!APPLIED!"=="!VER!" (
+    call :step "Putting this version's main world in place..."
+    powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\apply_shipped.ps1'))) -Proj '%PROJQ%'"
+    call :idle
+  )
 )
 
 rem What still needs setting up: the build once, then each new disc
@@ -122,10 +151,12 @@ if defined NEED_EXTRACT (
     echo.
     echo First start of Jak %%G: extracting your disc and compiling the game ^(20-40 minutes,
     echo only this once^). You can leave it running.
+    call :step "First start of Jak %%G: extracting your disc and compiling the game (20-40 minutes, only this once). You can leave it running."
     "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -e -d -c "!JAK%%G_ISO!" || goto :failed
     if defined VER echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
     rem (this made the levels with the replacement models as they are now)
     if defined VER powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\refresh_models.ps1'))) -Proj '%PROJQ%' -Bin '%BINQ%' -Game jak%%G -MarkOnly"
+    call :idle
   )
 )
 
@@ -136,19 +167,27 @@ for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\jak%%G\iso" if 
   set "HD="
   if exist "%PROJ%\hd-textures-jak%%G.txt" set /p HD=<"%PROJ%\hd-textures-jak%%G.txt"
   if not defined HD (
-    echo.
-    echo HD textures for Jak %%G: every texture of the game redrawn 4x by an AI ^(Real-ESRGAN^) on your
-    echo graphics card, from your own disc. It takes a while: about 30 minutes for Jak 1, 1-2 hours for
-    echo Jak II or Jak 3 ^(depends on the graphics card^), and 1-4 GB more on disk. The game works the
-    echo same without them. To be asked again, delete out\jak%%G\hd-textures.asked.
+    rem in a window (scripts\enhanced\ask.ps1: 10 yes, 11 no); in the console when it can't (hidden: no)
     set "HD=n"
-    set /p "HD=Make the HD textures for Jak %%G now? (y/N): "
+    powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\ask.ps1'))) -Hd -Game %%G -Icon '%PROJQ%\game\assets\enhanced\art\jak-enhanced.ico'; exit $LASTEXITCODE"
+    set "ASKED=!errorlevel!"
+    if "!ASKED!"=="10" set "HD=y"
+    if not "!ASKED!"=="10" if not "!ASKED!"=="11" if not defined JAK_ENHANCED_HIDDEN (
+      echo.
+      echo HD textures for Jak %%G: every texture of the game redrawn 4x by an AI ^(Real-ESRGAN^) on your
+      echo graphics card, from your own disc. It takes a while: about 30 minutes for Jak 1, 1-2 hours for
+      echo Jak II or Jak 3 ^(depends on the graphics card^), and 1-4 GB more on disk. The game works the
+      echo same without them. To be asked again, delete out\jak%%G\hd-textures.asked.
+      set /p "HD=Make the HD textures for Jak %%G now? (y/N): "
+    )
   )
   echo asked> "%PROJ%\out\jak%%G\hd-textures.asked"
   if /i "!HD!"=="y" (
+    call :step "Making the HD textures for Jak %%G: your graphics card redraws every texture (30 minutes to 2 hours, only this once)."
     where py >nul 2>nul || winget install --id Python.Python.3.12 -e --accept-package-agreements --accept-source-agreements
     set "PATH=%LOCALAPPDATA%\Programs\Python\Launcher;%PATH%"
     py -3 "%PROJ%\scripts\enhanced\hd_setup.py" --games jak%%G --bin "%BIN%" || goto :failed
+    call :idle
   )
 )
 
@@ -159,11 +198,13 @@ if defined VER for %%G in (1 2 3) do if defined JAK%%G_ISO if exist "%PROJ%\out\
   if not "!BUILT!"=="!VER!" (
     echo.
     echo Updating Jak %%G to !VER!: compiling the game again ^(a minute or two, only this once^).
+    call :step "Updating Jak %%G to !VER!: compiling the game again (a minute or two, only this once)."
     rem the game's text too: it is rebuilt only when its own files change, not when the text
     rem encoder does ^(the buttons drawn in the messages^)
     del /q "%PROJ%\out\jak%%G\iso\*COMMON.TXT" 2>nul
     "%BIN%\extractor.exe" --game jak%%G --proj-path "%PROJ%" -c "!JAK%%G_ISO!" || goto :failed
     echo !VER!>"%PROJ%\out\jak%%G\built-version.txt"
+    call :idle
   )
 )
 
@@ -174,7 +215,9 @@ if defined VER for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
   set "CHECKED="
   if exist "%PROJ%\out\jak%%G\models-checked.txt" set /p CHECKED=<"%PROJ%\out\jak%%G\models-checked.txt"
   if not "!CHECKED!"=="!VER!" (
+    call :step "Jak %%G: making again the levels with new replacement models (a few minutes when there are some)..."
     powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\refresh_models.ps1'))) -Proj '%PROJQ%' -Bin '%BINQ%' -Game jak%%G -Iso $env:JAK%%G_ISO" && echo !VER!>"%PROJ%\out\jak%%G\models-checked.txt"
+    call :idle
   )
 )
 
@@ -187,7 +230,8 @@ for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
 )
 if %COUNT%==0 (
   echo No game is ready yet: put your disc images ^(.iso^) in the ISO folder and start again.
-  pause
+  if defined JAK_ENHANCED_HIDDEN echo @@info No game is ready yet: put your disc images ^(.iso^) in the ISO folder and start Jak Enhanced Trilogy again.
+  call :pause
   exit /b 1
 )
 set "PICK=%READY1%"
@@ -209,6 +253,11 @@ if exist "%PROJ%\game\assets\jak3\enhanced-save\bank6.bin" if not exist "%SAVES%
 )
 endlocal
 cd /d "%PROJ%"
+rem (hidden: launcher.ps1 starts it and waits for it, the same way)
+if defined JAK_ENHANCED_HIDDEN (
+  echo @@launch %PICK%
+  exit /b 0
+)
 rem a hidden PowerShell starts the game and waits for it: if gk.exe closes with an error it opens
 rem the report window (scripts\enhanced\report.ps1: one click sends the logs, nothing without it)
 start "" powershell -NoProfile -WindowStyle Hidden -Command "$p = Start-Process -FilePath '%BINQ%\gk.exe' -ArgumentList '--game jak%PICK% -- -boot -fakeiso' -PassThru; $null = $p.Handle; $p.WaitForExit(); if ($p.ExitCode -ne 0) { & ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\report.ps1'))) -Proj '%PROJQ%' -Crash $p.ExitCode }"
@@ -249,7 +298,26 @@ cmake --preset=Release-windows-clang || exit /b 1
 cmake --build out\build\Release --parallel || exit /b 1
 exit /b 0
 
+rem Hidden, launcher.ps1 reads these lines of the output: what its status window says while a long
+rem step runs, and that something failed (it shows it in a window, with the log)
+:step
+if defined JAK_ENHANCED_HIDDEN echo @@step %~1
+exit /b 0
+
+:idle
+if defined JAK_ENHANCED_HIDDEN echo @@idle
+exit /b 0
+
+rem (hidden, nobody could press a key)
+:pause
+if not defined JAK_ENHANCED_HIDDEN pause
+exit /b 0
+
 :failed
+if defined JAK_ENHANCED_HIDDEN (
+  echo @@error Something went wrong.
+  exit /b 1
+)
 echo.
 echo Something went wrong (see the messages above). Ask for help at
 echo https://github.com/stichlola/jak-enhanced-trilogy/issues

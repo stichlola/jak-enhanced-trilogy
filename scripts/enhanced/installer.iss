@@ -108,13 +108,13 @@ Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs create
 Source: "{#Src}\data\scripts\enhanced\update.ps1"; Flags: dontcopy
 
 [Icons]
-Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"
-Name: "{group}\Report a problem"; Filename: "{app}\Report a problem.bat"; WorkingDir: "{app}"
+Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Flags: runminimized
+Name: "{group}\Report a problem"; Filename: "{app}\Report a problem.bat"; WorkingDir: "{app}"; Flags: runminimized
 Name: "{group}\{cm:UninstallProgram,Jak Enhanced Trilogy}"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Tasks: desktopicon
+Name: "{userdesktop}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Flags: runminimized; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; Description: "{cm:PlayNow}"; Flags: postinstall shellexec nowait skipifsilent
+Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; Description: "{cm:PlayNow}"; Flags: postinstall shellexec nowait skipifsilent runminimized
 
 [UninstallDelete]
 ; what the installer and the launcher made: the extracted discs, the compiled games, the HD textures

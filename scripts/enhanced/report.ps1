@@ -41,6 +41,11 @@ function Build-Zip([string]$note) {
   )
   foreach ($g in Get-CimInstance Win32_VideoController) { $info += 'GPU: ' + $g.Name + ', driver ' + $g.DriverVersion + ' (' + $g.DriverDate + ')' }
   $info | Set-Content -Encoding UTF8 (Join-Path $work 'system.txt')
+  # the hidden launcher's messages and the last update's (launcher.ps1, update.ps1 -Gui)
+  foreach ($l in 'launcher.log', 'launcher.prev.log', 'update.log') {
+    $p = Join-Path $logDir $l
+    if (Test-Path -LiteralPath $p) { Copy-Item -LiteralPath $p -Destination $work -ErrorAction SilentlyContinue }
+  }
   foreach ($g in 'jak1', 'jak2', 'jak3') {
     Get-ChildItem $logDir -Filter ($g + '.*.log') | Sort-Object LastWriteTime -Descending | Select-Object -First 2 | Copy-Item -Destination $work
     $s = Join-Path $env:APPDATA ('OpenGOAL\' + $g + '\settings')
