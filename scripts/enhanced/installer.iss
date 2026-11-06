@@ -25,6 +25,8 @@ DefaultDirName={localappdata}\Programs\Jak Enhanced Trilogy
 DefaultGroupName=Jak Enhanced Trilogy
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+; (the welcome page says the game is free, with the buy-me-a-coffee line)
+DisableWelcomePage=no
 OutputBaseFilename=Setup-Jak-Enhanced-Trilogy-{#MyVersion}
 ; the art: cover_art.py compose (the start menu's pictures, wheel/menuN.jpg + title.png) -> game/assets/enhanced/art
 SetupIconFile=..\..\game\assets\enhanced\art\jak-enhanced.ico
@@ -70,6 +72,12 @@ en.GameStuck=Jak Enhanced Trilogy could not be closed, so nothing was installed.
 en.PlayNow=Play now
 en.Desktop=Create a desktop shortcut
 en.Steam=Add it to Steam (as a non-Steam game; Steam closes for a moment if it is open)
+en.Free=Jak Enhanced is 100% free, and always will be. Made by one person in spare time: if you'd like, buy me a coffee (optional, unlocks nothing).
+en.DonateHead=Jak Enhanced is 100% free — support is optional
+en.Donate1=1 € — a sweet
+en.Donate2=3 € — a coffee
+en.Donate3=Any amount
+en.Trust=Secure payment on PayPal's own page (paypal.me/mymusicminis), to Code & Craft Solutions, the author's account. You can change the amount before paying.
 it.DiscsTitle=I tuoi dischi
 it.DiscsSub=Scegli le immagini (.iso) dei tuoi dischi PS2.
 it.DiscsText=Uno, due o tutti e tre i giochi, in qualsiasi ordine (PAL, NTSC o NTSC-J). Jak Enhanced Trilogy non contiene dati dei giochi: tutto si ricava dai tuoi dischi, 20-40 minuti a gioco, subito dopo l'installazione.
@@ -96,6 +104,12 @@ it.GameStuck=Non è stato possibile chiudere Jak Enhanced Trilogy, quindi non è
 it.PlayNow=Gioca ora
 it.Desktop=Crea un collegamento sul desktop
 it.Steam=Aggiungilo a Steam (come gioco non Steam; Steam si chiude un attimo se è aperto)
+it.Free=Jak Enhanced è gratis al 100%, e lo sarà sempre. Lo fa una persona sola nel tempo libero: se ti va, offrimi un caffè (facoltativo, non sblocca nulla).
+it.DonateHead=Jak Enhanced è gratis al 100% — il sostegno è facoltativo
+it.Donate1=1 € — una caramella
+it.Donate2=3 € — un caffè
+it.Donate3=Quanto vuoi
+it.Trust=Pagamento sicuro sulla pagina di PayPal (paypal.me/mymusicminis), a Code & Craft Solutions, il conto dell'autore. Puoi cambiare la cifra prima di pagare.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:Desktop}"
@@ -106,6 +120,8 @@ Name: "steam"; Description: "{cm:Steam}"; Flags: unchecked
 Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; run from the temporary folder before anything is copied: closes a game open from this folder
 Source: "{#Src}\data\scripts\enhanced\update.ps1"; Flags: dontcopy
+; the buy-me-a-coffee buttons on the last page (drawn by ask.ps1 -ExportIcons)
+Source: "..\..\game\assets\enhanced\art\donate-*.bmp"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Flags: runminimized
@@ -132,6 +148,13 @@ var
   // the disc picked for each game (1-3), from the serials
   GameIso: array[1..3] of String;
   LogLines: Integer;
+  // the buy-me-a-coffee buttons on the last page
+  DonateHead, DonateTrust: TNewStaticText;
+  DonatePanel: array[1..3] of TPanel;
+  DonateLock: TBitmapImage;
+
+const
+  DonateUrl = 'https://paypal.me/mymusicminis';
 
 // which game a disc image is: the serial on its boot line ("cdrom0:\SCES_524.60;1") in its first
 // megabytes, as the launcher does. 0: none of the three
@@ -169,6 +192,108 @@ begin
     Result := 3;
 end;
 
+// PayPal.Me in the browser; the installer stays as it is
+procedure DonateClick(Sender: TObject);
+var
+  Url: String;
+  ErrorCode: Integer;
+begin
+  case TComponent(Sender).Tag of
+    1: Url := DonateUrl + '/1EUR';
+    2: Url := DonateUrl + '/3EUR';
+  else
+    Url := DonateUrl;
+  end;
+  ShellExec('open', Url, '', '', SW_SHOWNORMAL, ewNoWait, ErrorCode);
+end;
+
+function DonateBitmap(const Name: String; const Parent: TWinControl): TBitmapImage;
+begin
+  ExtractTemporaryFile('donate-' + Name + '.bmp');
+  Result := TBitmapImage.Create(WizardForm);
+  Result.Parent := Parent;
+  Result.Stretch := True;
+  Result.Bitmap.LoadFromFile(ExpandConstant('{tmp}\donate-' + Name + '.bmp'));
+end;
+
+// the Finished page: PayPal-blue buttons one under the other (icon, amount, what it buys), then
+// where the money goes; placed under the "Play now" box when the page shows
+procedure CreateDonateButtons;
+var
+  i: Integer;
+  Page: TNewNotebookPage;
+  Icon: TBitmapImage;
+  Text: TNewStaticText;
+  Names: array[1..3] of String;
+begin
+  Page := WizardForm.FinishedPage;
+  Names[1] := 'sweet'; Names[2] := 'coffee'; Names[3] := 'heart';
+  DonateHead := TNewStaticText.Create(WizardForm);
+  DonateHead.Parent := Page;
+  DonateHead.Caption := CustomMessage('DonateHead');
+  DonateHead.Font.Style := [fsBold];
+  for i := 1 to 3 do
+  begin
+    DonatePanel[i] := TPanel.Create(WizardForm);
+    DonatePanel[i].Parent := Page;
+    DonatePanel[i].BevelOuter := bvNone;
+    DonatePanel[i].ParentBackground := False;
+    DonatePanel[i].Color := $BA7000;
+    DonatePanel[i].Cursor := crHand;
+    DonatePanel[i].Tag := i;
+    DonatePanel[i].OnClick := @DonateClick;
+    DonatePanel[i].Height := ScaleY(26);
+    DonatePanel[i].Width := ScaleX(200);
+    Icon := DonateBitmap(Names[i], DonatePanel[i]);
+    Icon.SetBounds(ScaleX(8), ScaleY(5), ScaleY(16), ScaleY(16));
+    Icon.Cursor := crHand;
+    Icon.Tag := i;
+    Icon.OnClick := @DonateClick;
+    Text := TNewStaticText.Create(WizardForm);
+    Text.Parent := DonatePanel[i];
+    Text.Caption := CustomMessage('Donate' + IntToStr(i));
+    Text.Font.Color := clWhite;
+    Text.Font.Style := [fsBold];
+    Text.Left := ScaleX(32);
+    Text.Top := (DonatePanel[i].Height - Text.Height) div 2;
+    Text.Cursor := crHand;
+    Text.Tag := i;
+    Text.OnClick := @DonateClick;
+  end;
+  DonateLock := DonateBitmap('lock', Page);
+  DonateTrust := TNewStaticText.Create(WizardForm);
+  DonateTrust.Parent := Page;
+  DonateTrust.AutoSize := False;
+  DonateTrust.WordWrap := True;
+  DonateTrust.ShowAccelChar := False;
+  DonateTrust.Font.Color := clGrayText;
+  DonateTrust.Caption := CustomMessage('Trust');
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  i, Top, Left, Width: Integer;
+begin
+  if CurPageID <> wpFinished then
+    exit;
+  Left := WizardForm.FinishedLabel.Left;
+  Width := WizardForm.FinishedLabel.Width;
+  Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height;
+  if WizardForm.RunList.Visible then
+    Top := WizardForm.RunList.Top + WizardForm.RunList.Height;
+  Top := Top + ScaleY(14);
+  DonateHead.SetBounds(Left, Top, Width, DonateHead.Height);
+  Top := Top + DonateHead.Height + ScaleY(6);
+  for i := 1 to 3 do
+  begin
+    DonatePanel[i].Left := Left;
+    DonatePanel[i].Top := Top;
+    Top := Top + DonatePanel[i].Height + ScaleY(4);
+  end;
+  DonateLock.SetBounds(Left, Top + ScaleY(3), ScaleY(12), ScaleY(12));
+  DonateTrust.SetBounds(Left + ScaleX(16), Top + ScaleY(2), Width - ScaleX(16), ScaleY(44));
+end;
+
 procedure InitializeWizard;
 var
   i: Integer;
@@ -182,6 +307,8 @@ begin
   for i := 1 to 3 do
     HdPage.Add(CustomMessage('Hd' + IntToStr(i)));
   WorkPage := CreateOutputProgressPage(CustomMessage('WorkTitle'), CustomMessage('WorkSub'));
+  WizardForm.WelcomeLabel2.Caption := WizardForm.WelcomeLabel2.Caption + #13#10#13#10 + CustomMessage('Free');
+  CreateDonateButtons;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;

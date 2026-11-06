@@ -118,7 +118,9 @@ try {
     if ($chunk) {
       $parts = ($pending + $chunk) -split "`r`n|`n|`r"
       $pending = $parts[-1]
-      foreach ($line in @($parts | Select-Object -First ($parts.Count - 1))) {
+      foreach ($raw in @($parts | Select-Object -First ($parts.Count - 1))) {
+        # (the extractor and the compiler colour their output: "ESC[38;2;144;238;144minfo ESC[0m")
+        $line = ($raw -replace "\x1b\[[0-9;?]*[A-Za-z]", '') -replace "[\x00-\x08\x0b\x0c\x0e-\x1f]", ''
         if ($line -match '^@@(\w+) ?(.*)$') {
           $arg = $Matches[2].Trim()
           switch ($Matches[1]) {
@@ -147,7 +149,8 @@ try {
       $bar.Style = 'Marquee'
     }
     $wanted = ($step -and $clock.ElapsedMilliseconds - $stepAt -gt 800) -or $clock.ElapsedMilliseconds -gt 2000
-    if ($wanted -and -not $form.Visible -and -not $state.Closed) { $form.Show(); $form.Activate() }
+    # (in front of the other windows while the launcher works; not any more once the game starts)
+    if ($wanted -and -not $form.Visible -and -not $state.Closed) { $form.TopMost = $true; $form.Show(); $form.Activate() }
     [Windows.Forms.Application]::DoEvents()
     Start-Sleep -Milliseconds 150
   }
@@ -160,6 +163,7 @@ try {
     $stepLabel.Text = "Starting Jak $launch..."
     $detail.Text = ''
     $bar.Style = 'Marquee'
+    $form.TopMost = $false
     $gkPsi = New-Object Diagnostics.ProcessStartInfo (Join-Path $Root 'gk.exe'), "--game jak$launch -- -boot -fakeiso"
     $gkPsi.UseShellExecute = $false
     $gkPsi.CreateNoWindow = $true
@@ -183,6 +187,7 @@ try {
     }
     exit 0
   }
+  $form.TopMost = $false
   $form.Hide()
   if ($update -and $code -eq 0) {
     [void](Start-Hidden (Join-Path $Proj 'scripts\enhanced\update.ps1') ("-Tag '{0}' -Gui" -f $update.Replace("'", "''")))
