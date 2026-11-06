@@ -87,10 +87,28 @@
     ((and (enhanced-ashelin-gun-active?) (-> *enhanced-ashelin-gun* out))
      (the-as int (pickup-type gun-red-2))
      )
+    ;; Sig's Peacemaker (Jak's gun-dark-1 underneath), out: the dark gun's first mode, hud-gunpurple-01a
+    ((and *target* (enhanced-player-sig?) (focus-test? *target* gun))
+     (the-as int (pickup-type gun-dark-1))
+     )
     (else
       0
       )
     )
+  )
+
+(defun enhanced-character-gun-arrow ()
+  "The one lit arrow of a character's own gun (*gun-arrow-table*, hud-classes.gc): its D-pad direction.
+   Ashelin: up (red, level 1), Sig: right (dark, level 1)."
+  (if (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-dark-1)))
+      19
+      1
+      )
+  )
+
+(defun enhanced-character-gun-ammo? ()
+  "Does a character's own gun show its ammo? Sig's Peacemaker spends Jak's dark ammo; Ashelin's has none."
+  (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-dark-1)))
   )
 
 (defun enhanced-ashelin-gun-slot ((k int))

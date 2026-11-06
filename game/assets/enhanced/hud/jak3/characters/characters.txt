@@ -4,3 +4,5 @@
 #
 # Ashelin's pistol (drawn by the user), in the gun HUD as the red gun's second mode (hud-gunred-02a, 64x32)
 ashelin level-default-minimap hud-gunred-02a hud-gunashelin-01a
+# Sig's Peacemaker (drawn by the user), in the gun HUD as the dark gun's first mode (hud-gunpurple-01a, 64x32)
+sig level-default-minimap hud-gunpurple-01a hud-gunsig-01a

@@ -955,8 +955,11 @@
 
 ;; Enhanced: a character's own gun in this HUD (enhanced-ashelin-gun.gc): the gun type whose icon
 ;; slot shows it (the picture swapped in for that character, game/assets/enhanced/hud/jak3/characters),
-;; 0: none (Jak's guns as always). Its ammo, shells and Jak's gun arrows are not shown
+;; 0: none (Jak's guns as always). Jak's gun arrows are not shown (its own one lit arrow instead); its
+;; ammo and shells only if it spends Jak's ammo (Sig's Peacemaker)
 (define-extern enhanced-character-gun-hud (function int))
+(define-extern enhanced-character-gun-arrow (function int))
+(define-extern enhanced-character-gun-ammo? (function symbol))
 
 (defmethod draw ((this hud-gun))
   (let ((sv-32 0)
@@ -1157,7 +1160,9 @@
               (if (and (zero? s5-0) (nonzero? (-> this values 1 current)))
                   (set! s5-0 1)
                   )
-              (when (and (not (-> *setting-control* user-current gun-special-mode)) (zero? (enhanced-character-gun-hud)))
+              (when (and (not (-> *setting-control* user-current gun-special-mode))
+                         (or (zero? (enhanced-character-gun-hud)) (enhanced-character-gun-ammo?))
+                         )
                 (with-dma-buffer-add-bucket ((s3-0 (-> *display* frames (-> *display* on-screen) global-buf))
                                              (bucket-id hud-draw-hud-alpha)
                                              )
@@ -1394,13 +1399,13 @@
           )
         )
       )
-    ;; Enhanced: a character's own gun: Jak's arrows off, one lit arrow up (D-pad up: hers), as Jak's menu
-    ;; shows the guns he has
+    ;; Enhanced: a character's own gun: Jak's arrows off, one lit arrow for its D-pad direction (Ashelin up,
+    ;; Sig right), as Jak's menu shows the guns he has
     (when (nonzero? (enhanced-character-gun-hud))
       (dotimes (v1-201 12)
         (set! (-> this sprites (+ v1-201 2) scale-x) 0.0)
         )
-      (hud-sprite-method-11 (-> this sprites 10) (-> *gun-arrow-table* 1) (-> sv-64 pos) 0 0)
+      (hud-sprite-method-11 (-> this sprites 10) (-> *gun-arrow-table* (enhanced-character-gun-arrow)) (-> sv-64 pos) 0 0)
       )
     (format (clear (-> this strings 0 text)) "~D/~D" (-> this values 1 current) sv-72)
     )
@@ -1414,8 +1419,8 @@
   (if (and (-> *setting-control* user-current gun-special-mode) (= (-> this values 0 current) 29))
       (clear (-> this strings 0 text))
       )
-  ;; Enhanced: a character's own gun: no ammo count (it has none)
-  (when (nonzero? (enhanced-character-gun-hud))
+  ;; Enhanced: a character's own gun: no ammo count (it has none; Sig's spends Jak's)
+  (when (and (nonzero? (enhanced-character-gun-hud)) (not (enhanced-character-gun-ammo?)))
     (clear (-> this strings 0 text))
     )
   ((method-of-type hud draw) this)
@@ -1432,8 +1437,13 @@
            (sound-play "gun-switch")
            )
        )
-     ;; (no ammo: the shells and count hidden, draw)
-     (set! (-> this values 1 target) 0)
+     ;; (no ammo: the shells and count hidden, draw; Sig's Peacemaker: Jak's dark ammo)
+     (set! (-> this values 1 target)
+           (if (enhanced-character-gun-ammo?)
+               (the int (-> *target* game gun-ammo (+ (gun->ammo (pickup-type gun-dark-1)) -15)))
+               0
+               )
+           )
      (logclear! (-> this flags) (hud-flags disable))
      (logior! (-> this flags) (hud-flags show))
      )
