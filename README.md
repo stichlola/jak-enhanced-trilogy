@@ -10,8 +10,11 @@ Unofficial and free. You need **your own disc images** (.iso) of the PS2 games: 
 this repository.
 
 > **Jak Enhanced is 100% free**, and always will be. I make it on my own in my spare time: if you'd
-> like to support my work, you can leave a small donation
-> [here (PayPal)](https://www.paypal.biz/mymusicminis).
+> like to support my work, you can buy me a coffee on PayPal:
+> [☕ 3 €](https://paypal.me/mymusicminis/3EUR) ·
+> [☕☕ 5 €](https://paypal.me/mymusicminis/5EUR) ·
+> [🍕 10 €](https://paypal.me/mymusicminis/10EUR) ·
+> [any amount](https://paypal.me/mymusicminis).
 > Donations are entirely optional and don't unlock anything.
 
 ## Install (players)
