@@ -52,6 +52,15 @@
       )
     (set! *enhanced-pad-press* (the-as pad-buttons 0))
     )
+  ;; as a real pad's input does (service-cpads): else the game thinks nobody touched the pad, and after 30 s
+  ;; puts the gun away (target-gun-stance's can-play-stance-amibent?) in the middle of a scripted test
+  (when (or (>= *enhanced-pad-leftx* 0) (>= *enhanced-pad-lefty* 0) (>= *enhanced-pad-rightx* 0)
+            (nonzero? (-> *cpad-list* cpads 0 button0-rel 0))
+            (nonzero? *enhanced-pad-hold*)
+            )
+    (set! (-> *cpad-list* cpads 0 change-time) (get-current-time))
+    (set! (-> *cpad-list* cpads 0 real-change-time) (get-real-current-time))
+    )
   (none)
   )
 
