@@ -86,6 +86,8 @@
    (anim       int32)
    (pose-blend float)              ;; 0: her own animation, 1: Jak's pose
    (size       float)              ;; its hips' height against Jak's (bind poses), for a sized character
+   (own-was    symbol)             ;; its own animation or Jak's pose, as last picked
+   (own-time   time-frame)         ;; when that changed (Jak's pose stays at least 0.2 s)
    (saved      matrix 80 :inline)  ;; her bones as her own animation left them
    (bind-world matrix 80 :inline)  ;; her joints' bind pose (joint to model)
    )
@@ -422,6 +424,8 @@
     (or (enhanced-sig-own?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
+         ;; not just after an attack (Jak's recovery, or the next hit of a combo, is still coming)
+         (>= (- (-> tgt clock frame-counter) (-> tgt control last-attack-end-time)) (seconds 0.25))
          (or (= top 0.0)
              (< (-> tgt control ctrl-xz-vel) (if (< (-> self pose-blend) 0.5) top (* 0.6 top)))
              )
@@ -474,7 +478,21 @@
          (skin (new 'stack-no-clear 'matrix))
          (rot (new 'stack-no-clear 'matrix))
          (own (new 'stack-no-clear 'matrix))
+         ;; his bones to its own: his pose taken against his root, put on its root
+         (fix (new 'stack-no-clear 'matrix))
+         (jpos (new 'stack-no-clear 'vector))
          )
+    ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
+    ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
+    ;; slides back (measured with Jak alone too): taken against his root, its body jumped away and came
+    ;; back (the teleports while moving and after a punch). Only the position: the prejoint's turn is
+    ;; real (his dive tilts him by it). In a vehicle, on a ledge and the like, his root as it is.
+    (matrix-copy! rot (-> jnodes data 0 bone transform))
+    (if (not (focus-test? jak pilot pilot-riding edge-grab pole flut board mech tube))
+        (vector-copy! (-> rot trans) (-> jnodes data 2 bone transform trans))
+        )
+    (matrix-4x4-inverse! inv rot)
+    (matrix*! fix inv (-> nodes data 0 bone transform))
     (dotimes (k n)
       (matrix-copy! (-> self saved k) (-> nodes data k bone transform))
       )
@@ -499,23 +517,28 @@
           (cond
             ((and (>= j 0) (-> cs joint) (< j (-> jnodes length)) (-> jnodes data j joint))
              ;; his skinning matrix (model to world), then her bind pose through it
-             (matrix*! skin (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
+             (matrix*! inv (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
+             (matrix*! skin inv fix)
              (matrix*! rot (-> self bind-world k) skin)
              (cond
                ((not (or (= k (-> ch main)) (= k (-> ch hips))))
                 (vector-copy! (-> rot trans) (-> own trans))
                 )
-               ((and (-> ch sized) (not (focus-test? jak pilot)))
-                ;; a taller one: as far from his feet as Jak's are from his, scaled by its size
-                (let ((root (-> jak control trans)))
-                  (vector-! (-> rot trans) (-> jnodes data j bone position) root)
-                  (vector+float*! (-> rot trans) root (-> rot trans) (-> self size))
-                  (set! (-> rot trans w) 1.0)
-                  )
-                )
                (else
-                 ;; where Jak's are (on his seat)
-                 (vector-copy! (-> rot trans) (-> jnodes data j bone position))
+                 ;; where Jak's are (on his seat), on its root now
+                 (vector-copy! jpos (-> jnodes data j bone transform trans))
+                 (set! (-> jpos w) 1.0)
+                 (vector-matrix*! (-> rot trans) jpos fix)
+                 ;; a taller one: as far from its root as Jak's are from his, scaled by its size (the root
+                 ;; is his collision plus cspace-offset, the offset an animation or a landing moves him by:
+                 ;; carried over as it is, never scaled, or the body slides away from the root and back)
+                 (when (and (-> ch sized) (not (focus-test? jak pilot)))
+                   (let ((root (-> nodes data 0 bone transform trans)))
+                     (vector-! jpos (-> rot trans) root)
+                     (vector+float*! (-> rot trans) root jpos (-> self size))
+                     )
+                   )
+                 (set! (-> rot trans w) 1.0)
                  )
                )
              ;; its thighs take only part of his leg swing (a longer stride)
@@ -595,13 +618,18 @@
   (none)
   )
 
+(defun enhanced-player-big-gun-out? ()
+  "A big gun (Sig's Peacemaker) out in the player's hand: Jak's shots leave from its muzzle."
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (the-as symbol (and skin (nonzero? *enhanced-big-gun-pid*) (= *enhanced-big-gun-pid* (-> skin pid))))
+    )
+  )
+
 (defun enhanced-player-muzzle! ((dst vector))
   "Jak's gun process (gun-util.gc): with a big gun out, his fire and laser points are its muzzle."
-  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
-    (when (and skin (nonzero? *enhanced-big-gun-pid*) (= *enhanced-big-gun-pid* (-> skin pid)))
+  (if (enhanced-player-big-gun-out?)
       (vector-copy! dst *enhanced-big-gun-muzzle*)
       )
-    )
   (none)
   )
 
@@ -617,7 +645,20 @@
         (logclear! (-> self draw status) (draw-control-status no-draw))
         )
     ;; into Jak's pose in 0.1 s, out of it in 0.2 s (straight away in or out of a vehicle)
-    (let ((own? (enhanced-skin-own-anim?)))
+    (let ((own? (the-as symbol (enhanced-skin-own-anim?))))
+      ;; into Jak's pose at once (his jump or attack shows), but back to its own only after 0.2 s in his:
+      ;; a blend never turns back halfway
+      (cond
+        ((= own? (-> self own-was))
+         )
+        ((or (not own?) (>= (- (current-time) (-> self own-time)) (seconds 0.2)))
+         (set! (-> self own-was) own?)
+         (set-time! (-> self own-time))
+         )
+        (else
+          (set! own? (-> self own-was))
+          )
+        )
       (cond
         ((focus-test? tgt pilot)
          (set! (-> self pose-blend) 1.0)
@@ -673,6 +714,14 @@
     )
   ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
   (enhanced-ashelin-gun-post)
+  ;; ja-post put its draw origin (bounds, lights, shadow) on the hips of its own animation: put it on the
+  ;; hips as drawn, as do-joint-math does (its bounds' centre through the origin joint)
+  (let ((b (new 'stack-no-clear 'vector)))
+    (vector-copy! b (-> self draw bounds))
+    (set! (-> b w) 1.0)
+    (vector-norm-matrix*! (-> self draw origin) b (-> self draw skeleton bones (-> self draw origin-joint-index) transform))
+    (set! (-> self draw origin w) (-> self draw bounds w))
+    )
   (none)
   )
 
@@ -729,7 +778,9 @@
   (set! (-> self draw lod-set max-lod) 0)
   (logior! (-> self skel status) (joint-control-status sync-math))
   (set! (-> self anim) -1)
-  (set! (-> self pose-blend) (if (enhanced-skin-own-anim?) 0.0 1.0))
+  (set! (-> self own-was) (the-as symbol (enhanced-skin-own-anim?)))
+  (set-time! (-> self own-time))
+  (set! (-> self pose-blend) (if (-> self own-was) 0.0 1.0))
   (dotimes (k (min 80 (-> self node-list length)))
     (let ((jt (-> self node-list data k joint)))
       (if jt
@@ -883,6 +934,8 @@
 
 ;; the gun features lent to Sig (Jak didn't have them yet), taken back when he isn't Sig any more
 (define *enhanced-sig-lent* 0)
+;; Jak's gun type before Sig made it the Peacemaker (given back when he is Jak again), -1: none
+(define *enhanced-sig-jak-gun* -1)
 
 (defun enhanced-sig-gun-update ((sig? symbol))
   "Sig's Peacemaker is Jak's (gun-dark-1: the same shots, damage and ammo; D-pad right, target-gun.gc).
@@ -906,13 +959,23 @@
      ;; put away, his gun is the Peacemaker (R1 brings out this one too)
      ;; (only the saved type: a nonzero using-gun-type with the gun away brings it out again)
      (when (not (using-gun? *target*))
+       (if (< *enhanced-sig-jak-gun* 0)
+           (set! *enhanced-sig-jak-gun* (the int (-> *game-info* gun-type)))
+           )
        (set! (-> *game-info* gun-type) (pickup-type gun-dark-1))
        )
      )
-    ((nonzero? *enhanced-sig-lent*)
-     (logclear! (-> *game-info* features) (the-as game-feature *enhanced-sig-lent*))
-     (set! *enhanced-sig-lent* 0)
-     )
+    (else
+      (when (nonzero? *enhanced-sig-lent*)
+        (logclear! (-> *game-info* features) (the-as game-feature *enhanced-sig-lent*))
+        (set! *enhanced-sig-lent* 0)
+        )
+      ;; Jak again: R1 brings out the gun he had before
+      (when (and (>= *enhanced-sig-jak-gun* 0) *target* (not (using-gun? *target*)))
+        (set! (-> *game-info* gun-type) (the-as pickup-type *enhanced-sig-jak-gun*))
+        (set! *enhanced-sig-jak-gun* -1)
+        )
+      )
     )
   (none)
   )

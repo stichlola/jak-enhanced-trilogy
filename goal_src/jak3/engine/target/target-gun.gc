@@ -596,6 +596,10 @@
 
 (defbehavior target-gun-ammo-out-pick target ()
   (cond
+    ;; Enhanced: Sig (enhanced-player.gc) has only his Peacemaker: dry, it clicks (none of Jak's other guns)
+    ((enhanced-player-sig?)
+     0
+     )
     ((and (and (logtest? (-> self game features) (game-feature gun))
                (-> *setting-control* user-current gun)
                (logtest? (logand (-> *setting-control* user-current features) (game-feature gun-yellow-1 gun-yellow-2 gun-yellow-3))

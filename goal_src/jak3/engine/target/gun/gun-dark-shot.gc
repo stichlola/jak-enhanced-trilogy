@@ -13,6 +13,7 @@
 (declare-type fruit-stand process-drawable)
 (define-extern enhanced-player-sig? (function symbol))
 (define-extern *enhanced-player-test* object)
+(define-extern enhanced-player-big-gun-out? (function symbol)) ;; enhanced-player.gc: Sig's Peacemaker out
 
 ;; DECOMP BEGINS
 
@@ -1518,20 +1519,25 @@
          )
         ((or (not (time-elapsed? (-> self state-time) (seconds 0.3))) (cpad-hold? 0 r1))
          (set! (-> self size-t) (fmin 1.0 (* 0.016666668 (the float (- (current-time) (-> self state-time))))))
-         (let ((t9-2 vector<-cspace!)
-               (a0-14 (-> self root trans))
-               (v1-28 (-> self parent))
+         (if (and *target* (enhanced-player-big-gun-out?))
+             ;; Enhanced: Sig's Peacemaker (enhanced-player.gc): it charges at its muzzle, not in Jak's
+             ;; hidden hand
+             (vector-copy! (-> self root trans) (-> *target* gun fire-point))
+             (let ((t9-2 vector<-cspace!)
+                   (a0-14 (-> self root trans))
+                   (v1-28 (-> self parent))
+                   )
+               (t9-2 a0-14 (-> (the-as process-focusable (if v1-28
+                                                             (the-as process-focusable (-> v1-28 0 self))
+                                                             )
+                                       )
+                               node-list
+                               data
+                               13
+                               )
+                     )
                )
-           (t9-2 a0-14 (-> (the-as process-focusable (if v1-28
-                                                         (the-as process-focusable (-> v1-28 0 self))
-                                                         )
-                                   )
-                           node-list
-                           data
-                           13
-                           )
-                 )
-           )
+             )
          )
         ((and (logtest? (projectile-options po17) (-> self options)) (made-impact? self))
          (go-virtual impact)
@@ -1577,6 +1583,30 @@
                               fvec
                               )
                     )
+      )
+    ;; Enhanced: Sig's Peacemaker (enhanced-player.gc): from its muzzle (higher than Jak's hand) toward the
+    ;; target, else to where Jak's shot would be 15 m ahead (or it flies over small enemies)
+    (when (and *target* (enhanced-player-big-gun-out?) (-> self parent))
+      (let ((aim (new 'stack-no-clear 'vector))
+            (len (vector-length (-> self core-velocity)))
+            )
+        (cond
+          ((handle->process (-> *target* gun track-target 0 handle))
+           (vector-copy! aim (-> *target* gun track-trans))
+           )
+          (else
+            (vector<-cspace! aim (-> (the-as process-focusable (ppointer->process (-> self parent))) node-list data 13))
+            (vector+float*! aim aim (-> self core-velocity) (/ (meters 15) (fmax 0.001 len)))
+            )
+          )
+        (vector-! aim aim (-> self root trans))
+        (set! (-> aim w) 0.0)
+        (when (< (meters 0.5) (vector-length aim))
+          (vector-normalize! aim len)
+          (set! (-> aim w) 0.0)
+          (vector-copy! (-> self core-velocity) aim)
+          )
+        )
       )
     (when (and *target* (focus-test? *target* in-head))
       (vector-copy! (-> self core-position) (camera-pos))
@@ -1937,7 +1967,14 @@
                   (let ((s1-1 (as-type (-> v1-66 process) process-focusable)))
                     (when s1-1
                       (when (and (nonzero? (-> (the-as process-focusable s1-1) root root-prim prim-core collide-as))
-                                 (logtest? (process-mask crate enemy guard vehicle civilian kg-robot metalhead) (-> s1-1 mask))
+                                 ;; Enhanced: Sig's shot takes only enemies (his 10 aren't spent on crates,
+                                 ;; cars, people and allies)
+                                 (logtest? (if (enhanced-player-sig?)
+                                               (process-mask enemy kg-robot metalhead)
+                                               (process-mask crate enemy guard vehicle civilian kg-robot metalhead)
+                                               )
+                                           (-> s1-1 mask)
+                                           )
                                  (not (focus-test? (the-as process-focusable s1-1) disable dead ignore))
                                  (!= s1-1 s5-1)
                                  )
