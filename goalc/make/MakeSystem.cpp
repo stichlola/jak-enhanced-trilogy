@@ -447,10 +447,12 @@ void print_input(const std::vector<std::string>& in, char end) {
     }
     all_names += name;
   }
+  // (Enhanced: per-target progress goes to the console only; the log file keeps the summary and
+  // the failures)
   if (all_names.length() > 70) {
-    lg::print("{}...{}", all_names.substr(0, 70 - 3), end);
+    lg::print_console("{}...{}", all_names.substr(0, 70 - 3), end);
   } else {
-    lg::print("{}{}{}", all_names, std::string(70 - all_names.length(), ' '), end);
+    lg::print_console("{}{}{}", all_names, std::string(70 - all_names.length(), ' '), end);
   }
 }
 }  // namespace
@@ -496,10 +498,10 @@ bool MakeSystem::make(const std::string& target_in, bool force, bool verbose, bo
     auto& tool = m_tools.at(rule->tool);
     int percent = (100.0 * (1 + (i++)) / (deps.size())) + 0.5;
     if (verbose) {
-      lg::print("[{:3d}%] [{:8s}] {}{}\n", percent, tool->name(), rule->input.at(0),
-                rule->input.size() > 1 ? ", ..." : "");
+      lg::print_console("[{:3d}%] [{:8s}] {}{}\n", percent, tool->name(), rule->input.at(0),
+                        rule->input.size() > 1 ? ", ..." : "");
     } else {
-      lg::print("[{:3d}%] [{:8s}]       ", percent, tool->name());
+      lg::print_console("[{:3d}%] [{:8s}]       ", percent, tool->name());
       print_input(rule->input, '\r');
     }
 
@@ -519,17 +521,17 @@ bool MakeSystem::make(const std::string& target_in, bool force, bool verbose, bo
     const auto seconds = step_timer.getSeconds();
     if (verbose) {
       if (seconds > 0.05) {
-        lg::print(fg(fmt::color::yellow), " {:.3f}\n", seconds);
+        lg::print_console(fg(fmt::color::yellow), " {:.3f}\n", seconds);
       } else {
-        lg::print(" {:.3f}\n", seconds);
+        lg::print_console(" {:.3f}\n", seconds);
       }
     } else {
       if (seconds > 0.05) {
-        lg::print("[{:3d}%] [{:8s}] ", percent, tool->name());
-        lg::print(fg(fmt::color::yellow), "{:.3f} ", seconds);
+        lg::print_console("[{:3d}%] [{:8s}] ", percent, tool->name());
+        lg::print_console(fg(fmt::color::yellow), "{:.3f} ", seconds);
         print_input(rule->input, '\n');
       } else {
-        lg::print("[{:3d}%] [{:8s}] {:.3f} ", percent, tool->name(), seconds);
+        lg::print_console("[{:3d}%] [{:8s}] {:.3f} ", percent, tool->name(), seconds);
         print_input(rule->input, '\n');
       }
     }

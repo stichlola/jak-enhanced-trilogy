@@ -103,6 +103,29 @@ ReplStatus Compiler::handle_repl_string(const std::string& input) {
     return ReplStatus::OK;
   }
 
+  // Enhanced: dev_goalc.py sends `(seval (error "DEVMARK-<pid>-<n>"))` after every form, an error on
+  // purpose whose block flushes goalc's stdout. The console (its pipe) still gets the whole block;
+  // the log file only one line instead of ~16 lines of a fake "Compilation Error".
+  struct FileMute {
+    bool on = false;
+    ~FileMute() {
+      if (on) {
+        lg::set_file_muted(false);
+      }
+    }
+  } mute;
+  {
+    const auto at = input.find("(error \"DEVMARK-");
+    if (at != std::string::npos && input.rfind("(seval", 0) == 0) {
+      const auto tag_end = input.find('"', at + 8);
+      lg::print_file("-- {} --\n", input.substr(at + 8, tag_end == std::string::npos
+                                                            ? std::string::npos
+                                                            : tag_end - (at + 8)));
+      lg::set_file_muted(true);
+      mute.on = true;
+    }
+  }
+
   try {
     // 1). read
     goos::Object code = m_goos.reader.read_from_string(input, true);
