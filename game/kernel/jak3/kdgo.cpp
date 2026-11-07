@@ -142,7 +142,9 @@ void load_and_link_dgo_from_c(const char* name,
                               s32 bufferSize,
                               bool jump_from_c_to_goal) {
   Timer timer;
-  lg::debug("[Load and Link DGO From C] {}", name);
+  // (Enhanced: info, a few per boot; the per-object "[link and exec]" lines stay debug and come
+  // back in the file if the game stops or crashes while linking)
+  lg::info("[Load and Link DGO From C] {}", name);
   u32 oldShowStall = sShowStallMsg;
 
   // remember where the heap top point is so we can clear temporary allocations

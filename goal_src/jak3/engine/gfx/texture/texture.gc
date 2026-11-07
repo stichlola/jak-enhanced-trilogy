@@ -1824,9 +1824,9 @@
       (if (and s5-0 (-> s5-0 page) (= (-> this cur) (+ sv-16 (-> s5-0 page size))))
           (set! (-> this cur) sv-16)
           ;; og:preserve-this PC: every boot (other pages come after the font's), harmless: the pool
-          ;; only keeps the font page's space, so no ERROR line on PC
+          ;; only keeps the font page's space, so a note instead of the ERROR line on PC
           (#if PC_PORT
-               0
+               (format 0 "texture pool: gamefont page space kept (harmless on PC)~%")
                (format 0 "ERROR: could not resize texture pool to remove gamefont.~%")
                )
           )

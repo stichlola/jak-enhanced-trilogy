@@ -28,6 +28,12 @@ struct Logger {
   std::mutex mutex;
   bool disable_colors = false;
   bool file_muted = false;
+  // Enhanced: the last debug lines the file skipped (it is at info without -v), written out when
+  // the game stops on a die or crashes: e.g. the "[link and exec] <obj>" a broken build died in
+  static constexpr int kRecentDebug = 16;
+  std::string recent_debug[kRecentDebug];
+  int recent_debug_next = 0;
+  int recent_debug_count = 0;
 
   ~Logger() {
     // will run when program exits.
@@ -101,6 +107,24 @@ const fmt::color log_colors[] = {
     fmt::color::gray, fmt::color::turquoise, fmt::color::light_green, fmt::color::yellow,
     fmt::color::red,  fmt::color::hot_pink,  fmt::color::hot_pink};
 
+// Enhanced: called with the mutex held
+void write_recent_debug_locked(const char* why) {
+  if (!gLogger.fp || gLogger.recent_debug_count == 0) {
+    return;
+  }
+  std::string head = fmt::format("[log] {}: last {} debug lines (not in this file without -v):\n",
+                                 why, gLogger.recent_debug_count);
+  write_file(head.data(), head.size());
+  int first = gLogger.recent_debug_next - gLogger.recent_debug_count;
+  for (int i = 0; i < gLogger.recent_debug_count; i++) {
+    const auto& line =
+        gLogger.recent_debug[(first + i + Logger::kRecentDebug) % Logger::kRecentDebug];
+    write_file(line.data(), line.size());
+  }
+  gLogger.recent_debug_count = 0;
+  fflush(gLogger.fp);
+}
+
 void log_message(level log_level, LogTime& now, const char* message) {
 #ifdef __linux__
   char date_time_buffer[128];
@@ -125,6 +149,13 @@ void log_message(level log_level, LogTime& now, const char* message) {
       if (log_level >= gLogger.flush_level) {
         fflush(gLogger.fp);
       }
+    } else if (gLogger.fp && log_level == level::debug) {
+      gLogger.recent_debug[gLogger.recent_debug_next] =
+          fmt::format("{} [debug] {}\n", time_string, message);
+      gLogger.recent_debug_next = (gLogger.recent_debug_next + 1) % Logger::kRecentDebug;
+      if (gLogger.recent_debug_count < Logger::kRecentDebug) {
+        gLogger.recent_debug_count++;
+      }
     }
 
     if (log_level >= gLogger.stdout_log_level ||
@@ -147,6 +178,8 @@ void log_message(level log_level, LogTime& now, const char* message) {
     fflush(stdout);
     fflush(stderr);
     if (gLogger.fp) {
+      std::lock_guard<std::mutex> lock(gLogger.mutex);
+      write_recent_debug_locked("stopped");
       fflush(gLogger.fp);
     }
     abort();
@@ -283,6 +316,30 @@ void set_max_debug_levels() {
 
 void disable_ansi_colors() {
   gLogger.disable_colors = true;
+}
+
+#ifdef _WIN32
+namespace {
+LPTOP_LEVEL_EXCEPTION_FILTER g_prev_crash_filter = nullptr;
+LONG WINAPI crash_flush_filter(EXCEPTION_POINTERS* info) {
+  // no waiting: the crashing thread may hold the mutex
+  if (gLogger.mutex.try_lock()) {
+    if (gLogger.fp) {
+      internal::write_recent_debug_locked(
+          fmt::format("crashed, code 0x{:08X}", info->ExceptionRecord->ExceptionCode).c_str());
+      fflush(gLogger.fp);
+    }
+    gLogger.mutex.unlock();
+  }
+  return g_prev_crash_filter ? g_prev_crash_filter(info) : EXCEPTION_CONTINUE_SEARCH;
+}
+}  // namespace
+#endif
+
+void install_crash_flush() {
+#ifdef _WIN32
+  g_prev_crash_filter = SetUnhandledExceptionFilter(crash_flush_filter);
+#endif
 }
 
 void set_file_muted(bool muted) {

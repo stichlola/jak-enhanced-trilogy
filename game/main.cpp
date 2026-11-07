@@ -55,6 +55,7 @@ void setup_logging(const std::string& game_name, bool verbose, bool disable_ansi
     lg::disable_ansi_colors();
   }
   lg::initialize();
+  lg::install_crash_flush();
 }
 
 std::string game_arg_documentation() {

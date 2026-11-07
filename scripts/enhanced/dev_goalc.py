@@ -44,8 +44,10 @@ def instance_offset(n):
 
 
 # (mi)'s progress entries: "[ 42%] [goalc   ] " + 6 chars (blank, or the seconds) + the 70-char
-# name field (MakeSystem.cpp); with \r gone, several of them run together on one line
-PROGRESS = re.compile(r"\[\s*\d{1,3}%\] \[.{8}\] (?: {6}|\d+\.\d{3} ).{0,70}")
+# name field (MakeSystem.cpp); with \r gone, several of them run together on one line. The tool
+# name is padded to 8 but can be longer (tpage-dir, subtitle-v2, build-level...)
+PROGRESS = re.compile(r"\[\s*\d{1,3}%\] \[[^\[\]\n]{8,24}\] (?: {6}|\d+\.\d{3} ).{0,70}")
+MARKER_BLOCK_MAX = 40  # a marker's fake error block is ~25 lines
 
 
 class LogFilter:
@@ -58,6 +60,7 @@ class LogFilter:
         self.buf = ""
         self.dashes = None     # a dashed line held back: a marker block may start with it
         self.skip = 0          # > 0: inside a marker block (lines left before giving up)
+        self.held = []         # the block's lines: written after all if it never ends
 
     def feed(self, s):
         self.buf += s
@@ -70,6 +73,7 @@ class LogFilter:
 
     def flush(self):
         out = []
+        self._release(out)
         if self.dashes is not None:
             out.append(self.dashes + "\n")
             self.dashes = None
@@ -82,7 +86,14 @@ class LogFilter:
     def _line(self, line, out):
         if self.skip:
             # the block ends with "[Warning] REPL Error: Compilation Error"
-            self.skip = 0 if "REPL Error" in line else self.skip - 1
+            if "REPL Error" in line:
+                self.skip, self.held = 0, []
+                return
+            self.held.append(line)
+            self.skip -= 1
+            if not self.skip:
+                # no end in sight: not a marker block after all, keep its lines
+                self._release(out)
             return
         if PROGRESS.search(line):
             line = PROGRESS.sub("", line)
@@ -94,13 +105,19 @@ class LogFilter:
             if line.startswith("From object") and m:
                 # (a prompt may lead the dashed line: "g > -----...")
                 out.append(f"{held.rstrip('-')}-- {m.group(1)} --\n")
-                self.skip = 40
+                self.skip = MARKER_BLOCK_MAX
                 return
             out.append(held + "\n")
         if line.endswith("-" * 40):
             self.dashes = line
             return
         out.append(line + "\n")
+
+    def _release(self, out):
+        if self.held:
+            out.append("(dev_goalc: the marker block had no end, its lines follow)\n")
+            out.extend(held + "\n" for held in self.held)
+        self.skip, self.held = 0, []
 
 
 class Goalc:

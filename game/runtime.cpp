@@ -183,7 +183,8 @@ void ee_runner(SystemThreadInterface& iface) {
   }
 
   if (g_ee_main_mem == (u8*)(-1)) {
-    lg::debug("Failed to initialize main memory! {}", strerror(errno));
+    // (Enhanced: error, not debug: the log file is at info)
+    lg::error("Failed to initialize main memory! {}", strerror(errno));
     iface.initialization_complete();
     return;
   }

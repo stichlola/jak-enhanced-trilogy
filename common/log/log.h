@@ -55,6 +55,8 @@ void disable_ansi_colors();
 // Enhanced: while muted nothing reaches the log file (the console still gets everything), e.g. for
 // goalc's REPL markers that dev_goalc.py sends after every form
 void set_file_muted(bool muted);
+// Enhanced (Windows): on a crash, flush the file and write the last debug lines it skipped
+void install_crash_flush();
 void initialize();
 void finish();
 

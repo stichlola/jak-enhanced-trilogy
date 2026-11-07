@@ -15,7 +15,8 @@
 #   -Start     continue point (JAK_ENHANCED_START)
 #   -Env       extra environment, @{ JAK_ENHANCED_PLAYER = 'sig' }
 #   -NoGoalc   don't start the dev goalc        -NoShaderReload  leave JAK_ENHANCED_SHADER_RELOAD unset
-#   -Wait      wait until frames come ("[enhanced] average" in the log; headless: the log's first lines)
+#   -Wait      wait until frames come ("[enhanced] average" in the log; headless: Jak in the level,
+#              "GAMEPLAY: enter" or the first "[camera]" line, as dev_test's "ready")
 #   -Minimized start the window minimized (test runs that only read logs)
 # Output: "LAUNCH instance=<n> pid=<gk> port=<gk listener> bin=<shadow bin> cfg=<dir> log=<gk log|->",
 # then the dev goalc's GOALC line. Stop the game with Stop-Process -Id <pid> (only the one you started).
@@ -133,7 +134,9 @@ while ((Get-Date) -lt $end -and -not $p.HasExited) {
   }
   $done = $log -and $hidden
   if ($done -and $Wait) {
-    $pat = if ($Headless) { '\[enhanced\]|target' } else { '\[enhanced\] average' }
+    # (headless: not '[enhanced]|target', which only matched debug "[link and exec] target-util"
+    # lines, and the log file is at info now)
+    $pat = if ($Headless) { '^GAMEPLAY: enter |^\[camera\] ' } else { '\[enhanced\] average' }
     $done = Select-String -Path $log -Pattern $pat -Quiet -ErrorAction SilentlyContinue
   }
   if ($done) { break }
