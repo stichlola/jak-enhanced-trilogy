@@ -536,6 +536,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   // the dev loop: tuning.json saved since, shaders saved since or asked for (EnhancedTune.h)
   enhanced_tune_poll();
   shaders.hot_reload();
+  m_fx_count++;  // (capture_fx: copies from this frame)
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
@@ -619,6 +620,54 @@ void EnhancedPost::capture_far_ocean(GLuint render_fbo, int w, int h) {
                     GL_NEAREST);
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   m_far_ocean_ready = true;
+}
+
+void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
+  // (JAK_ENHANCED_FX=0: off, the light effects graded with the scene as before)
+  static const bool off = [] {
+    const char* e = std::getenv("JAK_ENHANCED_FX");
+    return e && e[0] == '0';
+  }();
+  if (!m_settings.enabled || off || which < 0 || which > 1) {
+    return;
+  }
+  if (w != m_fx_w || h != m_fx_h) {
+    if (m_fx_fbo[0]) {
+      glDeleteFramebuffers(2, m_fx_fbo);
+      glDeleteTextures(2, m_fx_tex);
+    }
+    m_fx_w = w;
+    m_fx_h = h;
+    glGenFramebuffers(2, m_fx_fbo);
+    glGenTextures(2, m_fx_tex);
+    // (with mips: how far an effect spreads tells a shot or a flame from a wash of light over the
+    // whole room, which stays in the scene's grade)
+    int levels = 1;
+    while ((std::max(w, h) >> levels) > 0) {
+      levels++;
+    }
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_fx_tex[i]);
+      glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGBA8, w, h);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_fx_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_fx_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_fx_frame[0] = m_fx_frame[1] = 0;
+  }
+  // (resolving msaa, as the scene's own copy)
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fx_fbo[which]);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glBindTexture(GL_TEXTURE_2D, m_fx_tex[which]);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  m_fx_frame[which] = m_fx_count + 1;
 }
 
 void EnhancedPost::ensure_ocean_buffers(int w, int h) {

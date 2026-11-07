@@ -169,6 +169,33 @@ uniform float dawn_fog;         // the morning's low fog
 uniform float cloud_rays;       // the low sun's rays through the gaps in the clouds
 uniform vec4 jak_fx;            // Jak in view space; w: how wet he is (0..1)
 uniform float eye_adapt;        // the eye's adaptation: the picture lifted in the dark, lowered in glare
+// the light effects (Jak 3: sprites, glows, generic shots, trails): the scene right before the
+// sprite buckets (T23) and right after them (T24). What they added is kept out of the day's grade
+// (the desert's stop-down, the shoulders, the eye's adaptation squeezed it into the bright ground)
+// and added back after it with a gain. fx_day: 0 at night (the night's own look, unchanged)
+uniform sampler2D tex_T23;
+uniform sampler2D tex_T24;
+uniform float fx_day;
+uniform float tune_fx_gain = 2.2;    // the effects' light by day, over the scene graded without them
+uniform float tune_fx_bright = 0.8;  // more over bright ground (by the scene's brightness under them)
+uniform float tune_fx_sat = 1.0;  // their color (>1: more saturated)
+uniform float tune_fx_knee = 0.78;   // the shoulder their sum rolls off from, hue kept
+uniform float tune_fx_min = 0.02;    // what counts as an effect: the faint changes are smoke, dither
+uniform float tune_fx_area_frac = 6.0;  // the surroundings an effect must stand out from: 1/x screen
+uniform float tune_fx_area0 = 0.3;  // the mean around / the pixel: up to here a compact effect,
+uniform float tune_fx_area1 = 0.7;  // from here a wash of light (stays in the grade)
+uniform float tune_fx_wash0 = 0.03;  // that mean itself (and over 2^x wider): from here on a wash too
+uniform float tune_fx_wash1 = 0.08;
+uniform float tune_fx_wash_lod = 1.5;
+uniform float shadow_far_span = 6000.0;  // the far sun map's depth span (m)
+uniform float tune_shadow_far_bias_m = 0.45;  // its depth bias (m along the light)
+uniform float tune_night_horizon = 0.05;  // the night sky's glow along the horizon
+uniform float tune_sky_keep = 1.0; // the game's lines drawn over its sky (windows) kept over ours
+uniform float tune_sky_keep_lo = 0.06;  // by the contrast around (5 px): from here
+uniform float tune_sky_keep_hi = 0.16;  // to here, all of the game's pixel
+uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
+uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
+uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
@@ -326,11 +353,16 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
 
 // a contact shadow toward the light: only what's close in depth to the ray counts (a thin thing
 // standing in front of it isn't its shadow), softer the farther along the ray it's met
+float pixel_angle();
+
 float contact_shadow(vec3 from, vec3 dir) {
   const int STEPS = 10;
   const float reach = 0.5 * 4096.0;
+  // (steps offset per pixel and frame, as light_blocked's: fixed ones left 5 cm stair bands at the
+  // feet that the TAA couldn't average away)
+  float jit = fract(pixel_angle() * 0.1591549);
   for (int s = 0; s < STEPS; s++) {
-    float t = (float(s) + 0.5) / float(STEPS);
+    float t = (float(s) + jit) / float(STEPS);
     vec3 q = from + dir * reach * t;
     if (q.z < 0.3 * 4096.0) {
       break;
@@ -631,8 +663,11 @@ vec3 soft_normal(vec2 uv, vec3 n, float z) {
 
 // the far map: past the near one, the long shadows of the mountains, big rocks and trees (0.6 m
 // texels: a 3x3 filter, no penumbra search)
+// the near map's depth bias: 7 cm along the light, whatever its span (shadow.near_depth_m)
+#define NEAR_BIAS (0.072 / shadow_params.x)
+
 float sun_shadow_far(vec3 w) {
-  if (shadow_far_on <= 0.0) {
+  if (shadow_far_on <= 0.0 || abs(tune_shadow_dbg - 3.0) < 0.5) {
     return 0.0;
   }
   vec3 s = (light_mvp_far * vec4(w, 1.0)).xyz * 0.5 + 0.5;
@@ -643,9 +678,12 @@ float sun_shadow_far(vec3 w) {
   float fade = 1.0 - smoothstep(0.85, 1.0, max(e.x, e.y));
   vec2 t = vec2(1.0 / 4096.0);
   float lit = 0.0;
+  // (the bias in meters along the light, about one far texel: the constant it was came to 1.5 m
+  // and pulled the rocks' shadows meters off their feet in the low sun)
+  float bias = tune_shadow_far_bias_m / max(shadow_far_span, 1.0);
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
-      lit += texture(tex_T22, vec3(s.xy + vec2(x, y) * t, s.z - 0.00025));
+      lit += texture(tex_T22, vec3(s.xy + vec2(x, y) * t, s.z - bias));
     }
   }
   return (1.0 - lit / 9.0) * fade;
@@ -658,17 +696,17 @@ float sun_shadow_rough(vec3 w) {
     return sun_shadow_far(w);
   }
   float r = 0.5 / shadow_params.y;
-  float lit = texture(tex_T9, vec3(s.xy + vec2(r, r), s.z - 0.00012)) +
-              texture(tex_T9, vec3(s.xy + vec2(-r, r), s.z - 0.00012)) +
-              texture(tex_T9, vec3(s.xy + vec2(r, -r), s.z - 0.00012)) +
-              texture(tex_T9, vec3(s.xy + vec2(-r, -r), s.z - 0.00012));
+  float lit = texture(tex_T9, vec3(s.xy + vec2(r, r), s.z - NEAR_BIAS)) +
+              texture(tex_T9, vec3(s.xy + vec2(-r, r), s.z - NEAR_BIAS)) +
+              texture(tex_T9, vec3(s.xy + vec2(r, -r), s.z - NEAR_BIAS)) +
+              texture(tex_T9, vec3(s.xy + vec2(-r, -r), s.z - NEAR_BIAS));
   return 1.0 - lit * 0.25;
 }
 
 float sun_shadow(vec3 w) {
   vec4 l = light_mvp * vec4(w, 1.0);
   vec3 s = l.xyz * 0.5 + 0.5;
-  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0))) || abs(tune_shadow_dbg - 4.0) < 0.5) {
     return sun_shadow_far(w);
   }
   // fade out toward the edge of the map, into the far one
@@ -685,7 +723,7 @@ float sun_shadow(vec3 w) {
     float found = 0.0;
     for (int i = 0; i < 12; i++) {
       float bd = texture(tex_T13, s.xy + vogel(i, 12, rot) * search).r;
-      if (bd < s.z - 0.00012) {
+      if (bd < s.z - NEAR_BIAS) {
         blockers += bd;
         found += 1.0;
       }
@@ -697,7 +735,7 @@ float sun_shadow(vec3 w) {
     float penumbra_m = clamp(gap_m * shadow_params.z, 0.05, 1.2);
     float r = penumbra_m / shadow_params.y;
     // a wider filter reaches further over sloped ground: more bias with it
-    float bias = 0.00012 + penumbra_m / shadow_params.x * 0.6;
+    float bias = NEAR_BIAS + penumbra_m / shadow_params.x * 0.6;
     float lit = 0.0;
     for (int i = 0; i < 16; i++) {
       lit += texture(tex_T9, vec3(s.xy + vogel(i, 16, rot + 1.3) * r, s.z - bias));
@@ -708,7 +746,7 @@ float sun_shadow(vec3 w) {
   float lit = 0.0;
   for (int y = -1; y <= 2; y++) {
     for (int x = -1; x <= 2; x++) {
-      lit += texture(tex_T9, vec3(s.xy + (vec2(x, y) - 0.5) * t, s.z - 0.00012));
+      lit += texture(tex_T9, vec3(s.xy + (vec2(x, y) - 0.5) * t, s.z - NEAR_BIAS));
     }
   }
   return mix(far, 1.0 - lit / 16.0, fade);
@@ -2208,6 +2246,43 @@ void main() {
     }
   }
 
+  // the light effects (tex_T23/T24): what the sprite buckets added here, by day
+  vec3 fx_d = vec3(0.0);
+  float fx_w = 0.0;
+  float fx_under = 0.0;  // the scene's brightness under them
+  if (fx_day > 0.0) {
+    vec3 f0 = textureLod(tex_T23, uv, 0.0).rgb;
+    vec3 f1 = textureLod(tex_T24, uv, 0.0).rgb;
+    fx_d = max(f1 - f0, 0.0);
+    float fm = max(fx_d.r, max(fx_d.g, fx_d.b));
+    // (a channel the sum clipped at 1 lost part of the effect's light: an orange flame over the
+    // sand kept less red than green and turned green-yellow. Such a channel had at least as much as
+    // the strongest one that wasn't clipped: hot cores go pale, as they do at night)
+    vec3 clip = smoothstep(vec3(0.94), vec3(0.99), f1);
+    fx_d = mix(fx_d, max(fx_d, vec3(fm)), clip);
+    // (only what stands out from its surroundings: a shot, a thruster, a flame, sparks. A wash of
+    // light over a whole room (the arena's sun pool) has about as much all around, and stays in
+    // the scene's grade as before. The mean around this pixel, over a sixth of the screen's height)
+    float lod = log2(max(1.0, 1.0 / (texel.y * tune_fx_area_frac)));
+    float wide = max(luma(max(textureLod(tex_T24, uv, lod).rgb - textureLod(tex_T23, uv, lod).rgb, 0.0)), 0.0);
+    // (by the ratio, and by the amount itself: the edges of a wash stand out from its middle)
+    float wider = max(luma(textureLod(tex_T24, uv, lod + tune_fx_wash_lod).rgb -
+                           textureLod(tex_T23, uv, lod + tune_fx_wash_lod).rgb), 0.0);
+    float compact = (1.0 - smoothstep(tune_fx_area0, tune_fx_area1, wide / max(luma(fx_d), 0.02))) *
+                    (1.0 - smoothstep(tune_fx_wash0, tune_fx_wash1, max(wide, wider)));
+    fx_w = fx_day * smoothstep(tune_fx_min, tune_fx_min * 4.0, fm) * compact;
+    fx_under = luma(f0);
+  }
+  // (test: tune_fx_ab = s, off and on in turn every that many seconds, a corner mark tells which)
+  bool fx_ab_off = tune_fx_ab > 0.0 && mod(floor(haze.w / tune_fx_ab), 2.0) < 0.5;
+  if (fx_ab_off) {
+    fx_w = 0.0;
+  }
+  // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our
+  // sky replaces the game's by day and took them away with it: put back over ours)
+  vec3 fx_rest = fx_day > 0.0 ? textureLod(tex_T24, uv, 0.0).rgb - textureLod(tex_T23, uv, 0.0).rgb - fx_w * fx_d
+                              : vec3(0.0);
+
   // (the flames' place on screen: kept out of the daylight's corrections and the highlights'
   // bleaching further down, which took their orange to a pale yellow, green and blue by day)
   float flame_keep = 0.0;
@@ -2243,6 +2318,8 @@ void main() {
                                      // stands toward it, kept its raw yellow as a hard-edged patch)
                                      (1.0 - max(z == 0.0 ? 1.0 : 0.0, smoothstep(0.3, 0.6, dot(ray, sky_sun.xyz))) * (1.0 - clouds.w)));
   }
+  // (what flame_keep puts back: without the effects' light, added after the grade like the rest)
+  vec3 flame_base = max(flame_raw - fx_w * fx_d, 0.0);
 
   // the water's world position and pixel footprint, here in uniform control flow (derivatives)
   vec2 water_world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
@@ -2797,6 +2874,8 @@ void main() {
     vec3 wgt = -amp * mix(0.125, 0.2, sharp) * sharp;
     c = clamp((c + (n + s + w + e) * wgt) / (1.0 + 4.0 * wgt), 0.0, 1.0);
   }
+  // (the light effects out of the scene: from here on the grade shades what's behind them)
+  c = max(c - fx_w * fx_d, 0.0);
 
   // ambient occlusion and sun shadows
   float ao = wsurf > 0.0 ? 1.0 : ao_upsample(tex_coord, z);
@@ -3011,7 +3090,10 @@ void main() {
   // baked per vertex and knows nothing of what stands between them and the sun)
   if (shadow_strength > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
     vec3 nn = surf_n;
-    float ndl = dot(soft_n, sun_dir.xyz);
+    // (a character: its own normal, not the one averaged over a meter, which gave the whole 50 cm
+    // body one terminator; and no rough look 2 m toward the sun, which took a wall's shadow onto it)
+    bool chr = pix_tag > 0.3 && pix_tag < 0.55;
+    float ndl = dot(chr ? surf_n : soft_n, sun_dir.xyz);
     sun_lit = smoothstep(0.0, 0.15, ndl);
     float facing = smoothstep(0.0, 0.3, ndl);
     float sh = 0.0;
@@ -3023,7 +3105,7 @@ void main() {
     // turned away from the sun the map can't tell a shadow from the surface itself: looked at from
     // 2 m toward the sun, past the small shapes. Without it, inside a mountain's shadow the edges
     // of the rocks kept their full light
-    if (facing < 1.0) {
+    if (facing < 1.0 && !chr) {
       vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
       sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
     }
@@ -3036,6 +3118,9 @@ void main() {
       vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
       float cs = contact_shadow(from, sun_dir.xyz);
       sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
+    }
+    if (tune_shadow_dbg > 0.5 && tune_shadow_dbg < 1.5) {
+      sh = 0.0;  // (test: no sun shadows)
     }
     rock_sh = sh;
     sun_lit *= 1.0 - sh;
@@ -3408,6 +3493,27 @@ void main() {
         cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, game_w));
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
+      // (the sprites in front of it: the chimneys' smoke, glows)
+      c = max(c + fx_rest * clouds.x * (1.0 - game_w), 0.0);
+      // (and what the game drew over its sky without depth: the palace's honeycomb windows, glass
+      // and grates, went with the sky, blown to a white pane. Their darker lines, sharper than any
+      // painted cloud, put back over ours: the raw picture against its own surroundings, 5 px)
+      if (z == 0.0 && tune_sky_keep > 0.0) {
+        float lg = luma(texture(tex_T0, uv).rgb);
+        float lb = lg, lo = lg, hi = lg;
+        for (int i = 0; i < 8; i++) {
+          vec2 o = vec2(cos(float(i) * 0.785398), sin(float(i) * 0.785398)) * texel * 5.0;
+          float l = luma(texture(tex_T0, uv + o).rgb);
+          lb += l;
+          lo = min(lo, l);
+          hi = max(hi, l);
+        }
+        lb /= 9.0;
+        // (a pattern there: the game's own pixel back, as it drew the window; not the game's sun)
+        float keep = smoothstep(tune_sky_keep_lo, tune_sky_keep_hi, hi - lo) * (1.0 - smoothstep(0.85, 0.95, lb)) *
+                     clouds.x * (1.0 - game_w) * tune_sky_keep;
+        c = mix(c, c0, keep);
+      }
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
       }
@@ -3428,6 +3534,11 @@ void main() {
     vec3 base = c;
     c *= 1.0 - 0.75 * night_dark.x;
     c += night_sky(ray, base, pixel_rad);
+    // (a faint glow along the horizon, as a night sky has: the mountains' and the dunes'
+    // silhouettes stand out against it instead of going black on black)
+    float up_n = world_dir(ray).y;
+    c += tune_night_horizon * vec3(0.55, 0.7, 1.0) * night_dark.x *
+         smoothstep(-0.02, 0.03, up_n) * (1.0 - smoothstep(0.03, 0.3, up_n));
   }
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
@@ -4726,12 +4837,12 @@ void main() {
       c = mix(c, lifted, sky_day * (1.0 - smoothstep(80.0, 400.0, length(p) / 4096.0)));
     }
   }
-  c = mix(c, flame_raw, flame_keep);
+  c = mix(c, flame_base, flame_keep);
   // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
   // and shade made it look transparent
   {
     float cl = pix_tag;
-    c = mix(c, texture(tex_T0, tex_coord).rgb, (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
+    c = mix(c, max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0), (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
   }
 
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
@@ -4756,6 +4867,39 @@ void main() {
   }
 
   c *= eye_adapt;
+
+  // the light effects back, over the graded scene (not stopped down with the bright ground, not
+  // adapted to the glare): a gain by day, more over bright ground, their color back, and the sum
+  // rolled off at the top with its hue kept
+  if (fx_w > 0.0) {
+    float g = 1.0 + (tune_fx_gain - 1.0) * (1.0 + tune_fx_bright * smoothstep(0.25, 0.75, fx_under)) * fx_day;
+    vec3 fa = fx_d * g;
+    fa = max(mix(vec3(luma(fa)), fa, mix(1.0, tune_fx_sat, fx_day)), 0.0);
+    vec3 t = c + fa * fx_w;
+    float m = max(t.r, max(t.g, t.b));
+    float k = tune_fx_knee;
+    if (m > k) {
+      float s = k + (1.0 - k) * (1.0 - exp(-(m - k) / max(1.0 - k, 1e-3)));
+      t = mix(t, t * (s / m), fx_w);
+    }
+    c = t;
+  }
+  if (tune_fx_debug > 0.5) {
+    c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
+        tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : vec3(fx_day, 0.5, 0.0);
+  }
+  if (tune_shadow_dbg > 1.5) {
+    c = vec3(rock_sh, sun_lit, pix_tag);  // (test: the shadow, the sun's light, the material tag)
+    if (tune_shadow_dbg > 4.5 && z > 0.0) {
+      // (test: how far above this point the near map's caster is: red 0-2 m, green 2-20 m, blue 20-200 m)
+      vec3 sw = (light_mvp * vec4(view_to_world * p + cam_pos, 1.0)).xyz * 0.5 + 0.5;
+      float gap = (sw.z - texture(tex_T13, sw.xy).r) * shadow_params.x;
+      c = vec3(gap / 2.0, gap / 20.0, gap / 200.0);
+    }
+  }
+  if (tune_fx_ab > 0.0 && tex_coord.x > 1.0 - 8.0 * texel.x && tex_coord.y < 8.0 * texel.y) {
+    c = fx_ab_off ? vec3(0.0) : vec3(1.0);
+  }
 
   // vignette
   vec2 v = tex_coord - 0.5;

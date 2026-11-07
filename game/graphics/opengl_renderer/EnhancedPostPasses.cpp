@@ -388,6 +388,19 @@ void EnhancedPost::prepare(GLuint scene_tex,
   glUniform1i(glGetUniformLocation(down.id(), "tex_T0"), 0);
   glUniform1f(u_threshold, m_settings.bloom_threshold);
   glUniform1f(u_knee, m_settings.bloom_knee);
+  {
+    // the light effects' own glow by day (enh_bloom_down: what the sprite buckets added)
+    const bool fx = fx_ready();
+    glUniform1i(glGetUniformLocation(down.id(), "tex_T1"), 1);
+    glUniform1i(glGetUniformLocation(down.id(), "tex_T2"), 2);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, fx ? m_fx_tex[0] : m_black_tex);
+    glActiveTexture(GL_TEXTURE2);
+    glBindTexture(GL_TEXTURE_2D, fx ? m_fx_tex[1] : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1f(glGetUniformLocation(down.id(), "fx_bloom"),
+                fx ? std::clamp(1.f - m_night, 0.f, 1.f) : 0.f);
+  }
 
   GLuint src = scene_tex;
   int src_w = w;
@@ -869,8 +882,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T22"), 22);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp_far"), 1, GL_TRUE, m_light_mvp_far);
   glUniform1f(glGetUniformLocation(id, "shadow_far_on"), m_shadow_ready && m_shadow_far_ready ? 1.f : 0.f);
-  // the map's depth spans 2 x 300 m (do_shadow_map), its side 2 x range
-  glUniform4f(glGetUniformLocation(id, "shadow_params"), 600.f, 2.f * m_settings.shadow_range,
+  // the map's depth span (2 x shadow.near_depth_m, do_shadow_map), its side 2 x range; the far
+  // map's depth span for its bias in meters (it was a constant: 1.5 m along the light at 6 km)
+  glUniform1f(glGetUniformLocation(id, "shadow_far_span"), m_shadow_far_span_m);
+  glUniform4f(glGetUniformLocation(id, "shadow_params"), m_shadow_near_span_m, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,
               m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);
   {
@@ -957,6 +972,19 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform4f(glGetUniformLocation(id, "strike"), st[0], st[1], st[2], st[3] * on);
   }
   glUniform1f(glGetUniformLocation(id, "eye_adapt"), m_adapt);
+  {
+    // the light effects: the scene before and after the sprite buckets (capture_fx, this frame's
+    // both), kept out of the day's grade and added back after it (fx_day: 0 at night, as before)
+    const bool fx = fx_ready();
+    glActiveTexture(GL_TEXTURE23);
+    glBindTexture(GL_TEXTURE_2D, fx ? m_fx_tex[0] : m_black_tex);
+    glActiveTexture(GL_TEXTURE24);
+    glBindTexture(GL_TEXTURE_2D, fx ? m_fx_tex[1] : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T23"), 23);
+    glUniform1i(glGetUniformLocation(id, "tex_T24"), 24);
+    glUniform1f(glGetUniformLocation(id, "fx_day"), fx ? std::clamp(1.f - m_night, 0.f, 1.f) : 0.f);
+  }
   glUniform1f(glGetUniformLocation(id, "chroma"), m_chroma);
   glUniform1f(glGetUniformLocation(id, "dawn_fog"), m_dawn_fog);
   glUniform1f(glGetUniformLocation(id, "cloud_rays"), m_settings.cloud_rays);
