@@ -197,16 +197,25 @@ void main() {
     dy = pfu - pfd;
   }
   vec3 n = normalize(cross(dx, dy));
+  if (dot(n, -p) < 0.0) {
+    n = -n;  // face the camera, whatever the handedness of the game's view space
+  }
   // (from the depth, not the geometry's smoothed normals: on low-poly walls and crates those lean
   // out of the real face, so the flat surface around counts as blocking: dark flickering streaks)
   // (but the terrain's grid, tagged 0.85-0.95, is smooth: its own are the right ones)
   vec4 g = texture(tex_T11, uv);
   float g_tag = length(g.rgb * 2.0 - 1.0);
-  if (g.a > 0.17 && g_tag > 0.82 && g_tag < 0.96) {
-    n = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
-  }
-  if (dot(n, -p) < 0.0) {
-    n = -n;  // face the camera, whatever the handedness of the game's view space
+  if (g.a > 0.17 && g_tag > 0.3) {
+    vec3 gw = normalize(g.rgb * 2.0 - 1.0);
+    vec3 gn = normalize(gw * view_to_world);  // world -> view (transpose)
+    if (dot(gn, -p) < 0.0) {
+      gn = -gn;
+    }
+    // the terrain always, and any ground facing up: the depth's normal goes far off on level ground
+    // in rows at the same screen heights in every level (straight dark lines across the ground);
+    // a crate's smoothed edge leans out of "up" and keeps the depth's
+    float w = (g_tag > 0.82 && g_tag < 0.96) ? 1.0 : smoothstep(0.7, 0.85, abs(gw.y));
+    n = normalize(mix(n, gn, w));
   }
 
   // screen-space radius of the world radius at this depth (uv units)
