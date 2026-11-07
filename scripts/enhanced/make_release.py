@@ -316,6 +316,7 @@ def main():
         "Something wrong? If the game crashes, a report window opens by itself: one click sends it.\r\n"
         "Feedback any time: \"Send feedback\" in the Enhanced menu, or \"Report a problem.bat\".\r\n\r\n"
         "Free and unofficial: no donations of any kind are accepted for this project.\r\n\r\n"
+        "Credits: Motion capture: ACCAD, The Ohio State University, CC BY 3.0 (Ashelin's kick).\r\n\r\n"
         "https://github.com/stichlola/jak-enhanced-trilogy\r\n", encoding="ascii")
 
     zip_path = args.out / f"{NAME}{'-' + args.version if args.version else ''}.zip"

@@ -282,6 +282,12 @@ git: the Tripo icons).
 shapes; calmer palette, raised blocks with a lit bevel and a shadow on the streets, outlines, deeper
 water with a light rim; the painted maps of the desert enlarged with Real-ESRGAN).
 
+Ashelin (Jak 3, played in Jak's place): her gun holds 20 rounds, then reloads (1.1 s; the HUD shows
+`n/20`); square is a front kick (`enhanced-ashelin-kick.gc`, state `target-enhanced-kick`), its bone
+directions derived from motion capture (ACCAD's Male 2 Martial Arts Kicks, front kick: only the derived
+table is in git; the C3D stays in `local/mocap/accad`). Motion capture: ACCAD, The Ohio State University,
+CC BY 3.0.
+
 ## Known issues
 
 - Water and PBR (metal/glass) reflections and refraction: fewer artifacts than before, but still
