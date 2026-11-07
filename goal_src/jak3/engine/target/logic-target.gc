@@ -1160,7 +1160,12 @@ moves about, so it's Spargus's that are looked for.)"
       (if (< hours -12.0)
           (set! hours (+ hours 24.0))
           )
-      ;; (the clock counts 18000 ticks an hour)
+      ;; (the clock counts 18000 ticks an hour) but never back before its start: just after boot the
+      ;; clock is a few hours in, and running it back below 0 makes the time of day negative, the
+      ;; short way then keeps going back, and the game crashes. Forward round the day then
+      (if (< (+ (the float (-> *display* bg-clock frame-counter)) (* 18000.0 hours)) 0.0)
+          (set! hours (+ hours 24.0))
+          )
       (+! (-> *display* bg-clock frame-counter)
           (the-as time-frame (the int (/ (* 18000.0 hours) (the float *enhanced-hour-steps*))))
           )
