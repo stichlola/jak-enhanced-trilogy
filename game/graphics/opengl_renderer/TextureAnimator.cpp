@@ -15,7 +15,27 @@
 #include "third-party/imgui/imgui.h"
 
 #define _USE_MATH_DEFINES
+#include <atomic>
 #include <math.h>
+#include <mutex>
+#include <unordered_set>
+
+namespace {
+// Enhanced: messages that repeat hundreds of times per boot. log_due: the 1st, then every power of
+// two from 16 on (with the count), so a flood during play still shows up. first_time: once per name.
+bool log_due(std::atomic<u64>& counter, u64& count) {
+  count = ++counter;
+  return count == 1 || (count >= 16 && (count & (count - 1)) == 0);
+}
+bool first_time(const std::string& name) {
+  static std::mutex mutex;
+  static std::unordered_set<std::string> seen;
+  std::lock_guard<std::mutex> lock(mutex);
+  return seen.insert(name).second;
+}
+std::atomic<u64> g_pool_created{0};
+std::atomic<u64> g_pool_grown{0};
+}  // namespace
 
 // #define dprintf(...) printf(__VA_ARGS__)
 // #define dfmt(...) fmt::print(__VA_ARGS__)
@@ -160,7 +180,11 @@ GLuint OpenGLTexturePool::allocate(u64 w, u64 h) {
     // spammed during normal gameplay (bad for performance). Note that all of this can get massively
     // simplified once clouds are moved to C++. This is just a hack to keep the current clouds
     // working. (they are wrong and slow, but look better than nothing)
-    lg::warn("OpenGLTexturePool creating texture for {} x {}", w, h);
+    // (Enhanced: ~200 per boot with the HD textures: the 1st, then 16, 32, 64... with the count)
+    u64 n = 0;
+    if (log_due(g_pool_created, n)) {
+      lg::warn("OpenGLTexturePool creating texture for {} x {} ({} so far)", w, h, n);
+    }
     GLuint slot;
     glGenTextures(1, &slot);
     glActiveTexture(GL_TEXTURE0);
@@ -172,7 +196,10 @@ GLuint OpenGLTexturePool::allocate(u64 w, u64 h) {
   if (it->second.empty()) {
     // Enhanced: HD texture replacements make animated textures bigger than the preallocated
     // set expects, so grow the pool instead of stopping the game.
-    lg::warn("OpenGLTexturePool growing for {} x {}", w, h);
+    u64 n = 0;
+    if (log_due(g_pool_grown, n)) {
+      lg::warn("OpenGLTexturePool growing for {} x {} ({} so far)", w, h, n);
+    }
     GLuint slot;
     glGenTextures(1, &slot);
     glActiveTexture(GL_TEXTURE0);
@@ -218,7 +245,10 @@ const tfrag3::IndexTexture* itex_by_name(const tfrag3::Level* level,
     }
     if (match) {
       if (ret) {
-        lg::error("Multiple index textures named {}", name);
+        // (Enhanced: the same data, checked below; once per name, as a warning)
+        if (first_time("idx:" + name)) {
+          lg::warn("Multiple index textures named {} (same data, the first is used)", name);
+        }
         ASSERT(ret->color_table == t.color_table);
         ASSERT(ret->index_data == t.index_data);
       }
@@ -241,7 +271,11 @@ const tfrag3::Texture* tex_by_name(const tfrag3::Level* level, const std::string
   for (const auto& t : level->textures) {
     if (t.debug_name == name) {
       if (ret) {
-        lg::error("Multiple textures named {}", name);
+        // (Enhanced: the same data, checked below; once per name, as a warning: common-white alone
+        // was ~70 [error] lines per boot)
+        if (first_time(name)) {
+          lg::warn("Multiple textures named {} (same data, the first is used)", name);
+        }
         ASSERT(ret->data == t.data);
       }
       ret = &t;
@@ -642,7 +676,7 @@ TextureAnimator::TextureAnimator(ShaderLibrary& shaders,
       for (size_t i = 0; i < anim.src_textures.size(); i++) {
         const auto& it = name_to_slot.find(anim.def.layers.at(i).tex_name);
         if (it != name_to_slot.end()) {
-          lg::error("Patching ref to {} in {}", it->first, anim.def.tex_name);
+          lg::warn("Patching ref to {} in {}", it->first, anim.def.tex_name);
           anim.src_textures[i].is_anim_slot = true;
           anim.src_textures[i].idx = it->second;
         }

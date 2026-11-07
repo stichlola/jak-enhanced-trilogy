@@ -506,7 +506,8 @@ void DisplayManager::update_resolutions() {
       m_available_window_sizes.push_back(new_res);
       continue;
     }
-    lg::info("[DISPLAY]: {}x{} is supported", new_res.width, new_res.height);
+    // (Enhanced: debug; one summary line below, the list comes again on every display update)
+    lg::debug("[DISPLAY]: {}x{} is supported", new_res.width, new_res.height);
     m_available_resolutions.push_back(new_res);
     m_available_window_sizes.push_back(new_res);
   }
@@ -534,4 +535,11 @@ void DisplayManager::update_resolutions() {
                     return (a.width == b.width && a.height == b.height);
                   }),
       m_available_window_sizes.end());
+  if (m_available_resolutions.empty()) {
+    lg::info("[DISPLAY]: no fullscreen resolution at {:.0f}hz", active_refresh_rate);
+  } else {
+    lg::info("[DISPLAY]: {} resolutions supported at {:.0f}hz, up to {}x{}",
+             m_available_resolutions.size(), active_refresh_rate,
+             m_available_resolutions.front().width, m_available_resolutions.front().height);
+  }
 }

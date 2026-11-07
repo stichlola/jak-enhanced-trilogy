@@ -58,7 +58,11 @@ void GLAPIENTRY opengl_error_callback(GLenum source,
                                       GLsizei /*length*/,
                                       const GLchar* message,
                                       const void* /*userParam*/) {
-  if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
+  if (type == GL_DEBUG_TYPE_PERFORMANCE && severity != GL_DEBUG_SEVERITY_HIGH) {
+    // (Enhanced: debug: the driver recompiling a shader for the GL state, 0x20092, now and then;
+    // nothing wrong, and nothing to fix from a log)
+    lg::debug("[{}] OpenGL perf 0x{:X} S{:X}: {}", g_current_renderer, id, source, message);
+  } else if (severity == GL_DEBUG_SEVERITY_NOTIFICATION) {
     lg::debug("[{}] OpenGL notification 0x{:X} S{:X} T{:X}: {}", g_current_renderer, id, source,
               type, message);
   } else if (severity == GL_DEBUG_SEVERITY_LOW) {

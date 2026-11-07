@@ -910,8 +910,10 @@ PerGameVersion<std::unordered_map<std::string, std::vector<void (*)()>>> gMips2C
 void LinkedFunctionTable::reg(const std::string& name, u64 (*exec)(void*), u32 stack_size) {
   const auto& it = m_executes.insert({name, {exec, Ptr<u8>()}});
   if (!it.second) {
-    lg::error("MIPS2C Function {} is registered multiple times, ignoring later registrations.",
-              name);
+    // (Enhanced: a warning, not an error: the first registration is kept and works; jak3's
+    // "method 10 collide-shape-prim-mesh" comes twice every boot)
+    lg::warn("MIPS2C Function {} is registered multiple times, ignoring later registrations.",
+             name);
   }
 
   // this is short stub that will jump to the appropriate function.

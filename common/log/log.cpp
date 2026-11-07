@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <mutex>
 
 #include "fmt/color.h"
@@ -26,6 +27,7 @@ struct Logger {
   level flush_level = level::trace;
   std::mutex mutex;
   bool disable_colors = false;
+  bool file_muted = false;
 
   ~Logger() {
     // will run when program exits.
@@ -64,6 +66,36 @@ std::string console_safe(const char* message) {
   return out;
 }
 
+/*!
+ * Enhanced: the log file without the console's colours (goalc colours its errors and warnings;
+ * ESC [ ... m in a file only gets in the way of reading and grepping it).
+ */
+void write_file(const char* message, size_t len) {
+  const char* esc = static_cast<const char*>(memchr(message, '\x1b', len));
+  if (!esc) {
+    fwrite(message, len, 1, gLogger.fp);
+    return;
+  }
+  std::string out;
+  out.reserve(len);
+  for (size_t i = 0; i < len; i++) {
+    if (message[i] == '\x1b' && i + 1 < len && message[i + 1] == '[') {
+      size_t j = i + 2;
+      while (j < len && ((message[j] >= '0' && message[j] <= '9') || message[j] == ';' ||
+                         message[j] == '?')) {
+        j++;
+      }
+      if (j < len && ((message[j] >= 'A' && message[j] <= 'Z') ||
+                      (message[j] >= 'a' && message[j] <= 'z'))) {
+        i = j;
+        continue;
+      }
+    }
+    out.push_back(message[i]);
+  }
+  fwrite(out.data(), out.size(), 1, gLogger.fp);
+}
+
 const char* log_level_names[] = {"trace", "debug", "info", "warn", "error", "die", "die"};
 const fmt::color log_colors[] = {
     fmt::color::gray, fmt::color::turquoise, fmt::color::light_green, fmt::color::yellow,
@@ -84,11 +116,12 @@ void log_message(level log_level, LogTime& now, const char* message) {
 
   {
     std::lock_guard<std::mutex> lock(gLogger.mutex);
-    if (gLogger.fp && log_level >= gLogger.file_log_level) {
+    if (gLogger.fp && log_level >= gLogger.file_log_level &&
+        (!gLogger.file_muted || log_level >= level::warn)) {
       // log to file
       std::string file_string =
           fmt::format("{} [{}] {}\n", time_string, log_level_names[int(log_level)], message);
-      fwrite(file_string.c_str(), file_string.length(), 1, gLogger.fp);
+      write_file(file_string.c_str(), file_string.length());
       if (log_level >= gLogger.flush_level) {
         fflush(gLogger.fp);
       }
@@ -125,10 +158,9 @@ void log_print(const char* message) {
     // We always immediately flush prints because since it has no associated level
     // it could be anything from a fatal error to a useless debug log.
     std::lock_guard<std::mutex> lock(gLogger.mutex);
-    if (gLogger.fp) {
+    if (gLogger.fp && !gLogger.file_muted) {
       // Log to File
-      std::string msg(message);
-      fwrite(msg.c_str(), msg.length(), 1, gLogger.fp);
+      write_file(message, strlen(message));
       fflush(gLogger.fp);
     }
 
@@ -140,6 +172,19 @@ void log_print(const char* message) {
   }
 }
 
+void log_print_to(const char* message, bool to_file, bool to_console) {
+  std::lock_guard<std::mutex> lock(gLogger.mutex);
+  if (to_file && gLogger.fp) {
+    write_file(message, strlen(message));
+    fflush(gLogger.fp);
+  }
+  if (to_console && gLogger.stdout_log_level < lg::level::off_unless_die) {
+    fmt::print("{}", internal::console_safe(message));
+    fflush(stdout);
+    fflush(stderr);
+  }
+}
+
 void log_vprintf(const char* format, va_list arg_list) {
   {
     // We always immediately flush prints because since it has no associated level
@@ -147,7 +192,7 @@ void log_vprintf(const char* format, va_list arg_list) {
     std::lock_guard<std::mutex> lock(gLogger.mutex);
     va_list arg_list_2;
     va_copy(arg_list_2, arg_list);
-    if (gLogger.fp) {
+    if (gLogger.fp && !gLogger.file_muted) {
       // Log to File
       vfprintf(gLogger.fp, format, arg_list);
       fflush(gLogger.fp);
@@ -238,6 +283,11 @@ void set_max_debug_levels() {
 
 void disable_ansi_colors() {
   gLogger.disable_colors = true;
+}
+
+void set_file_muted(bool muted) {
+  std::lock_guard<std::mutex> lock(gLogger.mutex);
+  gLogger.file_muted = muted;
 }
 
 void initialize() {

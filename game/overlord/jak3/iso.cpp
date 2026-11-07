@@ -1621,7 +1621,10 @@ void LoadNextDGO(RPC_Dgo_Cmd* cmd) {
 }
 
 void CancelDGO(RPC_Dgo_Cmd* param_1) {
-  ovrld_log(LogCategory::WARN, "DGO RPC: CancelDGO {}", param_1 ? param_1->name : "NO CMD");
+  // (Enhanced: a cancel with no command and no load going on, ~10 per boot, does nothing: no line)
+  if (param_1 || sLoadDGO.msg_type != ISO_Hdr::MsgType::MSG_0) {
+    ovrld_log(LogCategory::WARN, "DGO RPC: CancelDGO {}", param_1 ? param_1->name : "NO CMD");
+  }
   if (sLoadDGO.msg_type != ISO_Hdr::MsgType::MSG_0) {
     sLoadDGO.want_abort = 1;
     if (NotifyDGO()) {

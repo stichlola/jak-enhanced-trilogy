@@ -45,7 +45,9 @@ void setup_logging(const std::string& game_name, bool verbose, bool disable_ansi
     lg::set_stdout_level(lg::level::debug);
     lg::set_flush_level(lg::level::debug);
   } else {
-    lg::set_file_level(lg::level::debug);
+    // (Enhanced: info, not debug: lg::debug is ~500 "link and exec" lines per boot, display modes
+    // skipped and DVD seeks; -v brings them back)
+    lg::set_file_level(lg::level::info);
     lg::set_stdout_level(lg::level::info);
     lg::set_flush_level(lg::level::warn);
   }

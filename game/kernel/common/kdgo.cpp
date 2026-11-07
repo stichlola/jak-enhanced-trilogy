@@ -103,7 +103,8 @@ u32 RpcBind(s32 channel, s32 id) {
       MsgErr("Error: RpcBind failed on port #%d [%4.4X]\n", channel, id);
       return 1;
     }
-    Msg(6, "kernel: RPC port #%d started [%4.4X]\n", channel, id);
+    // (Enhanced: debug, 6 per boot; "not responding" below stays)
+    lg::debug("kernel: RPC port #{} started [{:04X}]", channel, id);
     //    FlushCache(0);
     // In Jak 2 they do a sceSifCheckStatRpc, but we can just skip that.
 

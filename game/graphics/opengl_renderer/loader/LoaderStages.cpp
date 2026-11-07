@@ -87,7 +87,11 @@ class TextureLoaderStage : public LoaderStage {
         }
       }
     }
-    return data.lev_data->textures.size() == data.lev_data->level->textures.size();
+    const bool done = data.lev_data->textures.size() == data.lev_data->level->textures.size();
+    if (done && tex_this_run > 0) {
+      enhanced_hd_screen_textures_report();
+    }
+    return done;
   }
   void reset() override {}
 };

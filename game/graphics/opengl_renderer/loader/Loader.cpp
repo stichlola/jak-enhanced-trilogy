@@ -340,6 +340,7 @@ const tfrag3::Level& Loader::load_common(TexturePool& tex_pool, const std::strin
   for (auto& tex : m_common_level.level->textures) {
     m_common_level.textures.push_back(add_texture(tex_pool, tex, true));
   }
+  enhanced_hd_screen_textures_report();
 
   Timer tim;
   MercLoaderStage mls;
@@ -377,7 +378,11 @@ bool Loader::upload_textures(Timer& timer, LevelData& data, TexturePool& texture
       }
     }
   }
-  return data.textures.size() == data.level->textures.size();
+  const bool done = data.textures.size() == data.level->textures.size();
+  if (done && tex_this_run > 0) {
+    enhanced_hd_screen_textures_report();
+  }
+  return done;
 }
 
 void Loader::update_blocking(TexturePool& tex_pool) {

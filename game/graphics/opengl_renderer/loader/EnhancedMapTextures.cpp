@@ -22,7 +22,36 @@ bool ends_with(const std::string& s, const char* suffix) {
   const size_t n = std::strlen(suffix);
   return s.size() >= n && s.compare(s.size() - n, n, suffix) == 0;
 }
+
+// the HD screen textures of the page being loaded, logged as one line per page (was one per
+// texture: ~150 lines per boot, the minimap pages again at every level load)
+struct HdPage {
+  std::string tpage;
+  int count = 0;
+  int min_scale = 0;
+  int max_scale = 0;
+};
+std::mutex g_hd_page_mutex;
+HdPage g_hd_page;
+
+void hd_page_flush_locked() {
+  if (g_hd_page.count > 0) {
+    if (g_hd_page.min_scale == g_hd_page.max_scale) {
+      lg::info("[enhanced] {}: {} HD textures (x{})", g_hd_page.tpage, g_hd_page.count,
+               g_hd_page.min_scale);
+    } else {
+      lg::info("[enhanced] {}: {} HD textures (x{}-x{})", g_hd_page.tpage, g_hd_page.count,
+               g_hd_page.min_scale, g_hd_page.max_scale);
+    }
+  }
+  g_hd_page = HdPage();
+}
 }  // namespace
+
+void enhanced_hd_screen_textures_report() {
+  std::lock_guard<std::mutex> lock(g_hd_page_mutex);
+  hd_page_flush_locked();
+}
 
 bool enhanced_upscale_map(const tfrag3::Texture& tex, std::vector<u32>& out) {
   if (!ends_with(tex.debug_tpage_name, "-minimap") || tex.debug_name.rfind("map-", 0) != 0 ||
@@ -103,6 +132,13 @@ bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& ou
   if (tex.w <= 0 || tex.h <= 0) {
     return false;
   }
+  {
+    // another page: the last one's line
+    std::lock_guard<std::mutex> lock(g_hd_page_mutex);
+    if (g_hd_page.count > 0 && g_hd_page.tpage != tex.debug_tpage_name) {
+      hd_page_flush_locked();
+    }
+  }
   // only pages that have a folder (asked once per page)
   // made on this machine (out/, from the game's art) first, then the repo's own (game/assets: the
   // minimap icons redrawn with Tripo)
@@ -170,7 +206,15 @@ bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& ou
         px = mixed;
       }
     }
-    lg::info("[enhanced] {} {}: HD x{}", tex.debug_tpage_name, tex.debug_name, scale);
+    lg::debug("[enhanced] {} {}: HD x{}", tex.debug_tpage_name, tex.debug_name, scale);
+    std::lock_guard<std::mutex> lock(g_hd_page_mutex);
+    if (g_hd_page.count == 0) {
+      g_hd_page.tpage = tex.debug_tpage_name;
+      g_hd_page.min_scale = g_hd_page.max_scale = scale;
+    }
+    g_hd_page.count++;
+    g_hd_page.min_scale = std::min(g_hd_page.min_scale, scale);
+    g_hd_page.max_scale = std::max(g_hd_page.max_scale, scale);
   } else {
     lg::error("[enhanced] {}: {}x{} is not a multiple of {}x{}", path.string(), w, h, tex.w, tex.h);
   }

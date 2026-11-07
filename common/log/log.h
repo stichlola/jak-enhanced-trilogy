@@ -39,6 +39,8 @@ namespace internal {
 void log_message(level log_level, LogTime& now, const char* message);
 void log_print(const char* message);
 void log_vprintf(const char* format, va_list arg_list);
+// Enhanced: to the console and/or the log file only
+void log_print_to(const char* message, bool to_file, bool to_console);
 }  // namespace internal
 
 void set_file(const std::string& filename,
@@ -50,6 +52,9 @@ void set_file_level(level log_level);
 void set_stdout_level(level log_level);
 void set_max_debug_levels();
 void disable_ansi_colors();
+// Enhanced: while muted nothing reaches the log file (the console still gets everything), e.g. for
+// goalc's REPL markers that dev_goalc.py sends after every form
+void set_file_muted(bool muted);
 void initialize();
 void finish();
 
@@ -74,6 +79,24 @@ template <typename... Args>
 void print(const fmt::text_style& ts, const std::string& format, Args&&... args) {
   std::string formatted_message = fmt::vformat(ts, format, fmt::make_format_args(args...));
   internal::log_print(formatted_message.c_str());
+}
+
+// Enhanced: same as print, but to the console only (progress lines the log file doesn't need)
+template <typename... Args>
+void print_console(const std::string& format, Args&&... args) {
+  std::string formatted_message = fmt::format(fmt::runtime(format), std::forward<Args>(args)...);
+  internal::log_print_to(formatted_message.c_str(), false, true);
+}
+template <typename... Args>
+void print_console(const fmt::text_style& ts, const std::string& format, Args&&... args) {
+  std::string formatted_message = fmt::vformat(ts, format, fmt::make_format_args(args...));
+  internal::log_print_to(formatted_message.c_str(), false, true);
+}
+// Enhanced: same as print, but to the log file only
+template <typename... Args>
+void print_file(const std::string& format, Args&&... args) {
+  std::string formatted_message = fmt::format(fmt::runtime(format), std::forward<Args>(args)...);
+  internal::log_print_to(formatted_message.c_str(), true, false);
 }
 
 // same as print but uses the C printf instead of fmt

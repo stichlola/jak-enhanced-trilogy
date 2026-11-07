@@ -24,6 +24,9 @@ constexpr int kEnhancedMapScale = 4;
 // (scale), in the PS2's alpha (128 opaque). Unlike the level textures'
 // replacements (baked into the levels), the game keeps addressing these in its own texels
 bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale);
+// logs the last page's "[enhanced] <tpage>: N HD textures (xS)" line (each page's line comes when
+// the next page starts; call this when a level's textures are all in)
+void enhanced_hd_screen_textures_report();
 
 // Jak 3's pause map: the window the game uploads (256 x 416 texels from column strip * 256, row
 // row, of world map `map`, map_w x map_h) cut from game/assets/enhanced/bigmap/jak3/mapNN.jpg (a
