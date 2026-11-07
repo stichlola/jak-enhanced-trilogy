@@ -152,6 +152,7 @@
           (nap-stretch (get-art-by-name (-> self draw art-group) "jakb-nap-stretch" art-joint-anim))
           )
       (set! *enhanced-nap-wanted* 0)
+      (format 0 "[enhanced] nap start ~D h at ~,,2f~%" (the int hours) (-> *time-of-day-context* time))
       ;; onto a bed, if one is marked near
       (enhanced-nap-bed)
       ;; down onto the ground
@@ -236,6 +237,7 @@
           )
         )
       )
+    (format 0 "[enhanced] nap end at ~,,2f~%" (-> *time-of-day-context* time))
     (go target-stance)
     )
   :post target-no-stick-post

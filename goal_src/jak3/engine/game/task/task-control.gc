@@ -83,6 +83,7 @@
     (set! *enhanced-nap-ui-time* 0.0)
     (set! *enhanced-nap-ui-held* #t) ;; (a stick already pushed doesn't move the hours at once)
     (set-master-mode 'freeze)
+    (format 0 "[enhanced] nap window open~%")
     )
   (none)
   )

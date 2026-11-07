@@ -93,6 +93,29 @@ Run each script with `& ([scriptblock]::Create([IO.File]::ReadAllText('<repo>\sc
   then idle Jak is in `target-stance-ambient`, which the check accepts), 9 s once it is warm. Before: a windowed boot per variant (14-20 s each) and a screenshot
   looked at by eye.
 
+## Release gate (scripts/enhanced/release_gate.ps1, Jak 3)
+
+Before a release, `release_gate.ps1` (run through `[scriptblock]::Create`, `-Repo <tree>`) boots the
+built game once per scenario row, one small windowed test instance at a time (`-Instances n` for more;
+instance numbers from 6, own config dir under `local\gate\<time>\cfg-<row>`, so the user's saves and
+settings are never touched) and judges each row: gk still alive at the end, no Application event 1000
+for its PID, enough `[enhanced] average N fps ... in <level>` lines (average >= 20, level not
+none/title, levels in the expected order for level changes), screenshots not black (mean luma > 8),
+and the row's own log lines in order. The rows (`-List`; `-Only a,b` picks some, `-Games` keeps room
+for Jak 1/II, which have none yet): boot at desert-start and Spargus, the menu's hour picks right at
+boot (`JAK_ENHANCED_MENU=1:23`, and a burst with `JAK_ENHANCED_MENU_SCRIPT=<s>:<kind>:<value>,...`),
+the nap and its window, the parked Hellcat flown, desert to Spargus on foot and in the Hellcat,
+Spargus to the desert, the air train's cutscene and the train itself (`JAK_ENHANCED_AIR_TRAIN=1`:
+Jak at the train, triangle), the arena's training orbs (`JAK_ENHANCED_CENSUS=1` counts `arena-token`),
+Jak/Ashelin/Sig running, jumping and with their guns, the weather script in the desert and Spargus,
+the Enhanced menu open, and a save (`JAK_ENHANCED_SAVE_TEST=<slot>`) loaded by a second boot
+(`JAK_ENHANCED_LOAD_TEST=<slot>`, same config dir). The log lines it reads are env-free: `hour
+request/reached`, `nap request/start/end`, `nap window open`, `weather mode <n> in <level>`, `menu
+open`, `scene <name> start/end`, `continue request <cp>: sent|...`, `auto-save <mode> done|error`,
+`[air-train] ...`. Output: `GATE <row> PASS|FAIL <reasons>`, `GATE RESULT pass= fail=`, report.txt and
+report.html (with 320 px screenshots) in `local\gate\<time>\`; exit code 1 on any FAIL. A full run
+takes about 40 minutes with one instance.
+
 ## Graphics (game/graphics/opengl_renderer/EnhancedPost.*, shaders/enh_*)
 
 All in one pass on the finished 3D scene, between the 3D buckets and the HUD (so minimap and text stay untouched); sliders under

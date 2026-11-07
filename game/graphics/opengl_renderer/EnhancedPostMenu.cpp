@@ -228,6 +228,8 @@ void EnhancedPost::draw_menu() {
   static int drawn_frame = -10;
   if (ImGui::GetFrameCount() - drawn_frame > 1) {
     ImGui::SetNextWindowFocus();
+    // (one line each time it opens: test runs check it)
+    lg::info("[enhanced] menu open");
   }
   drawn_frame = ImGui::GetFrameCount();
   // the menu's own look, popped on every way out (see MenuStyle)

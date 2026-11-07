@@ -6,6 +6,8 @@
 ;; dgos: GAME
 
 (define-extern v-marauder type)
+(define-extern *enhanced-air-train-log* int) ;; logic-target.gc (the air train test)
+(define-extern *enhanced-air-train-nodest* int)
 (define-extern *range-warp-dust-color* curve-color-fast)
 (define-extern *range-warp-dust-alpha* curve2d-fast)
 (define-extern *range-warp-dust-scale-x* curve2d-fast)
@@ -525,6 +527,19 @@
     (update-transforms (-> self root))
     (until #f
       (eval-on-notice self)
+      ;; Enhanced: the air train test (logic-target.gc) asks every gate once for its state
+      (when (> *enhanced-air-train-log* 0)
+        (format 0 "[air-train] gate ~A continue ~A at ~M m (reach ~M) airlock ~A hint ~A" (-> self name)
+                (if (-> self continue) (-> self continue name) "none")
+                (if *target* (vector-vector-distance (-> self root trans) (-> *target* control trans)) 0.0)
+                (-> self distance) (-> *setting-control* user-current airlock) (-> *setting-control* user-current hint)
+                )
+        (format 0 " on-notice ~A~%" (-> self on-notice))
+        ;; (an air train with nowhere to go in this game's progress: the test plays its scene instead)
+        (if (and (not (-> self continue)) (string= (symbol->string-debug (-> self type symbol)) "air-train"))
+            (set! *enhanced-air-train-nodest* 1)
+            )
+        )
       (when (and (and *target*
                       (and (>= (-> self distance) (vector-vector-distance (-> self root trans) (-> *target* control trans)))
                            (not (logtest? (focus-status teleporting) (-> *target* focus-status)))
@@ -627,6 +642,7 @@
     )
   :code (behavior ((arg0 continue-point))
     (local-vars (v1-38 symbol))
+    (format 0 "[air-train] use gate ~A to ~A~%" (-> self name) (if arg0 (-> arg0 name) "none"))
     (kill-current-talker '() '() 'exit)
     (set-setting! 'mode-name 'cam-fixed 0.0 0)
     (set-setting! 'interp-time 'abs 0.0 0)
@@ -1206,6 +1222,7 @@
 (defstate use (air-train)
   :virtual #t
   :code (behavior ((arg0 continue-point))
+    (format 0 "[air-train] use train ~A to ~A~%" (-> self name) (if arg0 (-> arg0 name) "none"))
     (kill-current-talker '() '() 'exit)
     (set-time! (-> self state-time))
     (logclear! (-> self mask) (process-mask actor-pause))
