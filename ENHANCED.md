@@ -267,6 +267,56 @@ next start, with the old models in the meantime.
 to close, then it is forced), and writes `data/VERSION` last, so an update that stops halfway is offered
 again. The installer does the same with `-CheckOnly` and `-CloseOnly`.
 
+## Releasing
+
+`scripts/enhanced/release.ps1` does a whole release, run from the tree to release (it never uses
+`-ExecutionPolicy Bypass`):
+
+```powershell
+$rel = [scriptblock]::Create([IO.File]::ReadAllText("$PWD\scripts\enhanced\release.ps1"))
+& $rel -Version v0.14.8                   # dry run: commands printed, safe checks only
+& $rel -Version v0.14.8 -Publish          # the release
+& $rel -Version v0.14.8 -Publish -Resume  # a stopped run goes on from the first step not done
+```
+
+The steps:
+
+1. **clean**: `git status --porcelain` is empty (`make_release.py` copies the working tree, not HEAD), the
+   tools are there (Python, gh, Inno Setup), and so are the `HANDMADE` folders.
+2. **release**: no GitHub release with this tag yet. A draft left behind is resumed, never doubled; a published
+   one stops it.
+3. **gate**: `scripts/enhanced/release_gate.ps1`, if the tree has it, runs in its own PowerShell
+   (`JAK_RELEASE_VERSION` set). A non-zero exit stops the release. `-SkipGate` skips it.
+4. **build**: Release-static (`gk goalc extractor decompiler`, `-Jobs 12`). The first time it configures
+   `out/build/Release-static` (Ninja, clang, `STATICALLY_LINK`), which is slow. It wants `BUILD EXIT 0` and
+   the 4 programs no older than the last commit to their sources. `-SkipBuild` only checks them.
+5. **notes**: `out/release/notes-<version>.md`, UTF-8. When it is missing, a draft is written: the head of the
+   newest notes, the download table, empty New/Fixed sections and the commit subjects since the last
+   published release, under a `<!-- DRAFT` marker. Rewrite it in plain player language and delete the
+   markers. `-Publish` stops while a marker is there, or when the patches the table names aren't the
+   ones being made.
+6. **full / light**: `make_release.py --installer --patch-from <3 ZIPs>`, then `--light`, with `--out` set
+   (the shader check always runs). It stops on a non-zero exit, on a `WARNING:` about uncommitted files
+   or old programs (the `placed.json` one is only shown), and on sizes that make no sense. The patches
+   come from the 3 newest full ZIPs before this version, by version number, found in the out folder and
+   in the main tree's `out/release`, which is only read. `-PatchFrom v0.14.6,v0.14.0` chooses them instead.
+7. **push**: `git push enhanced HEAD:main` (fast-forward only), after listing what goes out: it asks you
+   to type the commit's first 7 characters, or takes `-ConfirmPush <sha>`. Other agents' WIP on main
+   would go out too, so look at the list. The draft targets that exact commit.
+8. **draft / upload / publish / light-upload**: a draft, then `metadata.json` and the patches, then Setup,
+   then the ZIP. Each file gets up to 15 tries 30 s apart (`gh release upload --clobber`). A file is up
+   when its asset is `uploaded` with the local size. Then `--draft=false --latest`, and Light last.
+9. **verify**: published, every asset `uploaded` and as big as the local file.
+10. **mods / mods-push**: once the Light asset answers 200, a new first entry in `mods.json`
+    (`jak-enhanced-light`, json load/dump, the file's own format) and `lastUpdated`. That file is committed
+    alone. It is pushed without asking only when it is the one commit going out.
+
+State goes to `local/release/<version>/state.json`, with the commit the packages came from. `-Resume`
+skips the steps done there and refuses a HEAD that isn't that commit (or that plus the mods.json commit).
+The script stops by throwing, never `exit`, and ends with a summary of each step and failed check, and
+`$LASTEXITCODE` 0 or 1. A release from a worktree needs the `HANDMADE` folders in it (they are out of git:
+copy them, or make junctions to the main tree's) and `-OutDir` if the packages should go elsewhere.
+
 ## Not done (yet)
 
 Next, the small ones first (the big ones below wait until these are done):
