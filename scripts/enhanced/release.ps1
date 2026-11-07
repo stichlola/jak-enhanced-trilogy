@@ -242,7 +242,7 @@ try {
         $last = [int64](GitQ log -1 --format=%ct '--' @ProgramSources)
         foreach ($e in $Exes) {
             $p = Join-Path $Bin $e
-            if (-not (Test-Path $p)) { Check "program $e" ($Dry -and -not $SkipBuild) 'missing (the build makes it)'; continue }
+            if (-not (Test-Path $p)) { Check "program $e" ($Dry -and -not $SkipBuild) $(if ($SkipBuild) { 'missing' } else { 'missing (the build makes it)' }); continue }
             $m = [int64]([DateTimeOffset](Get-Item $p).LastWriteTimeUtc).ToUnixTimeSeconds()
             Check "program $e" (($m -ge $last) -or ($Dry -and -not $SkipBuild)) $(if ($m -lt $last) { 'older than the last commit to its sources' })
         }
