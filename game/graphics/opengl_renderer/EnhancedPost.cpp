@@ -18,6 +18,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
@@ -1067,30 +1068,44 @@ float g_light_yaw = 0.f;
 float g_light_max_elev = 90.f;
 
 // test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
-// (tuning in one run)
+// (tuning in one run); tuning.json's "light": {"yaw", "max_elev", "morning_yaw"} too, over it
+// (EnhancedTune.h)
 void tune_light(float* yaw, float* elev) {
+  static const EnhancedTune t_yaw("light.yaw", 0.f);
+  static const EnhancedTune t_elev("light.max_elev", 90.f);
+  static const EnhancedTune t_morning("light.morning_yaw", 0.f);
   static const char* file = std::getenv("JAK_ENHANCED_TUNE");
-  if (!file) {
-    return;
-  }
-  static float y = 0.f, e = 90.f;
-  static auto last = std::chrono::steady_clock::now() - std::chrono::seconds(2);
-  auto now = std::chrono::steady_clock::now();
-  if (now - last > std::chrono::seconds(1)) {
-    last = now;
-    if (FILE* f = std::fopen(file, "r")) {
-      float a, b, m;
-      const int n = std::fscanf(f, "%f %f %f", &a, &b, &m);
-      if (n >= 2) {
-        y = a;
-        e = b;
+  if (file) {
+    static float y = 0.f, e = 90.f;
+    static auto last = std::chrono::steady_clock::now() - std::chrono::seconds(2);
+    auto now = std::chrono::steady_clock::now();
+    if (now - last > std::chrono::seconds(1)) {
+      last = now;
+      if (FILE* f = std::fopen(file, "r")) {
+        float a, b, m;
+        const int n = std::fscanf(f, "%f %f %f", &a, &b, &m);
+        if (n >= 2) {
+          y = a;
+          e = b;
+        }
+        g_tune_morning_yaw = n == 3 ? m : NAN;
+        std::fclose(f);
       }
-      g_tune_morning_yaw = n == 3 ? m : NAN;
-      std::fclose(f);
     }
+    *yaw = y;
+    *elev = e;
+  } else {
+    g_tune_morning_yaw = NAN;
   }
-  *yaw = y;
-  *elev = e;
+  if (t_yaw.is_set()) {
+    *yaw = t_yaw;
+  }
+  if (t_elev.is_set()) {
+    *elev = t_elev;
+  }
+  if (t_morning.is_set()) {
+    g_tune_morning_yaw = t_morning;
+  }
 }
 
 // the key light in world space (or with sky, the sun as seen in the sky), turned around the world's
@@ -1519,8 +1534,11 @@ void EnhancedPost::update_auto_quality() {
   }
   // each level also brings the detailed scenery models in closer (the far versions are cheap);
   // the last two draw the game at fewer pixels (85%, 72% a side), stretched to the window
-  static constexpr float kSceneryScale[kAutoLevels] = {1.f, 0.85f, 0.7f, 0.55f, 0.55f, 0.55f};
-  static constexpr float kRenderScale[kAutoLevels] = {1.f, 1.f, 1.f, 1.f, 0.85f, 0.72f};
+  // (tuning.json: "auto": {"scenery_scale": [...], "render_scale": [...]}, one per level)
+  static const EnhancedTune kSceneryScale("auto.scenery_scale",
+                                          {1.f, 0.85f, 0.7f, 0.55f, 0.55f, 0.55f});
+  static const EnhancedTune kRenderScale("auto.render_scale", {1.f, 1.f, 1.f, 1.f, 0.85f, 0.72f});
+  static_assert(kAutoLevels == 6, "auto.scenery_scale and auto.render_scale have 6 levels");
   // (test switches: JAK_ENHANCED_AUTO_MIN=n / JAK_ENHANCED_AUTO_MAX=n keep the level at n or
   // above / below; both for a fixed level while measuring)
   static const int auto_min = [] {
@@ -1547,6 +1565,9 @@ void EnhancedPost::update_auto_quality() {
 }
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
+  // the dev loop: tuning.json saved since, shaders saved since or asked for (EnhancedTune.h)
+  enhanced_tune_poll();
+  shaders.hot_reload();
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
@@ -1969,7 +1990,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       // (at most 20 m: a street lamp's 30 m lit a whole square evenly, no pool of light under it)
-      float radius = std::clamp(l.size * m_settings.light_reach, 4.f * kMeter, 20.f * kMeter);
+      // (tuning.json: "lights": {"glow_min_m", "glow_max_m"})
+      static const EnhancedTune t_glow_min("lights.glow_min_m", 4.f);
+      static const EnhancedTune t_glow_max("lights.glow_max_m", 20.f);
+      const float glow_lo = t_glow_min * kMeter;
+      float radius = std::clamp(l.size * m_settings.light_reach, glow_lo,
+                                std::max(glow_lo, t_glow_max * kMeter));
       c.pos[3] = radius;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
@@ -3716,18 +3742,23 @@ void EnhancedPost::update_scene() {
   }
   // sunny: Jak 1's Sandover. Saturated greens and blues, warm highlights, shadows lifted toward
   // blue (the sky fills them), a few white clouds
+  // (tuning.json: "grade": {"sunny": {"gain", "lift", "saturation", ...}})
   if (sunny > 0.f) {
-    const float gain[3] = {1.1f, 1.06f, 0.96f};
-    const float lift[3] = {0.012f, 0.02f, 0.045f};
+    static const EnhancedTune gain("grade.sunny.gain", {1.1f, 1.06f, 0.96f});
+    static const EnhancedTune lift("grade.sunny.lift", {0.012f, 0.02f, 0.045f});
+    static const EnhancedTune t_saturation("grade.sunny.saturation", 1.45f);
+    static const EnhancedTune t_contrast("grade.sunny.contrast", 0.08f);
+    static const EnhancedTune t_warmth("grade.sunny.warmth", 0.075f);
+    static const EnhancedTune t_clouds("grade.sunny.clouds", 0.32f);
     auto toward = [&](float& v, float t) { v += (t - v) * std::min(sunny, 1.f); };
     for (int i = 0; i < 3; i++) {
       toward(want.gain[i], gain[i]);
       toward(want.lift[i], lift[i]);
     }
-    toward(want.saturation, 1.45f);
-    toward(want.contrast, 0.08f);
-    toward(want.warmth, 0.075f);
-    toward(want.clouds, 0.32f);
+    toward(want.saturation, t_saturation);
+    toward(want.contrast, t_contrast);
+    toward(want.warmth, t_warmth);
+    toward(want.clouds, t_clouds);
   }
 
   const float dt = 1.f / 60.f;
@@ -4314,11 +4345,14 @@ void EnhancedPost::do_gi(GLuint scene_tex,
 }
 
 namespace {
+// (tuning.json: "shadow": {"alpha_ref", "far_range_m", "far_depth_m", "near_depth_m"})
 // texture alpha under this doesn't cast a shadow (leaf cards, cutouts)
-constexpr float kShadowAlphaRef = 0.25f;
+const EnhancedTune kShadowAlphaRef("shadow.alpha_ref", 0.25f);
 // the far shadow map: half its side and its depth span, meters
-constexpr float kShadowFarRange = 1200.f;
-constexpr float kShadowFarDepth = 3000.f;
+const EnhancedTune kShadowFarRange("shadow.far_range_m", 1200.f);
+const EnhancedTune kShadowFarDepth("shadow.far_depth_m", 3000.f);
+// the near map's depth span, meters (its side is the menu's shadow range)
+const EnhancedTune kShadowNearDepth("shadow.near_depth_m", 300.f);
 }  // namespace
 
 void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof) {
@@ -4633,7 +4667,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     mvp[12] = mvp[13] = mvp[14] = 0.f;
     mvp[15] = 1.f;
   };
-  make_mvp(m_settings.shadow_range * kMeter, 300.f * kMeter, m_light_mvp);
+  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp);
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
   float far_mvp[16];
@@ -4703,7 +4737,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
                                 (void*)0);
           glDisableVertexAttribArray(1);
         }
-        glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
+        glUniform1f(u_alpha, d.tex ? (float)kShadowAlphaRef : -1.f);
         if (d.tex) {
           glBindTexture(GL_TEXTURE_2D, d.tex);
         }
@@ -4873,7 +4907,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
       last_vertices = d.vertices;
     }
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
-    glUniform1f(u_alpha, d.tex ? kShadowAlphaRef : -1.f);
+    glUniform1f(u_alpha, d.tex ? (float)kShadowAlphaRef : -1.f);
     if (d.tex) {
       glBindTexture(GL_TEXTURE_2D, d.tex);
     }
@@ -5657,7 +5691,6 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
 }
 
 Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w, int h) {
-  render_state->shaders.hot_reload();
   auto& shader = render_state->shaders[ShaderId::ENH_COMPOSITE];
   shader.activate();
   glActiveTexture(GL_TEXTURE1);

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include "common/common_types.h"
 #include "common/versions/versions.h"
@@ -16,8 +17,26 @@ class Shader {
   u64 id() const { return m_program; }
   // Enhanced TAA: NDC offset added to gl_Position (only for the 3D world's shaders)
   void set_jitter(float x, float y) const;
+  // Enhanced dev loop: the fragment file the shader is built from (shrub_inst and shrub_grass
+  // share shrub.frag)
+  static std::string frag_file(const std::string& shader_name);
+  // its `uniform ... tune_<name> = ...;` take "shaders.tune_<name>" from the tuning file
+  // (EnhancedTune.h), sent again only when the file changed (activate)
+  void apply_tuning() const;
+  // the uniform values it holds now go to `fresh` (a reloaded copy); false (and a log line) when
+  // one sits at another location there, which a renderer that looked it up once would miss
+  bool hand_uniforms_to(const Shader& fresh, bool require_same_locations) const;
 
  private:
+  struct TuneUniform {
+    int loc = -1;
+    unsigned type = 0;
+    int n = 1;  // components
+    float def[4] = {0, 0, 0, 0};
+    std::string key;
+  };
+  std::vector<TuneUniform> m_tune;
+  mutable int m_tune_gen = -1;
   std::string m_name;
   u64 m_frag_shader = 0;
   u64 m_vert_shader = 0;
@@ -100,7 +119,11 @@ class ShaderLibrary {
   Shader& at(ShaderId id) { return m_shaders[(int)id]; }
   void set_jitter(float x, float y);
   // Enhanced: test switch JAK_ENHANCED_SHADER_RELOAD=1 compiles the enh_* shaders again when
-  // their files are saved (checked once a second; a shader that fails keeps the old one)
+  // their files are saved (checked 4 times a second; a shader that fails keeps the old one);
+  // JAK_ENHANCED_SHADER_RELOAD=all every shader (the game's own too: their uniform values are
+  // carried over, and one whose uniforms moved keeps the old program, the log says "restart").
+  // F5 (with the switch on) or the REPL's (pc-enhanced-getenv "JAK_ENHANCED_DO_RELOAD_SHADERS"
+  // "" 0) rebuild them at once, switch or not. Called once a frame (EnhancedPost::begin_frame).
   void hot_reload();
 
  private:
