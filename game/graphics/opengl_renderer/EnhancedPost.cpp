@@ -458,8 +458,14 @@ void EnhancedPost::update_auto_quality() {
   }
   m_last_frame = now;
   // slow: under ~58 fps for 3 s in a row, but not under 40 (a level loading: the CPU, not the
-  // graphics card, and the GPU's clock then counts the waits for it)
-  const bool under = m_frame_ms > 17.2f && m_frame_ms < 25.f;
+  // graphics card, and the GPU's clock then counts the waits for it), nor in the 10 s after such
+  // frames: the first seconds after a boot or a load run at 52-55 fps (streaming, first draws)
+  // and a pass set aside then stayed aside for good (the desert's mist volume, at 15.5 ms a frame
+  // after; the whole noon came out ~8% brighter in one run and not in the next)
+  if (m_frame_ms >= 25.f || m_warm_since <= 0.0) {
+    m_warm_since = now;
+  }
+  const bool under = m_frame_ms > 17.2f && m_frame_ms < 25.f && now - m_warm_since > 10.0;
   if (!under) {
     m_slow_since = -1.0;
   } else if (m_slow_since < 0.0) {
@@ -622,15 +628,75 @@ void EnhancedPost::capture_far_ocean(GLuint render_fbo, int w, int h) {
   m_far_ocean_ready = true;
 }
 
+// The game's sky as it drew it (sky bucket, far ocean), before the levels: what the levels drew
+// over it later without depth (the palace's honeycomb glass, grates) is what differs from it. The
+// game's own painted clouds and the mountains' edges don't: they kept grey halos and wisps over
+// the Enhanced sky when that was found by local contrast instead
+void EnhancedPost::capture_sky(GLuint render_fbo, int w, int h) {
+  m_sky_frame = 0;
+  if (!m_settings.enabled || m_night >= 0.999f) {  // (by night the game's own sky stays)
+    return;
+  }
+  if (w != m_sky_w || h != m_sky_h) {
+    if (m_sky_fbo) {
+      glDeleteFramebuffers(1, &m_sky_fbo);
+      glDeleteTextures(1, &m_sky_tex);
+    }
+    m_sky_w = w;
+    m_sky_h = h;
+    glGenFramebuffers(1, &m_sky_fbo);
+    glGenTextures(1, &m_sky_tex);
+    GLint act = 0, old = 0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &act);
+    glActiveTexture(GL_TEXTURE0);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &old);
+    glBindTexture(GL_TEXTURE_2D, m_sky_tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, w, h);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, old);
+    glActiveTexture(act);
+    GLint draw = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sky_fbo);
+    glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_sky_tex, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+  }
+  GLint read = 0, draw = 0;
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_sky_fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, read);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, draw);
+  m_sky_frame = m_fx_count + 1;
+}
+
 void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
-  // (JAK_ENHANCED_FX=0: off, the light effects graded with the scene as before)
-  static const bool off = [] {
+  // (JAK_ENHANCED_FX=0, or tuning.json "fx": {"off": 1} in a running game: off, the light effects
+  // graded with the scene as before)
+  static const bool env_off = [] {
     const char* e = std::getenv("JAK_ENHANCED_FX");
     return e && e[0] == '0';
   }();
-  if (!m_settings.enabled || off || which < 0 || which > 1) {
+  static const EnhancedTune t_off("fx.off", 0.f);
+  // (nor at full night: the composite leaves the effects in the grade then, the copies unused)
+  if (!m_settings.enabled || env_off || t_off > 0.5f || m_night >= 0.999f || which < 0 || which > 1) {
     return;
   }
+  // (the GL state as the bucket renderers left it, put back after: the game's direct renderers keep
+  // their textures bound on units 20+ and don't bind them again while their state is unchanged. A
+  // copy that unbound the active unit's texture dropped a full-screen pass of the desert's noon,
+  // and the whole picture came out 8% brighter)
+  GLint act = 0, old_tex = 0, old_read = 0, old_draw = 0;
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &act);
+  glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
+  glActiveTexture(GL_TEXTURE0);
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_tex);
   if (w != m_fx_w || h != m_fx_h) {
     if (m_fx_fbo[0]) {
       glDeleteFramebuffers(2, m_fx_fbo);
@@ -656,17 +722,18 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
       glBindFramebuffer(GL_FRAMEBUFFER, m_fx_fbo[i]);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_fx_tex[i], 0);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
     m_fx_frame[0] = m_fx_frame[1] = 0;
   }
   // (resolving msaa, as the scene's own copy)
   glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fx_fbo[which]);
   glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   glBindTexture(GL_TEXTURE_2D, m_fx_tex[which]);
   glGenerateMipmap(GL_TEXTURE_2D);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindTexture(GL_TEXTURE_2D, old_tex);
+  glActiveTexture(act);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
   m_fx_frame[which] = m_fx_count + 1;
 }
 

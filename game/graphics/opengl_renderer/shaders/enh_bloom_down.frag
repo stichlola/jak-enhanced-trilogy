@@ -55,11 +55,12 @@ void main() {
 
   if (first_pass != 0) {
     sum = bright(sum);
-    if (fx_bloom > 0.0) {
-      vec3 f1 = texture(tex_T2, uv).rgb;
-      vec3 fx = max(f1 - texture(tex_T1, uv).rgb, 0.0);
+    vec3 f1 = fx_bloom > 0.0 ? texture(tex_T2, uv).rgb : vec3(0.0);
+    vec3 fx = fx_bloom > 0.0 ? max(f1 - texture(tex_T1, uv).rgb, 0.0) : vec3(0.0);
+    float fm = max(fx.r, max(fx.g, fx.b));
+    // (the surroundings only where there is an effect, as in enh_composite)
+    if (fm > 0.02) {
       // (a channel the sum clipped kept less than it got: see enh_composite's fx_d)
-      float fm = max(fx.r, max(fx.g, fx.b));
       fx = mix(fx, max(fx, vec3(fm)), smoothstep(vec3(0.94), vec3(0.99), f1));
       // (and only the compact ones: a wash of light over a room already blooms with the scene)
       float lod = log2(max(1.0, 1.0 / (texel.y * tune_fx_area_frac)));

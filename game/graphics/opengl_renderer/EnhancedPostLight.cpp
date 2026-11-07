@@ -506,11 +506,14 @@ void EnhancedPost::update_scene() {
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
     // (but not as low in the middle of the day: at 18 degrees the desert-start basin lay in its
-    // cliffs' shadow at noon, grey-blue where the game has it bright. Raised to a mid-height sun
-    // around noon, the rocks still shaded; the morning and the golden hour as they were)
+    // cliffs' shadow at noon, grey-blue where the game has it bright. At 50 it still did: Spargus'
+    // gate walls, 40-60 m high, 20-40 m behind it (the gap to the caster was 20-100 m along the
+    // light). At 65 the basin is in the sun with short shadows at the walls' feet, the rocks still
+    // shaded; the sun in the sky goes up with it, so the shadows match it. The morning and the
+    // golden hour as they were)
     {
-      static const EnhancedTune t_light("light.midday_elev", 50.f);
-      static const EnhancedTune t_sun("light.midday_sun_elev", 42.f);
+      static const EnhancedTune t_light("light.midday_elev", 65.f);
+      static const EnhancedTune t_sun("light.midday_sun_elev", 58.f);
       const float midday = smooth((hour - 10.f) / 1.5f) * (1.f - smooth((hour - 14.f) / 1.5f)) * golden_area;
       g_light_max_elev += std::max((float)t_light - g_light_max_elev, 0.f) * midday;
       g_sun_max_elev += std::max((float)t_sun - g_sun_max_elev, 0.f) * midday;

@@ -306,6 +306,8 @@ class EnhancedPost {
   // right after them (1). Their difference is what the sprites, glows and generic shots added: the
   // composite keeps it out of the day's grade and adds it back after it, with a gain
   void capture_fx(GLuint render_fbo, int w, int h, int which);
+  // the game's sky as drawn, before the levels (Jak 3: after the far ocean)
+  void capture_sky(GLuint render_fbo, int w, int h);
 
   void apply_to_scene(GLuint render_fbo,
                       int w,
@@ -409,6 +411,13 @@ class EnhancedPost {
   bool fx_ready() const {
     return m_fx_fbo[0] && m_fx_frame[0] == m_fx_count + 1 && m_fx_frame[1] == m_fx_count + 1;
   }
+  // the game's sky (capture_sky), this frame's
+  GLuint m_sky_fbo = 0;
+  GLuint m_sky_tex = 0;
+  int m_sky_w = 0;
+  int m_sky_h = 0;
+  u64 m_sky_frame = 0;
+  bool sky_ready() const { return m_sky_fbo && m_sky_frame == m_fx_count + 1; }
 
   // copy of the scene being composited
   GLuint m_scene_fbo = 0;
@@ -765,6 +774,7 @@ class EnhancedPost {
   double m_last_frame = 0.0;
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)
   double m_fast_since = 0.0;
+  double m_warm_since = 0.0;  // the last frame of a load (under 40 fps): no step up for 10 s after
   int m_auto_level = 0;
   // the passes the auto quality sets aside, fading (1 = on)
   float m_fade_volume = 1.f, m_fade_gi = 1.f, m_fade_rays = 1.f;

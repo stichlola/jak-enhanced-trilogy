@@ -191,8 +191,10 @@ uniform float shadow_far_span = 6000.0;  // the far sun map's depth span (m)
 uniform float tune_shadow_far_bias_m = 0.45;  // its depth bias (m along the light)
 uniform float tune_night_horizon = 0.05;  // the night sky's glow along the horizon
 uniform float tune_sky_keep = 1.0; // the game's lines drawn over its sky (windows) kept over ours
-uniform float tune_sky_keep_lo = 0.06;  // by the contrast around (5 px): from here
-uniform float tune_sky_keep_hi = 0.16;  // to here, all of the game's pixel
+uniform float tune_sky_keep_lo = 0.05;  // by how much and how sharply the levels changed it: from here
+uniform float tune_sky_keep_hi = 0.14;  // to here, all of the game's pixel
+uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
+uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
@@ -2096,6 +2098,12 @@ float flare_ghost(vec2 at, float aspect, float rad) {
 
 // how much of the sun the shadow map blocks here (the rock's light below asks)
 float rock_sh = 0.0;
+// what the levels drew over the game's sky here (tex_T25: the sky as the sky bucket drew it; the
+// scene compared before the sprites when that copy is there)
+vec3 sky_over(vec2 q) {
+  vec3 g = sky_copy > 1.5 ? textureLod(tex_T23, q, 0.0).rgb : textureLod(tex_T0, q, 0.0).rgb;
+  return g - textureLod(tex_T25, q, 0.0).rgb;
+}
 void main() {
   if (cloud_pass == 1) {
     color = cloud_march();
@@ -2250,11 +2258,16 @@ void main() {
   vec3 fx_d = vec3(0.0);
   float fx_w = 0.0;
   float fx_under = 0.0;  // the scene's brightness under them
+  vec3 fx_all = vec3(0.0);  // all the sprites did here (fx_rest below)
   if (fx_day > 0.0) {
     vec3 f0 = textureLod(tex_T23, uv, 0.0).rgb;
     vec3 f1 = textureLod(tex_T24, uv, 0.0).rgb;
+    fx_all = f1 - f0;
     fx_d = max(f1 - f0, 0.0);
     float fm = max(fx_d.r, max(fx_d.g, fx_d.b));
+    // (the surroundings looked up only where there is an effect: most of the screen has none, and
+    // the four wide reads cost ~0.3 ms there for nothing)
+    if (fm > tune_fx_min) {
     // (a channel the sum clipped at 1 lost part of the effect's light: an orange flame over the
     // sand kept less red than green and turned green-yellow. Such a channel had at least as much as
     // the strongest one that wasn't clipped: hot cores go pale, as they do at night)
@@ -2272,6 +2285,7 @@ void main() {
                     (1.0 - smoothstep(tune_fx_wash0, tune_fx_wash1, max(wide, wider)));
     fx_w = fx_day * smoothstep(tune_fx_min, tune_fx_min * 4.0, fm) * compact;
     fx_under = luma(f0);
+    }
   }
   // (test: tune_fx_ab = s, off and on in turn every that many seconds, a corner mark tells which)
   bool fx_ab_off = tune_fx_ab > 0.0 && mod(floor(haze.w / tune_fx_ab), 2.0) < 0.5;
@@ -2280,8 +2294,7 @@ void main() {
   }
   // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our
   // sky replaces the game's by day and took them away with it: put back over ours)
-  vec3 fx_rest = fx_day > 0.0 ? textureLod(tex_T24, uv, 0.0).rgb - textureLod(tex_T23, uv, 0.0).rgb - fx_w * fx_d
-                              : vec3(0.0);
+  vec3 fx_rest = fx_all - fx_w * fx_d;
 
   // (the flames' place on screen: kept out of the daylight's corrections and the highlights'
   // bleaching further down, which took their orange to a pale yellow, green and blue by day)
@@ -3496,21 +3509,22 @@ void main() {
       // (the sprites in front of it: the chimneys' smoke, glows)
       c = max(c + fx_rest * clouds.x * (1.0 - game_w), 0.0);
       // (and what the game drew over its sky without depth: the palace's honeycomb windows, glass
-      // and grates, went with the sky, blown to a white pane. Their darker lines, sharper than any
-      // painted cloud, put back over ours: the raw picture against its own surroundings, 5 px)
-      if (z == 0.0 && tune_sky_keep > 0.0) {
-        float lg = luma(texture(tex_T0, uv).rgb);
-        float lb = lg, lo = lg, hi = lg;
-        for (int i = 0; i < 8; i++) {
-          vec2 o = vec2(cos(float(i) * 0.785398), sin(float(i) * 0.785398)) * texel * 5.0;
-          float l = luma(texture(tex_T0, uv + o).rgb);
-          lb += l;
-          lo = min(lo, l);
-          hi = max(hi, l);
+      // and grates, went with the sky, blown to a white pane. Their lines put back over ours: where
+      // the levels changed the game's sky (sky_over), and sharply, against what they did 3 px
+      // around. Not by the picture's own contrast: that also took every sky pixel at a mountain's
+      // edge (grey halos) and the game's painted cloud wisps. A soft cloud card the level draws
+      // changes the sky evenly; a mountain's pixels around don't count)
+      if (z == 0.0 && tune_sky_keep > 0.0 && sky_copy > 0.0) {
+        vec3 dc = sky_over(uv);
+        float sharp = 0.0;
+        for (int i = 0; i < 4; i++) {
+          vec2 q = uv + vec2(i == 0 ? 3.0 : i == 1 ? -3.0 : 0.0, i == 2 ? 3.0 : i == 3 ? -3.0 : 0.0) * texel;
+          if (textureLod(tex_T3, q, 0.0).r > 1e-7) {
+            continue;
+          }
+          sharp = max(sharp, length(sky_over(q) - dc));
         }
-        lb /= 9.0;
-        // (a pattern there: the game's own pixel back, as it drew the window; not the game's sun)
-        float keep = smoothstep(tune_sky_keep_lo, tune_sky_keep_hi, hi - lo) * (1.0 - smoothstep(0.85, 0.95, lb)) *
+        float keep = smoothstep(tune_sky_keep_lo, tune_sky_keep_hi, min(length(dc), sharp)) *
                      clouds.x * (1.0 - game_w) * tune_sky_keep;
         c = mix(c, c0, keep);
       }

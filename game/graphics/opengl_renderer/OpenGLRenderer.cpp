@@ -1565,6 +1565,8 @@ void OpenGLRenderer::dispatch_buckets_jak3(DmaFollower dma,
                                   m_render_state.render_fb_h, 1);
     }
     if (bucket_id == (int)jak3::BucketId::OCEAN_MID_FAR && m_enhanced_post) {
+      m_enhanced_post->capture_sky(m_render_state.render_fb, m_render_state.render_fb_w,
+                                   m_render_state.render_fb_h);
       m_enhanced_post->capture_far_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
                                          m_render_state.render_fb_h);
     }

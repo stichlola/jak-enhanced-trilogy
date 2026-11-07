@@ -984,6 +984,14 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1i(glGetUniformLocation(id, "tex_T23"), 23);
     glUniform1i(glGetUniformLocation(id, "tex_T24"), 24);
     glUniform1f(glGetUniformLocation(id, "fx_day"), fx ? std::clamp(1.f - m_night, 0.f, 1.f) : 0.f);
+    // the game's sky before the levels drew over it (capture_sky): what they drew there is kept
+    // over the Enhanced sky (sky_copy: 2 with the copy before the sprites to compare, 1 without)
+    const bool sky = sky_ready();
+    glActiveTexture(GL_TEXTURE25);
+    glBindTexture(GL_TEXTURE_2D, sky ? m_sky_tex : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T25"), 25);
+    glUniform1f(glGetUniformLocation(id, "sky_copy"), sky ? (fx ? 2.f : 1.f) : 0.f);
   }
   glUniform1f(glGetUniformLocation(id, "chroma"), m_chroma);
   glUniform1f(glGetUniformLocation(id, "dawn_fog"), m_dawn_fog);
