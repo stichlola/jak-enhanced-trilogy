@@ -75,7 +75,8 @@ $rows = @(
   # a nap: asked 8 s into the first level, Jak lies down, the hours go by, he gets up
   New-Row @{ Name = 'nap-6h'; Seconds = 45; Env = @{ JAK_ENHANCED_NAP = '6' }; Shots = @(15, 40)
     Expect = @((E '\[enhanced\] nap request 6 h' 'nap request'), (E '\[enhanced\] nap start 6 h' 'nap start'), (E '\[enhanced\] nap end' 'nap end')) }
-  New-Row @{ Name = 'nap-window'; Seconds = 30; Env = @{ JAK_ENHANCED_NAP = 'window' }; Shots = @(20)
+  # (the open window freezes the game: no fps lines after it)
+  New-Row @{ Name = 'nap-window'; Seconds = 30; Env = @{ JAK_ENHANCED_NAP = 'window' }; Shots = @(20); Lines = 0
     Expect = @((E '\[enhanced\] nap window open' 'nap window open')) }
   # the parked Hellcat: in, climb, fire, land, take off, out in flight
   New-Row @{ Name = 'hellcat-fly'; Seconds = 70; Env = @{ JAK_ENHANCED_HELLCAT_TEST = '1' }; Shots = @(22, 65)
@@ -321,6 +322,11 @@ function Poll-Row($it) {
     if ($it.ShotsDone -notcontains $s -and ($now - $it.Ready).TotalSeconds -ge $s) {
       $it.ShotsDone += $s
       $bmp = if ($it.Hwnd -ne [IntPtr]::Zero) { [GateWin]::Capture($it.Hwnd) } else { $null }
+      if (-not $bmp) {
+        # (the window handle first seen can be gone: ask the process again)
+        $it.Proc.Refresh()
+        if ($it.Proc.MainWindowHandle -ne [IntPtr]::Zero) { $it.Hwnd = $it.Proc.MainWindowHandle; $bmp = [GateWin]::Capture($it.Hwnd) }
+      }
       if ($bmp) {
         $st = [GateWin]::Stats($bmp)
         $file = "$($r.Name)-$s.png"
