@@ -1585,23 +1585,22 @@
                     )
       )
     ;; Enhanced: Sig's Peacemaker (enhanced-player.gc): from its muzzle (higher than Jak's hand) toward the
-    ;; target, else to where Jak's shot would be 15 m ahead (or it flies over small enemies)
+    ;; target; with none, along Jak's aim (his gun's fire direction, as the barrel points: enhanced-sig.gc),
+    ;; not along his hidden hand, which tips up a few degrees
     (when (and *target* (enhanced-player-big-gun-out?) (-> self parent))
       (let ((aim (new 'stack-no-clear 'vector))
             (len (vector-length (-> self core-velocity)))
             )
-        (cond
-          ((handle->process (-> *target* gun track-target 0 handle))
-           (vector-copy! aim (-> *target* gun track-trans))
-           )
-          (else
-            (vector<-cspace! aim (-> (the-as process-focusable (ppointer->process (-> self parent))) node-list data 13))
-            (vector+float*! aim aim (-> self core-velocity) (/ (meters 15) (fmax 0.001 len)))
+        (vector-copy! aim (-> *target* gun fire-dir-out))
+        (when (handle->process (-> *target* gun track-target 0 handle))
+          (let ((to (vector-! (new 'stack-no-clear 'vector) (-> *target* gun track-trans) (-> self root trans))))
+            (if (< (meters 0.5) (vector-length to))
+                (vector-copy! aim to)
+                )
             )
           )
-        (vector-! aim aim (-> self root trans))
         (set! (-> aim w) 0.0)
-        (when (< (meters 0.5) (vector-length aim))
+        (when (< 0.001 (vector-length aim))
           (vector-normalize! aim len)
           (set! (-> aim w) 0.0)
           (vector-copy! (-> self core-velocity) aim)
