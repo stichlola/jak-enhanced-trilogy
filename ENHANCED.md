@@ -126,11 +126,24 @@ run|jumps|attacks max <m>`: the drawn body's main joint against its root, most p
 the skins, measured 0.07-0.16; for Jak himself data only, his main joint leaves his root by up to 3 m in
 the walk/run blends) and their guns headless (`player-jak-gun`, `player-ashelin-gun`, `player-sig-gun`).
 
-Screenshots against a baseline: `-MakeBaseline` keeps the run's 320 px shots in
-`local\gate\baseline\<version>\` (`-Version`, default `$env:JAK_RELEASE_VERSION` or git describe);
-`-Baseline <dir|version|none>` (default: the newest other baseline) compares each shot at 64x36 (mean
-luma difference, SSIM over 8x8 windows; per row `MaxDiff` 30 / `MinSim` 0.5) and a big change makes the
-row **WARN** (it passes), with baseline and new side by side in report.html. Output: `GATE <row>
+The gk tested: `-Bin <dir>`, else `$env:JAK_RELEASE_BIN`, else `out\build\Release\bin` (copied into the
+run's folder). `release.ps1` passes `-Bin out\build\Release-static\bin` (the exe that ships), `-Version`
+and `-MakeBaseline`, so every release adds its shots to its own baseline and the next one compares with it.
+
+Screenshots against a baseline: `-MakeBaseline` adds the run's 320 px shots to
+`local\gate\baseline\<version>\` (`-Version`, default `$env:JAK_RELEASE_VERSION` or git describe) as one
+more rerun sample (the newest `-BaselineKeep` 4 kept; FAILed rows not added); run it 2-3 times on one
+build to give the rows real limits. `-Baseline <dir|version|none>` (default: the newest other baseline)
+compares each shot at 64x36 (mean luma difference, SSIM over 8x8 windows) with every sample and keeps the
+best match, and a change past the limits makes the row **WARN** (it passes), with baseline and new side by
+side in report.html. Limits per row and shot: from the samples (each one's best match among the others,
+the worst of those, sim - 0.05 / diff + 3, clamped to 0.5-0.97 / 3-30), else carried over from the
+baseline the one-sample baseline was made beside, else the row's `MinSim`/`MaxDiff` (default 0.85 / 6;
+air train rows wider). Measured at 64x36: reruns of one build diff 0.2-5.8 / sim 0.81-1.00 (the minimap
+shown or not at 14 s, ground decals, pose; the air train scene at 10 s has two looks, 0.65-0.99); a
+magenta box over 20 % of the frame diff 7.4-9.4 / sim 0.76-0.79; the desert from another camera 0.50;
+another level 0.15. The player shots can't tell Jak from Sig (0.90): their log lines check who is played.
+A shot with no baseline counterpart gets an info line. Output: `GATE <row>
 PASS|WARN|FAIL <fails; warns; every matched check with its value; info>`, `GATE RESULT pass= warn= fail=
 minutes=`, report.txt (one line per matched Expect with its log line) and report.html in
 `local\gate\<time>\`; numbers with dot decimals; exit code 1 on any FAIL. A full run: 15 min (15 windowed rows one

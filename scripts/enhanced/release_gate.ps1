@@ -8,14 +8,18 @@
 #   ... -List                                 print the rows and exit
 #   ... -Instances 1                          windowed rows side by side (default 1; RAM: ~2.8 GB each)
 #   ... -Parallel 4                           headless rows side by side (default 4; ~240 MB each)
-#   ... -MakeBaseline                         keep this run's screenshots as the baseline of -Version
+#   ... -MakeBaseline                         add this run's screenshots to the baseline of -Version, as one
+#                                             more rerun sample (the newest -BaselineKeep are kept; rows
+#                                             that FAIL are not added)
 #   ... -Baseline <dir|version|none>          compare the screenshots with a baseline (default: the
 #                                             newest under local\gate\baseline other than -Version)
 #
 #   -Games      games to run (default jak3; only jak3 has rows for now)
 #   -FirstInstance/-LastInstance  the JAK_ENHANCED_INSTANCE numbers used (default 6-12: 1-5 are the dev
 #               loop's and other test scripts', 0 the user's game); a number whose ports are taken is skipped
-#   -Repo       the jak-enhanced tree whose build is tested (out\build\Release\bin, out\<game>)
+#   -Repo       the jak-enhanced tree whose build is tested (out\<game>, and its bin, see -Bin)
+#   -Bin        the folder whose gk.exe (and DLLs) is tested (default $env:JAK_RELEASE_BIN, which
+#               release.ps1 sets to the static build it ships, else <Repo>\out\build\Release\bin)
 #   -ProjPath   the data tree gk runs on (default -Repo when it has out\<game>\iso, else the main tree)
 #   -Version    the baseline's name (default $env:JAK_RELEASE_VERSION, else git describe)
 #   -NoEarly    every row runs its full Seconds (by default a row ends once all its checks are met and
@@ -27,7 +31,10 @@
 # in <level>" lines every 2 s), screenshots not black (mean luma > 8), and the row's Expect lines in order,
 # each with its value checked when the row gives a range. Every verdict line lists the checks that matched
 # and their values, so a PASS can be trusted without opening the log. Screenshots that differ a lot from
-# the baseline's make the row WARN (it still passes). Output: "GATE <row> PASS|WARN|FAIL ..." per row,
+# the baseline's make the row WARN (it still passes): each shot is compared with every rerun sample of
+# the baseline and the best match counts; its limits come from how much those reruns differ from each
+# other (per row and shot), else from the baseline it was made beside, else the row's MinSim/MaxDiff.
+# Output: "GATE <row> PASS|WARN|FAIL ..." per row,
 # "GATE RESULT pass=.. warn=.. fail=..", report.txt + report.html (downscaled screenshots, baseline side by
 # side) in local\gate\<time>\. Exit code 1 on any FAIL. Only the processes started here are stopped; the
 # user's %APPDATA%\OpenGOAL is never read or written. Numbers are written with dot decimals.
@@ -43,8 +50,10 @@ param(
   [string]$GkPath = '',
   [string]$TestCfg = '',
   [string]$OutDir = '',
+  [string]$Bin = '',
   [string]$Baseline = '',
   [switch]$MakeBaseline,
+  [int]$BaselineKeep = 4,
   [string]$Version = '',
   [int]$BootTimeout = 240,
   [int]$Settle = 8,
@@ -57,6 +66,8 @@ $ErrorActionPreference = 'Stop'
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $prevCulture = [Threading.Thread]::CurrentThread.CurrentCulture
 [Threading.Thread]::CurrentThread.CurrentCulture = $inv
+# (the caller's culture comes back however the gate ends: the try's finally at the end of the file)
+try {
 
 if (-not $Repo) {
   $Repo = if ($PSScriptRoot) { Split-Path (Split-Path $PSScriptRoot) } else { (Get-Location).Path }
@@ -74,10 +85,14 @@ if ($LastInstance -lt $FirstInstance) { throw '-LastInstance < -FirstInstance' }
 # start point's level), MinFps, Bright (min share of bright pixels in the last shot), Save (the saves dir
 # must change), CfgFrom (a row whose config dir this one starts from), Lines (min frames lines; default
 # from the time run), Check (a script block on the Expect values: returns "!why" for a failure, else
-# info), MaxDiff/MinSim (baseline tolerance: mean luma difference 0-255, SSIM-like 0-1), Note
+# info), MaxDiff/MinSim (baseline tolerance when the baseline has no limits from reruns: mean luma
+# difference 0-255, SSIM-like 0-1), Note
+# (default 6 / 0.85, from reruns of one build at 64x36: diff 0.2-5.8, sim 0.81-1.00, most rows >= 0.94; a
+# magenta box over 20 % of the frame gave diff 7.4-9.4 / sim 0.76-0.79, the desert from another camera
+# sim 0.50, another level 0.15)
 function New-Row([hashtable]$h) {
   $d = @{ Game = 'jak3'; Start = 'desert-start'; Headless = $false; Seconds = 45; Env = @{}; Shots = @(); Expect = @(); Levels = @();
-    MinFps = 20; Bright = 0.0; Save = $false; CfgFrom = ''; Lines = -1; Check = $null; MaxDiff = 30.0; MinSim = 0.5; Note = '' }
+    MinFps = 20; Bright = 0.0; Save = $false; CfgFrom = ''; Lines = -1; Check = $null; MaxDiff = 6.0; MinSim = 0.85; Note = '' }
   foreach ($k in $h.Keys) { $d[$k] = $h[$k] }
   if ($d.Headless) { $d.Shots = @() } elseif ($d.Shots.Count -eq 0) { $d.Shots = @([Math]::Max(5, $d.Seconds - 5)) }
   if ($d.Levels.Count -eq 0) { $d.Levels = @(Start-Level $d.Start) }
@@ -165,9 +180,12 @@ $rows = @(
   # the air train: its cutscene (streamed: windowed, headless gk stalls STR streaming; it ends in Haven),
   # and the train itself (triangle at it; the driver closes city-destroy-grid-resolution first, which opens
   # the train to Haven)
+  # (the scene at 10 s has two looks on reruns, sim 0.65-0.99: fallback limits wide, the baseline's own
+  # samples set the real ones; the ride at 60 s 0.81-0.88)
   New-Row @{ Name = 'air-train-scene'; Start = 'desert-warp'; Seconds = 90; Env = @{ JAK_ENHANCED_SCENE = 'desert-air-train-in' }; Shots = @(10, 60)
+    MinSim = 0.6; MaxDiff = 12.0
     Levels = @('^des', '^cty'); Expect = @((E '\[enhanced\] scene "?desert-air-train-in"? start' 'scene start'), (E '\[enhanced\] scene "?desert-air-train-in"? end' 'scene end')) }
-  New-Row @{ Name = 'air-train-ride'; Start = 'desert-warp'; Seconds = 90; Shots = @(10, 60); Env = @{ JAK_ENHANCED_AIR_TRAIN = '1' }
+  New-Row @{ Name = 'air-train-ride'; Start = 'desert-warp'; Seconds = 90; Shots = @(10, 60); Env = @{ JAK_ENHANCED_AIR_TRAIN = '1' }; MinSim = 0.75; MaxDiff = 7.0
     Levels = @('^des', '^cty'); Expect = @((E '\[air-train\] found' 'train found'), (E '\[air-train\] gate "?air-train' 'train state'),
       (E '\[air-train\] use train .* to "?ctyport-warp' 'train used')) }
   # the arena's first training: the orbs (arena-token) up and drawn (bright floor: 1.18 % measured)
@@ -175,13 +193,14 @@ $rows = @(
     Levels = @('^wasstad'); Bright = 0.008; Expect = @((E '\[census\] .* tokens (?<v>\d+)' 'orbs alive' -MinV 1)) }
   # the playable characters: run, jumps, punch (Ashelin: her front kick), spin kick, the body-jump metric
   # (windowed: a picture of each body), then their guns (headless: the test scripts' lines)
-  New-Row @{ Name = 'player-jak'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'jak'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14); MinSim = 0.92
+  New-Row @{ Name = 'player-jak'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'jak'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14)
     Expect = (Run-Expect 'jak' $null); Note = 'body-jump for Jak himself is data only (no limit)' }
   # (skins measured 0.07-0.16 m; a skin left at Jak's root and snapping back was 1-3 m)
-  # (MinSim 0.92: reruns of one build 0.95-1.00, Jak against Sig in the same spot 0.90)
-  New-Row @{ Name = 'player-ashelin'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'ashelin'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14); MinSim = 0.92
+  # (the shot can't tell the bodies apart: reruns of one build 0.89-0.99 (minimap shown or not at 14 s,
+  # ground decals, pose), Jak against Sig in the same spot 0.90; the log lines check who is played)
+  New-Row @{ Name = 'player-ashelin'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'ashelin'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14)
     Expect = (Run-Expect 'ashelin' 0.4) }
-  New-Row @{ Name = 'player-sig'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'sig'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14); MinSim = 0.92
+  New-Row @{ Name = 'player-sig'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'sig'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14)
     Expect = (Run-Expect 'sig' 0.4) }
   New-Row @{ Name = 'player-jak-gun'; Headless = $true; Seconds = 35; Env = @{ JAK_ENHANCED_PLAYER = 'jak'; JAK_ENHANCED_PLAYER_TEST = 'gun'; JAK_ENHANCED_UNLOCK = '1' }
     Expect = @((E '\[player-test\] \d+ gun-type \d+ using #t' 'gun out')) }
@@ -222,7 +241,6 @@ if ($List) {
     '{0,-26} {1} {2} start={3} {4}s levels={5} env={6}' -f $r.Name, $r.Game, $(if ($r.Headless) { 'headless' } else { 'windowed' }), $r.Start, $r.Seconds,
       ($r.Levels -join '>'), (($r.Env.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) -join ' ')
   }
-  [Threading.Thread]::CurrentThread.CurrentCulture = $prevCulture
   return
 }
 if ($rows.Count -eq 0) { throw 'no rows to run (see -List)' }
@@ -249,17 +267,32 @@ if ($Baseline -ne 'none') {
 }
 $base = $null
 if ($baseDir) { $base = [IO.File]::ReadAllText((Join-Path $baseDir 'baseline.json')) | ConvertFrom-Json }
+# baseline.json: { version, commit, date, rows: [{ name, shots: [{ t, files: [one per rerun, newest last],
+# luma, minSim, maxDiff, limits: "reruns n" | "from <version>" }] }] } (a first-format shot has one "file")
+function Shot-Files($bs) { @(if ($bs.files) { $bs.files } elseif ($bs.file) { $bs.file }) }
+# a shot's limits: its baseline's (from reruns, or carried over), else the row's
+function Shot-Limits($r, $bs) {
+  if ($bs -and $null -ne $bs.minSim -and $null -ne $bs.maxDiff) { return @([double]$bs.maxDiff, [double]$bs.minSim, "$($bs.limits)") }
+  @([double]$r.MaxDiff, [double]$r.MinSim, 'row')
+}
+function Base-Shot($b, [string]$name, $t) {
+  if (-not $b) { return $null }
+  $br = $b.rows | Where-Object name -eq $name | Select-Object -First 1
+  if ($br) { $br.shots | Where-Object { [double]$_.t -eq [double]$t } | Select-Object -First 1 }
+}
 if (-not $GkPath) {
   # a copy of the build's gk and DLLs of its own (as dev_bin.ps1 makes them, but in the gate's folder: a
-  # dev_bin prune by another script between two rows can't take it away), so the build can relink meanwhile
-  $from = Join-Path $Repo 'out\build\Release\bin'
-  if (-not (Test-Path (Join-Path $from 'gk.exe'))) { throw "no gk.exe in $from" }
-  $bin = Join-Path $OutDir 'bin'
-  New-Item -ItemType Directory -Force $bin | Out-Null
+  # dev_bin prune by another script between two rows can't take it away), so the build can relink meanwhile;
+  # in a release the static build that ships (release.ps1 sets JAK_RELEASE_BIN), not the dev build
+  $from = if ($Bin) { $Bin } elseif ($env:JAK_RELEASE_BIN) { $env:JAK_RELEASE_BIN } else { Join-Path $Repo 'out\build\Release\bin' }
+  if (-not (Test-Path (Join-Path $from 'gk.exe'))) { throw "no gk.exe in $from (-Bin / JAK_RELEASE_BIN)" }
+  $Bin = (Resolve-Path $from).Path
+  $binCopy = Join-Path $OutDir 'bin'
+  New-Item -ItemType Directory -Force $binCopy | Out-Null
   Get-ChildItem $from -File | Where-Object { $_.Name -eq 'gk.exe' -or $_.Extension -eq '.dll' } |
-    ForEach-Object { [IO.File]::Copy($_.FullName, (Join-Path $bin $_.Name), $true) }
-  $GkPath = Join-Path $bin 'gk.exe'
-}
+    ForEach-Object { [IO.File]::Copy($_.FullName, (Join-Path $binCopy $_.Name), $true) }
+  $GkPath = Join-Path $binCopy 'gk.exe'
+} else { $Bin = '' }
 foreach ($p in @($GkPath, $ProjPath, $TestCfg)) { if (-not (Test-Path $p)) { throw "missing: $p" } }
 
 if (-not ('GateWin2' -as [type])) {
@@ -640,17 +673,23 @@ function Judge($it) {
   }
   if ($it.Shots.Count) { $it.Info += 'luma ' + (($it.Shots | ForEach-Object { '{0}s={1:0}' -f $_.T, $_.Luma }) -join ' ') }
   # the screenshots against the baseline's (a big change: WARN)
+  # (against each rerun sample of the shot; the best match counts, so a minimap shown in one rerun and
+  # not in another doesn't warn)
   if ($base) {
-    $brow = $base.rows | Where-Object name -eq $r.Name | Select-Object -First 1
     foreach ($s in $it.Shots | Where-Object File) {
-      $bs = if ($brow) { $brow.shots | Where-Object t -eq $s.T | Select-Object -First 1 } else { $null }
-      if (-not $bs) { continue }
-      $bf = Join-Path $baseDir $bs.file
-      if (-not (Test-Path $bf)) { continue }
-      $c = [GateWin2]::Compare($bf, (Join-Path $OutDir $s.File))
-      $s.Diff = $c[0]; $s.Sim = $c[1]; $s.Base = $bf
-      $txt = '{0}s diff {1:0.0} sim {2:0.00} vs {3}' -f $s.T, $c[0], $c[1], $base.version
-      if ($c[0] -gt $r.MaxDiff -or $c[1] -lt $r.MinSim) { $it.Warn += "$txt (limits diff $($r.MaxDiff), sim $($r.MinSim))" } else { $it.Info += $txt }
+      $bs = Base-Shot $base $r.Name $s.T
+      if (-not $bs) { $it.Info += "no baseline shot at $($s.T)s in $($base.version)"; continue }
+      $files = @(Shot-Files $bs | ForEach-Object { Join-Path $baseDir $_ } | Where-Object { Test-Path $_ })
+      if (-not $files.Count) { $it.Info += "baseline shot files at $($s.T)s missing in $baseDir"; continue }
+      $best = $null
+      foreach ($bf in $files) {
+        $c = [GateWin2]::Compare($bf, (Join-Path $OutDir $s.File))
+        if (-not $best -or $c[1] -gt $best[1] -or ($c[1] -eq $best[1] -and $c[0] -lt $best[0])) { $best = @($c[0], $c[1], $bf) }
+      }
+      $s.Diff = $best[0]; $s.Sim = $best[1]; $s.Base = $best[2]
+      $lim = Shot-Limits $r $bs
+      $txt = '{0}s diff {1:0.0} sim {2:0.00} vs {3} (best of {4}; limits diff {5:0.0} sim {6:0.00} {7})' -f $s.T, $best[0], $best[1], $base.version, $files.Count, $lim[0], $lim[1], $lim[2]
+      if ($best[0] -gt $lim[0] -or $best[1] -lt $lim[1]) { $it.Warn += $txt } else { $it.Info += $txt }
     }
   }
   if ($it.Early) { $it.Info += ('done early at {0:0} s of {1}' -f $it.Ran, $r.Seconds) }
@@ -667,7 +706,7 @@ $rows | Sort-Object @{ e = { $_.Headless } }, @{ e = { $_.Seconds }; Descending 
 $running = New-Object System.Collections.ArrayList
 $finished = New-Object System.Collections.ArrayList
 $tStart = Get-Date
-"GATE start rows=$($rows.Count) windowed=$(@($rows | Where-Object { -not $_.Headless }).Count)x$Instances headless=$(@($rows | Where-Object Headless).Count)x$Parallel instances=$FirstInstance-$LastInstance version=$Version baseline=$(if ($base) { $base.version } else { '-' }) gk=$GkPath proj=$ProjPath out=$OutDir"
+"GATE start rows=$($rows.Count) windowed=$(@($rows | Where-Object { -not $_.Headless }).Count)x$Instances headless=$(@($rows | Where-Object Headless).Count)x$Parallel instances=$FirstInstance-$LastInstance version=$Version baseline=$(if ($base) { $base.version } else { '-' }) gk=$GkPath$(if ($Bin) { " (from $Bin, $((Get-Item (Join-Path $Bin 'gk.exe')).LastWriteTime.ToString('yyyy-MM-dd HH:mm')))" }) proj=$ProjPath out=$OutDir"
 try {
   while ($queue.Count -or $running.Count) {
     # start rows into free slots (a row waits for the row its config comes from)
@@ -722,18 +761,59 @@ try {
 }
 
 # --- baseline ------------------------------------------------------------------------------------------
+# Each run adds its shots to the version's baseline as one more rerun sample (newest -BaselineKeep kept);
+# with 2+ samples a shot's limits come from how much they differ: for each sample its best match among the
+# others, the worst of those, sim - 0.05 and diff + 3 (clamped to 0.5-0.97 and 3-30); with one sample the
+# limits of the baseline compared against (same row and shot) are carried over, else the row's apply.
 if ($MakeBaseline) {
   $bd = Join-Path $baseRoot $Version
   New-Item -ItemType Directory -Force $bd | Out-Null
-  # (a run of some rows only (-Only) keeps the other rows of that version's baseline)
-  $brows = @()
+  $stamp = Split-Path $OutDir -Leaf
   $old = Join-Path $bd 'baseline.json'
-  if (Test-Path $old) { $brows = @(([IO.File]::ReadAllText($old) | ConvertFrom-Json).rows | Where-Object { $n = $_.name; -not ($finished | Where-Object { $_.Row.Name -eq $n }) }) }
-  foreach ($it in $finished) {
-    $shots = @($it.Shots | Where-Object File | ForEach-Object {
-      Copy-Item (Join-Path $OutDir $_.File) (Join-Path $bd $_.File) -Force
-      [ordered]@{ t = $_.T; file = $_.File; luma = [Math]::Round($_.Luma, 1) } })
-    if ($shots.Count) { $brows += [ordered]@{ name = $it.Row.Name; verdict = (Verdict $it); shots = $shots } }
+  $prev = if (Test-Path $old) { [IO.File]::ReadAllText($old) | ConvertFrom-Json } else { $null }
+  # (a run of some rows only (-Only) keeps the other rows of that version's baseline, a FAILed row its old shots)
+  $saved = @($finished | Where-Object { (Verdict $_) -ne 'FAIL' -and @($_.Shots | Where-Object File).Count })
+  $brows = @(if ($prev) { $prev.rows | Where-Object { $n = $_.name; -not ($saved | Where-Object { $_.Row.Name -eq $n }) } })
+  foreach ($it in @($finished | Where-Object { (Verdict $_) -eq 'FAIL' -and @($_.Shots | Where-Object File).Count })) {
+    "GATE baseline: $($it.Row.Name) FAILed, its shots not added$(if (Base-Shot $prev $it.Row.Name $it.Shots[0].T) { ' (the old ones kept)' })"
+  }
+  foreach ($it in $saved) {
+    $shots = @(foreach ($s in @($it.Shots | Where-Object File)) {
+      $ps = Base-Shot $prev $it.Row.Name $s.T
+      $nf = '{0}-{1}-{2}.png' -f $it.Row.Name, $s.T, $stamp
+      Copy-Item (Join-Path $OutDir $s.File) (Join-Path $bd $nf) -Force
+      $files = @(@(Shot-Files $ps | Where-Object { Test-Path (Join-Path $bd $_) }) + $nf)
+      if ($files.Count -gt $BaselineKeep) {
+        $files[0..($files.Count - $BaselineKeep - 1)] | ForEach-Object { Remove-Item (Join-Path $bd $_) -ErrorAction SilentlyContinue }
+        $files = @($files | Select-Object -Last $BaselineKeep)
+      }
+      $e = [ordered]@{ t = $s.T; files = $files; luma = [Math]::Round($s.Luma, 1) }
+      if ($files.Count -ge 2) {
+        $worstSim = 1.0; $worstDiff = 0.0
+        foreach ($a in $files) {
+          $bSim = -1.0; $bDiff = 1e9
+          foreach ($b in $files) {
+            if ($a -eq $b) { continue }
+            $c = [GateWin2]::Compare((Join-Path $bd $a), (Join-Path $bd $b))
+            if ($c[1] -gt $bSim) { $bSim = $c[1] }; if ($c[0] -lt $bDiff) { $bDiff = $c[0] }
+          }
+          $worstSim = [Math]::Min($worstSim, $bSim); $worstDiff = [Math]::Max($worstDiff, $bDiff)
+        }
+        $e.minSim = [Math]::Round([Math]::Min(0.97, [Math]::Max(0.5, $worstSim - 0.05)), 3)
+        $e.maxDiff = [Math]::Round([Math]::Min(30.0, [Math]::Max(3.0, $worstDiff + 3.0)), 1)
+        $e.limits = "reruns $($files.Count) (worst best-match sim $('{0:0.00}' -f $worstSim), diff $('{0:0.0}' -f $worstDiff))"
+      } else {
+        $cs = Base-Shot $base $it.Row.Name $s.T
+        if ($cs -and $null -ne $cs.minSim) {
+          $e.minSim = $cs.minSim; $e.maxDiff = $cs.maxDiff
+          $e.limits = if ("$($cs.limits)" -like 'from *') { "$($cs.limits)" } else { "from $($base.version)" }
+        }
+      }
+      $e
+    })
+    $brows += [ordered]@{ name = $it.Row.Name; verdict = (Verdict $it); shots = $shots }
+    $ls = @($shots | ForEach-Object { if ($null -ne $_.minSim) { '{0}s n={1} sim>={2:0.00} diff<={3:0.0}' -f $_.t, $_.files.Count, $_.minSim, $_.maxDiff } else { "$($_.t)s n=$($_.files.Count) row limits" } })
+    "GATE baseline $($it.Row.Name): $($ls -join ', ')"
   }
   $bj = [ordered]@{ version = $Version; commit = "$(& git -C $Repo rev-parse --short HEAD 2>$null)"; date = (Get-Date -Format 'yyyy-MM-dd HH:mm'); rows = $brows }
   [IO.File]::WriteAllText((Join-Path $bd 'baseline.json'), ($bj | ConvertTo-Json -Depth 6))
@@ -746,7 +826,7 @@ $warn = @($finished | Where-Object { (Verdict $_) -eq 'WARN' }).Count
 $fail = @($finished | Where-Object { (Verdict $_) -eq 'FAIL' }).Count
 $minutes = ((Get-Date) - $tStart).TotalMinutes
 $commit = (& git -C $Repo log -1 --format='%h %s' 2>$null)
-$txt = @(('GATE commit={0} rows={1} pass={2} warn={3} fail={4} minutes={5:0.0} baseline={6}' -f $commit, $finished.Count, $pass, $warn, $fail, $minutes, $(if ($base) { $base.version } else { '-' })))
+$txt = @(('GATE commit={0} rows={1} pass={2} warn={3} fail={4} minutes={5:0.0} baseline={6} gk={7}' -f $commit, $finished.Count, $pass, $warn, $fail, $minutes, $(if ($base) { $base.version } else { '-' }), $(if ($Bin) { $Bin } else { $GkPath })))
 foreach ($it in $finished) {
   $txt += '{0,-26} {1} {2} {3:0}s{4}' -f $it.Row.Name, (Verdict $it), $(if ($it.Row.Headless) { 'headless' } else { 'windowed' }), $it.Ran, $(if ($it.Early) { ' (early)' })
   foreach ($f in $it.Fail) { $txt += "    FAIL $f" }
@@ -768,7 +848,7 @@ table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #333;pad
 .PASS{color:#6fcf7f;font-weight:600}.FAIL{color:#ff6b6b;font-weight:600}.WARN{color:#f2c94c;font-weight:600}
 img{width:160px;margin-right:4px}figure{display:inline-block;margin:0 8px 6px 0}figcaption{font-size:12px;color:#9aa}
 small{color:#9aa}ul{margin:0;padding-left:16px}li.bad{color:#ff6b6b}code{color:#cfd6e0;font-size:12px}</style></head><body>
-<h1>Release gate</h1><p>$(& $enc $commit) &middot; $pass pass, $warn warn, $fail fail &middot; $('{0:0.0}' -f $minutes) min &middot; baseline $(& $enc $(if ($base) { $base.version } else { 'none' })) &middot; $(Get-Date -Format 'yyyy-MM-dd HH:mm')</p>
+<h1>Release gate</h1><p>$(& $enc $commit) &middot; $pass pass, $warn warn, $fail fail &middot; $('{0:0.0}' -f $minutes) min &middot; baseline $(& $enc $(if ($base) { $base.version } else { 'none' })) &middot; gk $(& $enc $(if ($Bin) { $Bin } else { $GkPath })) &middot; $(Get-Date -Format 'yyyy-MM-dd HH:mm')</p>
 <table><tr><th>Row</th><th>Result</th><th>Checks (matched lines and values)</th><th>Screenshots (baseline | now)</th></tr>
 "@)
 foreach ($it in $finished) {
@@ -794,6 +874,8 @@ foreach ($it in $finished) {
 [void]$h.Append('</table></body></html>')
 [IO.File]::WriteAllText((Join-Path $OutDir 'report.html'), $h.ToString())
 'GATE RESULT pass={0} warn={1} fail={2} minutes={3:0.0} report={4}' -f $pass, $warn, $fail, $minutes, (Join-Path $OutDir 'report.html')
-[Threading.Thread]::CurrentThread.CurrentCulture = $prevCulture
 $global:LASTEXITCODE = if ($fail) { 1 } else { 0 }
+} finally {
+  [Threading.Thread]::CurrentThread.CurrentCulture = $prevCulture
+}
 if ($MyInvocation.MyCommand.CommandType -eq 'ExternalScript') { exit $global:LASTEXITCODE }
