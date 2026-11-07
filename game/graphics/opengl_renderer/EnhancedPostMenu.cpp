@@ -634,9 +634,11 @@ void EnhancedPost::draw_menu() {
         ImGui::SameLine(0, 0);
       }
       const float away = std::fabs(std::fmod(now - hours[i].hour + 36.f, 24.f) - 12.f);  // round the clock
+      ImGui::PushID("hour");  // "Night" is also the Graphics group's id
       if (menu_segment(hours[i].name, away < 1.5f, 162, i % 3)) {
         g_enhanced_menu.ask(1, std::to_string(hours[i].hour));
       }
+      ImGui::PopID();
     }
     static int hour = 12;
     ImGui::SetNextItemWidth(260);
