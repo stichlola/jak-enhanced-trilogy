@@ -18,6 +18,40 @@ Ratchet & Clank Enhanced. Everything is code: the game data comes from your own 
   config, so the PAL folder is used).
 - Play: `gk -v --game jak3 -- -boot -fakeiso -debug`.
 
+## Fast dev loop (scripts/enhanced/dev_*.ps1, Jak 3)
+
+Run each script with `& ([scriptblock]::Create([IO.File]::ReadAllText('<repo>\scripts\enhanced\<name>.ps1'))) <args>`.
+
+- `dev_launch.ps1`: opens the game from a **shadow copy of the bin folder** (`dev_bin.ps1`:
+  `local\run\<stamp>-<tag>\bin`, 63 MB in 0.05-0.3 s, idle copies pruned after an hour or beyond the
+  last 5), so `build.bat` can always relink `out\build\Release\bin` while games run. `--proj-path`
+  points at the main tree. Shader hot reload (`JAK_ENHANCED_SHADER_RELOAD=1`) is on. It also starts the
+  instance's dev goalc. With no arguments it is the user's game (instance 0, own config); agents use
+  `-Instance n` (n >= 1: ports +10n, a test config in the run dir, windowed 640x360), `-Headless`
+  (`--no-display`), `-Start <continue>`, `-Env @{...}`, `-Wait`, `-Minimized`. `multi_run.ps1` uses a
+  shadow copy too, and accepts an instance whose goalc port is held by that instance's dev goalc.
+- `dev_goalc.ps1 -Instance n [-Wait|-Status|-Eval '<form>'|-Stop]` runs `dev_goalc.py`: one goalc per
+  instance, kept running (the cold `(mi)` is paid once, 30-50 s, in the background; then `(lt)`).
+  It answers on 127.0.0.1:8185+10n (JSON lines): each form goes through goalc's nREPL followed by a
+  marker form that fails on purpose, whose error print flushes goalc's block-buffered stdout, so the
+  answer is the text in between. goalc sits in a job object (dies with the daemon) and its stdin is an
+  open pipe (no 100% core spin). Log: `local\run\goalc_i<n>.log`.
+- `dev_reload.ps1 -Instance n [-Files <.gc>...] [-All] [-Force] [-Mi] [-Lt]`: `(ml "<file>")` into the
+  running game for each file that differs from HEAD (or untracked) and changed since the last
+  `(mi)`/`(ml)`, reverted files included. Prints `OK <file> <ms>ms loaded`, `ERROR <file>:<line> <msg>`,
+  `NEEDS <file> mi+restart (...)` (headers `*-h.gc`, `.gp`/`.gs`, a changed `deftype`/`defenum`; `-Force`
+  loads them anyway), then `RESULT ok= error= needs= ms=`; `$LASTEXITCODE` 0/1. `-Mi` queues a
+  background `(mi)` so the next boot has the change (an engine file cascades: ~30 s).
+- Measured (Jak 3, headless instance): one-file change to running code went from 35-90 s ((mi) +
+  gk restart) to **0.45-0.6 s** for `engine/target/logic-target.gc` (4859 lines, compile+load
+  0.28-0.40 s) and **0.2 s** for a small file (0.12 s compile+load); a compile error comes back in
+  0.37 s with file:line; a no-change call 0.17 s. Cold start (gk + dev goalc in parallel, bound by the cold `(mi)`): 34-46 s, once.
+- Caveats: a hot load runs the file's top-level forms again (its `define`d globals are re-created); a
+  process already inside a state keeps the old code until it enters the state again; type layouts can't
+  change in a running game. **gk accepts one goalc connection per run** (`Deci2Server::accept_thread_func`
+  returns after the first client): after a goalc restart, restart the game too. Keep the dev goalc and
+  restart only gk instead; the dev goalc reconnects (`(lt)`) on the next reload.
+
 ## Graphics (game/graphics/opengl_renderer/EnhancedPost.*, shaders/enh_*)
 
 All in one pass on the finished 3D scene, between the 3D buckets and the HUD (so minimap and text stay untouched); sliders under

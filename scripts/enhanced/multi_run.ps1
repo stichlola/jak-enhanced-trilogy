@@ -10,6 +10,8 @@
 #   -Minimized  minimize each window once it shows (rendering keeps going, nothing to see)
 #   -Keep       leave the games running at the end (their PIDs are printed)
 #
+# gk.exe runs from a shadow copy of the bin folder (local\run\<stamp>-multi\bin, pruned by dev_bin.ps1),
+# so a build can relink out\build\Release\bin while the games run; -GkPath overrides it.
 # Each instance gets JAK_ENHANCED_INSTANCE=<n> (n = 1..): gk listens on 8112+game-1+10n, a goalc
 # started with the same variable takes nREPL 8181+10n, og_repl.py --instance n reaches it.
 # Config dirs come from local\testcfg (windowed 640x360, 640x360 internal, Performance preset);
@@ -44,7 +46,12 @@ if (-not $Repo) {
 if (-not (Test-Path (Join-Path $Repo 'scripts\enhanced'))) { throw "-Repo: not a jak-enhanced tree: $Repo" }
 # the main worktree holds the built game data (out\jakN) and local\testcfg
 $main = Split-Path (& git -C $Repo rev-parse --path-format=absolute --git-common-dir)
-if (-not $GkPath) { $GkPath = Join-Path $Repo 'out\build\Release\bin\gk.exe' }
+# gk runs from a shadow copy of the build's bin (dev_bin.ps1), so build.bat can relink it meanwhile
+if (-not $GkPath) {
+  $shadow = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $Repo 'scripts\enhanced\dev_bin.ps1')))) `
+    -Tag multi -Repo $Repo -From (Join-Path $Repo 'out\build\Release\bin')
+  $GkPath = Join-Path $shadow 'gk.exe'
+}
 if (-not $ProjPath) { $ProjPath = $main }
 if (-not $TestCfg) { $TestCfg = Join-Path $main 'local\testcfg' }
 if (-not $RunDir) { $RunDir = Join-Path $main ('local\multi\' + (Get-Date -Format 'yyyyMMdd-HHmmss')) }
@@ -95,7 +102,10 @@ $cols = [Math]::Max(1, [Math]::Floor(($area.Width - 8) / ($Width + 16)))
 $list = @()
 $n = $FirstInstance
 for ($i = 0; $i -lt $Count; $i++) {
-  while ($n -lt 100 -and -not ((PortFree (8111 + $gameNum + 10 * $n)) -and (PortFree (8181 + 10 * $n)))) { $n++ }
+  # the gk port must be free; the goalc port too, unless it is this instance's dev goalc
+  # (dev_goalc.py, control port 8185+10n), which then drives the game
+  while ($n -lt 100 -and -not ((PortFree (8111 + $gameNum + 10 * $n)) -and
+      ((PortFree (8181 + 10 * $n)) -or -not (PortFree (8185 + 10 * $n))))) { $n++ }
   if ($n -ge 100) { throw 'no free instance ports' }
   $list += [pscustomobject]@{ Index = $i; N = $n; Port = 8111 + $gameNum + 10 * $n;
     X = $area.Left + 8 + ($i % $cols) * ($Width + 16); Y = $area.Top + 32 + [Math]::Floor($i / $cols) * ($Height + 40)
@@ -142,6 +152,7 @@ foreach ($it in $list) {
   $e['JAK_ENHANCED_INSTANCE'] = "$($it.N)"
   $e['JAK_ENHANCED_START_MENU'] = '0'
   $e['JAK_ENHANCED_PRESET'] = '3'
+  $e['JAK_ENHANCED_SHADER_RELOAD'] = '1'   # enh_* shaders reload when saved
   if ($it.Start) { $e['JAK_ENHANCED_START'] = $it.Start }
   foreach ($k in $InstanceEnv.Keys) { $e[$k] = (Pick @("$($InstanceEnv[$k])" -split ',') $it.Index) }
   $it.Proc = [Diagnostics.Process]::Start($psi)
