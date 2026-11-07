@@ -74,6 +74,50 @@ void EnhancedPost::update_scene() {
       nap = nullptr;
     }
   }
+  // test switch: JAK_ENHANCED_MENU_SCRIPT=<s>:<kind>:<value>,... queues menu requests that many
+  // seconds after the renderer's first frame (before any level is up, if early enough), e.g.
+  // "0.5:1:23,1:1:6,2:1:12": three hour picks in a burst. One request slot: keep them a frame apart
+  {
+    struct Step {
+      double t;
+      int kind;
+      std::string value;
+    };
+    static std::vector<Step> steps = [] {
+      std::vector<Step> out;
+      if (const char* e = std::getenv("JAK_ENHANCED_MENU_SCRIPT")) {
+        std::string str(e);
+        size_t pos = 0;
+        while (pos < str.size()) {
+          size_t end = str.find(',', pos);
+          std::string item = str.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+          size_t c1 = item.find(':');
+          size_t c2 = c1 == std::string::npos ? std::string::npos : item.find(':', c1 + 1);
+          if (c2 != std::string::npos) {
+            out.push_back({std::atof(item.c_str()), std::atoi(item.c_str() + c1 + 1), item.substr(c2 + 1)});
+          }
+          if (end == std::string::npos) {
+            break;
+          }
+          pos = end + 1;
+        }
+      }
+      return out;
+    }();
+    static double script_t0 = -1;
+    static size_t next = 0;
+    if (!steps.empty()) {
+      if (script_t0 < 0) {
+        script_t0 = m_time;
+      }
+      if (next < steps.size() && m_time - script_t0 >= steps[next].t) {
+        lg::info("[enhanced] menu script {:.1f} s: request {} '{}' in {}", m_time - script_t0,
+                 steps[next].kind, steps[next].value, level.empty() ? "none" : level);
+        g_enhanced_menu.ask(steps[next].kind, steps[next].value);
+        next++;
+      }
+    }
+  }
   m_zone = zone_of(level);
   m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
   m_city = g_game_version != GameVersion::Jak1 &&
@@ -237,6 +281,12 @@ void EnhancedPost::update_scene() {
   // the title screen's intro (Jak 2, Jak 3: game levels behind the logo) as in the original
   if (level == "title") {
     weather_mode = 0;
+  }
+  // one line per change (the menu's pick, the script's steps): test runs check it
+  static int logged_weather_mode = -1;
+  if (weather_mode != logged_weather_mode) {
+    lg::info("[enhanced] weather mode {} in {}", weather_mode, level.empty() ? "none" : level);
+    logged_weather_mode = weather_mode;
   }
   switch (weather_mode) {
     case 1: {
