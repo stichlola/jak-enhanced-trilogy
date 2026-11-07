@@ -8,6 +8,18 @@ uniform vec2 texel;  // source texel size
 uniform float threshold;
 uniform float knee;
 uniform int first_pass;
+// the light effects (Jak 3): the scene before (T1) and after (T2) the sprite buckets. By day what
+// they added glows on its own: the bright sand otherwise crosses the threshold as much as they do
+uniform sampler2D tex_T1;
+uniform sampler2D tex_T2;
+uniform float fx_bloom;  // the day's weight on the effects' glow (0: off, at night as before)
+uniform float tune_fx_bloom_gain = 1.6;
+uniform float tune_fx_area_frac = 6.0;  // (as in enh_composite)
+uniform float tune_fx_area0 = 0.3;
+uniform float tune_fx_area1 = 0.7;
+uniform float tune_fx_wash0 = 0.03;
+uniform float tune_fx_wash1 = 0.08;
+uniform float tune_fx_wash_lod = 1.5;
 
 in vec2 tex_coord;
 out vec4 color;
@@ -43,6 +55,25 @@ void main() {
 
   if (first_pass != 0) {
     sum = bright(sum);
+    vec3 f1 = fx_bloom > 0.0 ? texture(tex_T2, uv).rgb : vec3(0.0);
+    vec3 fx = fx_bloom > 0.0 ? max(f1 - texture(tex_T1, uv).rgb, 0.0) : vec3(0.0);
+    float fm = max(fx.r, max(fx.g, fx.b));
+    // (the surroundings only where there is an effect, as in enh_composite)
+    if (fm > 0.02) {
+      // (a channel the sum clipped kept less than it got: see enh_composite's fx_d)
+      fx = mix(fx, max(fx, vec3(fm)), smoothstep(vec3(0.94), vec3(0.99), f1));
+      // (and only the compact ones: a wash of light over a room already blooms with the scene)
+      float lod = log2(max(1.0, 1.0 / (texel.y * tune_fx_area_frac)));
+      vec3 wide = max(textureLod(tex_T2, uv, lod).rgb - textureLod(tex_T1, uv, lod).rgb, 0.0);
+      float lw = dot(wide, vec3(0.2126, 0.7152, 0.0722));
+      float lf = dot(fx, vec3(0.2126, 0.7152, 0.0722));
+      vec3 wider = max(textureLod(tex_T2, uv, lod + tune_fx_wash_lod).rgb -
+                       textureLod(tex_T1, uv, lod + tune_fx_wash_lod).rgb, 0.0);
+      float lw2 = max(lw, dot(wider, vec3(0.2126, 0.7152, 0.0722)));
+      float compact = (1.0 - smoothstep(tune_fx_area0, tune_fx_area1, lw / max(lf, 0.02))) *
+                      (1.0 - smoothstep(tune_fx_wash0, tune_fx_wash1, lw2));
+      sum += fx * smoothstep(0.02, 0.08, fm) * compact * fx_bloom * tune_fx_bloom_gain;
+    }
   }
   color = vec4(sum, 1.0);
 }

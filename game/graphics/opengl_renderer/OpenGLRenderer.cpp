@@ -1549,12 +1549,24 @@ void OpenGLRenderer::dispatch_buckets_jak3(DmaFollower dma,
       m_enhanced_post->begin_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
                                    m_render_state.render_fb_h, &m_render_state);
     }
+    // Enhanced: the scene right before the sprites, glows and generic shots (the light effects)
+    if (bucket_id == (int)jak3::BucketId::TEX_SPRITE && m_enhanced_post) {
+      m_enhanced_post->capture_fx(m_render_state.render_fb, m_render_state.render_fb_w,
+                                  m_render_state.render_fb_h, 0);
+    }
     renderer->render(dma, &m_render_state, bucket_prof);
     if (ocean) {
       m_enhanced_post->end_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
                                  m_render_state.render_fb_h, &m_render_state);
     }
+    // (and right after them, before the warp buckets bend the picture)
+    if (bucket_id == (int)jak3::BucketId::GENERIC_SPRITE_3 && m_enhanced_post) {
+      m_enhanced_post->capture_fx(m_render_state.render_fb, m_render_state.render_fb_w,
+                                  m_render_state.render_fb_h, 1);
+    }
     if (bucket_id == (int)jak3::BucketId::OCEAN_MID_FAR && m_enhanced_post) {
+      m_enhanced_post->capture_sky(m_render_state.render_fb, m_render_state.render_fb_w,
+                                   m_render_state.render_fb_h);
       m_enhanced_post->capture_far_ocean(m_render_state.render_fb, m_render_state.render_fb_w,
                                          m_render_state.render_fb_h);
     }

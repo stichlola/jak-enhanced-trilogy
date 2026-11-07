@@ -450,6 +450,19 @@ void EnhancedPost::update_scene() {
                     path;
     g_sun_max_elev = 90.f + (m_grade.sun_max_elev - 90.f) * g;
     g_light_max_elev = 90.f + (m_grade.light_max_elev - 90.f) * g;
+    // (but not as low in the middle of the day: at 18 degrees the desert-start basin lay in its
+    // cliffs' shadow at noon, grey-blue where the game has it bright. At 50 it still did: Spargus'
+    // gate walls, 40-60 m high, 20-40 m behind it (the gap to the caster was 20-100 m along the
+    // light). At 65 the basin is in the sun with short shadows at the walls' feet, the rocks still
+    // shaded; the sun in the sky goes up with it, so the shadows match it. The morning and the
+    // golden hour as they were)
+    {
+      static const EnhancedTune t_light("light.midday_elev", 65.f);
+      static const EnhancedTune t_sun("light.midday_sun_elev", 58.f);
+      const float midday = smooth((hour - 10.f) / 1.5f) * (1.f - smooth((hour - 14.f) / 1.5f)) * golden_area;
+      g_light_max_elev += std::max((float)t_light - g_light_max_elev, 0.f) * midday;
+      g_sun_max_elev += std::max((float)t_sun - g_sun_max_elev, 0.f) * midday;
+    }
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
     // the morning's low fog in the areas under open sky (not the desert's dry air), gone by mid-morning
@@ -995,6 +1008,8 @@ namespace {
 // (tuning.json: "shadow": {"alpha_ref", "far_range_m", "far_depth_m", "near_depth_m"})
 // texture alpha under this doesn't cast a shadow (leaf cards, cutouts)
 const EnhancedTune kShadowAlphaRef("shadow.alpha_ref", 0.25f);
+// the level's alpha-tested draws: their own cutoff (aref / 127) times this (read at level load)
+const EnhancedTune kShadowAlphaScale("shadow.alpha_scale", 1.f);
 // the far shadow map: half its side and its depth span, meters
 const EnhancedTune kShadowFarRange("shadow.far_range_m", 1200.f);
 const EnhancedTune kShadowFarDepth("shadow.far_depth_m", 3000.f);
@@ -1065,6 +1080,24 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     auto& draws = m_shadow_draws[lev->load_id];
     const auto& name = lev->level->level_name;
     const bool cut = (name == "mhcitya" || name == "ctyport") && enhanced_has_piazza();
+    // (test: JAK_ENHANCED_SHADOW_SKIP=lev1,lev2 casts nothing from those levels: bisecting a
+    // phantom shadow)
+    // (and lev:t<i> / lev:e<i> one tfrag / tie tree, lev:wind, lev:shrub; the trees are logged)
+    static const char* skip = std::getenv("JAK_ENHANCED_SHADOW_SKIP");
+    auto skipped = [&](const std::string& what) {
+      return skip && ("," + std::string(skip) + ",").find("," + what + ",") != std::string::npos;
+    };
+    if (skipped(name)) {
+      lg::info("[enhanced] shadow casters {}: skipped (JAK_ENHANCED_SHADOW_SKIP)", name);
+      continue;
+    }
+    auto log_tree = [&](const char* kind, size_t i, const tfrag3::BVH& bvh, size_t n) {
+      if (skip && !bvh.vis_nodes.empty()) {
+        const auto& b = bvh.vis_nodes[0].bsphere;
+        lg::info("[enhanced] shadow tree {}:{}{} {} draws, sphere {:.0f} {:.0f} {:.0f} r {:.0f} m", name,
+                 kind, i, n, b.x() / 4096.f, b.y() / 4096.f, b.z() / 4096.f, b.w() / 4096.f);
+      }
+    };
     // a tree's draws that cast, as runs of its index buffer: not the alpha-blended ones that leave
     // the depth alone (decals, veils): see-through, they cast hard-edged dark slabs. The blended
     // ones that write depth are solid (jak 3's desert draws its rocks, palms and buildings that
@@ -1073,10 +1106,14 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     // (counted for the log: what casts, what is left out and why)
     size_t n_cast = 0, n_veil = 0, n_water = 0;
     auto add_solid = [&](const std::vector<tfrag3::StripDraw>& tree_draws, size_t num_idx,
-                         const ShadowDraw& proto, const tfrag3::TieTree* tie) {
+                         const ShadowDraw& proto, const tfrag3::TieTree* tie,
+                         const std::string& tag) {
       size_t added = 0;
       for (size_t k = 0; k < tree_draws.size(); k++) {
         const auto& draw = tree_draws[k];
+        if (skip && skipped(tag + "d" + std::to_string(k))) {
+          continue;
+        }
         if (tie) {
           int cat = 0;
           while (cat + 1 < tfrag3::kNumTieCategories && k >= tie->category_draw_indices[cat + 1]) {
@@ -1093,12 +1130,27 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         u32 end = k + 1 < tree_draws.size()
                       ? tree_draws[k + 1].unpacked.idx_of_first_idx_in_full_buffer
                       : (u32)num_idx;
-        if ((draw.mode.get_ab_enable() && !draw.mode.get_depth_write_enable()) || end <= first) {
+        // (nor the ones that leave the depth alone by the game's other trick, alpha test NEVER with
+        // FB_ONLY: decals laid over the ground. The desert's basin floor sat in the shadow of its own
+        // sand overlay, a few cm above it, at any hour)
+        const bool no_z = !draw.mode.get_depth_write_enable() ||
+                          (draw.mode.get_at_enable() &&
+                           draw.mode.get_alpha_test() == DrawMode::AlphaTest::NEVER);
+        if (no_z || end <= first) {
           n_veil += end > first;
           continue;
         }
+        // alpha tested as the game draws them (fences, grates, leaf cards cast their holes)
+        GLuint tex = 0;
+        float alpha = -1.f;
+        if (draw.mode.get_at_enable() && draw.mode.get_alpha_test() == DrawMode::AlphaTest::GEQUAL &&
+            draw.mode.get_aref() > 0 && draw.tree_tex_id < lev->textures.size()) {
+          tex = lev->textures[draw.tree_tex_id];
+          alpha = std::max(draw.mode.get_aref() / 127.f * kShadowAlphaScale, 0.1f);
+        }
         n_cast++;
-        if (added && draws.back().first + draws.back().count == first) {
+        if (added && draws.back().first + draws.back().count == first && draws.back().tex == tex &&
+            draws.back().alpha == alpha) {
           draws.back().count += end - first;  // (joined to the run before)
           continue;
         }
@@ -1106,6 +1158,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         d.own_indices = proto.own_indices && !added;  // (the buffer freed with the first)
         d.first = first;
         d.count = end - first;
+        d.tex = tex;
+        d.alpha = alpha;
         draws.push_back(d);
         added++;
       }
@@ -1119,6 +1173,37 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
           tree.kind == tfrag3::TFragmentTreeKind::LOWRES_TRANS || tree.unpacked.indices.empty()) {
         continue;
       }
+      log_tree("t", i, tree.bvh, tree.draws.size());
+      if (skipped(name + ":t" + std::to_string(i))) {
+        continue;
+      }
+      if (skip) {
+        // (test: each draw's extent, the big ones: a phantom caster is usually one of them)
+        const auto& vs = tree.unpacked.vertices;
+        const auto& is = tree.unpacked.indices;
+        for (size_t k = 0; k < tree.draws.size(); k++) {
+          u32 a = tree.draws[k].unpacked.idx_of_first_idx_in_full_buffer;
+          u32 b = k + 1 < tree.draws.size() ? tree.draws[k + 1].unpacked.idx_of_first_idx_in_full_buffer
+                                            : (u32)is.size();
+          float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+          for (u32 q = a; q < b && q < is.size(); q++) {
+            if (is[q] == UINT32_MAX || is[q] >= vs.size()) {
+              continue;
+            }
+            const float pv[3] = {vs[is[q]].x, vs[is[q]].y, vs[is[q]].z};
+            for (int ax = 0; ax < 3; ax++) {
+              lo[ax] = std::min(lo[ax], pv[ax]);
+              hi[ax] = std::max(hi[ax], pv[ax]);
+            }
+          }
+          const auto& m = tree.draws[k].mode;
+          lg::info("[enhanced] shadow draw {}:t{}d{} idx {} x {:.0f}..{:.0f} y {:.0f}..{:.0f} z {:.0f}..{:.0f} "
+                   "ab {} zw {} at {} atst {} aref {} tex {}",
+                   name, i, k, b - a, lo[0] / 4096.f, hi[0] / 4096.f, lo[1] / 4096.f, hi[1] / 4096.f,
+                   lo[2] / 4096.f, hi[2] / 4096.f, m.get_ab_enable(), m.get_depth_write_enable(),
+                   m.get_at_enable(), (int)m.get_alpha_test(), m.get_aref(), tree.draws[k].tree_tex_id);
+        }
+      }
       ShadowDraw d;
       d.vertices = lev->tfrag_vertex_data[0][i];
       glGenBuffers(1, &d.indices);
@@ -1128,7 +1213,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       d.own_indices = true;
       d.mode = tree.use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
       d.cut = cut;
-      if (!add_solid(tree.draws, tree.unpacked.indices.size(), d, nullptr)) {
+      if (!add_solid(tree.draws, tree.unpacked.indices.size(), d, nullptr, name + ":t" + std::to_string(i))) {
         glDeleteBuffers(1, &d.indices);
       }
     }
@@ -1137,14 +1222,21 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       if (ties[i].unpacked.indices.empty()) {
         continue;
       }
+      log_tree("e", i, ties[i].bvh, ties[i].static_draws.size());
+      if (skipped(name + ":e" + std::to_string(i))) {
+        continue;
+      }
       ShadowDraw d;
       d.vertices = lev->tie_data[0][i].vertex_buffer;
       d.indices = lev->tie_data[0][i].index_buffer;
       d.mode = ties[i].use_strips ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
       d.cut = cut;
-      add_solid(ties[i].static_draws, ties[i].unpacked.indices.size(), d, &ties[i]);
+      add_solid(ties[i].static_draws, ties[i].unpacked.indices.size(), d, &ties[i],
+                name + ":e" + std::to_string(i));
     }
-    add_wind_shadow_draws(lev, cut, &draws);
+    if (!skipped(name + ":wind")) {
+      add_wind_shadow_draws(lev, cut, &draws);
+    }
     // the shrubs (bushes, plants, small rocks), cut out by their textures' alpha: the near map
     // only (on the far one they cost the most and their shadows are a texel or two), except the big
     // plants (over 4 m: bushes, small trees), whose strips go again, on their own, to the far map.
@@ -1153,7 +1245,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     const auto& shrubs = lev->level->shrub_trees;
     for (size_t i = 0; i < shrubs.size() && i < lev->shrub_vertex_data.size(); i++) {
       const auto& tree = shrubs[i];
-      if (tree.indices.empty()) {
+      if (tree.indices.empty() || skipped(name + ":shrub")) {
         continue;
       }
       GLuint ib = 0;
@@ -1277,7 +1369,18 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
 
   // the light's frame: f from the sun down, right and up across; a square of 2 * range around a
   // point ahead of the camera, snapped to whole texels so the edges don't crawl as it moves
-  float f[3] = {-sun[0] / len, -sun[1] / len, -sun[2] / len};
+  // (in steps of ~0.15 degrees: the sun's path and the area's eased turn rotated the maps by a
+  // fraction of a texel every frame, and the shadows' edges crawled, 9 cm a frame a km out)
+  {
+    const float live[3] = {-sun[0] / len, -sun[1] / len, -sun[2] / len};
+    const float dot = live[0] * m_shadow_dir[0] + live[1] * m_shadow_dir[1] + live[2] * m_shadow_dir[2];
+    static const EnhancedTune t_step("shadow.dir_step_deg", 0.15f);
+    if (dot < std::cos((float)t_step * 3.14159265f / 180.f)) {
+      memcpy(m_shadow_dir, live, sizeof(live));
+      m_shadow_far_ready = false;  // (the far map redrawn now with it, not next frame)
+    }
+  }
+  float f[3] = {m_shadow_dir[0], m_shadow_dir[1], m_shadow_dir[2]};
   float hint[3] = {0.f, 0.f, 1.f};
   if (std::abs(f[2]) > 0.9f) {
     hint[0] = 1.f;
@@ -1293,9 +1396,15 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
                  f[0] * right[1] - f[1] * right[0]};
   auto make_mvp = [&](float range, float depth, float* mvp) {
     float center[3];
+    // the camera looks down view +z: its forward in world is column 2 of the rotation; level (no
+    // y), so looking up or down doesn't slide the map's square and its seam over the ground
+    float fx = cam.rot[0][2], fz = cam.rot[2][2];
+    const float fl = std::sqrt(fx * fx + fz * fz);
+    fx = fl > 1e-3f ? fx / fl : 0.f;
+    fz = fl > 1e-3f ? fz / fl : 0.f;
+    const float fwd[3] = {fx, 0.f, fz};
     for (int i = 0; i < 3; i++) {
-      // the camera looks down view +z: its forward in world is column 2 of the rotation
-      center[i] = cam.trans[i] + cam.rot[i][2] * range * 0.5f;
+      center[i] = cam.trans[i] + fwd[i] * range * 0.5f;
     }
     const float texel = 2.f * range / kRes;
     float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
@@ -1315,6 +1424,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     mvp[15] = 1.f;
   };
   make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp);
+  m_shadow_near_span_m = 2.f * kShadowNearDepth;  // (the composite's biases and penumbrae, in meters)
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
   float far_mvp[16];
@@ -1382,9 +1492,15 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         } else {
           glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
                                 (void*)0);
-          glDisableVertexAttribArray(1);
+          if (d.tex) {
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                  (void*)offsetof(tfrag3::PreloadedVertex, s));
+            glEnableVertexAttribArray(1);
+          } else {
+            glDisableVertexAttribArray(1);
+          }
         }
-        glUniform1f(u_alpha, d.tex ? (float)kShadowAlphaRef : -1.f);
+        glUniform1f(u_alpha, !d.tex ? -1.f : d.alpha >= 0.f ? d.alpha : (float)kShadowAlphaRef);
         if (d.tex) {
           glBindTexture(GL_TEXTURE_2D, d.tex);
         }
@@ -1398,11 +1514,12 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   // map: the new one over last frame's map made the far shadows jump while the camera moved)
   if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
     memcpy(m_light_mvp_far, far_mvp, sizeof(far_mvp));
+    m_shadow_far_span_m = 2.f * kShadowFarDepth;
     draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true);
     m_shadow_far_ready = true;
   }
   draw_levels(m_shadow_fbo, m_light_mvp, true, false);
-  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);  glDisableVertexAttribArray(1);
+  glDisableVertexAttribArray(1);
   glBindVertexArray(0);
   // characters only with the sun (or moon) above ~7 degrees: lower, a 2 m character casts a band
   // tens of meters long that follows it around (the game's own short shadow stays)

@@ -302,6 +302,12 @@ class EnhancedPost {
   // same at the end of the frame, the far sea shows
   void capture_far_ocean(GLuint render_fbo, int w, int h);
   void end_ocean(GLuint render_fbo, int w, int h, SharedRenderState* render_state);
+  // the light effects (Jak 3): the scene copied right before the sprite buckets (which = 0) and
+  // right after them (1). Their difference is what the sprites, glows and generic shots added: the
+  // composite keeps it out of the day's grade and adds it back after it, with a gain
+  void capture_fx(GLuint render_fbo, int w, int h, int which);
+  // the game's sky as drawn, before the levels (Jak 3: after the far ocean)
+  void capture_sky(GLuint render_fbo, int w, int h);
 
   void apply_to_scene(GLuint render_fbo,
                       int w,
@@ -393,6 +399,25 @@ class EnhancedPost {
   int m_ocean_w = 0;
   int m_ocean_h = 0;
   bool m_ocean_ready = false;
+
+  // the scene before (0) and after (1) the sprite buckets (capture_fx), and the frame of each copy
+  GLuint m_fx_fbo[2] = {0, 0};
+  GLuint m_fx_tex[2] = {0, 0};
+  int m_fx_w = 0;
+  int m_fx_h = 0;
+  u64 m_fx_frame[2] = {0, 0};
+  u64 m_fx_count = 0;  // begin_frame calls: a copy from this frame has m_fx_count + 1
+  // both copies are from this frame
+  bool fx_ready() const {
+    return m_fx_fbo[0] && m_fx_frame[0] == m_fx_count + 1 && m_fx_frame[1] == m_fx_count + 1;
+  }
+  // the game's sky (capture_sky), this frame's
+  GLuint m_sky_fbo = 0;
+  GLuint m_sky_tex = 0;
+  int m_sky_w = 0;
+  int m_sky_h = 0;
+  u64 m_sky_frame = 0;
+  bool sky_ready() const { return m_sky_fbo && m_sky_frame == m_fx_count + 1; }
 
   // copy of the scene being composited
   GLuint m_scene_fbo = 0;
@@ -534,6 +559,7 @@ class EnhancedPost {
   bool big = false;           // the big shrubs' strips again (over 4 m): the far map only
     u32 first = 0;              // first index
     GLuint tex = 0;             // alpha tested with this texture (0 = solid)
+    float alpha = -1.f;         // its cutoff (< 0: the shrubs' kShadowAlphaRef)
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
   void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
@@ -552,6 +578,10 @@ class EnhancedPost {
   bool m_shadow_far_ready = false;
   u32 m_shadow_far_frame = 0;
   float m_light_mvp_far[16] = {};
+  // the maps' depth spans (meters): the composite's biases and penumbrae are in meters
+  float m_shadow_near_span_m = 600.f;
+  float m_shadow_dir[3] = {0.f, 0.f, 0.f};  // the light's direction the maps use (in steps)
+  float m_shadow_far_span_m = 6000.f;
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes
@@ -744,6 +774,7 @@ class EnhancedPost {
   double m_last_frame = 0.0;
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)
   double m_fast_since = 0.0;
+  double m_warm_since = 0.0;  // the last frame of a load (under 40 fps): no step up for 10 s after
   int m_auto_level = 0;
   // the passes the auto quality sets aside, fading (1 = on)
   float m_fade_volume = 1.f, m_fade_gi = 1.f, m_fade_rays = 1.f;

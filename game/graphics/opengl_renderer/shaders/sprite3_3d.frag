@@ -55,7 +55,8 @@ void enhanced_sprite() {
 
   // smoke is lit by the sun as a ball would be: a normal from where in the sprite this is (bumped by
   // the same noise), a bit of light always getting through
-  if (!flame) {
+  // (not the added ones: they are light, and the side away from the sun took them to x0.7 by day)
+  if (!flame && enh_kind != 3) {
     vec3 n = normalize(vec3(enh_q + flow * 1.5, 0.75));
     float lit = dot(n, enh_sun.xyz) * 0.5 + 0.5;
     color.rgb *= mix(1.0, 0.7 + 0.52 * lit, enh_sun.w * enh_fx.y);
