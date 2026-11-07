@@ -196,6 +196,7 @@ uniform float tune_sky_keep_hi = 0.14;  // to here, all of the game's pixel
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
+uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
@@ -3121,6 +3122,13 @@ void main() {
     if (facing < 1.0 && !chr) {
       vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
       sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
+    }
+    // a character standing in a wall's shadow: the game lights it in full anyway (its own lights
+    // know no shadows), and the faces turned from the sun skipped the map above, so Jak glowed
+    // sunlit inside the shade. Looked up 70 cm toward the sun, past the body's own thickness
+    if (chr) {
+      vec3 w3 = view_to_world * (p + sun_dir.xyz * (0.7 * 4096.0 + z * 0.002)) + cam_pos;
+      sh = max(sh, sun_shadow(w3) * tune_chr_shade);
     }
     if (close_up > 0.0) {
       sh *= smoothstep(0.5 * close_up, close_up, z);
