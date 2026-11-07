@@ -61,63 +61,8 @@ void EnhancedPost::update_scene() {
     last_level = level;
   }
   poll_world();
-  // test switch: JAK_ENHANCED_NAP=<hours> asks for a nap 8 s into the first level
-  {
-    static const char* nap = std::getenv("JAK_ENHANCED_NAP");
-    static double first_level_t = -1;
-    if (nap && first_level_t < 0 && !level.empty() && level != "none") {
-      first_level_t = m_time;
-    }
-    if (nap && first_level_t >= 0 && m_time - first_level_t > 8.0) {
-      // ("window": the nap window opens instead)
-      g_enhanced_menu.ask(std::strcmp(nap, "window") == 0 ? 12 : 11, nap);
-      nap = nullptr;
-    }
-  }
-  // test switch: JAK_ENHANCED_MENU_SCRIPT=<s>:<kind>:<value>,... queues menu requests that many
-  // seconds after the renderer's first frame (before any level is up, if early enough), e.g.
-  // "0.5:1:23,1:1:6,2:1:12": three hour picks in a burst. One request slot: keep them a frame apart
-  {
-    struct Step {
-      double t;
-      int kind;
-      std::string value;
-    };
-    static std::vector<Step> steps = [] {
-      std::vector<Step> out;
-      if (const char* e = std::getenv("JAK_ENHANCED_MENU_SCRIPT")) {
-        std::string str(e);
-        size_t pos = 0;
-        while (pos < str.size()) {
-          size_t end = str.find(',', pos);
-          std::string item = str.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
-          size_t c1 = item.find(':');
-          size_t c2 = c1 == std::string::npos ? std::string::npos : item.find(':', c1 + 1);
-          if (c2 != std::string::npos) {
-            out.push_back({std::atof(item.c_str()), std::atoi(item.c_str() + c1 + 1), item.substr(c2 + 1)});
-          }
-          if (end == std::string::npos) {
-            break;
-          }
-          pos = end + 1;
-        }
-      }
-      return out;
-    }();
-    static double script_t0 = -1;
-    static size_t next = 0;
-    if (!steps.empty()) {
-      if (script_t0 < 0) {
-        script_t0 = m_time;
-      }
-      if (next < steps.size() && m_time - script_t0 >= steps[next].t) {
-        lg::info("[enhanced] menu script {:.1f} s: request {} '{}' in {}", m_time - script_t0,
-                 steps[next].kind, steps[next].value, level.empty() ? "none" : level);
-        g_enhanced_menu.ask(steps[next].kind, steps[next].value);
-        next++;
-      }
-    }
-  }
+  // (the test switches JAK_ENHANCED_NAP and JAK_ENHANCED_MENU_SCRIPT run on the game's thread, in
+  // kmachine.cpp's pc_enhanced_set_scene, so they work without a renderer too)
   m_zone = zone_of(level);
   m_pond = g_game_version == GameVersion::Jak3 && level.rfind("des", 0) == 0;
   m_city = g_game_version != GameVersion::Jak1 &&

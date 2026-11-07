@@ -1126,15 +1126,90 @@ void pc_enhanced_set_player(u32 vec_ptr) {
   g_enhanced_player.valid = true;
 }
 
+// Enhanced: the test switches that queue menu requests (JAK_ENHANCED_MENU=<kind>:<value>,
+// JAK_ENHANCED_NAP, JAK_ENHANCED_MENU_SCRIPT). Run on the game's thread once a frame from
+// pc-enhanced-set-scene, so they work without a renderer too (gk --no-display, the release gate's
+// headless rows). One request slot: at most one request a frame.
+static void enhanced_test_switches(const std::string& level) {
+  using clock = std::chrono::steady_clock;
+  static const clock::time_point t_start = clock::now();
+  const double now = std::chrono::duration<double>(clock::now() - t_start).count();
+  // JAK_ENHANCED_MENU=<kind>:<value> (e.g. 1:23, 2:ctysluma-alley): one request in the first frames
+  // (the menu itself is opened by the renderer)
+  static bool boot_asked = false;
+  if (!boot_asked) {
+    boot_asked = true;
+    if (const char* menu = std::getenv("JAK_ENHANCED_MENU")) {
+      if (const char* colon = std::strchr(menu, ':')) {
+        g_enhanced_menu.ask(std::atoi(menu), colon + 1);
+        return;
+      }
+    }
+  }
+  // JAK_ENHANCED_NAP=<hours> asks for a nap 8 s into the first level ("window": the nap window)
+  {
+    static const char* nap = std::getenv("JAK_ENHANCED_NAP");
+    static double first_level_t = -1;
+    if (nap && first_level_t < 0 && !level.empty() && level != "none") {
+      first_level_t = now;
+    }
+    if (nap && first_level_t >= 0 && now - first_level_t > 8.0) {
+      g_enhanced_menu.ask(std::strcmp(nap, "window") == 0 ? 12 : 11, nap);
+      nap = nullptr;
+      return;
+    }
+  }
+  // JAK_ENHANCED_MENU_SCRIPT=<s>:<kind>:<value>,... queues menu requests that many seconds after the
+  // first frame (before any level is up, if early enough), e.g. "0.5:1:23,1:1:6,2:1:12": three hour
+  // picks in a burst
+  struct Step {
+    double t;
+    int kind;
+    std::string value;
+  };
+  static std::vector<Step> steps = [] {
+    std::vector<Step> out;
+    if (const char* e = std::getenv("JAK_ENHANCED_MENU_SCRIPT")) {
+      std::string str(e);
+      size_t pos = 0;
+      while (pos < str.size()) {
+        size_t end = str.find(',', pos);
+        std::string item = str.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+        size_t c1 = item.find(':');
+        size_t c2 = c1 == std::string::npos ? std::string::npos : item.find(':', c1 + 1);
+        if (c2 != std::string::npos) {
+          out.push_back({std::atof(item.c_str()), std::atoi(item.c_str() + c1 + 1), item.substr(c2 + 1)});
+        }
+        if (end == std::string::npos) {
+          break;
+        }
+        pos = end + 1;
+      }
+    }
+    return out;
+  }();
+  static size_t next = 0;
+  if (next < steps.size() && now >= steps[next].t) {
+    lg::info("[enhanced] menu script {:.1f} s: request {} '{}' in {}", now, steps[next].kind,
+             steps[next].value, level.empty() ? "none" : level);
+    g_enhanced_menu.ask(steps[next].kind, steps[next].value);
+    next++;
+  }
+}
+
 // Enhanced: the level Jak is in, the hour (0-24) and whether a cutscene plays
 void pc_enhanced_set_scene(u32 name, u32 hour, u32 movie) {
   float h;
   memcpy(&h, &hour, 4);
-  std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
-  g_enhanced_scene.level = Ptr<String>(name).c()->data();
-  g_enhanced_scene.hour = h;
-  g_enhanced_scene.movie = symbol_to_bool(movie);
-  g_enhanced_scene.valid = true;
+  std::string level = Ptr<String>(name).c()->data();
+  {
+    std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+    g_enhanced_scene.level = level;
+    g_enhanced_scene.hour = h;
+    g_enhanced_scene.movie = symbol_to_bool(movie);
+    g_enhanced_scene.valid = true;
+  }
+  enhanced_test_switches(level);
 }
 
 // Enhanced: the game's current continue point

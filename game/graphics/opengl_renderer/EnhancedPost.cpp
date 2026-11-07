@@ -182,12 +182,8 @@ EnhancedPost::EnhancedPost() {
   }
   if (const char* menu = std::getenv("JAK_ENHANCED_MENU")) {
     // test runs: the in-game menu open from the start; "<kind>:<value>" also queues one request
-    // (e.g. 2:ctysluma-alley, 1:23)
+    // (e.g. 2:ctysluma-alley, 1:23), on the game's thread (kmachine.cpp, works without a renderer)
     g_enhanced_menu.open = true;
-    const char* colon = std::strchr(menu, ':');
-    if (colon) {
-      g_enhanced_menu.ask(std::atoi(menu), colon + 1);
-    }
   }
   if (const char* ls = std::getenv("JAK_ENHANCED_LIGHT_SHADOWS")) {
     // how dark the dynamic lights' shadows are, 0 = none

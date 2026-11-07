@@ -139,6 +139,12 @@
 (define *enhanced-player-test-ammo* -1.0)  ;; the "shoot"/"gun" tests' last ammo logged
 (define *enhanced-player-test-gun* -1)     ;; the "gun" test's last gun-type and using-gun? logged
 (define *enhanced-player-test-using* 'none)
+;; "run" also logs Jak's state changes and the body-jump metric: per frame, how far the drawn body's main
+;; joint moved against its root (xz), the most per phase (a skin left behind and snapping back shows here)
+(define *enhanced-player-test-state* (the-as symbol #f))
+(define *enhanced-body-last* (new 'global 'vector))
+(define *enhanced-body-max* 0.0)
+(define *enhanced-body-max-t* 0)
 (define *enhanced-skin-foot-min* 1000000.0)
 (define *enhanced-skin-foot-max* -1000000.0)
 (define *enhanced-skin-cycle-frames* 0)
@@ -830,6 +836,69 @@
   (go-virtual idle)
   )
 
+(defun enhanced-body-offset ((out vector))
+  "The drawn body's main joint against its root, xz (the skin's when one is drawn, else Jak's). #f: none."
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (cond
+      (skin
+       (let ((j (enhanced-skin-joint-of skin 3)))
+         (cond
+           ((> j 0)
+            (vector-! out (-> skin node-list data j bone position) (-> skin root trans))
+            (set! (-> out y) 0.0)
+            #t
+            )
+           (else #f)
+           )
+         )
+       )
+      (*target*
+       (vector-! out (-> *target* node-list data 3 bone position) (-> *target* control trans))
+       (set! (-> out y) 0.0)
+       #t
+       )
+      (else #f)
+      )
+    )
+  )
+
+(defun enhanced-player-test-watch ((t int))
+  "The run test, 10-28 s: Jak's state changes, and the body-jump metric's most per phase (run, jumps, attacks)."
+  (when (and *target* (>= t 600) (< t 1700))
+    (let ((name (if (-> *target* state) (-> *target* state name) 'none)))
+      (when (!= name *enhanced-player-test-state*)
+        (set! *enhanced-player-test-state* name)
+        (format 0 "[player-test] state ~A at ~D~%" name t)
+        )
+      )
+    (let ((off (new 'stack-no-clear 'vector)))
+      (when (enhanced-body-offset off)
+        (when (> t 600)
+          (let ((d (vector-vector-xz-distance off *enhanced-body-last*)))
+            (when (> d *enhanced-body-max*)
+              (set! *enhanced-body-max* d)
+              (set! *enhanced-body-max-t* t)
+              )
+            )
+          )
+        (vector-copy! *enhanced-body-last* off)
+        )
+      )
+    )
+  (when (or (= t 900) (= t 1300) (= t 1700))
+    (format 0 "[player-test] body-jump ~S max ~,,3f m at ~D~%"
+            (cond
+              ((= t 900) "run")
+              ((= t 1300) "jumps")
+              (else "attacks")
+              )
+            (/ *enhanced-body-max* 4096.0) *enhanced-body-max-t*
+            )
+    (set! *enhanced-body-max* 0.0)
+    )
+  (none)
+  )
+
 (defun enhanced-player-test ()
   "JAK_ENHANCED_PLAYER_TEST: a run with jumps, or the camera turning, with [player-test] lines."
   (let ((t *enhanced-player-test-frames*))
@@ -947,8 +1016,12 @@
        )
       ((string= *enhanced-player-test-buf* "run")
        ;; on the open sand by the parked Hellcat; 10 s in: walk 2 s, run 4 s with a jump at 3 s; stand,
-       ;; jump at 9 s; double jump at 12 s
+       ;; jump at 9 s; double jump at 12 s; square (punch, Ashelin's front kick) at 22 s, circle (spin
+       ;; kick) at 25 s; state changes and the body-jump metric logged (enhanced-player-test-watch)
+       (enhanced-player-test-watch t)
        (case t
+         ((1320) (set! *enhanced-pad-press* (pad-buttons square)) (format 0 "[player-test] square~%"))
+         ((1500) (set! *enhanced-pad-press* (pad-buttons circle)) (format 0 "[player-test] circle~%"))
          ((1) (set-ignore-controller-in-bg! *pc-settings* #t))
          ((540)
           (let ((pos (new 'stack-no-clear 'vector)))
@@ -962,7 +1035,8 @@
          ((780) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] run-jump~%"))
          ((960) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] jump~%"))
          ((1140) (set! *enhanced-pad-press* (pad-buttons x)) (format 0 "[player-test] double-jump~%"))
-         ((1170) (set! *enhanced-pad-press* (pad-buttons x)))
+         ;; (the second press in the air: a tap is a short hop, down in ~24 frames)
+         ((1152) (set! *enhanced-pad-press* (pad-buttons x)))
          )
        (set! *enhanced-pad-lefty* (cond
                                     ((and (> t 600) (< t 720)) 90)

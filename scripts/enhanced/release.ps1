@@ -377,8 +377,10 @@ try {
         Check 'release gate script' (Test-Path $gate) "$(if (-not (Test-Path $gate)) { 'missing: ' })$gate (-SkipGate releases without it)"
         if (-not (Test-Path $gate)) { return }
         # PS 5.1: -Command's exit code is $? of its last statement, so the gate's code is passed on
-        # explicitly; a gate that sets none (null) fails (exit 3)
-        $cmd = "`$global:LASTEXITCODE = `$null; & ([scriptblock]::Create([IO.File]::ReadAllText('$gate'))); if (`$null -eq `$global:LASTEXITCODE) { exit 3 }; exit `$global:LASTEXITCODE"
+        # explicitly; a gate that sets none (null) fails (exit 3). It tests the static gk just built (-Bin,
+        # also in JAK_RELEASE_BIN) and adds its screenshots to this version's baseline (-MakeBaseline:
+        # the next release compares with them; rows that FAIL are not added)
+        $cmd = "`$global:LASTEXITCODE = `$null; & ([scriptblock]::Create([IO.File]::ReadAllText('$gate'))) -Repo '$Root' -Bin '$Bin' -Version '$Version' -MakeBaseline; if (`$null -eq `$global:LASTEXITCODE) { exit 3 }; exit `$global:LASTEXITCODE"
         if ($Dry) { Would "powershell -NoProfile -NonInteractive -Command `"$cmd`"   (env JAK_RELEASE_VERSION=$Version JAK_RELEASE_BIN=$Bin, cwd $Root)"; return }
         $oldVer = $env:JAK_RELEASE_VERSION; $oldBin = $env:JAK_RELEASE_BIN
         $env:JAK_RELEASE_VERSION = $Version; $env:JAK_RELEASE_BIN = $Bin
