@@ -293,11 +293,52 @@ constexpr int kPhotoFilterCount = sizeof(kPhotoFilters) / sizeof(kPhotoFilters[0
 // draw_menu pushes the style and pops it on the way out, and the helpers below draw ImGui's own
 // widgets elsewhere (weather_menu is also in the debug window)
 bool g_menu_styled = false;
-const ImVec4 kMenuAmber(1.00f, 0.70f, 0.16f, 1.f);
-const ImVec4 kMenuOrange(1.00f, 0.48f, 0.08f, 1.f);
-const ImVec4 kMenuYellow(1.00f, 0.88f, 0.34f, 1.f);
-const ImVec4 kMenuPurple(0.64f, 0.38f, 0.98f, 1.f);
-const ImVec4 kMenuInk(0.10f, 0.06f, 0.03f, 1.f);  // text on the amber of a picked choice
+// one theme a game: Jak 1's bright blue, yellow and orange, Jak 2's city greys with a cool steel
+// blue and a guard's red, Jak 3's desert sand and dusk. JAK_ENHANCED_MENU_THEME=1..3 picks one
+// whatever the game (screenshots)
+struct MenuTheme {
+  ImVec4 accent, accent2, highlight, second, ink;  // second: hover, separators, tooltips
+  ImVec4 text, text_disabled, panel, popup, title_band;
+  ImVec4 frame, frame_hovered, frame_active, button, button_hovered;
+};
+const MenuTheme kMenuThemes[3] = {
+    // Jak 1: a deep blue panel, sunny yellow and orange, sky blue
+    {{1.00f, 0.80f, 0.12f, 1.f}, {1.00f, 0.50f, 0.10f, 1.f}, {1.00f, 0.93f, 0.45f, 1.f},
+     {0.32f, 0.70f, 1.00f, 1.f}, {0.05f, 0.07f, 0.16f, 1.f},
+     {0.95f, 0.97f, 1.00f, 1.f}, {0.55f, 0.66f, 0.82f, 1.f}, {0.04f, 0.08f, 0.18f, 1.f},
+     {0.06f, 0.11f, 0.24f, 0.97f}, {0.07f, 0.16f, 0.36f, 0.85f},
+     {0.09f, 0.18f, 0.36f, 0.90f}, {0.14f, 0.30f, 0.55f, 0.95f}, {0.18f, 0.38f, 0.68f, 1.f},
+     {0.10f, 0.20f, 0.40f, 0.95f}, {0.20f, 0.45f, 0.80f, 1.f}},
+    // Jak 2: slate greys, steel blue, a red edge
+    {{0.62f, 0.80f, 0.92f, 1.f}, {0.86f, 0.26f, 0.22f, 1.f}, {0.88f, 0.94f, 1.00f, 1.f},
+     {0.90f, 0.32f, 0.28f, 1.f}, {0.06f, 0.07f, 0.09f, 1.f},
+     {0.90f, 0.92f, 0.94f, 1.f}, {0.55f, 0.58f, 0.62f, 1.f}, {0.07f, 0.08f, 0.09f, 1.f},
+     {0.10f, 0.11f, 0.13f, 0.97f}, {0.16f, 0.18f, 0.21f, 0.85f},
+     {0.17f, 0.19f, 0.22f, 0.90f}, {0.26f, 0.29f, 0.33f, 0.95f}, {0.33f, 0.37f, 0.42f, 1.f},
+     {0.19f, 0.21f, 0.24f, 0.95f}, {0.36f, 0.42f, 0.50f, 1.f}},
+    // Jak 3: sand and amber, a burnt orange, dusk purple
+    {{1.00f, 0.70f, 0.16f, 1.f}, {1.00f, 0.48f, 0.08f, 1.f}, {1.00f, 0.88f, 0.34f, 1.f},
+     {0.64f, 0.38f, 0.98f, 1.f}, {0.10f, 0.06f, 0.03f, 1.f},
+     {0.97f, 0.93f, 0.87f, 1.f}, {0.63f, 0.56f, 0.70f, 1.f}, {0.07f, 0.05f, 0.11f, 1.f},
+     {0.10f, 0.07f, 0.16f, 0.97f}, {0.17f, 0.08f, 0.22f, 0.85f},
+     {0.17f, 0.11f, 0.24f, 0.90f}, {0.27f, 0.16f, 0.40f, 0.95f}, {0.34f, 0.20f, 0.50f, 1.f},
+     {0.21f, 0.13f, 0.29f, 0.95f}, {0.45f, 0.26f, 0.72f, 1.f}},
+};
+MenuTheme g_menu_theme = kMenuThemes[2];
+// (the theme's colors under the names the widgets use)
+ImVec4 kMenuAmber, kMenuOrange, kMenuYellow, kMenuPurple, kMenuInk;
+int game_index();
+
+void pick_menu_theme() {
+  static const char* forced = std::getenv("JAK_ENHANCED_MENU_THEME");
+  const int i = forced ? std::clamp(std::atoi(forced) - 1, 0, 2) : game_index();
+  g_menu_theme = kMenuThemes[i];
+  kMenuAmber = g_menu_theme.accent;
+  kMenuOrange = g_menu_theme.accent2;
+  kMenuYellow = g_menu_theme.highlight;
+  kMenuPurple = g_menu_theme.second;
+  kMenuInk = g_menu_theme.ink;  // text on a picked choice
+}
 
 ImVec4 menu_rgba(const ImVec4& c, float a) {
   return ImVec4(c.x, c.y, c.z, a);
@@ -311,6 +352,8 @@ ImU32 menu_col(const ImVec4& c, float a = 1.f) {
 struct MenuStyle {
   int vars = 0, colors = 0;
   MenuStyle() {
+    pick_menu_theme();
+    const MenuTheme& t = g_menu_theme;
     auto var = [&](ImGuiStyleVar v, float f) {
       ImGui::PushStyleVar(v, f);
       vars++;
@@ -337,16 +380,16 @@ struct MenuStyle {
     var(ImGuiStyleVar_GrabMinSize, 12.f);
     var(ImGuiStyleVar_ScrollbarRounding, 6.f);
     var(ImGuiStyleVar_SeparatorTextBorderSize, 2.f);
-    col(ImGuiCol_Text, ImVec4(0.97f, 0.93f, 0.87f, 1.f));
-    col(ImGuiCol_TextDisabled, ImVec4(0.63f, 0.56f, 0.70f, 1.f));
-    col(ImGuiCol_WindowBg, ImVec4(0.07f, 0.05f, 0.11f, 1.f));
-    col(ImGuiCol_PopupBg, ImVec4(0.10f, 0.07f, 0.16f, 0.97f));
+    col(ImGuiCol_Text, t.text);
+    col(ImGuiCol_TextDisabled, t.text_disabled);
+    col(ImGuiCol_WindowBg, t.panel);
+    col(ImGuiCol_PopupBg, t.popup);
     col(ImGuiCol_Border, menu_rgba(kMenuAmber, 0.85f));
-    col(ImGuiCol_FrameBg, ImVec4(0.17f, 0.11f, 0.24f, 0.90f));
-    col(ImGuiCol_FrameBgHovered, ImVec4(0.27f, 0.16f, 0.40f, 0.95f));
-    col(ImGuiCol_FrameBgActive, ImVec4(0.34f, 0.20f, 0.50f, 1.f));
-    col(ImGuiCol_Button, ImVec4(0.21f, 0.13f, 0.29f, 0.95f));
-    col(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.26f, 0.72f, 1.f));
+    col(ImGuiCol_FrameBg, t.frame);
+    col(ImGuiCol_FrameBgHovered, t.frame_hovered);
+    col(ImGuiCol_FrameBgActive, t.frame_active);
+    col(ImGuiCol_Button, t.button);
+    col(ImGuiCol_ButtonHovered, t.button_hovered);
     col(ImGuiCol_ButtonActive, kMenuOrange);
     col(ImGuiCol_Header, menu_rgba(kMenuOrange, 0.28f));
     col(ImGuiCol_HeaderHovered, menu_rgba(kMenuPurple, 0.50f));
@@ -430,8 +473,8 @@ bool menu_segment(const char* label, bool picked, float width, int place) {
   const float rounding = ImGui::GetStyle().FrameRounding;
   ImVec4 fill = picked ? (hovered ? kMenuYellow : kMenuAmber)
                 : held ? kMenuOrange
-                : hovered ? ImVec4(0.45f, 0.26f, 0.72f, 1.f)
-                          : ImVec4(0.17f, 0.11f, 0.24f, 0.95f);
+                : hovered ? g_menu_theme.button_hovered
+                          : menu_rgba(g_menu_theme.frame, 0.95f);
   dl->AddRectFilled(pos, b, menu_col(fill), rounding, corners);
   if (picked) {
     // a brighter line on top, as lit from above
@@ -557,7 +600,7 @@ void menu_title(const char* closes) {
   const float ww = ImGui::GetWindowWidth();
   const float rounding = ImGui::GetStyle().WindowRounding;
   dl->AddRectFilled(ImVec2(wp.x + 1, wp.y + 1), ImVec2(wp.x + ww - 1, band_bottom),
-                    ImGui::GetColorU32(ImVec4(0.17f, 0.08f, 0.22f, 0.85f)), rounding - 1.f,
+                    ImGui::GetColorU32(g_menu_theme.title_band), rounding - 1.f,
                     ImDrawFlags_RoundCornersTop);
   dl->AddRectFilledMultiColor(ImVec2(wp.x + 1, band_bottom - 2.f), ImVec2(wp.x + ww - 1, band_bottom),
                               menu_col(kMenuAmber), menu_col(kMenuPurple), menu_col(kMenuPurple),
@@ -6204,6 +6247,61 @@ void EnhancedPost::draw_menu() {
     menu_slider_float("Vignette##photo", &s.photo_vignette, 0.f, 1.f, "%.2f");
     ImGui::TextDisabled("Close this menu (F1), then F2 takes the picture (in your OpenGOAL screenshots folder).");
   }
+  // the game's nap window (and the beds, the report: not in Enhanced Light)
+  if (!enhanced_light() && ImGui::Button("Nap...  (N, Select)")) {
+    g_enhanced_menu.ask(12, "");
+    g_enhanced_menu.open = false;
+  }
+  // a bed for the nap: Jak standing on it (saved in game/assets/enhanced/beds.json)
+  if (!enhanced_light()) {
+    auto& beds = g_beds[game_index()];
+    const auto& pl = g_enhanced_player;
+    ImGui::SameLine();
+    if (ImGui::Button("Mark a bed here") && pl.valid) {
+      beds.push_back({pl.pos[0], pl.pos[1], pl.pos[2]});
+      save_beds();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Unmark the nearest bed") && pl.valid && !beds.empty()) {
+      size_t best = 0;
+      float best_d2 = 1e30f;
+      for (size_t i = 0; i < beds.size(); i++) {
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          d2 += (beds[i][k] - pl.pos[k]) * (beds[i][k] - pl.pos[k]);
+        }
+        if (d2 < best_d2) {
+          best_d2 = d2;
+          best = i;
+        }
+      }
+      beds.erase(beds.begin() + best);
+      save_beds();
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Napping within 3 m of a marked bed, Jak sleeps on it (%d in this game)",
+                        (int)beds.size());
+    }
+  }
+  // the report window (scripts\enhanced\report.ps1, also opened by the launcher after a crash),
+  // read as text like update.ps1 so the execution policy doesn't matter
+  if (!enhanced_light()) {
+    const auto proj = file_util::get_jak_project_dir();
+    const fs::path ps1 = proj / "scripts" / "enhanced" / "report.ps1";
+    ImGui::SameLine();
+    if (ImGui::Button("Send feedback") && fs::exists(ps1)) {
+      std::system(fmt::format("start \"\" powershell -NoProfile -WindowStyle Hidden -Command \"& "
+                              "([scriptblock]::Create([IO.File]::ReadAllText('{}'))) -Proj '{}'\"",
+                              ps1.string(), proj.string())
+                      .c_str());
+      g_enhanced_menu.open = false;
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip(
+          "A problem, an idea? Write it and send it with one click: your newest logs, PC details\n"
+          "and settings go with it (a window opens over the game: Alt+Tab if you don't see it)");
+    }
+  }
   // the preset last picked, lit in its row until a setting changes (only the look: nothing reads it)
   static int preset_lit = -1;
   static std::string preset_lit_settings;
@@ -6221,134 +6319,9 @@ void EnhancedPost::draw_menu() {
         preset_lit_settings.clear();
       }
     }
-    // the game's nap window (and the beds, the report: not in Enhanced Light)
-    if (!enhanced_light() && ImGui::Button("Nap...  (N, Select)")) {
-      g_enhanced_menu.ask(12, "");
-      g_enhanced_menu.open = false;
-    }
-    // a bed for the nap: Jak standing on it (saved in game/assets/enhanced/beds.json)
-    if (!enhanced_light()) {
-      auto& beds = g_beds[game_index()];
-      const auto& pl = g_enhanced_player;
-      ImGui::SameLine();
-      if (ImGui::Button("Mark a bed here") && pl.valid) {
-        beds.push_back({pl.pos[0], pl.pos[1], pl.pos[2]});
-        save_beds();
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Unmark the nearest bed") && pl.valid && !beds.empty()) {
-        size_t best = 0;
-        float best_d2 = 1e30f;
-        for (size_t i = 0; i < beds.size(); i++) {
-          float d2 = 0.f;
-          for (int k = 0; k < 3; k++) {
-            d2 += (beds[i][k] - pl.pos[k]) * (beds[i][k] - pl.pos[k]);
-          }
-          if (d2 < best_d2) {
-            best_d2 = d2;
-            best = i;
-          }
-        }
-        beds.erase(beds.begin() + best);
-        save_beds();
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Napping within 3 m of a marked bed, Jak sleeps on it (%d in this game)",
-                          (int)beds.size());
-      }
-    }
-    // the report window (scripts\enhanced\report.ps1, also opened by the launcher after a crash),
-    // read as text like update.ps1 so the execution policy doesn't matter
-    if (!enhanced_light()) {
-      const auto proj = file_util::get_jak_project_dir();
-      const fs::path ps1 = proj / "scripts" / "enhanced" / "report.ps1";
-      ImGui::SameLine();
-      if (ImGui::Button("Send feedback") && fs::exists(ps1)) {
-        std::system(fmt::format("start \"\" powershell -NoProfile -WindowStyle Hidden -Command \"& "
-                                "([scriptblock]::Create([IO.File]::ReadAllText('{}'))) -Proj '{}'\"",
-                                ps1.string(), proj.string())
-                        .c_str());
-        g_enhanced_menu.open = false;
-      }
-      if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip(
-            "A problem, an idea? Write it and send it with one click: your newest logs, PC details\n"
-            "and settings go with it (a window opens over the game: Alt+Tab if you don't see it)");
-      }
-    }
     menu_toggle("Enhanced graphics (all)", &s.enabled);
-    ImGui::BeginDisabled(!s.enabled);
-    // two columns of switches
-    int n = 0;
-    auto check = [&](const char* label, bool* value) {
-      if (n++ % 2) {
-        ImGui::SameLine(260);
-      }
-      return menu_toggle(label, value);
-    };
-    check("Antialiasing (TAA)", &s.taa);
-    check("Volumetric mist", &s.volume);
-    check("Sun shadows", &s.shadow_map);
-    check("Character and tree shadows", &s.shadow_casters);
-    check("Contact shadows", &s.sun_shadows);
-    check("Ambient occlusion (SSAO)", &s.ssao);
-    check("Indirect light (SSGI)", &s.gi);
-    check("Character lighting", &g_enhanced_merc.enabled);
-    check("Bloom", &s.bloom);
-    check("God rays", &s.shafts);
-    check("Depth of field", &s.dof);
-    bool blur = s.motion_blur > 0.f;
-    if (check("Motion blur", &blur)) {
-      s.motion_blur = blur ? 0.3f : 0.f;
-    }
-    check("Dynamic lights", &s.lights);
-    check("Fires (heat, embers)", &s.fire);
-    bool light_shadows = s.light_shadow > 0.f;
-    if (check("Light shadows", &light_shadows)) {
-      s.light_shadow = light_shadows ? 0.85f : 0.f;
-    }
-    check("Geometry normals", &s.geometry_normals);
-    bool prints = s.prints > 0.f;
-    if (check("Footprints in the sand", &prints)) {
-      s.prints = prints ? 1.f : 0.f;
-    }
-    bool dark = s.dark_nights > 0.f;
-    if (check("Dark nights", &dark)) {
-      s.dark_nights = dark ? 1.f : 0.f;
-    }
-    bool spill = s.light_spill > 0.f;
-    if (check("Light spill at night", &spill)) {
-      s.light_spill = spill ? 1.f : 0.f;
-    }
-    check("Cloud shadows", &s.cloud_shadows);
-    bool flare = s.lens_flare > 0.f;
-    if (check("Lens flare", &flare)) {
-      s.lens_flare = flare ? 0.6f : 0.f;
-    }
-    check("Jak's lantern in the desert", &s.desert_lamp);
-    bool smoke = s.lit_smoke > 0.f;
-    if (check("Lit smoke", &smoke)) {
-      s.lit_smoke = smoke ? 0.8f : 0.f;
-    }
-    check("Extended draw distance", &s.far_view);
-    bool relief = s.relief > 0.f;
-    if (check("Surface relief", &relief)) {
-      s.relief = relief ? 1.f : 0.f;
-    }
-    bool mats = s.materials > 0.f;
-    bool traced = s.ray_traced > 0;
-    if (check("Ray-traced reflections", &traced)) {
-      s.ray_traced = traced ? 1 : 0;
-    }
-    check("Ray-traced ambient occlusion", &s.rt_ao);
-    if (check("Reflective metal and glass", &mats)) {
-      s.materials = mats ? 1.f : 0.f;
-    }
-    check("Wind on the grass", &g_enhanced_wind.enabled);
-    check("Grass bends away", &g_enhanced_wind.push);
-    check("Color grade per area", &s.area_grading);
-    check("Soft shadows", &s.soft_shadows);
-    check("Auto quality (keeps 60 fps)", &s.auto_quality);
+    ImGui::SameLine(260);
+    menu_toggle("Auto quality (keeps 60 fps)", &s.auto_quality);
     if (ImGui::IsItemHovered()) {
       ImGui::SetTooltip(
           "Where the graphics card can't keep 60 fps (Haven at night...), the mist volume, the\n"
@@ -6361,24 +6334,162 @@ void EnhancedPost::draw_menu() {
           : m_auto_level == 4 ? "those off, and 85% resolution"
                               : "those off, and 72% resolution");
     }
-    check("Clouds", &s.clouds);
-    check("Cutscene depth of field", &s.cine_dof);
-    bool sparks = s.blast_sparks > 0.f;
-    if (check("Explosion sparks", &sparks)) {
-      s.blast_sparks = sparks ? 1.f : 0.f;
+    ImGui::BeginDisabled(!s.enabled);
+    // the switches in groups (closed until opened: ImGui remembers which), two columns in each
+    int n = 0;
+    auto check = [&](const char* label, bool* value) {
+      if (n++ % 2) {
+        ImGui::SameLine(260);
+      }
+      return menu_toggle(label, value);
+    };
+    // a switch for a setting kept as a strength: on is `on`, off is 0
+    auto check_amount = [&](const char* label, float* value, float on) {
+      bool b = *value > 0.f;
+      if (check(label, &b)) {
+        *value = b ? on : 0.f;
+      }
+    };
+    auto group = [&](const char* label) {
+      n = 0;
+      return ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth);
+    };
+    if (group("Image and camera")) {
+      check("Antialiasing (TAA)", &s.taa);
+      check("Bloom", &s.bloom);
+      check("God rays", &s.shafts);
+      check_amount("Lens flare", &s.lens_flare, 0.6f);
+      check("Depth of field", &s.dof);
+      check("Cutscene depth of field", &s.cine_dof);
+      check_amount("Motion blur", &s.motion_blur, 0.3f);
+      check("Color grade per area", &s.area_grading);
+      ImGui::SetNextItemWidth(200);
+      menu_slider_float("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
+      ImGui::TreePop();
     }
-    bool motes = s.motes > 0.f;
-    if (check("Fireflies and pollen", &motes)) {
-      s.motes = motes ? 1.f : 0.f;
+    if (group("Light and shadows")) {
+      check("Sun shadows", &s.shadow_map);
+      check("Character and tree shadows", &s.shadow_casters);
+      check("Contact shadows", &s.sun_shadows);
+      check("Soft shadows", &s.soft_shadows);
+      check("Ambient occlusion (SSAO)", &s.ssao);
+      check("Ray-traced ambient occlusion", &s.rt_ao);
+      check("Indirect light (SSGI)", &s.gi);
+      check("Character lighting", &g_enhanced_merc.enabled);
+      check("Dynamic lights", &s.lights);
+      check_amount("Light shadows", &s.light_shadow, 0.85f);
+      ImGui::BeginDisabled(!s.lights);
+      ImGui::SetNextItemWidth(200);
+      menu_slider_float("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
+      if (ImGui::TreeNode("Place a light")) {
+        // a light of your own where Jak stands, 2.5 m up (saved in game/assets/enhanced/lights.json)
+        static float color[3] = {1.f, 0.62f, 0.32f};
+        static float radius = 8.f;
+        static bool flicker = false;
+        ImGui::SetNextItemWidth(200);
+        ImGui::ColorEdit3("Color##ml", color);
+        ImGui::SetNextItemWidth(200);
+        menu_slider_float("Radius (m)##ml", &radius, 2.f, 40.f, "%.0f");
+        menu_toggle("Flickers like a fire##ml", &flicker);
+        auto& list = g_manual_lights[game_index()];
+        const auto& pl = g_enhanced_player;
+        if (ImGui::Button("Add a light here") && pl.valid) {
+          ManualLight l;
+          l.note = g_enhanced_scene.level;
+          l.pos[0] = pl.pos[0];
+          l.pos[1] = pl.pos[1] + 2.5f * 4096.f;
+          l.pos[2] = pl.pos[2];
+          l.radius = radius * 4096.f;
+          std::memcpy(l.color, color, sizeof(color));
+          l.flicker = flicker;
+          list.push_back(l);
+          save_manual_lights();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Remove the nearest") && pl.valid && !list.empty()) {
+          size_t best = 0;
+          float best_d2 = 1e30f;
+          for (size_t i = 0; i < list.size(); i++) {
+            float d2 = 0.f;
+            for (int k = 0; k < 3; k++) {
+              d2 += (list[i].pos[k] - pl.pos[k]) * (list[i].pos[k] - pl.pos[k]);
+            }
+            if (d2 < best_d2) {
+              best_d2 = d2;
+              best = i;
+            }
+          }
+          list.erase(list.begin() + best);
+          save_manual_lights();
+        }
+        ImGui::Text("%d lights of your own in this game", (int)list.size());
+        ImGui::TreePop();
+      }
+      ImGui::EndDisabled();
+      ImGui::TreePop();
     }
-    ImGui::SetNextItemWidth(200);
-    menu_slider_float("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
-    ImGui::SetNextItemWidth(200);
-    menu_slider_float("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
-    ImGui::SetNextItemWidth(200);
-    menu_slider_float("Snow on the ground", &s.snow_cover, 0.f, 1.f, "%.2f");
-    // the subtitles' size (accessibility): the default is smaller than the PS2's
-    {
+    if (group("Night")) {
+      check_amount("Dark nights", &s.dark_nights, 1.f);
+      check_amount("Light spill at night", &s.light_spill, 1.f);
+      check("Jak's lantern in the desert", &s.desert_lamp);
+      ImGui::TreePop();
+    }
+    if (group("Sky and weather")) {
+      check("Clouds", &s.clouds);
+      check("Cloud shadows", &s.cloud_shadows);
+      if (!kFogOff) {
+        check("Volumetric mist", &s.volume);
+      }
+      ImGui::SetNextItemWidth(200);
+      menu_slider_float("Snow on the ground", &s.snow_cover, 0.f, 1.f, "%.2f");
+      weather_menu(s, "Weather");
+      ImGui::TreePop();
+    }
+    if (group("Surfaces and materials")) {
+      check_amount("Surface relief", &s.relief, 1.f);
+      check("Geometry normals", &s.geometry_normals);
+      check_amount("Reflective metal and glass", &s.materials, 1.f);
+      bool traced = s.ray_traced > 0;
+      if (check("Ray-traced reflections", &traced)) {
+        s.ray_traced = traced ? 1 : 0;
+      }
+      check_amount("Footprints in the sand", &s.prints, 1.f);
+      bool smooth = g_enhanced_smooth_chars > 0;
+      if (check("Smoother characters (after a restart)", &smooth)) {
+        g_enhanced_smooth_chars = smooth ? 1 : 0;
+      }
+      ImGui::TreePop();
+    }
+    if (group("World and vegetation")) {
+      check("Extended draw distance", &s.far_view);
+      check("Wind on the grass", &g_enhanced_wind.enabled);
+      check("Grass bends away", &g_enhanced_wind.push);
+      ImGui::NewLine();
+      ImGui::SetNextItemWidth(200);
+      ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
+      ImGui::SetNextItemWidth(200);
+      menu_slider_float("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
+      ImGui::TreePop();
+    }
+    if (group("Effects")) {
+      check("Fires (heat, embers)", &s.fire);
+      check_amount("Lit smoke", &s.lit_smoke, 0.8f);
+      check_amount("Explosion sparks", &s.blast_sparks, 1.f);
+      check_amount("Fireflies and pollen", &s.motes, 1.f);
+      ImGui::TreePop();
+    }
+    if (group("Water")) {
+      check("Reflections", &s.water_reflections);
+      check_amount("Swell", &s.water_swell, 1.f);
+      check_amount("Refraction", &s.water_refraction, 0.012f);
+      check_amount("Caustics", &s.water_caustics, 0.8f);
+      ImGui::TreePop();
+    }
+    ImGui::EndDisabled();
+    if (group("Sound and subtitles")) {
+      ImGui::SetNextItemWidth(200);
+      menu_slider_float("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
+      // the subtitles' size (accessibility): the default is smaller than the PS2's
       static const int kSizes[] = {100, 120, 138, 170};
       int pick = 0;
       for (int i = 0; i < 4; i++) {
@@ -6391,80 +6502,8 @@ void EnhancedPost::draw_menu() {
       if (ImGui::Combo("Subtitle size", &pick, kSizeNames, 4)) {
         g_enhanced_menu.subtitle_size = kSizes[pick];
       }
-    }
-    weather_menu(s, "Weather");
-    ImGui::SetNextItemWidth(200);
-    ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
-    ImGui::SetNextItemWidth(200);
-    menu_slider_float("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
-    {
-      bool smooth = g_enhanced_smooth_chars > 0;
-      if (menu_toggle("Smoother characters (after a restart)", &smooth)) {
-        g_enhanced_smooth_chars = smooth ? 1 : 0;
-      }
-    }
-    ImGui::BeginDisabled(!s.lights);
-    ImGui::SetNextItemWidth(200);
-    menu_slider_float("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
-    if (ImGui::TreeNode("Place a light")) {
-      // a light of your own where Jak stands, 2.5 m up (saved in game/assets/enhanced/lights.json)
-      static float color[3] = {1.f, 0.62f, 0.32f};
-      static float radius = 8.f;
-      static bool flicker = false;
-      ImGui::SetNextItemWidth(200);
-      ImGui::ColorEdit3("Color##ml", color);
-      ImGui::SetNextItemWidth(200);
-      menu_slider_float("Radius (m)##ml", &radius, 2.f, 40.f, "%.0f");
-      menu_toggle("Flickers like a fire##ml", &flicker);
-      auto& list = g_manual_lights[game_index()];
-      const auto& pl = g_enhanced_player;
-      if (ImGui::Button("Add a light here") && pl.valid) {
-        ManualLight l;
-        l.note = g_enhanced_scene.level;
-        l.pos[0] = pl.pos[0];
-        l.pos[1] = pl.pos[1] + 2.5f * 4096.f;
-        l.pos[2] = pl.pos[2];
-        l.radius = radius * 4096.f;
-        std::memcpy(l.color, color, sizeof(color));
-        l.flicker = flicker;
-        list.push_back(l);
-        save_manual_lights();
-      }
-      ImGui::SameLine();
-      if (ImGui::Button("Remove the nearest") && pl.valid && !list.empty()) {
-        size_t best = 0;
-        float best_d2 = 1e30f;
-        for (size_t i = 0; i < list.size(); i++) {
-          float d2 = 0.f;
-          for (int k = 0; k < 3; k++) {
-            d2 += (list[i].pos[k] - pl.pos[k]) * (list[i].pos[k] - pl.pos[k]);
-          }
-          if (d2 < best_d2) {
-            best_d2 = d2;
-            best = i;
-          }
-        }
-        list.erase(list.begin() + best);
-        save_manual_lights();
-      }
-      ImGui::Text("%d lights of your own in this game", (int)list.size());
       ImGui::TreePop();
     }
-    ImGui::EndDisabled();
-    menu_subhead("Water");
-    n = 0;
-    bool swell = s.water_swell > 0.f, refr = s.water_refraction > 0.f, caus = s.water_caustics > 0.f;
-    check("Reflections", &s.water_reflections);
-    if (check("Swell", &swell)) {
-      s.water_swell = swell ? 1.f : 0.f;
-    }
-    if (check("Refraction", &refr)) {
-      s.water_refraction = refr ? 0.012f : 0.f;
-    }
-    if (check("Caustics", &caus)) {
-      s.water_caustics = caus ? 0.8f : 0.f;
-    }
-    ImGui::EndDisabled();
   }
   if (menu_section("City", ImGuiTreeNodeFlags_DefaultOpen)) {
     // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
