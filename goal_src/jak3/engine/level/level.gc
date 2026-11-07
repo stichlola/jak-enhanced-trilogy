@@ -3365,6 +3365,10 @@
   (none)
   )
 
+;; PC (Enhanced): the level last named in a "want to unload" line, so a level that waits a few frames
+;; for its DGO before going is named once, not once per frame (#f again after each discard)
+(define *pc-unload-msg-last* #f)
+
 (defmethod update! ((this load-state))
   (local-vars (a0-11 symbol))
   (if (-> this update-callback)
@@ -3398,13 +3402,17 @@
           ;; you may attempt to start a new load right away before the ISO thread can properly stop the previous load
           ;; which will just crash the game. Sadly this means loads may sometimes be delayed by one frame. The horror.
           (when (>= a0-3 0)
-            (format 0 "  level loading : want to unload ~A. load-level is ~A~%" (-> *level* level a0-3 load-name) (-> *level* load-level))
+            (when (!= (-> *level* level a0-3 load-name) *pc-unload-msg-last*)
+              (set! *pc-unload-msg-last* (-> *level* level a0-3 load-name))
+              (format 0 "  level loading : want to unload ~A. load-level is ~A~%" (-> *level* level a0-3 load-name) (-> *level* load-level))
+              )
             (when (or (!= (-> *level* level a0-3 load-name) (-> *level* load-level))
                       (< 1 (- (-> *display* real-clock integral-frame-counter) *dgo-time*)))
               (let ((lev-to-unload (-> *level* level a0-3)))
                 (format 0 "Discarding level ~A~%" (-> lev-to-unload name))
                 (level-status-update! lev-to-unload 'inactive) ;; kill it.
                 )
+              (set! *pc-unload-msg-last* #f)
               )
             (set! v1-3 #t)
             )

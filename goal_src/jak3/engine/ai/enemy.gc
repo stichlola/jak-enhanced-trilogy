@@ -824,6 +824,11 @@
   (above-ground? (-> this root) arg0 arg1 arg2 arg3 arg4 arg5)
   )
 
+;; og:preserve-this
+;; PC (Enhanced): the "failed to locate ground" warning comes for every citizen and flitter spawned
+;; off the collision, ~30 per boot: the first 4, then at 8, 16, 32... with the count
+(define *enemy-ground-warnings* 0)
+
 (defmethod move-to-ground ((this enemy) (arg0 meters) (arg1 meters) (arg2 symbol) (arg3 collide-spec))
   "Snap the enemy to the ground below."
   (let ((s4-0 (new 'stack-no-clear 'collide-query)))
@@ -880,9 +885,12 @@
             (set! (-> v1-11 touch-angle) 0.0)
             )
           )
-        (if arg2
-            (format 0 "WARNING: enemy::move-to-ground: failed to locate ground for ~S!~%" (-> this name))
-            )
+        (when arg2
+          (+! *enemy-ground-warnings* 1)
+          (if (or (< *enemy-ground-warnings* 5) (zero? (logand *enemy-ground-warnings* (+ *enemy-ground-warnings* -1))))
+              (format 0 "WARNING: enemy::move-to-ground: failed to locate ground for ~S! (~D so far)~%" (-> this name) *enemy-ground-warnings*)
+              )
+          )
         #f
         )
       )
