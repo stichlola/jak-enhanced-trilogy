@@ -170,9 +170,11 @@ $rows = @(
   # level changes: desert -> Spargus on foot and in the Hellcat, Spargus -> desert by the menu (windowed,
   # as every row that loads a level after the boot: a headless gk logs "Adding level X" and never
   # finishes loading it; the air train's actors aren't found either)
-  New-Row @{ Name = 'desert-to-spargus-foot'; Seconds = 90; Shots = @(45); Env = @{ JAK_ENHANCED_HELLCAT_TEST = '3' }
+  # (after the level change Jak and the camera stop in a different spot each run: reruns sim 0.59-0.99,
+  # diff 1.4-16; fallback limits wide, the baseline's own samples set the real ones)
+  New-Row @{ Name = 'desert-to-spargus-foot'; Seconds = 90; Shots = @(45); Env = @{ JAK_ENHANCED_HELLCAT_TEST = '3' }; MinSim = 0.5; MaxDiff = 20.0
     Levels = @('^des', '^was'); Expect = @((E '\[spargus-test\] gate' 'gate swap'), (E '\[spargus-test\] t .*wascitya active' 'wascitya active')) }
-  New-Row @{ Name = 'desert-to-spargus-hellcat'; Seconds = 90; Shots = @(45); Env = @{ JAK_ENHANCED_HELLCAT_TEST = '2' }
+  New-Row @{ Name = 'desert-to-spargus-hellcat'; Seconds = 90; Shots = @(45); Env = @{ JAK_ENHANCED_HELLCAT_TEST = '2' }; MinSim = 0.5; MaxDiff = 20.0
     Levels = @('^des', '^was'); Expect = @((E '\[spargus-test\] gate' 'gate swap'), (E '\[spargus-test\] t .*wascitya active' 'wascitya active')) }
   # (the request 25 s after the first frame: one queued at boot is taken before the level is up)
   New-Row @{ Name = 'spargus-to-desert'; Shots = @(50); Start = 'wascitya-start'; Seconds = 60; Env = @{ JAK_ENHANCED_MENU_SCRIPT = '25:2:desert-start' }
@@ -270,8 +272,30 @@ if ($baseDir) { $base = [IO.File]::ReadAllText((Join-Path $baseDir 'baseline.jso
 # baseline.json: { version, commit, date, rows: [{ name, shots: [{ t, files: [one per rerun, newest last],
 # luma, minSim, maxDiff, limits: "reruns n" | "from <version>" }] }] } (a first-format shot has one "file")
 function Shot-Files($bs) { @(if ($bs.files) { $bs.files } elseif ($bs.file) { $bs.file }) }
-# a shot's limits: its baseline's (from reruns, or carried over), else the row's
-function Shot-Limits($r, $bs) {
+# limits from 2+ rerun samples of a shot: each sample's best match among the others, the worst of those,
+# less a margin that shrinks with more samples (sim 0.10 for 2, 0.07 for 3, 0.06 for 4; diff +4, +3, +2.7),
+# clamped to sim 0.5-0.97, diff 3-30 (reruns of a still shot: worst sim 0.93-0.98; a 20 % box: 0.80)
+function Sample-Limits([string]$dir, $files) {
+  $worstSim = 1.0; $worstDiff = 0.0
+  foreach ($a in $files) {
+    $bSim = -1.0; $bDiff = 1e9
+    foreach ($b in $files) {
+      if ($a -eq $b) { continue }
+      $c = [GateWin2]::Compare((Join-Path $dir $a), (Join-Path $dir $b))
+      if ($c[1] -gt $bSim) { $bSim = $c[1] }; if ($c[0] -lt $bDiff) { $bDiff = $c[0] }
+    }
+    $worstSim = [Math]::Min($worstSim, $bSim); $worstDiff = [Math]::Max($worstDiff, $bDiff)
+  }
+  $k = $files.Count - 1
+  @([Math]::Round([Math]::Min(30.0, [Math]::Max(3.0, $worstDiff + 2.0 + 2.0 / $k)), 1),
+    [Math]::Round([Math]::Min(0.97, [Math]::Max(0.5, $worstSim - 0.04 - 0.06 / $k)), 3),
+    ('reruns {0} (worst best-match sim {1:0.00}, diff {2:0.0})' -f $files.Count, $worstSim, $worstDiff))
+}
+# a shot's limits: from its baseline's rerun samples (worked out now, so older baselines follow the rule),
+# else carried over from another baseline, else the row's
+function Shot-Limits($r, $bs, [string]$dir) {
+  $f = @(Shot-Files $bs | Where-Object { Test-Path (Join-Path $dir $_) })
+  if ($f.Count -ge 2) { return (Sample-Limits $dir $f) }
   if ($bs -and $null -ne $bs.minSim -and $null -ne $bs.maxDiff) { return @([double]$bs.maxDiff, [double]$bs.minSim, "$($bs.limits)") }
   @([double]$r.MaxDiff, [double]$r.MinSim, 'row')
 }
@@ -687,7 +711,7 @@ function Judge($it) {
         if (-not $best -or $c[1] -gt $best[1] -or ($c[1] -eq $best[1] -and $c[0] -lt $best[0])) { $best = @($c[0], $c[1], $bf) }
       }
       $s.Diff = $best[0]; $s.Sim = $best[1]; $s.Base = $best[2]
-      $lim = Shot-Limits $r $bs
+      $lim = Shot-Limits $r $bs $baseDir
       $txt = '{0}s diff {1:0.0} sim {2:0.00} vs {3} (best of {4}; limits diff {5:0.0} sim {6:0.00} {7})' -f $s.T, $best[0], $best[1], $base.version, $files.Count, $lim[0], $lim[1], $lim[2]
       if ($best[0] -gt $lim[0] -or $best[1] -lt $lim[1]) { $it.Warn += $txt } else { $it.Info += $txt }
     }
@@ -762,8 +786,7 @@ try {
 
 # --- baseline ------------------------------------------------------------------------------------------
 # Each run adds its shots to the version's baseline as one more rerun sample (newest -BaselineKeep kept);
-# with 2+ samples a shot's limits come from how much they differ: for each sample its best match among the
-# others, the worst of those, sim - 0.05 and diff + 3 (clamped to 0.5-0.97 and 3-30); with one sample the
+# with 2+ samples a shot's limits come from how much they differ (Sample-Limits); with one sample the
 # limits of the baseline compared against (same row and shot) are carried over, else the row's apply.
 if ($MakeBaseline) {
   $bd = Join-Path $baseRoot $Version
@@ -789,19 +812,8 @@ if ($MakeBaseline) {
       }
       $e = [ordered]@{ t = $s.T; files = $files; luma = [Math]::Round($s.Luma, 1) }
       if ($files.Count -ge 2) {
-        $worstSim = 1.0; $worstDiff = 0.0
-        foreach ($a in $files) {
-          $bSim = -1.0; $bDiff = 1e9
-          foreach ($b in $files) {
-            if ($a -eq $b) { continue }
-            $c = [GateWin2]::Compare((Join-Path $bd $a), (Join-Path $bd $b))
-            if ($c[1] -gt $bSim) { $bSim = $c[1] }; if ($c[0] -lt $bDiff) { $bDiff = $c[0] }
-          }
-          $worstSim = [Math]::Min($worstSim, $bSim); $worstDiff = [Math]::Max($worstDiff, $bDiff)
-        }
-        $e.minSim = [Math]::Round([Math]::Min(0.97, [Math]::Max(0.5, $worstSim - 0.05)), 3)
-        $e.maxDiff = [Math]::Round([Math]::Min(30.0, [Math]::Max(3.0, $worstDiff + 3.0)), 1)
-        $e.limits = "reruns $($files.Count) (worst best-match sim $('{0:0.00}' -f $worstSim), diff $('{0:0.0}' -f $worstDiff))"
+        $sl = Sample-Limits $bd $files
+        $e.maxDiff = $sl[0]; $e.minSim = $sl[1]; $e.limits = $sl[2]
       } else {
         $cs = Base-Shot $base $it.Row.Name $s.T
         if ($cs -and $null -ne $cs.minSim) {

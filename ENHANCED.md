@@ -137,10 +137,12 @@ build to give the rows real limits. `-Baseline <dir|version|none>` (default: the
 compares each shot at 64x36 (mean luma difference, SSIM over 8x8 windows) with every sample and keeps the
 best match, and a change past the limits makes the row **WARN** (it passes), with baseline and new side by
 side in report.html. Limits per row and shot: from the samples (each one's best match among the others,
-the worst of those, sim - 0.05 / diff + 3, clamped to 0.5-0.97 / 3-30), else carried over from the
+the worst of those, less a margin that shrinks with more samples: sim -0.10/-0.07/-0.06 and diff
++4/+3/+2.7 for 2/3/4 samples, clamped to 0.5-0.97 / 3-30; worked out at compare time), else carried over from the
 baseline the one-sample baseline was made beside, else the row's `MinSim`/`MaxDiff` (default 0.85 / 6;
-air train rows wider). Measured at 64x36: reruns of one build diff 0.2-5.8 / sim 0.81-1.00 (the minimap
-shown or not at 14 s, ground decals, pose; the air train scene at 10 s has two looks, 0.65-0.99); a
+air train and desert-to-Spargus rows wider). Measured at 64x36: reruns of one build diff 0.2-5.8 / sim
+0.81-1.00 (the minimap shown or not at 14 s, ground decals, pose; the air train scene at 10 s has two
+looks, 0.63-0.99; after desert-to-Spargus Jak and the camera stop elsewhere each run, 0.59-0.99); a
 magenta box over 20 % of the frame diff 7.4-9.4 / sim 0.76-0.79; the desert from another camera 0.50;
 another level 0.15. The player shots can't tell Jak from Sig (0.90): their log lines check who is played.
 A shot with no baseline counterpart gets an info line. Output: `GATE <row>
