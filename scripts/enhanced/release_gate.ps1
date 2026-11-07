@@ -286,7 +286,7 @@ function Start-Row($r, [int]$slot) {
   $p = [Diagnostics.Process]::Start($psi)
   $null = $p.Handle
   [pscustomobject]@{ Row = $r; N = $n; Slot = $slot; X = $x; Y = $y; Cfg = $cfg; Proc = $p; Pid = $p.Id; T0 = $t0; Log = '';
-    Hwnd = [IntPtr]::Zero; Ready = $null; End = $null; ShotsDone = @(); Shots = @(); Done = $false; SavesBefore = $savesBefore;
+    Hwnd = [IntPtr]::Zero; Ready = $null; End = $null; ShotsDone = @(); Shots = @(); Tries = @{}; Done = $false; SavesBefore = $savesBefore;
     Exit = ''; Fail = @(); Info = @() }
 }
 
@@ -334,7 +334,17 @@ function Poll-Row($it) {
         $bmp.Dispose()
         $it.Shots += [pscustomobject]@{ T = $s; File = $file; Luma = $st[0]; Bright = $st[1] }
       } else {
-        $it.Shots += [pscustomobject]@{ T = $s; File = ''; Luma = -1; Bright = 0 }
+        # (no picture this time - the window busy or briefly without a client area: up to 8 tries, half a
+        # second apart, before it counts as missing)
+        $it.Tries[$s] = 1 + [int]$it.Tries[$s]
+        if ($it.Tries[$s] -lt 8 -and $now.AddSeconds(1) -lt $it.End) {
+          $it.ShotsDone = @($it.ShotsDone | Where-Object { $_ -ne $s })
+        } else {
+          $rc = New-Object GateWin+RECT
+          $ok = $it.Hwnd -ne [IntPtr]::Zero -and [GateWin]::GetClientRect($it.Hwnd, [ref]$rc)
+          $it.Info += "shot $s s failed: hwnd $($it.Hwnd) client $(if ($ok) { "$($rc.R - $rc.L)x$($rc.B - $rc.T)" } else { 'none' })"
+          $it.Shots += [pscustomobject]@{ T = $s; File = ''; Luma = -1; Bright = 0 }
+        }
       }
     }
   }
