@@ -19,6 +19,7 @@
 #include "game/graphics/display.h"
 #include "game/graphics/gfx.h"
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/screenshot.h"
 #include "game/kernel/common/Ptr.h"
 #include "game/kernel/common/kboot.h"
@@ -1568,6 +1569,26 @@ u64 pc_enhanced_minimap_size() {
 // Enhanced: read an environment variable (test runs pick their start point, run probes... without
 // recompiling or a REPL). Copies it into dest (a GOAL string of max_len chars), #f if unset.
 u64 pc_enhanced_getenv(u32 var, u32 dest, u32 max_len) {
+  // (not real variables: the dev loop's requests from the REPL, done at the next frame; dest is
+  // left alone, see EnhancedTune.h)
+  //   (pc-enhanced-getenv "JAK_ENHANCED_DO_RELOAD_SHADERS" "" 0)
+  //   (pc-enhanced-getenv "JAK_ENHANCED_DO_RELOAD_TUNE" "" 0)
+  //   (pc-enhanced-getenv "JAK_ENHANCED_DO_TUNE shadow.far_range_m 1500" "" 0)
+  {
+    const char* req = Ptr<String>(var).c()->data();
+    if (std::strncmp(req, "JAK_ENHANCED_DO_", 16) == 0) {
+      if (std::strcmp(req + 16, "RELOAD_SHADERS") == 0) {
+        enhanced_request_shader_reload();
+      } else if (std::strcmp(req + 16, "RELOAD_TUNE") == 0) {
+        enhanced_request_tune_reload();
+      } else if (std::strncmp(req + 16, "TUNE ", 5) == 0) {
+        enhanced_request_tune_set(req + 21);
+      } else {
+        return bool_to_symbol(false);
+      }
+      return bool_to_symbol(true);
+    }
+  }
   // (not a real variable: whether the Jak 2 plaza is built, see enhanced_has_piazza)
   if (std::strcmp(Ptr<String>(var).c()->data(), "JAK_ENHANCED_HAS_PIAZZA") == 0) {
     return bool_to_symbol(enhanced_has_piazza());

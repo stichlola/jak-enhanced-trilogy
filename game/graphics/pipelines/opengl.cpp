@@ -27,6 +27,7 @@
 #include "game/graphics/screenshot.h"
 #include "game/graphics/texture/TexturePool.h"
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/runtime.h"
 #include "game/sce/libscf.h"
 #include "game/system/hid/input_manager.h"
@@ -424,6 +425,15 @@ GLDisplay::GLDisplay(SDL_Window* window, SDL_GLContext gl_context, bool is_main)
   m_input_manager->register_command(
       CommandBinding::Source::KEYBOARD,
       CommandBinding(SDLK_F2, [&]() { m_take_screenshot_next_frame = true; }));
+  // Enhanced dev loop: F5 rebuilds the shaders and reads tuning.json again, with the test switch
+  // JAK_ENHANCED_SHADER_RELOAD on (ShaderLibrary::hot_reload)
+  if (std::getenv("JAK_ENHANCED_SHADER_RELOAD")) {
+    m_input_manager->register_command(CommandBinding::Source::KEYBOARD,
+                                      CommandBinding(SDLK_F5, []() {
+                                        enhanced_request_shader_reload();
+                                        enhanced_request_tune_reload();
+                                      }));
+  }
   // Enhanced: \ opens and closes the in-game Enhanced menu, and so does its shortcut (F1 unless
   // changed in the menu's Controls, see enhanced_shortcuts); on a pad Select and R3 together
   m_input_manager->register_command(

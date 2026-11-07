@@ -70,6 +70,7 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/EnhancedImport.cpp
         graphics/opengl_renderer/EnhancedTextures.cpp
         graphics/opengl_renderer/EnhancedNotes.cpp
+        graphics/opengl_renderer/EnhancedTune.cpp
         graphics/opengl_renderer/loader/EnhancedScenery.cpp
         graphics/opengl_renderer/loader/EnhancedTerrain.cpp
         graphics/opengl_renderer/loader/EnhancedSmoothMerc.cpp

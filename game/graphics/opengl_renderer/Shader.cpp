@@ -1,11 +1,15 @@
 #include "Shader.h"
 
+#include <chrono>
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 
 #include "common/log/log.h"
 #include "common/util/Assert.h"
 #include "common/util/FileUtil.h"
 
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/pipelines/opengl.h"
 
 namespace {
@@ -39,6 +43,158 @@ std::string ascii_only(const std::string& src) {
   }
   return out;
 }
+
+// a uniform type's base (0 float, 1 int/bool/sampler, 2 unsigned, -1 unknown) and components
+std::pair<int, int> uniform_layout(GLenum type) {
+  switch (type) {
+    case GL_FLOAT:
+      return {0, 1};
+    case GL_FLOAT_VEC2:
+      return {0, 2};
+    case GL_FLOAT_VEC3:
+      return {0, 3};
+    case GL_FLOAT_VEC4:
+    case GL_FLOAT_MAT2:
+      return {0, 4};
+    case GL_FLOAT_MAT3:
+      return {0, 9};
+    case GL_FLOAT_MAT4:
+      return {0, 16};
+    case GL_FLOAT_MAT2x3:
+    case GL_FLOAT_MAT3x2:
+      return {0, 6};
+    case GL_FLOAT_MAT2x4:
+    case GL_FLOAT_MAT4x2:
+      return {0, 8};
+    case GL_FLOAT_MAT3x4:
+    case GL_FLOAT_MAT4x3:
+      return {0, 12};
+    case GL_INT:
+    case GL_BOOL:
+      return {1, 1};
+    case GL_INT_VEC2:
+    case GL_BOOL_VEC2:
+      return {1, 2};
+    case GL_INT_VEC3:
+    case GL_BOOL_VEC3:
+      return {1, 3};
+    case GL_INT_VEC4:
+    case GL_BOOL_VEC4:
+      return {1, 4};
+    case GL_UNSIGNED_INT:
+      return {2, 1};
+    case GL_UNSIGNED_INT_VEC2:
+      return {2, 2};
+    case GL_UNSIGNED_INT_VEC3:
+      return {2, 3};
+    case GL_UNSIGNED_INT_VEC4:
+      return {2, 4};
+    case GL_SAMPLER_1D:
+    case GL_SAMPLER_2D:
+    case GL_SAMPLER_3D:
+    case GL_SAMPLER_CUBE:
+    case GL_SAMPLER_2D_SHADOW:
+    case GL_SAMPLER_1D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY:
+    case GL_SAMPLER_2D_ARRAY_SHADOW:
+    case GL_SAMPLER_CUBE_SHADOW:
+    case GL_SAMPLER_BUFFER:
+    case GL_SAMPLER_2D_MULTISAMPLE:
+    case GL_INT_SAMPLER_2D:
+    case GL_INT_SAMPLER_BUFFER:
+    case GL_UNSIGNED_INT_SAMPLER_2D:
+    case GL_UNSIGNED_INT_SAMPLER_BUFFER:
+      return {1, 1};
+    default:
+      return {-1, 0};
+  }
+}
+
+// sets a uniform of the current program from floats (an int type from `iv`/`uv` when given,
+// else from the floats rounded)
+void set_uniform(GLint loc,
+                 GLenum type,
+                 const float* f,
+                 const GLint* iv = nullptr,
+                 const GLuint* uv = nullptr) {
+  const auto [kind, n] = uniform_layout(type);
+  GLint ibuf[4];
+  GLuint ubuf[4];
+  if (kind == 1 && !iv) {
+    for (int k = 0; k < 4; k++) {
+      ibuf[k] = (GLint)std::lround(f[k]);
+    }
+    iv = ibuf;
+  }
+  if (kind == 2 && !uv) {
+    for (int k = 0; k < 4; k++) {
+      ubuf[k] = (GLuint)std::max(0L, std::lround(f[k]));
+    }
+    uv = ubuf;
+  }
+  switch (type) {
+    case GL_FLOAT_MAT2:
+      glUniformMatrix2fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT3:
+      glUniformMatrix3fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT4:
+      glUniformMatrix4fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT2x3:
+      glUniformMatrix2x3fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT3x2:
+      glUniformMatrix3x2fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT2x4:
+      glUniformMatrix2x4fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT4x2:
+      glUniformMatrix4x2fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT3x4:
+      glUniformMatrix3x4fv(loc, 1, GL_FALSE, f);
+      return;
+    case GL_FLOAT_MAT4x3:
+      glUniformMatrix4x3fv(loc, 1, GL_FALSE, f);
+      return;
+    default:
+      break;
+  }
+  if (kind == 0) {
+    if (n == 1) {
+      glUniform1fv(loc, 1, f);
+    } else if (n == 2) {
+      glUniform2fv(loc, 1, f);
+    } else if (n == 3) {
+      glUniform3fv(loc, 1, f);
+    } else {
+      glUniform4fv(loc, 1, f);
+    }
+  } else if (kind == 1) {
+    if (n == 1) {
+      glUniform1iv(loc, 1, iv);
+    } else if (n == 2) {
+      glUniform2iv(loc, 1, iv);
+    } else if (n == 3) {
+      glUniform3iv(loc, 1, iv);
+    } else {
+      glUniform4iv(loc, 1, iv);
+    }
+  } else if (kind == 2) {
+    if (n == 1) {
+      glUniform1uiv(loc, 1, uv);
+    } else if (n == 2) {
+      glUniform2uiv(loc, 1, uv);
+    } else if (n == 3) {
+      glUniform3uiv(loc, 1, uv);
+    } else {
+      glUniform4uiv(loc, 1, uv);
+    }
+  }
+}
 }  // namespace
 
 Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(shader_name) {
@@ -50,8 +206,7 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   auto vert_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
   // (Enhanced: the detailed scenery's instanced models are colored like the shrubs they replace)
-  const std::string frag_name =
-      shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
+  const std::string frag_name = frag_file(shader_name);
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
 
@@ -116,6 +271,7 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   if (!compile_ok) {
     glGetShaderInfoLog(m_vert_shader, len, nullptr, err);
     lg::error("Failed to compile vertex shader {}:\n{}", shader_name.c_str(), err);
+    glDeleteShader(m_vert_shader);  // (Enhanced: a failed hot reload leaves nothing behind)
     m_is_okay = false;
     return;
   }
@@ -129,6 +285,8 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   if (!compile_ok) {
     glGetShaderInfoLog(m_frag_shader, len, nullptr, err);
     lg::error("Failed to compile fragment shader {}:\n{}", shader_name.c_str(), err);
+    glDeleteShader(m_vert_shader);
+    glDeleteShader(m_frag_shader);
     m_is_okay = false;
     return;
   }
@@ -142,6 +300,10 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   if (!compile_ok) {
     glGetProgramInfoLog(m_program, len, nullptr, err);
     lg::error("Failed to link shader {}:\n{}", shader_name.c_str(), err);
+    glDeleteShader(m_vert_shader);
+    glDeleteShader(m_frag_shader);
+    glDeleteProgram(m_program);
+    m_program = 0;
     m_is_okay = false;
     return;
   }
@@ -167,6 +329,118 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   if (m_jitters) {
     m_jitter_loc = glGetUniformLocation(m_program, "enh_jitter");
   }
+
+  // Enhanced dev loop: the tunable uniforms (tune_*), with the values the shader gives them
+  GLint count = 0;
+  glGetProgramiv(m_program, GL_ACTIVE_UNIFORMS, &count);
+  for (GLint i = 0; i < count; i++) {
+    char name[128];
+    GLint size = 0;
+    GLenum type = 0;
+    glGetActiveUniform(m_program, i, sizeof(name), nullptr, &size, &type, name);
+    if (std::strncmp(name, "tune_", 5) != 0 || size != 1) {
+      continue;
+    }
+    const auto [kind, n] = uniform_layout(type);
+    if (kind < 0 || kind == 2 || n > 4 || type == GL_FLOAT_MAT2) {
+      continue;  // (floats and ints, up to 4)
+    }
+    TuneUniform u;
+    u.loc = glGetUniformLocation(m_program, name);
+    u.type = type;
+    u.n = n;
+    u.key = std::string("shaders.") + name;
+    if (kind == 0) {
+      glGetUniformfv(m_program, u.loc, u.def);
+    } else {
+      GLint iv[4] = {0, 0, 0, 0};
+      glGetUniformiv(m_program, u.loc, iv);
+      for (int k = 0; k < 4; k++) {
+        u.def[k] = (float)iv[k];
+      }
+    }
+    m_tune.push_back(u);
+  }
+}
+
+std::string Shader::frag_file(const std::string& shader_name) {
+  return shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
+}
+
+void Shader::apply_tuning() const {
+  const int gen = enhanced_tune_generation();
+  if (gen == m_tune_gen) {
+    return;
+  }
+  m_tune_gen = gen;
+  for (const auto& u : m_tune) {
+    float v[4] = {u.def[0], u.def[1], u.def[2], u.def[3]};
+    if (enhanced_tune_lookup(u.key.c_str(), v, u.n)) {
+      lg::info("[enhanced] shader {}: {} = {:g} {:g} {:g} {:g}", m_name, u.key, v[0], v[1], v[2],
+               v[3]);
+    }
+    set_uniform(u.loc, u.type, v);
+  }
+}
+
+bool Shader::hand_uniforms_to(const Shader& fresh, bool require_same_locations) const {
+  struct Value {
+    GLint new_loc;
+    GLenum type;
+    float f[16];
+    GLint i[16];
+    GLuint u[16];
+  };
+  std::vector<Value> values;
+  GLint count = 0;
+  glGetProgramiv(m_program, GL_ACTIVE_UNIFORMS, &count);
+  for (GLint idx = 0; idx < count; idx++) {
+    char name[256];
+    GLint size = 0;
+    GLenum type = 0;
+    glGetActiveUniform(m_program, idx, sizeof(name), nullptr, &size, &type, name);
+    const auto [kind, n] = uniform_layout(type);
+    if (kind < 0) {
+      continue;
+    }
+    // (an array is "name[0]": each element has its own location)
+    std::string base = name;
+    if (auto b = base.find('['); b != std::string::npos) {
+      base.resize(b);
+    }
+    for (GLint e = 0; e < size; e++) {
+      const std::string el = size > 1 ? base + "[" + std::to_string(e) + "]" : std::string(name);
+      const GLint old_loc = glGetUniformLocation(m_program, el.c_str());
+      if (old_loc < 0) {
+        continue;  // (in a uniform block)
+      }
+      const GLint new_loc = glGetUniformLocation(fresh.m_program, el.c_str());
+      if (new_loc != old_loc && require_same_locations) {
+        lg::warn("[enhanced] shader {}: uniform {} moved ({} -> {}), restart to see the change",
+                 m_name, el, old_loc, new_loc);
+        return false;
+      }
+      if (new_loc < 0) {
+        continue;
+      }
+      Value v{};
+      v.new_loc = new_loc;
+      v.type = type;
+      if (kind == 0) {
+        glGetUniformfv(m_program, old_loc, v.f);
+      } else if (kind == 1) {
+        glGetUniformiv(m_program, old_loc, v.i);
+      } else {
+        glGetUniformuiv(m_program, old_loc, v.u);
+      }
+      values.push_back(v);
+    }
+  }
+  glUseProgram(fresh.m_program);
+  for (const auto& v : values) {
+    set_uniform(v.new_loc, v.type, v.f, v.i, v.u);
+  }
+  return true;
 }
 
 void Shader::set_jitter(float x, float y) const {
@@ -179,6 +453,9 @@ void Shader::set_jitter(float x, float y) const {
 void Shader::activate() const {
   ASSERT(m_is_okay);
   glUseProgram(m_program);
+  if (!m_tune.empty()) {
+    apply_tuning();
+  }
 }
 
 ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
@@ -250,41 +527,69 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
 }
 
 void ShaderLibrary::hot_reload() {
-  static const bool on = std::getenv("JAK_ENHANCED_SHADER_RELOAD") != nullptr;
+  // (unset: off; "all": the game's shaders too, not only the enh_* passes)
+  static const char* env = std::getenv("JAK_ENHANCED_SHADER_RELOAD");
+  static const bool on = env != nullptr;
+  static const bool all = env && std::string(env) == "all";
   static int frames = 0;
   static std::filesystem::file_time_type last[(int)ShaderId::MAX_SHADERS]{};
-  if (!on || ++frames < 60) {
+  const bool forced = enhanced_take_shader_reload_request();
+  if (!forced && (!on || ++frames < 15)) {
     return;
   }
   frames = 0;
+  int reloaded = 0, failed = 0;
+  const auto t0 = std::chrono::steady_clock::now();
+  auto ms_since = [](std::chrono::steady_clock::time_point t) {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+  };
   for (auto& shader : m_shaders) {
     const auto& name = shader.name();
-    if (name.rfind("enh_", 0) != 0) {
+    const bool enh = name.rfind("enh_", 0) == 0;
+    // (tex_anim: TextureAnimator keeps the program's id, a new one would never be used)
+    if ((!enh && !all) || name == "tex_anim") {
       continue;
     }
     std::error_code ec;
     auto t = std::filesystem::last_write_time(
-        file_util::get_file_path({Shader::shader_folder, name + ".frag"}), ec);
+        file_util::get_file_path({Shader::shader_folder, Shader::frag_file(name) + ".frag"}), ec);
     const auto tv = std::filesystem::last_write_time(
         file_util::get_file_path({Shader::shader_folder, name + ".vert"}), ec);
     t = std::max(t, tv);
     auto& seen = last[&shader - m_shaders];
-    if (seen == std::filesystem::file_time_type{}) {
+    if (!forced && seen == std::filesystem::file_time_type{}) {
       seen = t;
       continue;
     }
-    if (t == seen) {
+    if (!forced && t == seen) {
       continue;
     }
     seen = t;
+    const auto s0 = std::chrono::steady_clock::now();
     Shader fresh(name, m_version);
-    if (fresh.okay()) {
-      glDeleteProgram(shader.id());
-      shader = fresh;
-      lg::info("[enhanced] shader {} reloaded", name);
-    } else {
+    if (!fresh.okay()) {
+      failed++;
       lg::error("[enhanced] shader {} failed, keeping the old one", name);
+      continue;
     }
+    // (the game's renderers look their uniforms up once: the new program must keep them where
+    // they were, and gets the values they set; the enh_* passes look theirs up every frame)
+    if (shader.okay() && !shader.hand_uniforms_to(fresh, !enh)) {
+      glDeleteProgram(fresh.id());
+      failed++;
+      continue;
+    }
+    if (shader.okay()) {
+      glDeleteProgram(shader.id());
+    }
+    shader = fresh;
+    reloaded++;
+    lg::info("[enhanced] shader {} reloaded ({:.0f} ms)", name, ms_since(s0));
+  }
+  glUseProgram(0);
+  if (forced) {
+    lg::info("[enhanced] shaders reloaded: {} ok, {} failed ({:.0f} ms)", reloaded, failed,
+             ms_since(t0));
   }
 }
 
