@@ -1,0 +1,7 @@
+{
+  "start": "desert-start",
+  "headless": true,
+  "timeout": 30,
+  "expect": ["^GAMEPLAY: enter desert", "^\\[census\\] .* at 22\\d\\d\\.\\d+ "],
+  "forbid": ["\\[enhanced\\].*(failed|crash)", "Unhandled exception"]
+}

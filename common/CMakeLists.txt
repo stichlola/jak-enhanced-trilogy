@@ -23,7 +23,17 @@ function(write_revision_h)
           list(GET GIT_TAG_LIST ${GIT_TAG_LAST_INDEX} GIT_TAG)
         endif()
     endif()
-    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/versions/revision.h "#define BUILT_TAG \"${GIT_TAG}\"\n#define BUILT_SHA \"${GIT_SHORT_SHA}\"\n")
+    # Rewrite it only when it changes: a fresh timestamp on every CMake re-run (a CONFIGURE_DEPENDS glob
+    # seeing a new file) recompiled versions.cpp and relinked common.dll and everything linked to it.
+    set(REVISION_H "${CMAKE_CURRENT_SOURCE_DIR}/versions/revision.h")
+    set(REVISION_TEXT "#define BUILT_TAG \"${GIT_TAG}\"\n#define BUILT_SHA \"${GIT_SHORT_SHA}\"\n")
+    set(REVISION_OLD "")
+    if(EXISTS ${REVISION_H})
+      file(READ ${REVISION_H} REVISION_OLD)
+    endif()
+    if(NOT REVISION_OLD STREQUAL REVISION_TEXT)
+      file(WRITE ${REVISION_H} "${REVISION_TEXT}")
+    endif()
 endfunction()
 
 write_revision_h()

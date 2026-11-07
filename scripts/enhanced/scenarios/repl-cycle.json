@@ -1,0 +1,12 @@
+{
+  "start": "desert-start",
+  "headless": true,
+  "timeout": 30,
+  "variants": [
+    { "name": "stance", "eval": "(if (and *target* (let ((s (-> *target* next-state name))) (or (= s 'target-stance) (= s 'target-stance-ambient)))) 7777 0)",
+      "answer": "7777" },
+    { "name": "evening", "eval": "(begin (send-event (ppointer->process *time-of-day*) 'change 'hour 18) 7777)",
+      "answer": "7777", "settle": 1 }
+  ],
+  "forbid": ["Unhandled exception"]
+}

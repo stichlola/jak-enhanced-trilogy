@@ -47,8 +47,15 @@ $gameNum = [int]$Game.Substring(3)
 $off = if ($Instance -gt 0 -and $Instance -lt 100) { 10 * $Instance } else { 0 }
 $port = 8111 + $gameNum + $off
 
-$l = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback), $port
-try { $l.Start(); $l.Stop() } catch { throw "gk port $port is taken: instance $Instance already runs a game" }
+# a game that just closed can hold its port for a few more seconds: wait for it before giving up
+$portEnd = (Get-Date).AddSeconds(15)
+while ($true) {
+  $l = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback), $port
+  try { $l.Start(); $l.Stop(); break } catch {
+    if ((Get-Date) -gt $portEnd) { throw "gk port $port is taken: instance $Instance already runs a game" }
+    Start-Sleep -Milliseconds 500
+  }
+}
 
 # the shadow bin's run dir also holds the test config, so dev_bin.ps1 prunes both once gk is gone
 $bin = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $enh 'dev_bin.ps1')))) -Tag "gk$Instance" -Repo $Repo
@@ -107,7 +114,7 @@ if (-not $NoGoalc) {
 $logPat = if ($off) { "$($Game)_i$Instance.*.log" } else { "$Game.*.log" }
 $log = ''
 $end = $t0.AddSeconds($BootTimeout)
-$hidden = -not $Minimized
+$hidden = (-not $Minimized) -or $Headless   # headless: no window to minimize
 while ((Get-Date) -lt $end -and -not $p.HasExited) {
   if (-not $log) {
     $log = Get-ChildItem (Join-Path $main 'log') -Filter $logPat -ErrorAction SilentlyContinue |

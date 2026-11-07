@@ -97,6 +97,10 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/SkyRenderer.cpp
         graphics/opengl_renderer/EnhancedParticles.cpp
         graphics/opengl_renderer/EnhancedPost.cpp
+        graphics/opengl_renderer/EnhancedPostLight.cpp
+        graphics/opengl_renderer/EnhancedPostMenu.cpp
+        graphics/opengl_renderer/EnhancedPostPasses.cpp
+        graphics/opengl_renderer/EnhancedPostScene.cpp
         graphics/opengl_renderer/loader/EnhancedMapTextures.cpp
         graphics/opengl_renderer/SlowTimeEffect.cpp
         graphics/opengl_renderer/sprite/GlowRenderer.cpp
@@ -404,6 +408,16 @@ add_subdirectory(sound)
 add_library(runtime STATIC ${RUNTIME_SOURCE} "../third-party/glad/src/glad.c")
 
 target_link_libraries(runtime common fmt SDL3::SDL3 imgui discord-rpc sound stb_image libco libcurl meshoptimizer tiny_gltf)
+
+# Jak Enhanced dev builds: the runtime's common headers precompiled (enhanced_pch.h), ~1 s off every
+# file's compile. Off by default, so release builds compile exactly as before; turn it on in the dev
+# build dir with `cmake -DENHANCED_PCH=ON out/build/Release`.
+option(ENHANCED_PCH "Precompile the runtime's common headers (faster dev builds)" OFF)
+if(ENHANCED_PCH)
+    target_precompile_headers(runtime PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/enhanced_pch.h>")
+    # defines _USE_MATH_DEFINES before <cmath>
+    set_source_files_properties(graphics/opengl_renderer/TextureAnimator.cpp PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
+endif()
 if(WIN32)
     target_link_libraries(runtime mman)
 else()

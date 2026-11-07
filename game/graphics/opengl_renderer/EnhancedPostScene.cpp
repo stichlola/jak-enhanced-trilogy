@@ -1,0 +1,1658 @@
+// EnhancedPost::apply_to_scene: the whole chain on the finished 3D scene, pass by pass (split
+// from EnhancedPost.cpp; shared helpers in EnhancedPostInternal.h)
+
+#include "game/graphics/opengl_renderer/EnhancedPostInternal.h"
+
+using namespace enh_post;
+
+void EnhancedPost::apply_to_scene(GLuint render_fbo,
+                                  int w,
+                                  int h,
+                                  GLuint screen_vao,
+                                  SharedRenderState* render_state,
+                                  ScopedProfilerNode& prof) {
+  if (m_gpu_query_open) {
+    glQueryCounter(m_gpu_query[m_gpu_query_slot][1], GL_TIMESTAMP);
+  }
+  if (!m_settings.enabled) {
+    g_enhanced_camera.valid = false;
+    // the ambient sounds go quiet with the rest of Enhanced
+    static const float silent[snd::ambience::kLayers] = {};
+    snd::ambience::set_targets(silent);
+    return;
+  }
+  if (w != m_scene_w || h != m_scene_h) {
+    if (m_scene_fbo) {
+      glDeleteFramebuffers(1, &m_scene_fbo);
+      glDeleteTextures(1, &m_scene_tex);
+    }
+    m_scene_w = w;
+    m_scene_h = h;
+    glGenFramebuffers(1, &m_scene_fbo);
+    glGenTextures(1, &m_scene_tex);
+    glBindTexture(GL_TEXTURE_2D, m_scene_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_scene_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_scene_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+
+  // copy (resolving msaa) the scene so we can read it while drawing over it
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+  const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
+  prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
+  const bool have_scene = m_ssao_ready;
+  update_scene();
+  if (have_scene) {
+    // (and the common level: the HUD's textures are there, enhanced_character_hud)
+    auto levels = render_state->loader->get_in_use_levels();
+    if (auto* common = render_state->loader->get_common_level()) {
+      levels.push_back(common);
+    }
+    enhanced_editor_levels(levels);
+    enhanced_editor_frame(w, h, m_depth_fbo, cam, m_last_proj.data());
+  }
+  if (have_scene) {
+    read_exposure(w, h);
+  }
+  if (have_scene && m_cine > 0.f) {
+    read_focus(w, h);
+  } else if (m_cine <= 0.f) {
+    m_focus = 0.f;
+  }
+
+  // view -> previous view is R^T Rp, with the camera's move as an offset (motion blur, TAA)
+  float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
+  float offset[3];
+  bool reproject = false;
+  if (have_scene && m_prev_camera.valid && cam.valid) {
+    float moved = 0.f;
+    for (int k = 0; k < 3; k++) {
+      for (int c = 0; c < 3; c++) {
+        to_prev[k][c] = 0.f;
+        for (int r = 0; r < 3; r++) {
+          to_prev[k][c] += cam.rot[r][k] * m_prev_camera.rot[r][c];
+        }
+      }
+    }
+    for (int c = 0; c < 3; c++) {
+      offset[c] = 0.f;
+      for (int r = 0; r < 3; r++) {
+        offset[c] += (cam.trans[r] - m_prev_camera.trans[r]) * m_prev_camera.rot[r][c];
+      }
+      moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
+    }
+    // a cut or a teleport isn't motion
+    reproject = std::sqrt(moved) < 8.f * kMeter;
+  }
+
+  // temporal anti-aliasing: this frame blended into the reprojected history. After the composite
+  // (late): its occlusion, shadows, lights and sand are made from this frame's jittered depth, a
+  // fraction of a pixel off each frame: resolved before it, their edges (grass blades, pebbles)
+  // flickered. (JAK_ENHANCED_TAA_CYCLE: early, late and off in turn, 6 s each, to compare.)
+  GLuint scene_tex = m_scene_tex;
+  const bool taa_on = m_settings.taa && m_jittered && have_scene;
+  static const bool taa_cycle = std::getenv("JAK_ENHANCED_TAA_CYCLE") != nullptr;
+  int taa_mode = taa_on ? 1 : -1;  // 0 early, 1 late
+  if (taa_on && taa_cycle) {
+    static int last_mode = -2;
+    taa_mode = (int)(m_time / 6.0) % 3;
+    taa_mode = taa_mode == 2 ? -1 : taa_mode;
+    if (taa_mode != last_mode) {
+      lg::info("[enhanced] taa mode {}", taa_mode == 0 ? "early" : taa_mode == 1 ? "late" : "off");
+      last_mode = taa_mode;
+      m_taa_history = false;
+    }
+  }
+  const bool taa = taa_mode >= 0;
+  auto resolve_taa = [&](GLuint src_tex) -> GLuint {
+    if (w != m_taa_w || h != m_taa_h) {
+      if (m_taa_fbo[0]) {
+        glDeleteFramebuffers(2, m_taa_fbo);
+        glDeleteTextures(2, m_taa_tex);
+      }
+      m_taa_w = w;
+      m_taa_h = h;
+      glGenFramebuffers(2, m_taa_fbo);
+      glGenTextures(2, m_taa_tex);
+      for (int i = 0; i < 2; i++) {
+        glBindTexture(GL_TEXTURE_2D, m_taa_tex[i]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[i]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_taa_tex[i],
+                               0);
+      }
+      glBindTexture(GL_TEXTURE_2D, 0);
+      m_taa_history = false;
+    }
+    const int cur = m_taa_cur;
+    glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[cur]);
+    glViewport(0, 0, w, h);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+    glBindVertexArray(screen_vao);
+    auto& resolve = render_state->shaders[ShaderId::ENH_TAA];
+    resolve.activate();
+    auto rid = resolve.id();
+    glActiveTexture(GL_TEXTURE3);
+    glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, m_taa_tex[1 - cur]);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, src_tex);
+    glUniform1i(glGetUniformLocation(rid, "tex_T0"), 0);
+    glUniform1i(glGetUniformLocation(rid, "tex_T1"), 1);
+    glUniform1i(glGetUniformLocation(rid, "tex_T3"), 3);
+    glUniform4f(glGetUniformLocation(rid, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+                m_last_proj[3]);
+    glUniform2f(glGetUniformLocation(rid, "texel"), 1.f / w, 1.f / h);
+    if (reproject) {
+      glUniformMatrix3fv(glGetUniformLocation(rid, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+      glUniform3f(glGetUniformLocation(rid, "to_prev_offset"), offset[0], offset[1], offset[2]);
+    }
+    glUniform2f(glGetUniformLocation(rid, "prev_f"), m_prev_camera.fx, m_prev_fy);
+    glUniform2f(glGetUniformLocation(rid, "keep"), m_settings.taa_history,
+                m_settings.taa_history_fast);
+    glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
+    ENH_TIMED("enh-taa", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    prof.add_draw_call();
+    m_taa_cur = 1 - cur;
+    m_taa_history = true;
+    return m_taa_tex[cur];
+  };
+  if (taa && taa_mode == 0) {
+    scene_tex = resolve_taa(m_scene_tex);
+  } else if (!taa) {
+    m_taa_history = false;
+  }
+
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  auto& shader = activate_composite(render_state, w, h);
+  auto id = shader.id();
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, scene_tex);
+  // the game's brightness/contrast is applied later, on the whole frame
+  glUniform4f(glGetUniformLocation(id, "color_mult"), 1.f, 1.f, 1.f, 1.f);
+  glUniform4f(glGetUniformLocation(id, "color_add"), 0.f, 0.f, 0.f, 0.f);
+
+  // world up in view space, for the fog and the heat haze
+  glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
+  glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
+              m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount * m_fog : 0.f, 0.f);
+  glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
+              render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
+  m_time += 1.0 / 60.0;
+  // (the heat shimmer only where it's hot, Jak 3's desert by day: elsewhere it only blurred and
+  // shimmered the distance; lava has its own)
+  const float hot = m_pond ? (1.f - m_night) * (1.f - std::min(1.f, m_rain * 2.f)) : 0.f;
+  glUniform4f(glGetUniformLocation(id, "haze"), have_scene ? m_settings.haze_strength * hot : 0.f,
+              120.f * kMeter, 400.f * kMeter, (float)m_time);
+  glUniform1i(glGetUniformLocation(id, "fxaa"), m_settings.fxaa && !taa);
+
+  // water reflections: the ocean surface depth from begin/end_ocean this frame
+  const bool near_water = have_scene && m_ocean_ready && m_settings.water_reflections;
+  const bool far_water = have_scene && m_far_ocean_ready && m_settings.water_reflections;
+  const bool water = near_water || far_water;
+  glActiveTexture(GL_TEXTURE5);
+  glBindTexture(GL_TEXTURE_2D, near_water ? m_ocean_depth[1] : m_black_tex);
+  glActiveTexture(GL_TEXTURE6);
+  glBindTexture(GL_TEXTURE_2D, far_water ? m_ocean_depth[2] : m_black_tex);
+  glActiveTexture(GL_TEXTURE14);
+  glBindTexture(GL_TEXTURE_2D, near_water ? m_ocean_depth[0] : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T5"), 5);
+  glUniform1i(glGetUniformLocation(id, "tex_T6"), 6);
+  glUniform1i(glGetUniformLocation(id, "tex_T14"), 14);
+  m_far_ocean_ready = false;
+  glUniform1f(glGetUniformLocation(id, "water_strength"),
+              water ? m_settings.water_reflection_strength : 0.f);
+  // the camera's right and forward in view space, and its position, for the ripples
+  glUniform3f(glGetUniformLocation(id, "right_view"), cam.rot[0][0], cam.rot[0][1], cam.rot[0][2]);
+  glUniform3f(glGetUniformLocation(id, "fwd_view"), cam.rot[2][0], cam.rot[2][1], cam.rot[2][2]);
+  glUniform3f(glGetUniformLocation(id, "cam_pos"), cam.trans[0], cam.trans[1], cam.trans[2]);
+  glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
+  {
+    // sunny: Jak 1's turquoise sea
+    const float deep[3] = {0.02f, 0.3f, 0.4f}, shallow[3] = {0.12f, 0.68f, 0.66f};
+    float d[3], sh[3];
+    for (int i = 0; i < 3; i++) {
+      d[i] = m_settings.water_deep[i] + (deep[i] - m_settings.water_deep[i]) * m_sunny;
+      sh[i] = m_settings.water_shallow[i] + (shallow[i] - m_settings.water_shallow[i]) * m_sunny;
+    }
+    glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, d);
+    glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, sh);
+  }
+  glUniform1f(glGetUniformLocation(id, "water_unify"), m_settings.water_unify);
+  glUniform1f(glGetUniformLocation(id, "water_swell_strength"), m_settings.water_swell);
+  glUniform1f(glGetUniformLocation(id, "water_refraction"), m_settings.water_refraction);
+  glUniform1f(glGetUniformLocation(id, "water_caustics"), m_settings.water_caustics);
+  // in Jak 3's desert the ocean renderer draws the oases: ponds, murky, their rough bed hidden
+  // as in the game
+  glUniform1i(glGetUniformLocation(id, "pond"), m_pond ? 1 : 0);
+  glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
+  {
+    // dynamic lights: the glows in view space, the brightest and nearest first, at most kLights
+    constexpr int kLights = 32;
+    struct Candidate {
+      float pos[4];  // view space, radius
+      float color[4];
+      float score;
+    };
+    std::vector<Candidate> candidates;
+    struct Fire {
+      float pos[4];  // view space, flame size
+      float seed;
+      float dist;
+    };
+    std::vector<Fire> fires;
+    // the glows too far to light anything: drawn as points of light that carry across the dark
+    // (a camp's fire, a town's lamps over the night desert)
+    struct Beacon {
+      float pos[4];    // view space, glow size
+      float color[4];  // rgb, how far in it is (fades in past 40 m)
+      float score;
+    };
+    std::vector<Beacon> beacons;
+    static int debug_beacons = 0;
+    const bool on = m_settings.lights && have_scene && cam.valid;
+    g_enhanced_smoke_lights.count = 0;
+    // in the sun's full daylight the glows' light is lost in it: a garage door's big orange glow
+    // lit the sand around for tens of meters, with hard shadows of every slab (the beacons stay)
+    const float glow_day =
+        g_enhanced_sun.valid ? 1.f - std::max(m_night, night_darkness()) : 0.f;
+    for (int i = 0; on && i < g_enhanced_lights.count; i++) {
+      const auto& raw = g_enhanced_lights.lights[i];
+      auto l = raw;  // as the game draws it, faded with distance: the light it casts
+      for (int k = 0; k < 3; k++) {
+        l.color[k] *= raw.fade;
+      }
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (l.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      // (at most 20 m: a street lamp's 30 m lit a whole square evenly, no pool of light under it)
+      // (tuning.json: "lights": {"glow_min_m", "glow_max_m"})
+      static const EnhancedTune t_glow_min("lights.glow_min_m", 4.f);
+      static const EnhancedTune t_glow_max("lights.glow_max_m", 20.f);
+      const float glow_lo = t_glow_min * kMeter;
+      float radius = std::clamp(l.size * m_settings.light_reach, glow_lo,
+                                std::max(glow_lo, t_glow_max * kMeter));
+      c.pos[3] = radius;
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // far ones in front: beacons (not the moon or the sky's glows: huge or kilometers away)
+      // (not a fire's sparks and embers either: tiny glows)
+      // (by its color before the fade: the game fades its lamps out a few hundred meters away)
+      const float raw_peak = std::max(raw.color[0], std::max(raw.color[1], raw.color[2]));
+      const bool lamp_sized = raw.size > 0.6f * kMeter && raw.size < 12.f * kMeter;
+      if (lamp_sized && raw_peak > 0.f && dist < 2500.f * kMeter) {
+        remember_lamp(raw.pos, raw.size, raw.color);
+      }
+      if (dist > 40.f * kMeter && dist < 2500.f * kMeter && lamp_sized) {
+        float peak = raw_peak;
+        if (peak > 0.f && c.pos[2] > 0.f) {
+          Beacon b;
+          std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+          b.pos[3] = raw.size;
+          for (int k = 0; k < 3; k++) {
+            b.color[k] = raw.color[k] / peak;
+          }
+          b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+          b.score = (raw.color[0] + raw.color[1] + raw.color[2]) / (dist / kMeter);
+          beacons.push_back(b);
+        }
+      }
+      // behind the camera beyond its reach, or far away (the moon is a glow too)
+      if (c.pos[2] < -radius || dist > 150.f * kMeter) {
+        continue;
+      }
+      // the glow's hue at full value; its brightness (glows are faint, 0.1-0.3) scaled up
+      float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+      float bright = l.color[0] + l.color[1] + l.color[2];
+      if (peak <= 0.f) {
+        continue;
+      }
+      float intensity =
+          std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day) * m_grade.glows;
+      // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
+      // far beacons and the sky's glows are bigger), and staying put
+      const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&
+                        l.color[1] > 0.1f * l.color[0] && l.color[1] < 0.9f * l.color[0] &&
+                        l.size > 0.3f * kMeter && l.size < 6.f * kMeter && dist < 60.f * kMeter;
+      if (const auto* f = warm ? note_fire_glow(l.pos, l.size) : nullptr) {
+        // its light flickers on top of the game's own (a seed from where it stands)
+        float seed = std::fmod(std::abs(f->pos[0] * 0.013f + f->pos[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        float n = 0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                  0.2f * std::sin(t * 37.f + 2.3f * seed);
+        intensity *= 0.82f + 0.18f * n;
+      }
+      // a glow of one pure hue (a red warning lamp, an indicator): its light stays small and
+      // soft, or a few of them flood a whole district in red (Haven's industrial district)
+      {
+        float lo = std::min(l.color[0], std::min(l.color[1], l.color[2]));
+        float second = bright - peak - lo;
+        float pure = std::clamp((0.3f - second / peak) / 0.2f, 0.f, 1.f);
+        intensity *= 1.f - 0.65f * pure;
+        c.pos[3] = radius * (1.f - 0.45f * pure);
+      }
+      // (a shot's violet: red and blue with no green, one bolt turned a whole square pink)
+      if (l.color[1] < 0.5f * std::min(l.color[0], l.color[2])) {
+        intensity *= 0.35f;
+        c.pos[3] = std::min(c.pos[3], 8.f * kMeter);
+      }
+      for (int k = 0; k < 3; k++) {
+        c.color[k] = l.color[k] / peak * intensity;
+      }
+      c.color[3] = 0.f;
+      c.score = bright * c.pos[3] / (dist + c.pos[3]);
+      // a light is often drawn as two glows at the same spot: keep the one
+      bool dup = false;
+      for (auto& o : candidates) {
+        float dx = o.pos[0] - c.pos[0], dy = o.pos[1] - c.pos[1], dz = o.pos[2] - c.pos[2];
+        if (dx * dx + dy * dy + dz * dz < 0.25f * kMeter * kMeter) {
+          dup = true;
+          if (c.score > o.score) {
+            o = c;
+          }
+          break;
+        }
+      }
+      if (!dup) {
+        candidates.push_back(c);
+      }
+    }
+    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
+    // seconds; one gone from right in front of the camera was put out or destroyed: forgotten)
+    for (size_t i = 0; on && i < m_lamps.size();) {
+      auto& l = m_lamps[i];
+      float v[3] = {0.f, 0.f, 0.f};
+      for (int col = 0; col < 3; col++) {
+        for (int row = 0; row < 3; row++) {
+          v[col] += (l.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      float dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+      double unseen = m_time - l.last;
+      bool steady = l.last - l.first >= 2.0;
+      if ((dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) || unseen > 900.0) {
+        m_lamps[i] = m_lamps.back();
+        m_lamps.pop_back();
+        continue;
+      }
+      i++;
+      if (!steady || unseen <= 0.0 || dist < 40.f * kMeter || dist > 2500.f * kMeter || v[2] <= 0.f) {
+        continue;
+      }
+      float peak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+      Beacon b;
+      std::memcpy(b.pos, v, sizeof(float) * 3);
+      b.pos[3] = l.size;
+      for (int k = 0; k < 3; k++) {
+        b.color[k] = l.color[k] / peak;
+      }
+      b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+      b.score = (l.color[0] + l.color[1] + l.color[2]) / (dist / kMeter);
+      beacons.push_back(b);
+    }
+    // explosions: a bright flash fading in half a second (sorted first: the score is huge)
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_explosions.mutex);
+      for (int i = 0; i < g_enhanced_explosions.count; i++) {
+        const float* e = g_enhanced_explosions.pending[i];
+        if (m_blasts.size() < 16) {
+          Blast b{{e[0], e[1], e[2]}, std::max(e[3], 1.f * kMeter), m_time};
+          b.dir[0] = e[4];
+          b.dir[1] = e[5];
+          b.dir[2] = e[6];
+          b.kind = (int)e[7];
+          m_blasts.push_back(b);
+        }
+      }
+      g_enhanced_explosions.count = 0;
+    }
+    m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
+                                  [&](const Blast& b) {
+                                    // gun blasts are short: free their slots for the next ones
+                                    // (fx_detail: an explosion's dust and debris last longer)
+                                    const double life = b.kind == 2   ? 0.3
+                                                        : b.kind != 0 ? 0.7
+                                                        : m_settings.fx_detail > 0.f ? 2.4
+                                                                                     : 1.6;
+                                    return m_time - b.start > life;
+                                  }),
+                   m_blasts.end());
+    update_blast_fx(cam, on, w, h);
+    // an explosion's wave through the grass: it spreads for a third of a second, then the grass
+    // rises back
+    g_enhanced_blast_push.count = 0;
+    for (const auto& b : m_blasts) {
+      const float age = (float)(m_time - b.start);
+      if (b.kind != 0 || !on || age > 1.1f || g_enhanced_blast_push.count >= EnhancedBlastPush::kMax) {
+        continue;
+      }
+      const float r = std::clamp(b.radius * 2.f, 8.f * kMeter, 20.f * kMeter);
+      float* out = g_enhanced_blast_push.pos[g_enhanced_blast_push.count++];
+      out[0] = b.pos[0];
+      out[1] = b.pos[1];
+      out[2] = b.pos[2];
+      out[3] = std::max(r * std::min(age / 0.3f, 1.f) * std::clamp((1.1f - age) / 0.6f, 0.f, 1.f), 1.f);
+    }
+    for (const auto& b : m_blasts) {
+      if (!on || m_settings.blast <= 0.f) {
+        break;
+      }
+      float age = (float)(m_time - b.start);
+      if (age > 0.6f) {
+        continue;  // the flash is over (the sparks fly on)
+      }
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (b.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      c.pos[3] = std::clamp(b.radius * 4.f, 8.f * kMeter, 30.f * kMeter);
+      float k = 4.f * std::exp(-age * 5.f) * m_settings.blast * m_settings.light_strength;
+      // the red gun: a short red-orange flash carried ahead of the muzzle with its wave
+      // (the charged shot: red-fuchsia)
+      const float tint[3] = {1.f, b.kind == 1 ? 0.32f : b.kind == 3 ? 0.2f : 0.62f,
+                             b.kind == 1 ? 0.1f : b.kind == 3 ? 0.5f : 0.3f};
+      if (b.kind == 1 || b.kind == 3) {
+        if (age > 0.35f) {
+          continue;
+        }
+        const float ahead = (1.f + 20.f * age) * kMeter;
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += b.dir[row] * ahead * cam.rot[row][col];
+          }
+        }
+        c.pos[3] = std::max(11.f * kMeter, b.radius * 7.f);
+        k = 5.f * std::exp(-age * 9.f) * m_settings.blast * m_settings.light_strength;
+      } else if (b.kind == 2) {
+        // charging: a small flicker on the gun, stronger as it charges (radius 0.5-1.5 m)
+        if (age > 0.2f) {
+          continue;
+        }
+        c.pos[3] = b.radius * 4.f;
+        k = 1.5f * (b.radius / kMeter) * std::exp(-age * 12.f) * m_settings.blast *
+            m_settings.light_strength;
+      }
+      c.color[0] = tint[0] * k;
+      c.color[1] = tint[1] * k;
+      c.color[2] = tint[2] * k;
+      c.color[3] = 0.f;
+      c.score = 1e6f;
+      candidates.push_back(c);
+    }
+    // the levels' own lamps (light spheres), sent by the game with their time-of-day palette
+    int lamps = 0;
+    if (on) {
+      std::lock_guard<std::mutex> lock(g_enhanced_game_lights.mutex);
+      lamps = g_enhanced_game_lights.count;
+      for (int i = 0; i < lamps; i++) {
+        const float* lp = g_enhanced_game_lights.pos[i];
+        const float* lc = g_enhanced_game_lights.color[i];
+        Candidate c;
+        for (int col = 0; col < 3; col++) {
+          c.pos[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += (lp[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        float radius = std::clamp(lp[3] * m_settings.lamp_reach, 2.f * kMeter, 30.f * kMeter);
+        c.pos[3] = radius;
+        float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+        if (c.pos[2] < -radius || dist > 150.f * kMeter) {
+          continue;
+        }
+        float bright = lc[0] + lc[1] + lc[2];
+        for (int k = 0; k < 3; k++) {
+          c.color[k] =
+              lc[k] * m_settings.light_strength * m_settings.lamp_strength * game_lamp_scale() * m_grade.lamps;
+        }
+        c.color[3] = 0.f;
+        c.score = bright * radius / (dist + radius);
+        candidates.push_back(c);
+      }
+    }
+    // the fires and lamps the levels place (torches, braziers, gas lamps): each its own light,
+    // stronger as the night falls, reaching further than the glows (a town's torches light its
+    // gate from across the desert). Not where a glow already lights the same spot.
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_fires.mutex);
+      if (g_enhanced_fires.count > 0) {
+        m_fire_spawners.clear();
+        for (int i = 0; i < g_enhanced_fires.count; i++) {
+          const float* fp = g_enhanced_fires.pending[i];
+          m_fire_spawners.push_back({fp[0], fp[1], fp[2], (float)g_enhanced_fires.kind[i]});
+        }
+        g_enhanced_fires.count = 0;
+        m_fire_spawners_time = m_time;
+      } else if (m_time - m_fire_spawners_time > 0.3) {
+        m_fire_spawners.clear();
+      }
+    }
+    const float fire_night = std::max(m_night, night_darkness());
+    const size_t glow_lights = candidates.size();
+    for (const auto& fs : m_fire_spawners) {
+      if (!on || !m_settings.fire) {
+        break;
+      }
+      const int kind = (int)fs[3];
+      // a little above the spawner: the flame, not its base; a fire's light wanders with its
+      // flames (the shadows around it tremble)
+      const float ft = (float)m_time + std::fmod(std::abs(fs[0] * 0.011f + fs[2] * 0.017f), 6.2832f);
+      const float wander = kind == EnhancedFires::FIRE ? 0.12f * kMeter : 0.f;
+      const float wp[3] = {fs[0] + wander * std::sin(ft * 7.3f) * std::sin(ft * 2.1f),
+                           fs[1] + (kind == EnhancedFires::CANDLE ? 0.2f : 0.6f) * kMeter +
+                               wander * 0.6f * std::sin(ft * 9.7f),
+                           fs[2] + wander * std::cos(ft * 6.1f) * std::sin(ft * 1.7f)};
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (wp[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      const float reach = kind == EnhancedFires::CANDLE ? 4.f : (kind == EnhancedFires::FIRE ? 13.f : 11.f);
+      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f);
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // a placed fire close by also gets the embers and hot air (a torch's flame is often too
+      // small a glow to be told a fire by its light)
+      if (kind == EnhancedFires::FIRE && dist < 100.f * kMeter && c.pos[2] > -1.f * kMeter) {
+        Fire v;
+        std::memcpy(v.pos, c.pos, sizeof(float) * 3);
+        v.pos[3] = 0.45f * kMeter;
+        v.dist = dist;
+        v.seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
+        fires.push_back(v);
+      }
+      bool lit_already = false;
+      for (size_t j = 0; j < glow_lights && !lit_already; j++) {
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          float dk = candidates[j].pos[k] - c.pos[k];
+          d2 += dk * dk;
+        }
+        lit_already = d2 < 3.f * kMeter * 3.f * kMeter;
+      }
+      static const float kColors[4][3] = {
+          {1.f, 0.55f, 0.22f}, {1.f, 0.82f, 0.55f}, {0.45f, 0.65f, 1.f}, {1.f, 0.7f, 0.35f}};
+      const float* col3 = kColors[kind & 3];
+      if (c.pos[2] > 0.f && dist > 40.f * kMeter && dist < 2500.f * kMeter) {
+        Beacon b;
+        std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+        b.pos[3] = 1.f * kMeter;
+        std::memcpy(b.color, col3, sizeof(float) * 3);
+        b.color[3] = std::clamp((dist / kMeter - 40.f) / 40.f, 0.f, 1.f);
+        b.score = 2.f / (dist / kMeter);
+        beacons.push_back(b);
+      }
+      if (lit_already || c.pos[2] < -c.pos[3] || dist > 400.f * kMeter) {
+        continue;
+      }
+      // (by day a warm glow around the flame, at night far more: a torch's full 13 m of orange
+      // light by day laid a bright orange pool on the sunlit sand)
+      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps;
+      if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
+        float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        k *= 0.8f + 0.2f * (0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                            0.2f * std::sin(t * 37.f + 2.3f * seed));
+      }
+      for (int i = 0; i < 3; i++) {
+        c.color[i] = col3[i] * k * (kind == EnhancedFires::CANDLE ? 0.5f : 1.2f);
+      }
+      c.color[3] = 0.f;
+      // far ones still count (their light on a gate across the sand), near ones first
+      c.score = 1.5f * c.pos[3] / (dist + c.pos[3]);
+      candidates.push_back(c);
+    }
+    // Jak's lantern: on foot or on the board in the desert as the night darkens, a Wastelander's
+    // lantern bulb (Damas's people cross the sands by night with them), a little machine of its own:
+    // it rises off Jak's shoulder as the dark comes, hovers up to his right and follows him on a
+    // spring, lagging, swaying and settling, so its warm light shifts as he moves
+    m_lantern[3] = 0.f;
+    {
+      const auto& pl = g_enhanced_player;
+      const bool on_foot = pl.valid && pl.state != 2 && pl.state != 5 && pl.state != 7;
+      // the first time Jak stands in the desert (once per install): night falls and the bulb rises,
+      // with a word on it on the screen (request 10: the hour, the hint)
+      if (!m_settings.lantern_intro_done && m_settings.desert_lamp && m_pond && pl.valid &&
+          (pl.state == 1 || pl.state == 3) && !g_enhanced_scene.movie) {
+        g_enhanced_menu.ask(10, "22");
+        m_lamp_mode = 0;
+        m_settings.lantern_intro_done = true;
+        save_menu_settings();
+      }
+      // on by itself in the desert at night; holding triangle switches it on anywhere, any hour,
+      // or off (switched off it stays off until the next desert night)
+      const float auto_on = (m_settings.desert_lamp && m_pond)
+                                ? std::clamp((std::max(m_night, night_darkness()) - 0.25f) / 0.4f, 0.f, 1.f)
+                                : 0.f;
+      if (pl.valid && pl.lamp_toggles != m_lamp_toggles_seen) {
+        if (m_lamp_toggles_seen >= 0) {
+          const bool lit = m_lamp_mode == 1 || (m_lamp_mode == 0 && auto_on > 0.5f);
+          m_lamp_mode = lit ? 2 : 1;
+        }
+        m_lamp_toggles_seen = pl.lamp_toggles;
+      }
+      if (m_lamp_mode == 2 && auto_on <= 0.f) {
+        m_lamp_mode = 0;
+      }
+      const float lit = m_lamp_mode == 1 ? 1.f : (m_lamp_mode == 2 ? 0.f : auto_on);
+      const float want = on_foot ? lit : 0.f;
+      m_lamp_on += (want - m_lamp_on) * 0.05f;
+      const float dt = std::clamp((float)(m_time - m_bulb_time), 0.f, 0.1f);
+      m_bulb_time = m_time;
+      if (on && pl.valid && m_lamp_on > 0.01f) {
+        float fx = cam.rot[0][2], fz = cam.rot[2][2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1e-3f);
+        fx /= len;
+        fz /= len;
+        // the camera's right, flat
+        const float rx = -fz, rz = fx;
+        const float t = (float)m_time;
+        // its spot: up to Jak's right and a little behind, drifting on its own
+        const float drift_side = 0.18f * std::sin(t * 0.63f) + 0.07f * std::sin(t * 1.9f + 0.4f);
+        const float drift_up = 0.14f * std::sin(t * 0.91f + 1.1f) + 0.05f * std::sin(t * 2.7f);
+        const float drift_fwd = 0.15f * std::sin(t * 0.47f + 2.3f);
+        // (far enough to the side that trailing him at a run doesn't bring it over him)
+        const float side = 1.7f + drift_side, up = 2.35f + drift_up, fwd = -0.3f + drift_fwd;
+        // its place next to Jak (m), where it heads
+        const float target[3] = {rx * side + fx * fwd, up, rz * side + fz * fwd};
+        // Jak's velocity (m/s): the bulb keeps up with him, but his starts, stops and turns jolt it
+        float jv[3] = {0.f, 0.f, 0.f};
+        if (m_bulb_out && dt > 0.f) {
+          for (int k = 0; k < 3; k++) {
+            jv[k] = (pl.pos[k] - m_bulb_jak[k]) / kMeter / dt;
+          }
+        }
+        const float jump2 = jv[0] * jv[0] + jv[1] * jv[1] + jv[2] * jv[2];
+        if (!m_bulb_out || jump2 > 40.f * 40.f) {
+          // it starts on Jak's shoulder (or catches up after a teleport)
+          m_bulb_off[0] = rx * 0.3f;
+          m_bulb_off[1] = 1.5f;
+          m_bulb_off[2] = rz * 0.3f;
+          for (int k = 0; k < 3; k++) {
+            m_bulb_vel[k] = 0.f;
+            m_bulb_jv[k] = 0.f;
+            jv[k] = 0.f;
+          }
+          m_bulb_out = true;
+        }
+        // a soft spring, near critical damping: it trails Jak a little as he moves (half a meter at a
+        // run), sways a touch when he starts, stops or turns, settles without bouncing
+        const float kSpring = 10.f, kDamp = 5.6f;
+        for (int k = 0; k < 3; k++) {
+          m_bulb_vel[k] -= (jv[k] - m_bulb_jv[k]) * 0.12f;
+          m_bulb_jv[k] += (jv[k] - m_bulb_jv[k]) * std::min(1.f, dt * 6.f);
+          const float trail = std::clamp(-m_bulb_jv[k] * 0.08f, -0.8f, 0.8f);
+          float a = kSpring * (target[k] + trail - m_bulb_off[k]) - kDamp * m_bulb_vel[k];
+          m_bulb_vel[k] += a * dt;
+          m_bulb_off[k] += m_bulb_vel[k] * dt;
+          m_bulb_jak[k] = pl.pos[k];
+          m_bulb_pos[k] = pl.pos[k] + m_bulb_off[k] * kMeter;
+        }
+        Candidate c;
+        for (int col = 0; col < 3; col++) {
+          c.pos[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += (m_bulb_pos[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        c.pos[3] = 14.f * kMeter;
+        // a steady bulb with a faint hum in it
+        const float hum = 0.97f + 0.02f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
+                          0.01f * std::sin(t * 41.f);
+        const float k = m_lamp_on * hum * m_settings.light_strength;
+        c.color[0] = 1.25f * k;
+        c.color[1] = 0.62f * k;
+        c.color[2] = 0.22f * k;
+        c.color[3] = 1.f;  // with Jak: no shadow of him from it
+        c.score = 100.f;  // always among the lights
+        candidates.push_back(c);
+        std::memcpy(m_lantern, c.pos, sizeof(float) * 3);
+        m_lantern[3] = m_lamp_on * hum;
+      } else if (m_lamp_on <= 0.01f) {
+        m_bulb_out = false;  // next time it rises off the shoulder again
+      }
+    }
+    // the lights placed by hand (lights.json), the night ones lit as the night falls
+    for (const auto& ml : g_manual_lights[game_index()]) {
+      const float lit = ml.night ? std::max(m_night, night_darkness()) : 1.f;
+      if (!on || lit <= 0.01f) {
+        continue;
+      }
+      Candidate c;
+      for (int col = 0; col < 3; col++) {
+        c.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          c.pos[col] += (ml.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      c.pos[3] = std::min(ml.radius, 40.f * kMeter);
+      float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+      // it has no bulb of its own in the game: its beacon is the lamp, near or far
+      if (ml.bulb && c.pos[2] > 0.f && dist < 2500.f * kMeter) {
+        float peak = std::max(ml.color[0], std::max(ml.color[1], ml.color[2]));
+        if (peak > 0.f) {
+          Beacon b;
+          std::memcpy(b.pos, c.pos, sizeof(float) * 3);
+          b.pos[3] = 0.4f * kMeter;
+          for (int k = 0; k < 3; k++) {
+            b.color[k] = ml.color[k] / peak;
+          }
+          b.color[3] = lit;
+          b.score = 3.f * peak / std::max(dist / kMeter, 1.f);
+          beacons.push_back(b);
+        }
+      }
+      if (c.pos[2] < -c.pos[3] || dist > 150.f * kMeter) {
+        continue;
+      }
+      float k = lit * m_settings.light_strength * m_settings.lamp_strength;
+      if (ml.flicker) {
+        float seed = std::fmod(std::abs(ml.pos[0] * 0.013f + ml.pos[2] * 0.007f), 6.2832f);
+        float t = (float)m_time;
+        k *= 0.82f + 0.18f * (0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
+                              0.2f * std::sin(t * 37.f + 2.3f * seed));
+      }
+      for (int i = 0; i < 3; i++) {
+        c.color[i] = ml.color[i] * ml.intensity * k;
+      }
+      c.color[3] = 0.f;
+      c.score = (ml.color[0] + ml.color[1] + ml.color[2]) * ml.intensity * c.pos[3] / (dist + c.pos[3]);
+      candidates.push_back(c);
+    }
+    std::sort(candidates.begin(), candidates.end(),
+              [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+    // only those whose reach (and halo, 1.5x) touches the view: every pixel loops over the list
+    {
+      const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
+      const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
+      const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
+      std::erase_if(candidates, [&](const Candidate& c) {
+        const float r = c.pos[3] * 1.5f;
+        return (std::abs(c.pos[0]) - c.pos[2] * ix) * nx > r ||
+               (std::abs(c.pos[1]) - c.pos[2] * iy) * ny > r;
+      });
+    }
+    const int n = std::min((int)candidates.size(), kLights);
+    float pos[kLights * 4] = {};
+    float color[kLights * 4] = {};
+    for (int i = 0; i < n; i++) {
+      std::memcpy(pos + i * 4, candidates[i].pos, sizeof(float) * 4);
+      std::memcpy(color + i * 4, candidates[i].color, sizeof(float) * 4);
+    }
+    {
+      // the strongest few back in world space for the smoke particles, drawn next frame
+      auto& sl = g_enhanced_smoke_lights;
+      sl.count = std::min(n, EnhancedSmokeLights::kMax);
+      for (int i = 0; i < sl.count; i++) {
+        const auto& c = candidates[i];
+        for (int row = 0; row < 3; row++) {
+          sl.pos[i][row] = cam.trans[row];
+          for (int col = 0; col < 3; col++) {
+            sl.pos[i][row] += cam.rot[row][col] * c.pos[col];
+          }
+        }
+        sl.pos[i][3] = c.pos[3];
+        std::memcpy(sl.color[i], c.color, sizeof(float) * 4);
+      }
+      sl.strength = m_settings.lit_smoke;
+    }
+    // the fires: forget the ones not seen for a second, the nearest few for the hot air and embers
+    m_fires.erase(std::remove_if(m_fires.begin(), m_fires.end(),
+                                 [&](const FireMemory& f) { return m_time - f.last > 1.0; }),
+                  m_fires.end());
+    for (const auto& f : m_fires) {
+      if (!on || !is_fire(f)) {
+        continue;
+      }
+      Fire v;
+      for (int col = 0; col < 3; col++) {
+        v.pos[col] = 0.f;
+        for (int row = 0; row < 3; row++) {
+          v.pos[col] += (f.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      v.pos[3] = f.size;
+      v.dist = std::sqrt(v.pos[0] * v.pos[0] + v.pos[1] * v.pos[1] + v.pos[2] * v.pos[2]);
+      v.seed = std::fmod(std::abs(f.pos[0] * 0.013f + f.pos[2] * 0.007f), 6.2832f);
+      if (v.dist < 45.f * kMeter && v.pos[2] > -f.size) {
+        // (the glow of a placed fire: that one, sized by its glow)
+        bool same = false;
+        for (auto& o : fires) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            d2 += (o.pos[k] - v.pos[k]) * (o.pos[k] - v.pos[k]);
+          }
+          if (d2 < 2.f * kMeter * 2.f * kMeter) {
+            o = v;
+            same = true;
+            break;
+          }
+        }
+        if (!same) {
+          fires.push_back(v);
+        }
+      }
+    }
+    std::sort(fires.begin(), fires.end(), [](const Fire& a, const Fire& b) { return a.dist < b.dist; });
+    constexpr int kFires = 4;
+    float fire_pos[kFires * 4] = {};
+    float fire_seed[kFires] = {};
+    int fire_count = 0;
+    for (const auto& f : fires) {
+      if (fire_count == kFires) {
+        break;
+      }
+      std::memcpy(fire_pos + fire_count * 4, f.pos, sizeof(float) * 4);
+      fire_seed[fire_count++] = f.seed;
+    }
+    glUniform1f(glGetUniformLocation(id, "light_shadow"), m_settings.light_shadow);
+    glUniform1f(glGetUniformLocation(id, "materials"), m_settings.materials);
+    glUniform1f(glGetUniformLocation(id, "reflect_amount"), g_world.reflect[game_index()]);
+    glUniform1f(glGetUniformLocation(id, "reflect_rough"), g_world.rough[game_index()]);
+    glUniform1f(glGetUniformLocation(id, "relief"), m_settings.relief);
+    {
+      // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
+      // the shader starts a ring on the water from each one that lies at the water's height
+      // (riding over the water: a point every 0.05 s, foam churned along them)
+      constexpr int kWake = 32;
+      const auto& pl = g_enhanced_player;
+      const bool riding_water = pl.valid && pl.state == 5;
+      if (pl.valid && m_settings.wake > 0.f) {
+        double since = m_wake.empty() ? 1e9 : m_time - m_wake.back().time;
+        float moved = 1e9f;
+        if (!m_wake.empty()) {
+          const float* q = m_wake.back().pos;
+          float dx = pl.pos[0] - q[0], dz = pl.pos[2] - q[2];
+          moved = std::sqrt(dx * dx + dz * dz);
+        }
+        if ((since >= (riding_water ? 0.05 : 0.1) && moved > 0.1f * kMeter) || since >= 0.5) {
+          m_wake.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time, riding_water});
+        }
+      }
+      while (!m_wake.empty() && (m_time - m_wake.front().time > 2.0 || m_wake.size() > kWake)) {
+        m_wake.erase(m_wake.begin());
+      }
+      float wake[kWake * 4] = {};
+      int wake_count = 0;
+      for (const auto& w : m_wake) {
+        if (m_settings.wake <= 0.f) {
+          break;
+        }
+        std::memcpy(wake + wake_count * 4, w.pos, sizeof(float) * 3);
+        // age, + 10 behind a vehicle or the board
+        wake[wake_count * 4 + 3] = (float)(m_time - w.time) + (w.ride ? 10.f : 0.f);
+        wake_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "wake_count"), wake_count);
+      glUniform4fv(glGetUniformLocation(id, "wake"), kWake, wake);
+      glUniform1f(glGetUniformLocation(id, "wake_strength"), m_settings.wake);
+    }
+    {
+      // footprints where Jak walks on soft ground (the game knows the ground's material), ruts where
+      // he drives; kept 90 s
+      constexpr int kPrints = 96;
+      const auto& pl = g_enhanced_player;
+      static bool test_prints = std::getenv("JAK_ENHANCED_PRINTS_TEST") != nullptr;
+      static double test_seeded = -1e9;
+      if (test_prints && pl.valid && m_time - test_seeded > 10.0) {
+        // test switch: footprints walking away from the camera beside Jak, ruts on his other side
+        // (again every 10 s, wherever he is by then)
+        test_seeded = m_time;
+        m_prints.clear();
+        float fx = pl.pos[0] - cam.trans[0], fz = pl.pos[2] - cam.trans[2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1.f);
+        fx /= len;
+        fz /= len;
+        for (int i = 0; i < 24; i++) {
+          bool rut = i >= 12;
+          float along = (-2.f + (i % 12) * (rut ? 0.5f : 0.7f)) * kMeter;
+          float side = (rut ? 2.5f : ((i % 2) ? -1.32f : -1.08f)) * kMeter;
+          Print p;
+          p.pos[0] = pl.pos[0] + fx * along + fz * side;
+          p.pos[1] = pl.pos[1] + (rut ? 1.f * kMeter : 0.f);
+          p.pos[2] = pl.pos[2] + fz * along - fx * side;
+          p.heading = std::atan2(fx, fz);
+          p.kind = rut ? 2 : (i % 2);
+          p.time = m_time;
+          m_prints.push_back(p);
+        }
+      }
+      // a landing from a jump: a big splash where he comes down
+      const bool on_foot = pl.state == 1 || pl.state == 3;
+      if (pl.valid && on_foot && m_last_player_state == 0) {
+        m_steps.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, 2.f, m_time});
+        for (int k = 0; k < 3; k++) {
+          const float a = k * 2.094f + (float)(std::rand() % 100) * 0.01f;
+          const float at[3] = {pl.pos[0] + std::cos(a) * 0.4f * kMeter, pl.pos[1],
+                               pl.pos[2] + std::sin(a) * 0.4f * kMeter};
+          ground_puff(at, 0.7f, 1.6f, false);
+        }
+      }
+      m_last_player_state = pl.valid ? pl.state : 0;
+      if (pl.valid && pl.state > 0 && pl.state <= 3) {
+        bool rut = pl.state == 2;
+        const bool soft = pl.state == 1 || pl.state == 2;
+        // (ruts: a piece every meter, each one reaching back to the one before: a solid track)
+        float stride = (rut ? 1.f : 0.7f) * kMeter;
+        float dx = 0.f, dz = 0.f, moved = 1e9f;
+        if (m_last_print_valid) {
+          dx = pl.pos[0] - m_last_print[0];
+          dz = pl.pos[2] - m_last_print[2];
+          moved = std::sqrt(dx * dx + dz * dz);
+        }
+        if (moved > stride) {
+          if (moved < 4.f * stride) {  // a step, not a jump or a teleport
+            float fx = dx / moved, fz = dz / moved;
+            float side = rut ? 0.f : (m_print_left ? 0.12f : -0.12f) * kMeter;
+            Print p;
+            p.pos[0] = pl.pos[0] + fz * side;
+            p.pos[1] = pl.pos[1];
+            p.pos[2] = pl.pos[2] - fx * side;
+            p.heading = std::atan2(fx, fz);
+            p.kind = rut ? 2 : (m_print_left ? 0 : 1);
+            p.time = m_time;
+            p.seg = moved;
+            // (in lying snow any ground takes them)
+            if ((soft || m_snow_cover > 0.15f) && m_settings.prints > 0.f) {
+              m_prints.push_back(p);
+            }
+            if (!rut) {
+              m_steps.push_back({{p.pos[0], p.pos[1], p.pos[2]}, 1.f, m_time});
+              // running kicks up more than walking
+              if (moved > 0.9f * kMeter || (std::rand() % 2) == 0) {
+                ground_puff(p.pos, 0.3f, 1.0f, true);
+              }
+            }
+            m_print_left = !m_print_left;
+          }
+          std::memcpy(m_last_print, pl.pos, sizeof(m_last_print));
+          m_last_print_valid = true;
+        }
+      }
+      while (!m_prints.empty() &&
+             (m_time - m_prints.front().time > 90.0 || m_prints.size() > (size_t)kPrints)) {
+        m_prints.erase(m_prints.begin());
+      }
+      float prints[kPrints * 4] = {};
+      float print_info[kPrints * 2] = {};
+      int print_count = 0;
+      for (const auto& p : m_prints) {
+        if (m_settings.prints <= 0.f) {
+          break;
+        }
+        std::memcpy(prints + print_count * 4, p.pos, sizeof(float) * 3);
+        prints[print_count * 4 + 3] = p.heading;
+        print_info[print_count * 2] = (float)(m_time - p.time);
+        // (ruts: 2 + the piece's length in meters)
+        print_info[print_count * 2 + 1] = (float)p.kind + (p.kind == 2 ? p.seg / kMeter : 0.f);
+        print_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "print_count"), print_count);
+      glUniform4fv(glGetUniformLocation(id, "prints"), kPrints, prints);
+      glUniform2fv(glGetUniformLocation(id, "print_info"), kPrints, print_info);
+      glUniform1f(glGetUniformLocation(id, "prints_strength"), m_settings.prints);
+
+      // splashes: the steps of the last second (the shader checks for a puddle under them)
+      constexpr int kSplashes = 16;
+      static bool test_splash = std::getenv("JAK_ENHANCED_SPLASH_TEST") != nullptr;
+      static double test_splash_t = 0;
+      if (test_splash && pl.valid && m_time - test_splash_t > 0.15) {
+        // test switch: steps landing one after another on a line ahead of Jak, away from the camera
+        test_splash_t = m_time;
+        static int n = 0;
+        float fx = pl.pos[0] - cam.trans[0], fz = pl.pos[2] - cam.trans[2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1.f);
+        const float along = (-1.5f + (n % 6) * 0.6f) * kMeter;
+        const float side = ((n % 3) - 1) * 1.2f * kMeter;
+        m_steps.push_back({{pl.pos[0] + fx / len * along + fz / len * side, pl.pos[1],
+                            pl.pos[2] + fz / len * along - fx / len * side},
+                           (n % 4) == 0 ? 2.f : 1.f, m_time});
+        n++;
+      }
+      while (!m_steps.empty() &&
+             (m_time - m_steps.front().time > 1.2 || m_steps.size() > (size_t)kSplashes / 2)) {
+        m_steps.erase(m_steps.begin());
+      }
+      // in the rain, drops bounce off the ground around Jak (2-6 m, on his level ground): a few
+      // droplets each, hopping a few centimeters
+      if (m_rain > 0.1f && pl.valid && (pl.state == 1 || pl.state == 3)) {
+        static double bounce_t = 0;
+        const double every = 0.11 / m_rain;
+        if (m_time - bounce_t > every) {
+          bounce_t = m_time;
+          const float a = (float)(std::rand() % 10000) / 10000.f * 6.2832f;
+          const float r = (2.f + (float)(std::rand() % 1000) / 250.f) * kMeter;
+          m_bounces.push_back({{pl.pos[0] + std::cos(a) * r, pl.pos[1], pl.pos[2] + std::sin(a) * r},
+                               0.f, m_time});
+        }
+      }
+      while (!m_bounces.empty() &&
+             (m_time - m_bounces.front().time > 0.45 || m_bounces.size() > (size_t)kSplashes / 2)) {
+        m_bounces.erase(m_bounces.begin());
+      }
+      float splash[kSplashes * 4] = {};
+      int splash_count = 0;
+      for (const auto* list : {&m_steps, &m_bounces})
+      for (const auto& st : *list) {
+        std::memcpy(splash + splash_count * 4, st.pos, sizeof(float) * 3);
+        // age, with the strength in the integer part above 10 s: 1 step, 2 landing
+        splash[splash_count * 4 + 3] = (float)(m_time - st.time) + 10.f * st.strength;
+        splash_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "splash_count"),
+                  std::max(m_wet, m_puddle) > 0.05f ? splash_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "splash"), kSplashes, splash);
+
+      // dust behind a vehicle or the board crossing the desert (two plumes, off the back wheels),
+      // spray where they cross water, and a burst where they hit it
+      constexpr int kPuffs = 32;
+      const bool riding = pl.valid && (pl.state == 2 || pl.state >= 4);
+      if (riding && m_ride_last_time >= 0.0 && m_time > m_ride_last_time) {
+        float dx = pl.pos[0] - m_ride_last[0], dz = pl.pos[2] - m_ride_last[2];
+        float dist = std::sqrt(dx * dx + dz * dz) / kMeter;
+        float v = dist / (float)(m_time - m_ride_last_time);
+        if (v < 200.f) {  // not a teleport (the boosted board does ~100 m/s)
+          m_ride_speed += (v - m_ride_speed) * 0.2f;
+          if (dist > 0.02f) {
+            m_ride_dir[0] = dx / (dist * kMeter);
+            m_ride_dir[1] = dz / (dist * kMeter);
+          }
+        }
+      } else if (!riding) {
+        m_ride_speed = 0.f;
+      }
+      std::memcpy(m_ride_last, pl.pos, sizeof(m_ride_last));
+      m_ride_last_time = m_time;
+      auto add_puff = [&](float back, float side, float down, float size, int kind, float life) {
+        Puff f;
+        const float fx = m_ride_dir[0], fz = m_ride_dir[1];
+        f.pos[0] = pl.pos[0] - fx * back * kMeter + fz * side * kMeter;
+        f.pos[1] = pl.pos[1] - down * kMeter;
+        f.pos[2] = pl.pos[2] - fz * back * kMeter - fx * side * kMeter;
+        f.size = size;
+        f.kind = kind;
+        f.seed = (float)(std::rand() % 1000) / 1000.f;
+        f.life = life;
+        f.time = m_time;
+        m_puffs.push_back(f);
+      };
+      // test switch: puffs behind Jak at any speed, anywhere (dust; spray with the value "water")
+      static const char* puff_test = std::getenv("JAK_ENHANCED_PUFF_TEST");
+      static bool test_puffs = puff_test != nullptr;
+      static bool test_spray = puff_test && std::strcmp(puff_test, "water") == 0;
+      if (pl.state == 2 || pl.state == 4 || pl.state == 6 || pl.state == 7) {
+        m_last_ride_state = pl.state == 6 ? 4 : pl.state == 7 ? 2 : pl.state;
+      }
+      const bool board = pl.state == 4 || pl.state == 6 || (pl.state == 5 && m_last_ride_state == 4);
+      const bool on_water = pl.state == 5 || test_spray;
+      // (none while the board or the vehicle is in the air: a jump leaves no dust)
+      if ((riding || test_puffs) && pl.valid && pl.state < 6 && m_time - m_puff_time > 0.06) {
+        const float sp = test_puffs ? 20.f : m_ride_speed;
+        const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
+        // (the test: as if moving, along a 12 m trail)
+        // (Jak sits ~1.4 m over the ground in a vehicle: the dust starts on the ground behind the
+        // back wheels, not up by the seat)
+        const float back = (board ? 0.6f : 2.2f) + (test_puffs ? (float)std::fmod(m_time * 6.0, 12.0) : 0.f);
+        if (on_water && sp > 3.f && m_settings.wake > 0.f) {
+          add_puff(back, side, board ? 0.2f : 0.6f, std::min(0.5f + sp * 0.04f, 2.f), 1, 1.1f);
+        } else if (!on_water && std::max(m_wet, m_puddle) > 0.3f && sp > 6.f &&
+                   m_settings.wake > 0.f) {
+          // wet ground (rain, puddles): the wheels throw spray, not dust
+          add_puff(back, side, board ? 0.1f : 1.3f, std::min(0.4f + sp * 0.03f, 1.6f), 1, 0.8f);
+        } else if (!on_water && (m_pond || test_puffs) && sp > 5.f && m_settings.prints > 0.f) {
+          // (the board under its L2 boost: a bigger plume, hanging longer, starting farther back: a
+          // cloud swelling around Jak himself veiled him, he looked see-through)
+          const float b = board ? g_enhanced_board_boost.load() : 0.f;
+          add_puff(back + 2.5f * b, side, board ? 0.1f : 1.4f,
+                   std::min(0.6f + sp * 0.05f, 2.4f) * (1.f + 0.3f * b), 0, 2.2f * (1.f + 0.5f * b));
+        }
+        m_puff_left = !m_puff_left;
+        m_puff_time = m_time;
+      }
+      // hitting the water at speed: a burst all around
+      static int last_state = 0;
+      if (pl.valid && pl.state == 5 && (last_state == 2 || last_state == 4) && m_ride_speed > 5.f &&
+          m_settings.wake > 0.f) {
+        for (int k = 0; k < 4; k++) {
+          add_puff((k - 1.5f) * 0.8f, (k % 2 ? 1.f : -1.f) * 1.2f, 0.4f, 2.6f, 1, 1.4f);
+        }
+      }
+      last_state = pl.valid ? pl.state : 0;
+      while (!m_puffs.empty() && (m_time - m_puffs.front().time > m_puffs.front().life ||
+                                  m_puffs.size() > (size_t)kPuffs)) {
+        m_puffs.erase(m_puffs.begin());
+      }
+      float puff[kPuffs * 4] = {};
+      float puff_info[kPuffs * 4] = {};
+      int puff_count = 0;
+      for (const auto& f : m_puffs) {
+        if (m_time - f.time > f.life) {
+          continue;
+        }
+        std::memcpy(puff + puff_count * 4, f.pos, sizeof(float) * 3);
+        puff[puff_count * 4 + 3] = (float)(m_time - f.time);
+        puff_info[puff_count * 4] = f.size;
+        puff_info[puff_count * 4 + 1] = (float)f.kind;
+        puff_info[puff_count * 4 + 2] = f.seed;
+        puff_info[puff_count * 4 + 3] = f.life;
+        puff_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "puff_count"), cam.valid ? puff_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "puff"), kPuffs, puff);
+      glUniform4fv(glGetUniformLocation(id, "puff_info"), kPuffs, puff_info);
+    }
+    // the nearest explosions in view for the shockwave: view space + radius, age
+    {
+      constexpr int kBlasts = 4;
+      float blast_pos[kBlasts * 4] = {};
+      float blast_age[kBlasts] = {};
+      float blast_seed[kBlasts] = {};
+      float blast_dir[kBlasts * 4] = {};
+      float blast_ground[kBlasts] = {};
+      int blast_count = 0;
+      // (fx_detail: the newest first, the older ones linger now)
+      const bool newest_first = m_settings.fx_detail > 0.f;
+      for (size_t k = 0; k < m_blasts.size(); k++) {
+        const auto& b = m_blasts[newest_first ? m_blasts.size() - 1 - k : k];
+        if (blast_count == kBlasts || !on || m_settings.blast <= 0.f) {
+          break;
+        }
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (b.pos[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        if (v[2] < 1.f * kMeter) {
+          continue;
+        }
+        std::memcpy(blast_pos + blast_count * 4, v, sizeof(v));
+        blast_pos[blast_count * 4 + 3] = b.radius;
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            blast_dir[blast_count * 4 + col] += b.dir[row] * cam.rot[row][col];
+          }
+        }
+        blast_dir[blast_count * 4 + 3] = (float)b.kind;
+        // (> 0: no ground known)
+        blast_ground[blast_count] = b.ground < 1e11f ? std::min(b.ground - b.pos[1], 0.f) : 1.f;
+        blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
+        blast_age[blast_count++] = (float)(m_time - b.start);
+      }
+      glUniform1i(glGetUniformLocation(id, "blast_count"), blast_count);
+      glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
+      glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
+      glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
+      glUniform1fv(glGetUniformLocation(id, "blast_ground"), kBlasts, blast_ground);
+      glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
+      glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
+      enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
+    }
+    // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
+    // city), dry and calm, a few dozen meters around Jak, each wandering on its own
+    {
+      constexpr int kMotes = 24;
+      const auto& pl = g_enhanced_player;
+      static const bool force = [] {
+        const char* m = std::getenv("JAK_ENHANCED_MOTES");
+        return m && std::strcmp(m, "force") == 0;
+      }();
+      const bool wild =
+          force || (!m_city && !m_pond && m_snow < 0.1f && m_rain < 0.1f && m_storm < 0.1f);
+      const float dt = m_motes_time < 0 ? 0.f : (float)std::min(0.1, m_time - m_motes_time);
+      m_motes_time = m_time;
+      const float target = wild && pl.valid && on && m_settings.motes > 0.f ? 1.f : 0.f;
+      m_motes_on += (target - m_motes_on) * std::min(1.f, dt * (force ? 5.f : 0.5f));
+      const bool night = m_night > 0.5f;
+      static std::mt19937 rng{std::random_device{}()};
+      std::uniform_real_distribution<float> u(0.f, 1.f);
+      auto spawn = [&](Mote& m) {
+        const float a = u(rng) * 6.2832f, r = (3.f + 19.f * std::sqrt(u(rng))) * kMeter;
+        m.pos[0] = pl.pos[0] + std::cos(a) * r;
+        m.pos[1] = pl.pos[1] + (0.3f + 2.2f * u(rng)) * kMeter;
+        m.pos[2] = pl.pos[2] + std::sin(a) * r;
+        m.vel[0] = m.vel[1] = m.vel[2] = 0.f;
+        m.seed = u(rng) * 100.f;
+      };
+      if (m_motes_on <= 0.01f || !pl.valid) {
+        m_motes.clear();
+      } else {
+        while ((int)m_motes.size() < kMotes) {
+          m_motes.emplace_back();
+          spawn(m_motes.back());
+        }
+        for (auto& m : m_motes) {
+          const float dx = m.pos[0] - pl.pos[0], dz = m.pos[2] - pl.pos[2];
+          if (dx * dx + dz * dz > 26.f * 26.f * kMeter * kMeter) {
+            spawn(m);  // left behind: one comes in somewhere else around Jak
+          }
+          // a wander: a slow random push, damped; fireflies hover, seeds drift with the breeze and
+          // sink slowly
+          for (int k = 0; k < 3; k++) {
+            m.vel[k] += (u(rng) - 0.5f) * (night ? 3.f : 1.5f) * kMeter * dt;
+            m.vel[k] *= 1.f - std::min(1.f, dt * 0.8f);
+          }
+          if (!night) {
+            m.vel[0] += 0.25f * kMeter * dt;
+            m.vel[2] += 0.12f * kMeter * dt;
+            m.vel[1] -= 0.05f * kMeter * dt;
+          }
+          // between half a meter and three over Jak's ground
+          const float above = (m.pos[1] - pl.pos[1]) / kMeter;
+          if (above < 0.4f) {
+            m.vel[1] += 1.f * kMeter * dt;
+          }
+          if (above > 3.f) {
+            m.vel[1] -= 1.f * kMeter * dt;
+          }
+          for (int k = 0; k < 3; k++) {
+            m.pos[k] += m.vel[k] * dt;
+          }
+        }
+      }
+      float mote[kMotes * 4] = {};
+      int mote_count = 0;
+      for (const auto& m : m_motes) {
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (m.pos[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        if (v[2] < 0.3f * kMeter) {
+          continue;
+        }
+        std::memcpy(mote + mote_count * 4, v, sizeof(v));
+        mote[mote_count * 4 + 3] = m.seed;
+        mote_count++;
+      }
+      glUniform1i(glGetUniformLocation(id, "mote_count"), cam.valid ? mote_count : 0);
+      glUniform4fv(glGetUniformLocation(id, "mote"), kMotes, mote);
+      // kind (0 fireflies, 1 seeds and pollen), strength, time (s)
+      glUniform3f(glGetUniformLocation(id, "mote_style"), night ? 0.f : 1.f,
+                  m_motes_on * m_settings.motes * (night ? m_night : 1.f - m_night),
+                  (float)std::fmod(m_time, 1000.0));
+    }
+    glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
+    glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
+    glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
+    glUniform3f(glGetUniformLocation(id, "fire"), m_settings.fire_haze, m_settings.fire_embers,
+                (float)std::fmod(m_time, 1000.0));
+    // dark nights: how dark (the desert darkest, a city least), and the lights reach further and
+    // shine stronger into it
+    const float dark = night_darkness();
+    glUniform2f(glGetUniformLocation(id, "night_dark"), dark, 1.f + 1.6f * dark);
+    glUniform1f(glGetUniformLocation(id, "light_spill"), m_settings.light_spill);
+    {
+      // Spargus lights the sky over it at night, a warm glow on the horizon seen from the desert
+      // (out of town, fading with the distance)
+      const float sx = 2050.f * kMeter, sz = -230.f * kMeter;
+      const float dx = cam.trans[0] - sx, dz = cam.trans[2] - sz;
+      const float dist_m = std::sqrt(dx * dx + dz * dz) / kMeter;
+      const float k = (g_game_version == GameVersion::Jak3 && m_pond)
+                          ? dark * std::clamp((dist_m - 350.f) / 400.f, 0.f, 1.f) *
+                                std::exp(-dist_m / 4000.f) * m_settings.light_strength
+                          : 0.f;
+      glUniform4f(glGetUniformLocation(id, "town_glow"), sx, sz, k, 0.f);
+    }
+    glUniform1f(glGetUniformLocation(id, "cloud_shadows"), m_settings.cloud_shadows ? 1.f : 0.f);
+    glUniform1f(glGetUniformLocation(id, "lens_flare"),
+                g_enhanced_scene.movie ? 0.f : m_settings.lens_flare);
+    {
+      // Jak in view space: the dark spares a little around him (he stays readable)
+      const auto& pl = g_enhanced_player;
+      float v[3] = {0.f, 0.f, 0.f};
+      for (int col = 0; col < 3; col++) {
+        for (int row = 0; row < 3; row++) {
+          v[col] += (pl.pos[row] - cam.trans[row]) * cam.rot[row][col];
+        }
+      }
+      glUniform4f(glGetUniformLocation(id, "player_view"), v[0], v[1] + 1.f * kMeter, v[2],
+                  pl.valid && cam.valid ? 1.f : 0.f);
+    }
+    for (int i = 0; i < n; i++) {
+      pos[i * 4 + 3] *= 1.f + 0.6f * dark;
+    }
+    {
+      // headlights: the nearest few, in view space, shown in the dark only
+      {
+        std::lock_guard<std::mutex> lock(g_enhanced_headlights.mutex);
+        if (g_enhanced_headlights.count > 0) {
+          m_headlights.clear();
+          for (int i = 0; i < g_enhanced_headlights.count; i++) {
+            std::array<float, 8> h;
+            std::memcpy(h.data(), g_enhanced_headlights.pending[i], sizeof(float) * 8);
+            m_headlights.push_back(h);
+          }
+          g_enhanced_headlights.count = 0;
+          m_headlights_time = m_time;
+        } else if (m_time - m_headlights_time > 0.2) {
+          m_headlights.clear();
+        }
+      }
+      // test switch: two headlights on Jak, pointing where the camera looks
+      static bool test_headlights = std::getenv("JAK_ENHANCED_HEADLIGHT_TEST") != nullptr;
+      if (test_headlights && g_enhanced_player.valid) {
+        const auto& pl = g_enhanced_player;
+        float fx = cam.rot[0][2], fz = cam.rot[2][2];
+        float len = std::max(std::sqrt(fx * fx + fz * fz), 1e-3f);
+        fx /= len;
+        fz /= len;
+        m_headlights.clear();
+        for (int k = 0; k < 2; k++) {
+          float side = (k ? 0.7f : -0.7f) * kMeter;
+          m_headlights.push_back({pl.pos[0] + fz * side + fx * kMeter, pl.pos[1] + 0.9f * kMeter,
+                                  pl.pos[2] - fx * side + fz * kMeter, 1.f, fx * 0.99f, -0.07f,
+                                  fz * 0.99f, 0.f});
+        }
+      }
+      constexpr int kSpots = 8;
+      const auto& spots_src = m_headlights;
+      std::vector<std::pair<float, int>> order;
+      for (int i = 0; i < (int)spots_src.size(); i++) {
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          float dk = spots_src[i][k] - cam.trans[k];
+          d2 += dk * dk;
+        }
+        order.push_back({d2, i});
+      }
+      std::sort(order.begin(), order.end());
+      float spot_pos[kSpots * 4] = {};
+      float spot_dir[kSpots * 4] = {};
+      int spots = 0;
+      const float shown = std::max(m_night, dark);
+      for (const auto& [d2, i] : order) {
+        if (spots == kSpots || shown <= 0.01f || !m_settings.lights) {
+          break;
+        }
+        const auto& h = spots_src[i];
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            spot_pos[spots * 4 + col] += (h[row] - cam.trans[row]) * cam.rot[row][col];
+            spot_dir[spots * 4 + col] += h[4 + row] * cam.rot[row][col];
+          }
+        }
+        spot_pos[spots * 4 + 3] = h[3] * shown * m_grade.headlights;
+        spots++;
+      }
+      glUniform1i(glGetUniformLocation(id, "spot_count"), spots);
+      glUniform4fv(glGetUniformLocation(id, "spot_pos"), kSpots, spot_pos);
+      glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
+    }
+    glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
+    glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
+    glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
+    {
+      // the beacons, the brightest and nearest first, shown as the night falls
+      // (a town's every lamp: Spargus's gate and walls are more than twenty)
+      constexpr int kBeacons = 64;
+      std::sort(beacons.begin(), beacons.end(),
+                [](const Beacon& a, const Beacon& b) { return a.score > b.score; });
+      const float shown = std::max(m_night, night_darkness());
+      float bpos[kBeacons * 4] = {};
+      float bcol[kBeacons * 4] = {};
+      int nb = 0;
+      for (const auto& b : beacons) {
+        if (shown <= 0.01f || nb == kBeacons) {
+          break;
+        }
+        // one point per lamp: a glow next to a brighter one already taken (a flame is several
+        // glows) is part of it
+        bool merged = false;
+        for (int j = 0; j < nb && !merged; j++) {
+          float d2 = 0.f;
+          for (int k = 0; k < 3; k++) {
+            float dk = bpos[j * 4 + k] - b.pos[k];
+            d2 += dk * dk;
+          }
+          merged = d2 < 4.f * kMeter * 4.f * kMeter;
+        }
+        if (merged) {
+          continue;
+        }
+        std::memcpy(bpos + nb * 4, b.pos, sizeof(float) * 4);
+        std::memcpy(bcol + nb * 4, b.color, sizeof(float) * 4);
+        bcol[nb * 4 + 3] *= shown * m_settings.light_strength;
+        nb++;
+      }
+      glUniform1i(glGetUniformLocation(id, "beacon_count"), nb);
+      glUniform4fv(glGetUniformLocation(id, "beacon_pos"), kBeacons, bpos);
+      glUniform4fv(glGetUniformLocation(id, "beacon_color"), kBeacons, bcol);
+      if (m_settings.ssao_debug && (debug_beacons++ % 300) == 0) {
+        lg::info("[enhanced] beacons: {} far glows, {} shown", beacons.size(), nb);
+      }
+    }
+    static int debug_counter = 0;
+    if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
+      lg::info("[enhanced] lights: {} glows, {} lamps, {} used", g_enhanced_lights.count, lamps, n);
+      for (int i = 0; i < std::min(n, 6); i++) {
+        const auto& c = candidates[i];
+        lg::info("[enhanced]   light at {:.1f} {:.1f} {:.1f} m (view), radius {:.1f} m, color {:.2f} {:.2f} {:.2f}",
+                 c.pos[0] / kMeter, c.pos[1] / kMeter, c.pos[2] / kMeter, c.pos[3] / kMeter,
+                 c.color[0], c.color[1], c.color[2]);
+      }
+    }
+  }
+  {
+    // the sun for the glints, only when it's above the horizon
+    float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
+                          m_sun_view[2] * m_sun_view[2]);
+    float up = len > 0.f ? (m_sun_view[0] * cam.rot[1][0] + m_sun_view[1] * cam.rot[1][1] +
+                            m_sun_view[2] * cam.rot[1][2]) / len
+                         : 0.f;
+    const bool sun = g_enhanced_sun.valid && len > 0.f && up > 0.f;
+    glUniform4f(glGetUniformLocation(id, "sun_dir"), sun ? m_sun_view[0] / len : 0.f,
+                sun ? m_sun_view[1] / len : 0.f, sun ? m_sun_view[2] / len : 0.f,
+                sun ? m_settings.water_glint * std::min(1.f, up * 4.f) : 0.f);
+  }
+  m_ocean_ready = false;
+
+  // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
+  float strength = 0.f;
+  if (reproject && m_settings.motion_blur > 0.f) {
+    strength = m_settings.motion_blur;
+    glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
+  }
+  // (the board's L2 boost: a stronger, longer blur)
+  const float boost = have_scene && g_enhanced_player.valid ? g_enhanced_board_boost.load() : 0.f;
+  glUniform4f(glGetUniformLocation(id, "motion"), m_prev_camera.fx, m_prev_fy,
+              strength * (1.f + 1.5f * boost), 0.02f * (1.f + boost));
+  // (sharp out past Jak: the blur takes the world as still, and Jak moves with the camera. Boosting,
+  // the camera trails him farther than 10 m and his own pixels were smeared into the ground behind:
+  // he looked see-through)
+  float keep = 10.f * kMeter;
+  if (have_scene && g_enhanced_player.valid) {
+    float d2 = 0.f;
+    for (int c = 0; c < 3; c++) {
+      d2 += (g_enhanced_player.pos[c] - cam.trans[c]) * (g_enhanced_player.pos[c] - cam.trans[c]);
+    }
+    keep = std::max(keep, std::sqrt(d2) + 4.f * kMeter);
+  }
+  glUniform2f(glGetUniformLocation(id, "motion_keep"), keep, keep + 15.f * kMeter);
+
+  // the clouds first, at a quarter of the pixels (the composite then reads them)
+  // (JAK_ENHANCED_CLOUDS_FULL: marched at every pixel, as before, to compare)
+  static const bool clouds_full = std::getenv("JAK_ENHANCED_CLOUDS_FULL") != nullptr;
+  const bool clouds = have_scene && m_settings.clouds && m_settings.cloud_amount > 0.f && !clouds_full;
+  if (clouds) {
+    if (reproject) {
+      glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    }
+    draw_clouds(id, w, h, reproject, render_fbo, prof);
+  } else {
+    m_cloud_history = false;
+    glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
+  }
+
+  // (test switch, what each part of the composite costs, in one run:
+  // JAK_ENHANCED_COMPOSITE_OFF="sand;rock_detail;light_count,lantern": every 3 s the next group of
+  // uniforms is zeroed (first: none), the draw timed on the GPU (waited for: the clock stays up);
+  // after two rounds the log has each group's average)
+  struct CostProbe {
+    std::vector<std::vector<std::string>> groups;
+    std::vector<double> sum;
+    std::vector<int> count;
+    double start = -1.0;
+    bool done = false;
+    GLuint query = 0;
+  };
+  static CostProbe probe = [] {
+    CostProbe out;
+    if (const char* env = std::getenv("JAK_ENHANCED_COMPOSITE_OFF")) {
+      std::string s = env;
+      out.groups.push_back({});  // everything on
+      std::vector<std::string> group;
+      std::string name;
+      for (size_t i = 0; i <= s.size(); i++) {
+        char ch = i < s.size() ? s[i] : ';';
+        if (ch == ',' || ch == ';') {
+          if (!name.empty()) {
+            group.push_back(name);
+          }
+          name.clear();
+          if (ch == ';' && !group.empty()) {
+            out.groups.push_back(group);
+            group.clear();
+          }
+        } else {
+          name += ch;
+        }
+      }
+      out.sum.assign(out.groups.size(), 0.0);
+      out.count.assign(out.groups.size(), 0);
+    }
+    return out;
+  }();
+  int probe_group = -1;
+  if (!probe.groups.empty() && !probe.done) {
+    const double now =
+        std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (probe.start < 0.0) {
+      probe.start = now + 10.0;  // (the level settles first)
+      glGenQueries(1, &probe.query);
+    }
+    const double t = now - probe.start;
+    const int slots = (int)probe.groups.size() * 2;
+    if (t >= 0.0 && t < slots * 3.0) {
+      probe_group = (int)(t / 3.0) % (int)probe.groups.size();
+      if (std::fmod(t, 3.0) < 0.5) {
+        probe_group = -probe_group - 2;  // (switched just now: not timed yet, but zeroed)
+      }
+    } else if (t >= slots * 3.0) {
+      probe.done = true;
+      for (size_t g = 0; g < probe.groups.size(); g++) {
+        std::string names;
+        for (auto& n : probe.groups[g]) {
+          names += (names.empty() ? "" : ",") + n;
+        }
+        lg::info("[enhanced] composite cost: {:6.2f} ms without {}",
+                 probe.count[g] ? probe.sum[g] / probe.count[g] : 0.0,
+                 names.empty() ? "(nothing: all on)" : names);
+      }
+    }
+  }
+  const int zero_group = probe_group >= 0 ? probe_group : (probe_group < -1 ? -probe_group - 2 : -1);
+  if (zero_group >= 0) {
+    GLint n = 0;
+    glGetProgramiv(id, GL_ACTIVE_UNIFORMS, &n);
+    for (auto& name : probe.groups[zero_group]) {
+      GLint loc = glGetUniformLocation(id, name.c_str());
+      GLenum type = 0;
+      for (GLint i = 0; loc >= 0 && i < n; i++) {
+        char buf[128];
+        GLint size;
+        GLenum t;
+        glGetActiveUniform(id, i, sizeof(buf), nullptr, &size, &t, buf);
+        if (name == buf) {
+          type = t;
+        }
+      }
+      if (type == GL_INT) {
+        glUniform1i(loc, 0);
+      } else if (type == GL_FLOAT) {
+        glUniform1f(loc, 0.f);
+      } else if (type == GL_FLOAT_VEC2) {
+        glUniform2f(loc, 0.f, 0.f);
+      } else if (type == GL_FLOAT_VEC3) {
+        glUniform3f(loc, 0.f, 0.f, 0.f);
+      } else if (type == GL_FLOAT_VEC4) {
+        glUniform4f(loc, 0.f, 0.f, 0.f, 0.f);
+      }
+    }
+  }
+  if (probe_group >= 0) {
+    glBeginQuery(GL_TIME_ELAPSED, probe.query);
+  }
+  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  if (probe_group >= 0) {
+    glEndQuery(GL_TIME_ELAPSED);
+    GLuint64 ns = 0;
+    glGetQueryObjectui64v(probe.query, GL_QUERY_RESULT, &ns);
+    probe.sum[probe_group] += ns / 1e6;
+    probe.count[probe_group]++;
+  }
+  prof.add_draw_call();
+  glBindSampler(13, 0);
+  if (taa && taa_mode == 1) {
+    // the finished frame through the TAA, and back
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    resolve_taa(m_scene_tex);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taa_fbo[1 - m_taa_cur]);  // (the one just written)
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  }
+
+  m_prev_camera = cam;
+  m_prev_fy = cam.fy * kScissorHeightScale;
+
+  // the end of this frame's 3D and post work, for the auto quality
+  if (m_gpu_query_open) {
+    glQueryCounter(m_gpu_query[m_gpu_query_slot][2], GL_TIMESTAMP);
+    m_gpu_query_used[m_gpu_query_slot] = true;
+    m_gpu_query_slot = (m_gpu_query_slot + 1) % 4;
+    m_gpu_query_open = false;
+  }
+
+  // leave the state the way the bucket renderers expect it
+  glBindVertexArray(0);
+  glEnable(GL_DEPTH_TEST);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_BLEND);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+}
+

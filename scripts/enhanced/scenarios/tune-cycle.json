@@ -1,0 +1,12 @@
+{
+  "start": "desert-start",
+  "headless": false,
+  "timeout": 60,
+  "variants": [
+    { "name": "alpha-0.5", "tune": { "shadow": { "alpha_ref": 0.5 } },
+      "expect": ["\\[enhanced\\] tune shadow\\.alpha_ref = 0\\.5$"] },
+    { "name": "built-in", "tune": {},
+      "expect": ["\\[enhanced\\] tune shadow\\.alpha_ref = 0\\.25 \\(built in\\)"] }
+  ],
+  "forbid": ["\\[enhanced\\].*(failed|not loaded)"]
+}

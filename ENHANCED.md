@@ -51,6 +51,47 @@ Run each script with `& ([scriptblock]::Create([IO.File]::ReadAllText('<repo>\sc
   change in a running game. **gk accepts one goalc connection per run** (`Deci2Server::accept_thread_func`
   returns after the first client): after a goalc restart, restart the game too. Keep the dev goalc and
   restart only gk instead; the dev goalc reconnects (`(lt)`) on the next reload.
+- `dev_build.ps1 [-Targets auto|all|gk,goalc] [-Refresh]`: the C++ build without `build.bat`'s
+  overhead. It runs ninja directly with the vcvars64 environment cached in `local\run\vcvars.env`
+  (calling `vcvars64.bat` costs ~1.6 s per build), builds `gk` only unless `goalc/`, `common/` or
+  `decompiler/` differ from HEAD (or goalc.exe is older than a goalc/ source), and prints the slowest
+  steps from `.ninja_log`: `STEP <ms> <output>`, then `BUILD OK|FAIL targets= ms= steps= compile=`
+  (on failure the compiler's error lines first). Games of the dev loop run from shadow bins, so the
+  link never waits for a running game.
+- C++ build time: `EnhancedPost.cpp` (7250 lines) is split, by moving whole functions only, into
+  `EnhancedPost.cpp` (setup, auto quality, ocean, fires, debug window), `EnhancedPostScene.cpp`
+  (`apply_to_scene`), `EnhancedPostLight.cpp` (grade and weather, focus, exposure, shafts, GI, shadow
+  maps, mist, clouds), `EnhancedPostPasses.cpp` (SSAO, resize, prepare, ray traced cover, the composite's
+  uniforms) and `EnhancedPostMenu.cpp` (the menus, settings, presets); what they share (world.json,
+  the menu's widgets, the hand-placed lights, the sun) is in `EnhancedPostInternal.h`, inline in
+  `namespace enh_post`, so each global is still one object. The dev build dir also precompiles the
+  runtime's common headers (`game/enhanced_pch.h`: STL, fmt, json, FileUtil with windows.h), CMake
+  option `ENHANCED_PCH`, off by default so release builds compile exactly as before; turn it on once
+  with `cmake -DENHANCED_PCH=ON out/build/Release` (a full rebuild, ~3 min). `common/versions/revision.h`
+  is rewritten only when the commit changes, so a CMake re-run (a CONFIGURE_DEPENDS glob seeing a new
+  file) costs ~5 s instead of relinking everything.
+- Measured (one-line change, quiet machine): `EnhancedPost.cpp` touched, `build.bat` 7.3-8.2 s
+  (compile 5.4-6.2 s, of it 2.4 s parse) → `dev_build.ps1` **2.3-3.1 s** (compile 1.6-2.4 s for any of the
+  five files); `EnhancedNotes.cpp` compile 3.0 → 2.1 s; no-op build 2.5 → 0.3 s. Not done: sccache (a
+  compiler cache only helps rebuilds of unchanged content: branch switches, touch, worktrees; it is not
+  installed, `winget install Mozilla.sccache` then `-DCMAKE_CXX_COMPILER_LAUNCHER=sccache`).
+- `dev_test.ps1 -Scenario <name> | -Start <continue> [-Env @{...}] [-Headless|-Windowed] [-Expect <regex>...]
+  [-Forbid <regex>...] [-Ready <regex>] [-Timeout s] [-Instance n] [-Keep] [-StopGoalc]`: one in-game
+  check asserted on log lines. It boots a test game (dev_launch: shadow bin, instance >= 1, minimized)
+  straight into the scenario, waits for the ready line (with a start point the first `[camera]` line with
+  the camera placed: test boots log it every 2 s, headless too), runs the scenario's variants in the
+  same game, then checks the regexes and closes the game. Scenarios are `scripts\enhanced\scenarios\*.json`
+  (`desert-boot`, `tune-cycle`, `repl-cycle`; the keys are in the script's header): a variant sends a
+  GOAL form through the dev goalc (`eval`, its output checked with `answer`), writes
+  `local\tuning_i<n>.json` (`tune`, removed afterwards), expects log lines after it, takes a
+  screenshot (`shot`, windowed, at most 4); `wait` lets game time pass before the variant acts, `settle`
+  after it. A launch right after a game on the same instance waits up to 15 s for the gk port. Output: `PASS|FAIL <check> t=<s>`, then `RESULT pass= fail=`;
+  `$LASTEXITCODE` 0/1. `-Headless` (`gk --no-display`) works for Jak 3: logic only (states, census,
+  AI, REPL forms), no renderer, so no tuning, shaders, fps lines or shots.
+- Measured: `desert-boot` headless 7.5 s from launch to RESULT; `tune-cycle` windowed (two tuning
+  variants in one run) 18 s; `repl-cycle` headless ~55 s with a cold dev goalc (its first `(mi)`, by
+  then idle Jak is in `target-stance-ambient`, which the check accepts), 9 s once it is warm. Before: a windowed boot per variant (14-20 s each) and a screenshot
+  looked at by eye.
 
 ## Graphics (game/graphics/opengl_renderer/EnhancedPost.*, shaders/enh_*)
 
