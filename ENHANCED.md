@@ -96,25 +96,46 @@ Run each script with `& ([scriptblock]::Create([IO.File]::ReadAllText('<repo>\sc
 ## Release gate (scripts/enhanced/release_gate.ps1, Jak 3)
 
 Before a release, `release_gate.ps1` (run through `[scriptblock]::Create`, `-Repo <tree>`) boots the
-built game once per scenario row, one small windowed test instance at a time (`-Instances n` for more;
-instance numbers from 6, own config dir under `local\gate\<time>\cfg-<row>`, so the user's saves and
-settings are never touched) and judges each row: gk still alive at the end, no Application event 1000
-for its PID, enough `[enhanced] average N fps ... in <level>` lines (average >= 20, level not
-none/title, levels in the expected order for level changes), screenshots not black (mean luma > 8),
-and the row's own log lines in order. The rows (`-List`; `-Only a,b` picks some, `-Games` keeps room
-for Jak 1/II, which have none yet): boot at desert-start and Spargus, the menu's hour picks right at
-boot (`JAK_ENHANCED_MENU=1:23`, and a burst with `JAK_ENHANCED_MENU_SCRIPT=<s>:<kind>:<value>,...`),
-the nap and its window, the parked Hellcat flown, desert to Spargus on foot and in the Hellcat,
-Spargus to the desert, the air train's cutscene and the train itself (`JAK_ENHANCED_AIR_TRAIN=1`:
-Jak at the train, triangle), the arena's training orbs (`JAK_ENHANCED_CENSUS=1` counts `arena-token`),
-Jak/Ashelin/Sig running, jumping and with their guns, the weather script in the desert and Spargus,
-the Enhanced menu open, and a save (`JAK_ENHANCED_SAVE_TEST=<slot>`) loaded by a second boot
-(`JAK_ENHANCED_LOAD_TEST=<slot>`, same config dir). The log lines it reads are env-free: `hour
-request/reached`, `nap request/start/end`, `nap window open`, `weather mode <n> in <level>`, `menu
-open`, `scene <name> start/end`, `continue request <cp>: sent|...`, `auto-save <mode> done|error`,
-`[air-train] ...`. Output: `GATE <row> PASS|FAIL <reasons>`, `GATE RESULT pass= fail=`, report.txt and
-report.html (with 320 px screenshots) in `local\gate\<time>\`; exit code 1 on any FAIL. A full run
-takes about 40 minutes with one instance.
+built game once per scenario row and judges each row from the outside. Rows that only need log lines
+run **headless** (`gk --no-display`, ~240 MB, `-Parallel 4` side by side); rows that need the renderer
+(fps, weather, the menu, pictures, streamed cutscenes) or load a level after the boot run in a small
+windowed test instance (`-Instances 1`; a headless gk logs "Adding level X" for a level asked mid-run
+and never finishes loading it). Instance numbers stay in 6-12 (`-FirstInstance/-LastInstance`), each
+row has its own config dir under `local\gate\<time>\cfg-<row>`, so the user's saves and settings are
+never touched. Checks: gk alive at the end, no Application event 1000 for its PID, the levels in order
+(the row's `Levels`, else its start point's level), frames coming (windowed: `[enhanced] average N fps
+... in <level>`, average >= 20; headless: the test boot's `[camera] ... in <level>` every 2 s),
+screenshots not black, and the row's `Expect` lines in order, each with its value (`(?<v>...)`) checked
+against a range where the row gives one (hour reached ~23, nap hours ~6 from `nap start/end at <hour>`,
+Ashelin's 37 shots with arm-along-shot >= 0.9, the reload and `reloaded 20`, Sig's gun-along-shot,
+the orbs counted, the bright floor in the arena 0.8 % against 1.18 % measured). A row ends early
+once all its checks are met for `-Settle` s (`-NoEarly`: full length). The test switches
+`JAK_ENHANCED_MENU=<kind>:<value>`, `JAK_ENHANCED_MENU_SCRIPT` and `JAK_ENHANCED_NAP` run on the game's
+thread (kmachine.cpp, `pc_enhanced_set_scene`), so they work headless too.
+
+The rows (`-List`; `-Only a,b` picks some, `-Games` keeps room for Jak 1/II): boot at desert-start and
+Spargus, the menu's hour picks at boot and in a burst, the nap and its window, the parked Hellcat
+flown, desert to Spargus on foot and in the Hellcat, Spargus to the desert, the air train's cutscene
+and the train itself, the arena's training orbs, the weather script in the desert and Spargus, the
+menu open (log line only: the baseline compare is the picture check), a save loaded by a second boot,
+and the playable characters: `player-jak|ashelin|sig` (`JAK_ENHANCED_PLAYER_TEST=run`: walk, run,
+run-jump, jump, double jump, square, circle; the `[player-test] state <name> at <frame>` changes must
+show target-walk, target-jump, target-double-jump, target-running-attack (Ashelin:
+target-enhanced-kick + `[ashelin-kick] done`), target-attack; and `[player-test] body-jump
+run|jumps|attacks max <m>`: the drawn body's main joint against its root, most per frame, <= 0.4 m for
+the skins, measured 0.07-0.16; for Jak himself data only, his main joint leaves his root by up to 3 m in
+the walk/run blends) and their guns headless (`player-jak-gun`, `player-ashelin-gun`, `player-sig-gun`).
+
+Screenshots against a baseline: `-MakeBaseline` keeps the run's 320 px shots in
+`local\gate\baseline\<version>\` (`-Version`, default `$env:JAK_RELEASE_VERSION` or git describe);
+`-Baseline <dir|version|none>` (default: the newest other baseline) compares each shot at 64x36 (mean
+luma difference, SSIM over 8x8 windows; per row `MaxDiff` 30 / `MinSim` 0.5) and a big change makes the
+row **WARN** (it passes), with baseline and new side by side in report.html. Output: `GATE <row>
+PASS|WARN|FAIL <fails; warns; every matched check with its value; info>`, `GATE RESULT pass= warn= fail=
+minutes=`, report.txt (one line per matched Expect with its log line) and report.html in
+`local\gate\<time>\`; numbers with dot decimals; exit code 1 on any FAIL. A full run: 15 min (15 windowed rows one
+at a time beside 10 headless, 4 at once, most rows ending early), was ~40 min (25 windowed rows one by
+one, full length).
 
 ## Graphics (game/graphics/opengl_renderer/EnhancedPost.*, shaders/enh_*)
 

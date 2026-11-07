@@ -80,7 +80,7 @@ if ($Targets -contains 'auto') {
 } elseif ($Targets -contains 'all') { $Targets = @() }
 
 # --- ninja -------------------------------------------------------------------------------------
-$ninja = (Select-String -Path $cache -Pattern '^CMAKE_MAKE_PROGRAM:FILEPATH=(.*)$').Matches[0].Groups[1].Value
+$ninja = (Select-String -Path $cache -Pattern '^CMAKE_MAKE_PROGRAM:[A-Z]+=(.*)$').Matches[0].Groups[1].Value
 $log = Join-Path $BuildDir '.ninja_log'
 # Steps of this build = log entries whose output time (3rd field) is newer than any before it: ninja
 # recompacts the log now and then (always after a CMake re-run), so line counts can't tell.
