@@ -277,6 +277,7 @@ void OpenGlDebugGui::draw_overlord_debug_menu() {
 
 namespace ImGui {
 ImFont* g_ui_font = nullptr;
+ImFont* g_ui_font_bold = nullptr;
 
 void applyFontStyle() {
   ImGuiIO& io = ImGui::GetIO();
@@ -318,6 +319,16 @@ void applyFontStyle() {
   }
   if (!g_ui_font) {
     g_ui_font = custom_font ? custom_font : default_font;
+  }
+  // and its bold face, for the Enhanced menu's title
+  g_ui_font_bold = nullptr;
+  for (const char* path : {"C:/Windows/Fonts/segoeuib.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"}) {
+    if (!g_ui_font_bold && file_util::file_exists(path)) {
+      g_ui_font_bold = io.Fonts->AddFontFromFileTTF(path, 16);
+    }
+  }
+  if (!g_ui_font_bold) {
+    g_ui_font_bold = g_ui_font;
   }
 
   io.FontDefault = Gfx::g_debug_settings.monospaced_font

@@ -32,7 +32,12 @@
 #include "game/sound/common/enhanced_ambience.h"
 
 #include "third-party/imgui/imgui.h"
+#include "third-party/imgui/imgui_internal.h"
 #include "third-party/stb_image/stb_image.h"
+
+namespace ImGui {
+extern ImFont* g_ui_font_bold;  // debug_gui.cpp: the menu title's font
+}
 
 EnhancedCamera g_enhanced_camera;
 EnhancedSun g_enhanced_sun;
@@ -283,6 +288,296 @@ const PhotoFilter kPhotoFilters[] = {
 };
 constexpr int kPhotoFilterCount = sizeof(kPhotoFilters) / sizeof(kPhotoFilters[0]);
 
+// The Enhanced menu's look (F1): a dark, slightly purple panel with a glowing amber edge, switches
+// for the on/off settings, filled amber sliders and rows of choices drawn as one bar. Only that menu:
+// draw_menu pushes the style and pops it on the way out, and the helpers below draw ImGui's own
+// widgets elsewhere (weather_menu is also in the debug window)
+bool g_menu_styled = false;
+const ImVec4 kMenuAmber(1.00f, 0.70f, 0.16f, 1.f);
+const ImVec4 kMenuOrange(1.00f, 0.48f, 0.08f, 1.f);
+const ImVec4 kMenuYellow(1.00f, 0.88f, 0.34f, 1.f);
+const ImVec4 kMenuPurple(0.64f, 0.38f, 0.98f, 1.f);
+const ImVec4 kMenuInk(0.10f, 0.06f, 0.03f, 1.f);  // text on the amber of a picked choice
+
+ImVec4 menu_rgba(const ImVec4& c, float a) {
+  return ImVec4(c.x, c.y, c.z, a);
+}
+// (through GetColorU32: faded like the rest inside BeginDisabled)
+ImU32 menu_col(const ImVec4& c, float a = 1.f) {
+  return ImGui::GetColorU32(menu_rgba(c, c.w * a));
+}
+
+// the style vars and colors of the menu, popped when it goes out of scope (every way out of draw_menu)
+struct MenuStyle {
+  int vars = 0, colors = 0;
+  MenuStyle() {
+    auto var = [&](ImGuiStyleVar v, float f) {
+      ImGui::PushStyleVar(v, f);
+      vars++;
+    };
+    auto var2 = [&](ImGuiStyleVar v, ImVec2 f) {
+      ImGui::PushStyleVar(v, f);
+      vars++;
+    };
+    auto col = [&](ImGuiCol c, ImVec4 v) {
+      ImGui::PushStyleColor(c, v);
+      colors++;
+    };
+    var(ImGuiStyleVar_WindowRounding, 10.f);
+    var(ImGuiStyleVar_WindowBorderSize, 1.5f);
+    var2(ImGuiStyleVar_WindowPadding, ImVec2(16, 12));
+    var(ImGuiStyleVar_ChildRounding, 6.f);
+    var(ImGuiStyleVar_PopupRounding, 6.f);
+    var(ImGuiStyleVar_PopupBorderSize, 1.f);
+    var(ImGuiStyleVar_FrameRounding, 5.f);
+    var(ImGuiStyleVar_FrameBorderSize, 0.f);
+    var2(ImGuiStyleVar_FramePadding, ImVec2(8, 4));
+    var2(ImGuiStyleVar_ItemSpacing, ImVec2(8, 6));
+    var(ImGuiStyleVar_GrabRounding, 5.f);
+    var(ImGuiStyleVar_GrabMinSize, 12.f);
+    var(ImGuiStyleVar_ScrollbarRounding, 6.f);
+    var(ImGuiStyleVar_SeparatorTextBorderSize, 2.f);
+    col(ImGuiCol_Text, ImVec4(0.97f, 0.93f, 0.87f, 1.f));
+    col(ImGuiCol_TextDisabled, ImVec4(0.63f, 0.56f, 0.70f, 1.f));
+    col(ImGuiCol_WindowBg, ImVec4(0.07f, 0.05f, 0.11f, 1.f));
+    col(ImGuiCol_PopupBg, ImVec4(0.10f, 0.07f, 0.16f, 0.97f));
+    col(ImGuiCol_Border, menu_rgba(kMenuAmber, 0.85f));
+    col(ImGuiCol_FrameBg, ImVec4(0.17f, 0.11f, 0.24f, 0.90f));
+    col(ImGuiCol_FrameBgHovered, ImVec4(0.27f, 0.16f, 0.40f, 0.95f));
+    col(ImGuiCol_FrameBgActive, ImVec4(0.34f, 0.20f, 0.50f, 1.f));
+    col(ImGuiCol_Button, ImVec4(0.21f, 0.13f, 0.29f, 0.95f));
+    col(ImGuiCol_ButtonHovered, ImVec4(0.45f, 0.26f, 0.72f, 1.f));
+    col(ImGuiCol_ButtonActive, kMenuOrange);
+    col(ImGuiCol_Header, menu_rgba(kMenuOrange, 0.28f));
+    col(ImGuiCol_HeaderHovered, menu_rgba(kMenuPurple, 0.50f));
+    col(ImGuiCol_HeaderActive, menu_rgba(kMenuPurple, 0.70f));
+    col(ImGuiCol_CheckMark, kMenuYellow);
+    col(ImGuiCol_SliderGrab, kMenuAmber);
+    col(ImGuiCol_SliderGrabActive, kMenuYellow);
+    col(ImGuiCol_Separator, menu_rgba(kMenuPurple, 0.55f));
+    col(ImGuiCol_SeparatorHovered, kMenuPurple);
+    col(ImGuiCol_SeparatorActive, kMenuPurple);
+    col(ImGuiCol_ScrollbarBg, ImVec4(0.f, 0.f, 0.f, 0.f));
+    col(ImGuiCol_ScrollbarGrab, menu_rgba(kMenuAmber, 0.45f));
+    col(ImGuiCol_ScrollbarGrabHovered, menu_rgba(kMenuAmber, 0.70f));
+    col(ImGuiCol_ScrollbarGrabActive, kMenuAmber);
+    col(ImGuiCol_NavCursor, kMenuPurple);
+    col(ImGuiCol_TextSelectedBg, menu_rgba(kMenuPurple, 0.45f));
+    g_menu_styled = true;
+  }
+  ~MenuStyle() {
+    ImGui::PopStyleColor(colors);
+    ImGui::PopStyleVar(vars);
+    g_menu_styled = false;
+  }
+};
+
+// an on/off switch where the menu had a checkbox: the same id, the same answer (true when flipped),
+// the label clickable too; a checkbox outside the menu
+bool menu_toggle(const char* label, bool* v) {
+  if (!g_menu_styled) {
+    return ImGui::Checkbox(label, v);
+  }
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const float h = ImGui::GetFrameHeight();
+  const float sw_h = std::round(h * 0.68f), sw_w = std::round(sw_h * 1.85f);
+  const ImVec2 text = ImGui::CalcTextSize(label, nullptr, true);
+  const ImVec2 pos = ImGui::GetCursorScreenPos();
+  const bool pressed = ImGui::InvisibleButton(label, ImVec2(sw_w + st.ItemInnerSpacing.x * 2 + text.x, h));
+  if (pressed) {
+    *v = !*v;
+  }
+  const ImGuiID id = ImGui::GetItemID();
+  const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
+  // the knob slides over a few frames
+  ImGuiStorage* store = ImGui::GetStateStorage();
+  float t = store->GetFloat(id, *v ? 1.f : 0.f);
+  const float target = *v ? 1.f : 0.f;
+  const float step = ImGui::GetIO().DeltaTime * 10.f;
+  t = t < target ? std::min(target, t + step) : std::max(target, t - step);
+  store->SetFloat(id, t);
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImVec2 a(pos.x, pos.y + (h - sw_h) * 0.5f), b(a.x + sw_w, a.y + sw_h);
+  const float r = sw_h * 0.5f;
+  const ImVec4 off(0.20f, 0.13f, 0.29f, 1.f);
+  const ImVec4 on = held ? kMenuYellow : hovered ? kMenuAmber : kMenuOrange;
+  const ImVec4 track(off.x + (on.x - off.x) * t, off.y + (on.y - off.y) * t, off.z + (on.z - off.z) * t, 1.f);
+  dl->AddRectFilled(a, b, menu_col(track), r);
+  dl->AddRect(a, b, hovered ? menu_col(kMenuPurple) : menu_col(kMenuPurple, 0.45f + 0.3f * (1.f - t)), r, 0,
+              1.f);
+  const ImVec2 knob(a.x + r + (sw_w - sw_h) * t, a.y + r);
+  dl->AddCircleFilled(knob, r - 2.5f,
+                      menu_col(ImVec4(0.72f + 0.28f * t, 0.66f + 0.29f * t, 0.80f - 0.02f * t, 1.f)));
+  dl->AddText(ImVec2(b.x + st.ItemInnerSpacing.x * 2, pos.y + st.FramePadding.y),
+              ImGui::GetColorU32(ImGuiCol_Text), label, ImGui::FindRenderedTextEnd(label));
+  ImGui::RenderNavCursor(ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()), id);
+  return pressed;
+}
+
+// one choice of a row drawn as one bar (place 0: the first, 1: between, 2: the last); the picked
+// one amber. Drawn next to each other with SameLine(0, 0)
+bool menu_segment(const char* label, bool picked, float width, int place) {
+  const float h = ImGui::GetFrameHeight();
+  const ImVec2 pos = ImGui::GetCursorScreenPos();
+  const bool pressed = ImGui::InvisibleButton(label, ImVec2(width, h));
+  const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const ImVec2 b(pos.x + width, pos.y + h);
+  const ImDrawFlags corners = place == 0   ? ImDrawFlags_RoundCornersLeft
+                              : place == 2 ? ImDrawFlags_RoundCornersRight
+                                           : ImDrawFlags_RoundCornersNone;
+  const float rounding = ImGui::GetStyle().FrameRounding;
+  ImVec4 fill = picked ? (hovered ? kMenuYellow : kMenuAmber)
+                : held ? kMenuOrange
+                : hovered ? ImVec4(0.45f, 0.26f, 0.72f, 1.f)
+                          : ImVec4(0.17f, 0.11f, 0.24f, 0.95f);
+  dl->AddRectFilled(pos, b, menu_col(fill), rounding, corners);
+  if (picked) {
+    // a brighter line on top, as lit from above
+    dl->AddRectFilled(ImVec2(pos.x + 2, pos.y + 1), ImVec2(b.x - 2, pos.y + 3), menu_col(kMenuYellow, 0.9f),
+                      1.f);
+  }
+  if (place != 0) {
+    dl->AddLine(ImVec2(pos.x, pos.y + 4), ImVec2(pos.x, b.y - 4), menu_col(kMenuPurple, 0.6f));
+  }
+  dl->AddRect(pos, b, menu_col(kMenuAmber, picked ? 0.9f : 0.30f), rounding, corners, 1.f);
+  const ImVec2 text = ImGui::CalcTextSize(label, nullptr, true);
+  dl->AddText(ImVec2(pos.x + (width - text.x) * 0.5f, pos.y + (h - text.y) * 0.5f),
+              picked && !held ? menu_col(kMenuInk) : ImGui::GetColorU32(ImGuiCol_Text), label,
+              ImGui::FindRenderedTextEnd(label));
+  ImGui::RenderNavCursor(ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax()), ImGui::GetItemID());
+  return pressed;
+}
+
+// a slider whose track fills with amber up to its value (the slider draws over it, its own frame
+// left clear); ImGui's plain slider outside the menu
+template <typename F>
+bool menu_slider(float frac, F&& slider) {
+  if (!g_menu_styled) {
+    return slider();
+  }
+  const float w = ImGui::CalcItemWidth(), h = ImGui::GetFrameHeight();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  for (ImGuiCol c : {ImGuiCol_FrameBg, ImGuiCol_FrameBgHovered, ImGuiCol_FrameBgActive}) {
+    ImGui::PushStyleColor(c, ImVec4(0.f, 0.f, 0.f, 0.f));
+  }
+  const bool changed = slider();
+  ImGui::PopStyleColor(3);
+  const bool hovered = ImGui::IsItemHovered(), active = ImGui::IsItemActive();
+  dl->ChannelsSetCurrent(0);
+  const ImGuiStyle& st = ImGui::GetStyle();
+  const ImVec2 a = ImGui::GetItemRectMin(), b(a.x + w, a.y + h);
+  dl->AddRectFilled(a, b,
+                    active    ? ImGui::GetColorU32(ImGuiCol_FrameBgActive)
+                    : hovered ? ImGui::GetColorU32(ImGuiCol_FrameBgHovered)
+                              : ImGui::GetColorU32(ImGuiCol_FrameBg),
+                    st.FrameRounding);
+  // (to the grab's middle: it moves inside the frame less its size and 2 pixels each side)
+  const float x = a.x + 2.f + st.GrabMinSize * 0.5f + std::clamp(frac, 0.f, 1.f) * (w - 4.f - st.GrabMinSize);
+  dl->AddRectFilled(a, ImVec2(x, b.y), menu_col(kMenuOrange, active ? 0.55f : 0.40f), st.FrameRounding,
+                    ImDrawFlags_RoundCornersLeft);
+  dl->AddRectFilled(ImVec2(a.x + 1, b.y - 3), ImVec2(x, b.y - 1), menu_col(kMenuAmber, 0.9f), 1.f);
+  dl->ChannelsMerge();
+  return changed;
+}
+bool menu_slider_float(const char* label, float* v, float lo, float hi, const char* format) {
+  return menu_slider((*v - lo) / (hi - lo),
+                     [&] { return ImGui::SliderFloat(label, v, lo, hi, format); });
+}
+bool menu_slider_int(const char* label, int* v, int lo, int hi, const char* format = "%d") {
+  return menu_slider(float(*v - lo) / float(hi - lo),
+                     [&] { return ImGui::SliderInt(label, v, lo, hi, format); });
+}
+
+// a section of the menu: an amber bar on its left (purple when the pointer is on it)
+bool menu_section(const char* label, ImGuiTreeNodeFlags flags = 0) {
+  const bool open = ImGui::CollapsingHeader(label, flags);
+  const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  const bool hovered = ImGui::IsItemHovered();
+  dl->AddRectFilled(a, ImVec2(a.x + 4.f, b.y), menu_col(hovered ? kMenuPurple : kMenuAmber), 2.f,
+                    ImDrawFlags_RoundCornersLeft);
+  dl->AddLine(ImVec2(a.x, b.y), b, menu_col(hovered ? kMenuPurple : kMenuOrange, 0.6f));
+  return open;
+}
+
+// a heading inside a section, in amber over a purple line
+void menu_subhead(const char* label) {
+  ImGui::PushStyleColor(ImGuiCol_Text, kMenuAmber);
+  ImGui::SeparatorText(label);
+  ImGui::PopStyleColor();
+}
+
+// the title bar: JAK ENHANCED in bold, the credit and which keys close it smaller, on a band with
+// an amber-to-purple line under it (drawn after the text, under it, through a second channel)
+void menu_title(const char* closes) {
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->ChannelsSplit(2);
+  dl->ChannelsSetCurrent(1);
+  const ImVec2 start = ImGui::GetCursorScreenPos();
+  const float size = ImGui::GetStyle().FontSizeBase;
+  ImGui::PushFont(ImGui::g_ui_font_bold, size * 1.75f);
+  const ImVec2 title_pos = ImGui::GetCursorScreenPos();
+  const char* title = "JAK ENHANCED";
+  const ImVec2 title_size = ImGui::CalcTextSize(title);
+  // a soft orange glow behind the letters
+  for (int i = 0; i < 4; i++) {
+    const float dx = i == 0 ? -1.5f : i == 1 ? 1.5f : 0.f, dy = i == 2 ? -1.5f : i == 3 ? 1.5f : 0.f;
+    dl->AddText(ImVec2(title_pos.x + dx, title_pos.y + dy), menu_col(kMenuOrange, 0.35f), title);
+  }
+  ImGui::TextColored(kMenuYellow, "%s", title);
+  ImGui::PopFont();
+  ImGui::PushFont(nullptr, size * 0.875f);
+  const float small_h = ImGui::GetTextLineHeight();
+  const float base = title_pos.y + title_size.y - small_h - 4.f;
+  ImGui::SameLine(0, 12);
+  ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, base));
+  ImGui::TextColored(menu_rgba(kMenuPurple, 1.f), "TRILOGY");
+  ImGui::SameLine(0, 6);
+  ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, base));
+  ImGui::TextDisabled("by stichlola");
+  // the keys that close it, at the right edge: its room kept after the credit (so the window, which
+  // fits its contents, doesn't chase its own width), the text drawn at the edge
+  const ImVec2 hint = ImGui::CalcTextSize(closes);
+  ImGui::SameLine(0, 32);
+  const ImVec2 hint_pos(ImGui::GetCursorScreenPos().x, base);
+  ImGui::SetCursorScreenPos(hint_pos);
+  ImGui::Dummy(hint);
+  const float right = ImGui::GetWindowPos().x + ImGui::GetWindowWidth() - ImGui::GetStyle().WindowPadding.x;
+  dl->AddText(ImVec2(std::max(hint_pos.x, right - hint.x), base), ImGui::GetColorU32(ImGuiCol_TextDisabled), closes);
+  ImGui::PopFont();
+  ImGui::SetCursorScreenPos(ImVec2(start.x, title_pos.y + title_size.y + 4.f));
+  const float band_bottom = ImGui::GetCursorScreenPos().y + 4.f;
+  ImGui::Dummy(ImVec2(0, 8.f));
+  dl->ChannelsSetCurrent(0);
+  const ImVec2 wp = ImGui::GetWindowPos();
+  const float ww = ImGui::GetWindowWidth();
+  const float rounding = ImGui::GetStyle().WindowRounding;
+  dl->AddRectFilled(ImVec2(wp.x + 1, wp.y + 1), ImVec2(wp.x + ww - 1, band_bottom),
+                    ImGui::GetColorU32(ImVec4(0.17f, 0.08f, 0.22f, 0.85f)), rounding - 1.f,
+                    ImDrawFlags_RoundCornersTop);
+  dl->AddRectFilledMultiColor(ImVec2(wp.x + 1, band_bottom - 2.f), ImVec2(wp.x + ww - 1, band_bottom),
+                              menu_col(kMenuAmber), menu_col(kMenuPurple), menu_col(kMenuPurple),
+                              menu_col(kMenuAmber));
+  dl->ChannelsMerge();
+}
+
+// the glow round the panel's amber edge, behind the windows
+void menu_glow() {
+  const ImVec2 a = ImGui::GetWindowPos();
+  const ImVec2 b(a.x + ImGui::GetWindowWidth(), a.y + ImGui::GetWindowHeight());
+  const float rounding = ImGui::GetStyle().WindowRounding;
+  ImDrawList* bg = ImGui::GetBackgroundDrawList();
+  for (int i = 1; i <= 6; i++) {
+    const float d = i * 1.5f;
+    bg->AddRect(ImVec2(a.x - d, a.y - d), ImVec2(b.x + d, b.y + d),
+                ImGui::GetColorU32(menu_rgba(kMenuOrange, 0.16f * (1.f - i / 7.f))), rounding + d, 0, 2.f);
+  }
+}
+
 // the weather in a menu: the presets, and under them the mix (moving a slider makes it "Custom")
 void weather_menu(EnhancedPost::Settings& s, const char* id) {
   ImGui::SetNextItemWidth(200);
@@ -320,8 +615,8 @@ void weather_menu(EnhancedPost::Settings& s, const char* id) {
     ImGui::SetNextItemWidth(160);
     float v = s.weather_mix[i];
     const float lo = i == 8 ? -0.01f : 0.f;  // wet ground below 0: as wet as it rains
-    if (ImGui::SliderFloat(fmt::format("{}##{}", names[i], id).c_str(), &v, lo, top[i],
-                           i == 8 && v < 0.f ? "with the rain" : "%.2f")) {
+    if (menu_slider_float(fmt::format("{}##{}", names[i], id).c_str(), &v, lo, top[i],
+                          i == 8 && v < 0.f ? "with the rain" : "%.2f")) {
       s.weather_mix[i] = v;
       s.weather = kWeatherCustom;
     }
@@ -5853,19 +6148,25 @@ void EnhancedPost::draw_photo_hint() {
 
 void EnhancedPost::draw_menu() {
   ImGui::SetNextWindowPos(ImVec2(30, 60), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowBgAlpha(0.85f);
+  ImGui::SetNextWindowBgAlpha(0.88f);
   // (focused as it opens, so a pad can move through it right away)
   static int drawn_frame = -10;
   if (ImGui::GetFrameCount() - drawn_frame > 1) {
     ImGui::SetNextWindowFocus();
   }
   drawn_frame = ImGui::GetFrameCount();
-  // no close button: \ or F1 closes it (and gives the mouse back to the camera); Select + R3 on a pad
+  // the menu's own look, popped on every way out (see MenuStyle)
+  const MenuStyle style;
+  // no close button: \ or F1 closes it (and gives the mouse back to the camera); Select + R3 on a pad.
+  // Its own title bar is drawn inside (menu_title); the name stays the window's id, so it keeps
+  // where it was put
   if (!ImGui::Begin("Jak Enhanced Trilogy by stichlola  ( \\, F1 or Select+R3 closes )", nullptr,
-                    ImGuiWindowFlags_AlwaysAutoResize)) {
+                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoTitleBar)) {
     ImGui::End();
     return;
   }
+  menu_glow();
+  menu_title("\\, F1 or Select+R3 closes");
   auto& s = m_settings;
   // photo mode: in and out, and while it's on its filter
   if (!enhanced_light() &&
@@ -5900,18 +6201,24 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SameLine();
     ImGui::SetNextItemWidth(120);
-    ImGui::SliderFloat("Vignette##photo", &s.photo_vignette, 0.f, 1.f, "%.2f");
+    menu_slider_float("Vignette##photo", &s.photo_vignette, 0.f, 1.f, "%.2f");
     ImGui::TextDisabled("Close this menu (F1), then F2 takes the picture (in your OpenGOAL screenshots folder).");
   }
-  if (ImGui::CollapsingHeader("Graphics", ImGuiTreeNodeFlags_DefaultOpen)) {
+  // the preset last picked, lit in its row until a setting changes (only the look: nothing reads it)
+  static int preset_lit = -1;
+  static std::string preset_lit_settings;
+  if (menu_section("Graphics", ImGuiTreeNodeFlags_DefaultOpen)) {
     // (in the menu's order: Performance sits between Classic and Medium)
     static const char* presets[] = {"Classic", "Performance", "Medium", "Maximum"};
     static const int preset_ids[] = {0, 3, 1, 2};
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted("Preset:");
     for (int i = 0; i < 4; i++) {
-      ImGui::SameLine();
-      if (ImGui::Button(presets[i], ImVec2(110, 0))) {
+      ImGui::SameLine(0, i == 0 ? -1.f : 0.f);
+      if (menu_segment(presets[i], preset_lit == i, 110, i == 0 ? 0 : i == 3 ? 2 : 1)) {
         apply_preset(preset_ids[i]);
+        preset_lit = i;
+        preset_lit_settings.clear();
       }
     }
     // the game's nap window (and the beds, the report: not in Enhanced Light)
@@ -5969,7 +6276,7 @@ void EnhancedPost::draw_menu() {
             "and settings go with it (a window opens over the game: Alt+Tab if you don't see it)");
       }
     }
-    ImGui::Checkbox("Enhanced graphics (all)", &s.enabled);
+    menu_toggle("Enhanced graphics (all)", &s.enabled);
     ImGui::BeginDisabled(!s.enabled);
     // two columns of switches
     int n = 0;
@@ -5977,7 +6284,7 @@ void EnhancedPost::draw_menu() {
       if (n++ % 2) {
         ImGui::SameLine(260);
       }
-      return ImGui::Checkbox(label, value);
+      return menu_toggle(label, value);
     };
     check("Antialiasing (TAA)", &s.taa);
     check("Volumetric mist", &s.volume);
@@ -6065,11 +6372,11 @@ void EnhancedPost::draw_menu() {
       s.motes = motes ? 1.f : 0.f;
     }
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
+    menu_slider_float("Vivid colors", &s.vivid, 0.f, 1.f, "%.2f");
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
+    menu_slider_float("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Snow on the ground", &s.snow_cover, 0.f, 1.f, "%.2f");
+    menu_slider_float("Snow on the ground", &s.snow_cover, 0.f, 1.f, "%.2f");
     // the subtitles' size (accessibility): the default is smaller than the PS2's
     {
       static const int kSizes[] = {100, 120, 138, 170};
@@ -6089,16 +6396,16 @@ void EnhancedPost::draw_menu() {
     ImGui::SetNextItemWidth(200);
     ImGui::Combo("Vegetation", &g_enhanced_vegetation, "Classic\0Moderate\0Lush\0");
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
+    menu_slider_float("Detailed scenery", &g_enhanced_scenery_dist, 0.f, 120.f, "%.0f m");
     {
       bool smooth = g_enhanced_smooth_chars > 0;
-      if (ImGui::Checkbox("Smoother characters (after a restart)", &smooth)) {
+      if (menu_toggle("Smoother characters (after a restart)", &smooth)) {
         g_enhanced_smooth_chars = smooth ? 1 : 0;
       }
     }
     ImGui::BeginDisabled(!s.lights);
     ImGui::SetNextItemWidth(200);
-    ImGui::SliderFloat("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
+    menu_slider_float("Lamp strength", &s.lamp_strength, 0.f, 3.f, "%.2f");
     if (ImGui::TreeNode("Place a light")) {
       // a light of your own where Jak stands, 2.5 m up (saved in game/assets/enhanced/lights.json)
       static float color[3] = {1.f, 0.62f, 0.32f};
@@ -6107,8 +6414,8 @@ void EnhancedPost::draw_menu() {
       ImGui::SetNextItemWidth(200);
       ImGui::ColorEdit3("Color##ml", color);
       ImGui::SetNextItemWidth(200);
-      ImGui::SliderFloat("Radius (m)##ml", &radius, 2.f, 40.f, "%.0f");
-      ImGui::Checkbox("Flickers like a fire##ml", &flicker);
+      menu_slider_float("Radius (m)##ml", &radius, 2.f, 40.f, "%.0f");
+      menu_toggle("Flickers like a fire##ml", &flicker);
       auto& list = g_manual_lights[game_index()];
       const auto& pl = g_enhanced_player;
       if (ImGui::Button("Add a light here") && pl.valid) {
@@ -6144,7 +6451,7 @@ void EnhancedPost::draw_menu() {
       ImGui::TreePop();
     }
     ImGui::EndDisabled();
-    ImGui::SeparatorText("Water");
+    menu_subhead("Water");
     n = 0;
     bool swell = s.water_swell > 0.f, refr = s.water_refraction > 0.f, caus = s.water_caustics > 0.f;
     check("Reflections", &s.water_reflections);
@@ -6159,7 +6466,7 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::EndDisabled();
   }
-  if (ImGui::CollapsingHeader("City", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (menu_section("City", ImGuiTreeNodeFlags_DefaultOpen)) {
     // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
     // enhanced-population-count); the game reads the same variable at boot
     ImGui::SetNextItemWidth(200);
@@ -6168,24 +6475,24 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SetNextItemWidth(200);
     int fov = g_enhanced_menu.fov;
-    if (ImGui::SliderInt("Field of view %", &fov, 80, 140)) {
+    if (menu_slider_int("Field of view %", &fov, 80, 140)) {
       g_enhanced_menu.fov = fov;
     }
     bool map = g_enhanced_menu.minimap;
-    if (ImGui::Checkbox("Minimap", &map)) {
+    if (menu_toggle("Minimap", &map)) {
       g_enhanced_menu.minimap = map;
     }
     ImGui::BeginDisabled(!map);
     ImGui::SetNextItemWidth(200);
     int map_size = g_enhanced_menu.minimap_size;
-    if (ImGui::SliderInt("Minimap size %", &map_size, 50, 100)) {
+    if (menu_slider_int("Minimap size %", &map_size, 50, 100)) {
       g_enhanced_menu.minimap_size = map_size;
     }
     ImGui::EndDisabled();
     if (g_game_version == GameVersion::Jak3) {
       // (off: none parked, and one left out goes once Jak is out of it; enhanced-hellcat-update)
       bool hellcat = g_enhanced_menu.desert_hellcat;
-      if (ImGui::Checkbox("Hellcat in the desert", &hellcat)) {
+      if (menu_toggle("Hellcat in the desert", &hellcat)) {
         g_enhanced_menu.desert_hellcat = hellcat;
       }
       if (ImGui::IsItemHovered()) {
@@ -6208,7 +6515,7 @@ void EnhancedPost::draw_menu() {
     // (not in Enhanced Light: the game plays as it was, see pc_enhanced_storm_drag and the rest)
     bool play_weather = g_enhanced_play_weather.enabled;
     if (!enhanced_light()) {
-      if (ImGui::Checkbox("Weather and night affect play", &play_weather)) {
+      if (menu_toggle("Weather and night affect play", &play_weather)) {
         g_enhanced_play_weather.enabled = play_weather;
       }
       if (ImGui::IsItemHovered()) {
@@ -6217,7 +6524,7 @@ void EnhancedPost::draw_menu() {
             "more marauders roam the desert at night (Jak 3)");
       }
       bool balance = g_enhanced_balance;
-      if (ImGui::Checkbox("Enhanced balance (Jak 3)", &balance)) {
+      if (menu_toggle("Enhanced balance (Jak 3)", &balance)) {
         g_enhanced_balance = balance;
       }
       if (ImGui::IsItemHovered()) {
@@ -6231,30 +6538,44 @@ void EnhancedPost::draw_menu() {
     }
   }
   save_menu_settings();
-  if (ImGui::CollapsingHeader("Time of day", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (preset_lit >= 0) {
+    if (preset_lit_settings.empty()) {
+      preset_lit_settings = m_saved_settings;
+    } else if (preset_lit_settings != m_saved_settings) {
+      preset_lit = -1;
+    }
+  }
+  if (menu_section("Time of day", ImGuiTreeNodeFlags_DefaultOpen)) {
     struct Hour {
       const char* name;
       int hour;
     };
     static const Hour hours[] = {{"Dawn", 6},    {"Morning", 9},  {"Noon", 12},
                                  {"Sunset", 18}, {"Evening", 20}, {"Night", 23}};
+    // the one the clock is at (within an hour and a half) lit in the row
+    float now = 12.f;
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+      now = g_enhanced_scene.hour;
+    }
     for (int i = 0; i < 6; i++) {
       if (i % 3) {
-        ImGui::SameLine();
+        ImGui::SameLine(0, 0);
       }
-      if (ImGui::Button(hours[i].name, ImVec2(159, 0))) {
+      const float away = std::fabs(std::fmod(now - hours[i].hour + 36.f, 24.f) - 12.f);  // round the clock
+      if (menu_segment(hours[i].name, away < 1.5f, 162, i % 3)) {
         g_enhanced_menu.ask(1, std::to_string(hours[i].hour));
       }
     }
     static int hour = 12;
     ImGui::SetNextItemWidth(260);
-    ImGui::SliderInt("##hour", &hour, 0, 23, "%d:00");
+    menu_slider_int("##hour", &hour, 0, 23, "%d:00");
     ImGui::SameLine();
     if (ImGui::Button("Set")) {
       g_enhanced_menu.ask(1, std::to_string(hour));
     }
     static bool frozen = false;
-    if (ImGui::Checkbox("Freeze time", &frozen)) {
+    if (menu_toggle("Freeze time", &frozen)) {
       g_enhanced_menu.ask(4, frozen ? "0" : "1");
     }
     // this evening's sky (each evening picks its own: this sets it by hand)
@@ -6271,11 +6592,11 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::SameLine();
     bool red = m_red_sunset;
-    if (ImGui::Checkbox("Red sunset", &red)) {
+    if (menu_toggle("Red sunset", &red)) {
       m_sky_force_red = red ? 1 : 0;
     }
   }
-  if (ImGui::CollapsingHeader("Controls")) {
+  if (menu_section("Controls")) {
     // the Enhanced shortcuts on the keyboard (the game's own buttons are in its Options menu)
     static const char* names[EnhancedMenu::kShortcuts] = {"This menu (\\ too)", "Photo mode",
                                                           "Nap", "Next game of the trilogy"};
@@ -6299,7 +6620,7 @@ void EnhancedPost::draw_menu() {
     ImGui::TextDisabled("Pad: Select opens the nap window, Select + R3 this menu.");
     ImGui::TextDisabled("The game's own buttons: its Options menu.");
   }
-  if (ImGui::CollapsingHeader("My Levels", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (menu_section("My Levels", ImGuiTreeNodeFlags_DefaultOpen)) {
     // (read again now and then: the editor or an import may have changed them)
     static std::vector<EnhancedLevelInfo> levels;
     static double levels_read = -100.0;
@@ -6329,7 +6650,7 @@ void EnhancedPost::draw_menu() {
       enhanced_level_leave();
     }
   }
-  if (ImGui::CollapsingHeader("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (menu_section("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
     int shown = 0;
     for (const auto& p : enhanced_places()) {
       if (shown++ % 2) {
