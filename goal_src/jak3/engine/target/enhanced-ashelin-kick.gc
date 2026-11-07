@@ -1,0 +1,296 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: enhanced-ashelin-kick.gc
+;; name in dgo: enhanced-ashelin-kick
+;; dgos: GAME
+
+;; Enhanced: Ashelin's front kick, in place of Jak's punch (square, standing or running) while she is the
+;; player's model (enhanced-player.gc). Her art group (ashelin-ag) has no kick and Jak's attacks are a spin
+;; kick and punches, so it is made here by hand: a 0.7 s timeline of her right leg chambered (knee up,
+;; shin hanging), then thrust straight out to about her head's height, held, pulled back and set down, her
+;; left leg straight, her chest leaning back and her arms up guarding. Each posed bone is aimed (its child
+;; joint's direction, in her model space: +z forward, +y up, -x her right) on top of her idle, what hangs
+;; from it following, so it doesn't depend on her joints' own axes.
+;; Jak's target (hidden) runs target-enhanced-kick: his punch's events and surface, a small step forward
+;; (about 0.7 m), and the punch's damage ('punch: same attack, same reactions) only while the leg is out,
+;; from a sphere on her kicking foot. Out of the punch, the running punch (same state, square while
+;; running) kicks too; the dive (square in the air) and the spin kick (circle) stay Jak's.
+;; *enhanced-ashelin-kick-freeze* (REPL, seconds into the kick, -1 off): holds the pose at that point (for
+;; screenshots); the hit sphere follows it.
+
+(define *enhanced-ashelin-kick-phase* -1.0)   ;; seconds into the kick now, -1: not kicking
+(define *enhanced-ashelin-kick-freeze* -1.0)
+(define *enhanced-ashelin-kick-start* (new 'global 'vector)) ;; where Jak stood when it began
+(define *enhanced-ashelin-kick-log* 0)
+
+(defconstant ASHELIN_KICK_LENGTH 0.7)  ;; seconds
+(defconstant ASHELIN_KICK_HIT_FROM 0.2)
+(defconstant ASHELIN_KICK_HIT_TO 0.46)
+
+(defun enhanced-ashelin-kick-active? ()
+  "Is Ashelin kicking now (her pose comes from this file)?"
+  (and (<= 0.0 *enhanced-ashelin-kick-phase*) (enhanced-player-ashelin?))
+  )
+
+;; The bones posed: each one's joint, the joint its direction points to, and that direction (her model
+;; space) chambered and extended.
+(defconstant ASHELIN_KICK_AIMS 11)
+(define *enhanced-ashelin-kick-joints* (new 'static 'array int32 22
+  4 5     ;; chest -> neck: leaning back
+  5 6     ;; neck -> head: the head kept up, looking ahead
+  7 8     ;; left upper arm: down, forward and out
+  8 9     ;; left forearm: up toward her chin (guard)
+  10 11   ;; right upper arm
+  11 12   ;; right forearm: lower guard, at her ribs
+  14 15   ;; left thigh: the standing leg, straight
+  15 16   ;; left shin
+  18 19   ;; right thigh: knee up, then thrust out
+  19 20   ;; right shin: hanging, then in line with the thigh
+  20 21   ;; right foot: toes forward and down, then pulled back (the ball of the foot hits)
+  ))
+(define *enhanced-ashelin-kick-dirs* (new 'static 'array float 66
+  ;; chambered          extended
+  0.0 0.99 -0.12        0.0 0.95 -0.3
+  0.0 0.99 0.1          0.0 0.99 0.14
+  0.3 -0.7 0.55         0.3 -0.62 0.62
+  -0.2 0.7 0.65         -0.2 0.75 0.6
+  -0.3 -0.75 0.45       -0.3 -0.78 0.42
+  0.25 0.5 0.8          0.25 0.45 0.85
+  0.04 -1.0 -0.04       0.05 -1.0 -0.1
+  0.04 -1.0 -0.02       0.05 -1.0 -0.06
+  -0.05 0.5 0.87        -0.08 0.72 0.69
+  -0.03 -0.97 -0.05     -0.08 0.72 0.69
+  0.0 -0.55 0.83        -0.05 0.97 0.25
+  ))
+
+(defun enhanced-ashelin-kick-smooth ((x float))
+  "0-1 eased in and out."
+  (let ((c (fmax 0.0 (fmin 1.0 x))))
+    (* c c (- 3.0 (* 2.0 c)))
+    )
+  )
+
+(defun enhanced-ashelin-kick-weights! ((dst vector) (p float))
+  "At p seconds into the kick: x how much of the kick's pose (0: her stance), y how far from chambered
+   (0) to extended (1). Chamber 0-0.14 s, thrust to 0.26, held to 0.42, pulled back to 0.54, down to 0.7."
+  (set! (-> dst x) (cond
+                     ((< p 0.14) (enhanced-ashelin-kick-smooth (/ p 0.14)))
+                     ((< p 0.54) 1.0)
+                     (else (enhanced-ashelin-kick-smooth (/ (- ASHELIN_KICK_LENGTH p) 0.16)))
+                     )
+        )
+  (set! (-> dst y) (cond
+                     ((< p 0.14) 0.0)
+                     ((< p 0.26) (enhanced-ashelin-kick-smooth (/ (- p 0.14) 0.12)))
+                     ((< p 0.42) 1.0)
+                     ((< p 0.54) (enhanced-ashelin-kick-smooth (/ (- 0.54 p) 0.12)))
+                     (else 0.0)
+                     )
+        )
+  dst
+  )
+
+(defun enhanced-ashelin-kick-under? ((nodes cspace-array) (j int) (k int))
+  "Is joint j joint k or hanging from it (the gun from her right hand)?"
+  (let ((i j)
+        (n 0)
+        )
+    (while (and (>= i 0) (!= i k) (< n 16))
+      (set! i (enhanced-ashelin-gun-parent nodes i))
+      (+! n 1)
+      )
+    (= i k)
+    )
+  )
+
+(defbehavior enhanced-ashelin-kick-aim! enhanced-skin ((k int) (c int) (to vector) (w float))
+  "Turn joint k (and all that hangs from it) about itself by w of the way from its direction (toward its
+   joint c) to to (world, unit)."
+  (let* ((nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (pivot (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data k bone transform trans)))
+         (from (vector-! (new 'stack-no-clear 'vector) (-> nodes data c bone transform trans) pivot))
+         (q (new 'stack-no-clear 'quaternion))
+         (r (new 'stack-no-clear 'matrix))
+         (v (new 'stack-no-clear 'vector))
+         )
+    (set! (-> from w) 0.0)
+    (vector-normalize! from 1.0)
+    (when (and (< 0.0 w) (< (vector-dot from to) 0.9999) (< -0.9999 (vector-dot from to)))
+      (quaternion-from-two-vectors-partial! q from to w)
+      (quaternion->matrix r q)
+      (dotimes (j n)
+        (when (enhanced-ashelin-kick-under? nodes j k)
+          (let ((m (-> nodes data j bone transform)))
+            (dotimes (row 3)
+              (vector-rotate*! v (-> m vector row) r)
+              (set! (-> v w) 0.0)
+              (vector-copy! (-> m vector row) v)
+              )
+            (vector-! v (-> m trans) pivot)
+            (set! (-> v w) 0.0)
+            (vector-rotate*! v v r)
+            (vector+! (-> m trans) pivot v)
+            (set! (-> m trans w) 1.0)
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-ashelin-kick-post enhanced-skin ()
+  "Her kick's pose, after her bones are done (enhanced-skin-post, after her gun's): each aimed bone toward
+   its direction at this point of the kick, then the holstered gun back on her right thigh."
+  (when (and (enhanced-ashelin-kick-active?) (= (-> self pid) (-> *enhanced-ashelin-gun* pid)))
+    (let ((wt (enhanced-ashelin-kick-weights! (new 'stack-no-clear 'vector) *enhanced-ashelin-kick-phase*))
+          (d (new 'stack-no-clear 'vector))
+          (e (new 'stack-no-clear 'vector))
+          (nodes (-> self node-list))
+          )
+      (when (< 0.0 (-> wt x))
+        (dotimes (i ASHELIN_KICK_AIMS)
+          (let ((k (-> *enhanced-ashelin-kick-joints* (* i 2)))
+                (c (-> *enhanced-ashelin-kick-joints* (+ (* i 2) 1)))
+                (o (* i 6))
+                )
+            (when (< c (-> nodes length))
+              (set-vector! d
+                           (-> *enhanced-ashelin-kick-dirs* o)
+                           (-> *enhanced-ashelin-kick-dirs* (+ o 1))
+                           (-> *enhanced-ashelin-kick-dirs* (+ o 2))
+                           0.0
+                           )
+              (set-vector! e
+                           (-> *enhanced-ashelin-kick-dirs* (+ o 3))
+                           (-> *enhanced-ashelin-kick-dirs* (+ o 4))
+                           (-> *enhanced-ashelin-kick-dirs* (+ o 5))
+                           0.0
+                           )
+              (vector-lerp! d d e (-> wt y))
+              (set! (-> d w) 0.0)
+              (vector-normalize! d 1.0)
+              ;; her model space to the world
+              (vector-orient-by-quat! e d (-> self root quat))
+              (set! (-> e w) 0.0)
+              (vector-normalize! e 1.0)
+              (enhanced-ashelin-kick-aim! k c e (-> wt x))
+              )
+            )
+          )
+        ;; holstered, the gun goes with her (kicking) right thigh
+        (when (not (-> *enhanced-ashelin-gun* out))
+          (matrix*! (-> nodes data ASHELIN_GUN_JOINT bone transform)
+                    (-> *enhanced-ashelin-gun* holster)
+                    (-> nodes data ASHELIN_GUN_RTHIGH bone transform)
+                    )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-ashelin-kick-foot! ((dst vector))
+  "Her kicking foot (between her right ankle and ball, world), or #f with no skin."
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (when (and skin (> (-> skin node-list length) 21))
+      (vector-average! dst
+                       (-> skin node-list data 20 bone transform trans)
+                       (-> skin node-list data 21 bone transform trans)
+                       )
+      (set! (-> dst w) 1.0)
+      dst
+      )
+    )
+  )
+
+(defstate target-enhanced-kick (target)
+  :event (-> target-running-attack event)
+  :enter (-> target-running-attack enter)
+  :exit (behavior ()
+    (set! *enhanced-ashelin-kick-phase* -1.0)
+    ((-> target-running-attack exit))
+    )
+  :trans (-> target-running-attack trans)
+  :code (behavior ()
+    (ja-channel-push! 1 (seconds 0.05))
+    (ja :group! jakb-stance-loop-ja :num! min)
+    (target-start-attack)
+    (target-danger-set! 'harmless #f)
+    (vector-copy! *enhanced-ashelin-kick-start* (-> self control trans))
+    (set! *enhanced-ashelin-kick-phase* 0.0)
+    (set! *enhanced-ashelin-kick-log* 0)
+    (let ((v0 (fmin (meters 6) (-> self control ctrl-xz-vel)))
+          (danger? #f)
+          (foot (new 'stack-no-clear 'vector))
+          (p 0.0)
+          )
+      (until (and (< *enhanced-ashelin-kick-freeze* 0.0) (>= p ASHELIN_KICK_LENGTH))
+        (set! p (if (<= 0.0 *enhanced-ashelin-kick-freeze*)
+                    *enhanced-ashelin-kick-freeze*
+                    (/ (the float (- (current-time) (-> self state-time))) 300.0)
+                    )
+              )
+        (set! *enhanced-ashelin-kick-phase* (fmin p ASHELIN_KICK_LENGTH))
+        ;; off the ground: falling
+        (if (and (not (logtest? (-> self control status) (collide-status on-surface)))
+                 (time-elapsed? (-> self control last-time-on-surface) (-> *TARGET-bank* ground-timeout))
+                 (>= 0.0 (vector-dot (-> self control dynam gravity-normal) (-> self control transv)))
+                 (>= (target-height-above-ground) (-> *TARGET-bank* fall-height))
+                 )
+            (go target-falling #f)
+            )
+        ;; a run's speed gone in 0.08 s, then a small step while the leg goes out (about 0.7 m)
+        (set-forward-vel (cond
+                           ((<= 0.0 *enhanced-ashelin-kick-freeze*) 0.0)
+                           ((< p 0.08) (* v0 (- 1.0 (/ p 0.08))))
+                           ((< p 0.34) (meters 2.6))
+                           (else 0.0)
+                           )
+                         )
+        ;; the hit: the punch's attack, only while the leg is out, on her foot
+        (let ((in? (and (>= p ASHELIN_KICK_HIT_FROM) (< p ASHELIN_KICK_HIT_TO))))
+          (when (!= in? danger?)
+            (set! danger? in?)
+            (target-danger-set! (if in? 'punch 'harmless) #f)
+            (format 0 "[ashelin-kick] hit window ~A at ~,,2f s~%" (if in? "on" "off") p)
+            )
+          (when in?
+            (let ((s4 (-> self control collision-spheres 6))
+                  (s5 (-> self control collision-spheres 7))
+                  )
+              ;; not Jak's (hidden) forearm
+              (set! (-> s5 prim-core collide-as) (collide-spec))
+              (set! (-> s5 prim-core collide-with) (collide-spec))
+              (set! (-> s5 local-sphere w) 0.0)
+              ;; a sphere on her foot (transform-index -2: an offset from Jak's root, not turned)
+              (when (enhanced-ashelin-kick-foot! foot)
+                (vector-! (-> s4 local-sphere) foot (-> self control trans))
+                (set! (-> s4 local-sphere w) (meters 0.9))
+                )
+              )
+            )
+          )
+        ;; once, at full extension (her pose lags a frame): how high her foot is and how far she went
+        (when (and (zero? *enhanced-ashelin-kick-log*) (>= p 0.36) (enhanced-ashelin-kick-foot! foot))
+          (set! *enhanced-ashelin-kick-log* 1)
+          (format 0 "[ashelin-kick] extended: foot ~M up, ~M ahead; moved ~M~%"
+                  (- (-> foot y) (-> self control trans y))
+                  (vector-dot (vector-! (new 'stack-no-clear 'vector) foot (-> self control trans))
+                              (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self control quat))
+                              )
+                  (vector-vector-xz-distance (-> self control trans) *enhanced-ashelin-kick-start*)
+                  )
+          )
+        (suspend)
+        (ja :num! (loop!))
+        )
+      )
+    (format 0 "[ashelin-kick] done: moved ~M~%" (vector-vector-xz-distance (-> self control trans) *enhanced-ashelin-kick-start*))
+    (go target-stance)
+    )
+  :post target-post
+  )

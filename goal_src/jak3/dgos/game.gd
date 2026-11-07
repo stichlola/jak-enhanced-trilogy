@@ -492,5 +492,6 @@
   "entity-debug.o" ;; added
   "enhanced-player.o" ;; Enhanced: Ashelin as the player's model
   "enhanced-ashelin-gun.o" ;; Enhanced: Ashelin's own pistol
+  "enhanced-ashelin-kick.o" ;; Enhanced: Ashelin's front kick (her square)
   "enhanced-sig.o" ;; Enhanced: Sig's streamed clips
  ))

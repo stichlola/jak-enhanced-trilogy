@@ -58,8 +58,16 @@
    (rest-src   matrix 7 :inline)  ;; Jak's arm turns last seen in his plain stance (slots 0-6, world)
    (rest-src-ok symbol)           ;; rest-src holds them
    (test-state basic)             ;; JAK_ENHANCED_ASHELIN_GUN_TEST=idle: Jak's state last logged
+   (ammo        int32)            ;; rounds left in the magazine (ASHELIN_GUN_MAGAZINE full)
+   (reloading   symbol)           ;; reloading: no shots until reload-time + ASHELIN_GUN_RELOAD
+   (reload-time time-frame)
    )
   )
+
+;; her magazine: 20 rounds, then a reload (her art group has no reload clip: standing, she lowers the gun
+;; with her putaway clip and brings it back up with her takeout; moving, only the pause), with the gun sounds
+(defconstant ASHELIN_GUN_MAGAZINE 20)
+(defconstant ASHELIN_GUN_RELOAD (seconds 1.1))
 
 (define *enhanced-ashelin-gun* (new 'global 'enhanced-ashelin-gun-state))
 (set! (-> *enhanced-ashelin-gun* pid) 0)
@@ -107,8 +115,27 @@
   )
 
 (defun enhanced-character-gun-ammo? ()
-  "Does a character's own gun show its ammo? Sig's Peacemaker spends Jak's dark ammo; Ashelin's has none."
-  (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-dark-1)))
+  "Does a character's own gun show its ammo? Sig's Peacemaker spends Jak's dark ammo; Ashelin's pistol its
+   magazine."
+  (let ((g (enhanced-character-gun-hud)))
+    (or (= g (the-as int (pickup-type gun-dark-1))) (= g (the-as int (pickup-type gun-red-2))))
+    )
+  )
+
+(defun enhanced-character-gun-ammo ()
+  "The ammo count the gun HUD shows for a character's own gun: Ashelin's rounds left, Sig's Jak's dark ammo."
+  (if (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-red-2)))
+      (-> *enhanced-ashelin-gun* ammo)
+      (the int (-> *target* game gun-ammo (+ (gun->ammo (pickup-type gun-dark-1)) -15)))
+      )
+  )
+
+(defun enhanced-character-gun-max-ammo ()
+  "Its full count for the HUD (the shells and \"n/max\"): Ashelin's magazine, else 0 (the gun type's own)."
+  (if (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-red-2)))
+      ASHELIN_GUN_MAGAZINE
+      0
+      )
   )
 
 (defun enhanced-ashelin-gun-slot ((k int))
@@ -162,6 +189,9 @@
       (set! (-> st trans-anim) -1)
       (set! (-> st aimed) #f)
       (set! (-> st fire-time) 0)
+      (set! (-> st ammo) ASHELIN_GUN_MAGAZINE)
+      (set! (-> st reloading) #f)
+      (set! (-> st reload-time) 0)
       ;; holstered: the gun as far from her right thigh as in her bind pose (arms down, the gun at her side)
       (matrix-4x4-inverse! inv (-> self bind-world ASHELIN_GUN_RTHIGH))
       (matrix*! (-> st holster) (-> self bind-world ASHELIN_GUN_JOINT) inv)
@@ -198,14 +228,22 @@
                   (if (enhanced-ashelin-gun-anim? (-> self anim)) (meters 0.6) (meters 0.3))
                   )
                )
-      ;; the takeout or putaway clip once through, then on
+      ;; the takeout or putaway clip once through, then on (reloading, the putaway holds its last frame)
       (when (and (>= (-> st trans-anim) 0)
                  (= (-> self anim) (-> st trans-anim))
                  (>= (ja-frame-num 0) (the float (+ -2 (ja-num-frames 0))))
+                 (not (and (-> st reloading) (= (-> st trans-anim) ASHELIN_STANDING_TO_WAITING)))
                  )
         (set! (-> st trans-anim) -1)
         )
       (cond
+        ((and (-> st reloading)
+              (= (-> self anim) ASHELIN_STANDING_TO_WAITING)
+              (>= (ja-frame-num 0) (the float (+ -2 (ja-num-frames 0))))
+              )
+         (ja :num! (identity (the float (+ -1 (ja-num-frames 0)))))
+         #t
+         )
         ((>= (-> st trans-anim) 0)
          (enhanced-skin-play (-> st trans-anim) 1.0 (seconds 0.1))
          #t
@@ -963,8 +1001,22 @@
            (format 0 "[ashelin-gun] out (R1)~%")
            )
           )
+        ;; the magazine: reloaded ASHELIN_GUN_RELOAD after the last round (standing: the gun back up)
+        (when (and (-> st reloading) (time-elapsed? (-> st reload-time) ASHELIN_GUN_RELOAD))
+          (set! (-> st reloading) #f)
+          (set! (-> st ammo) ASHELIN_GUN_MAGAZINE)
+          (when (-> st out)
+            (sound-play "gun-takeout")
+            (when (= (-> st trans-anim) ASHELIN_STANDING_TO_WAITING)
+              (set! (-> st trans-anim) ASHELIN_WAITING_TO_STANDING)
+              (set! (-> self anim) -1)
+              )
+            )
+          (format 0 "[ashelin-gun] reloaded ~D~%" (-> st ammo))
+          )
         (let* ((own-gun-anim? (enhanced-ashelin-gun-anim? (-> self anim)))
-               (arm-on? (and (-> st out) (not busy?)))
+               ;; (reloading, the arm lets her own clip lower the gun)
+               (arm-on? (and (-> st out) (not busy?) (not (-> st reloading))))
                (fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> tgt control quat)))
                (moving? (< (meters 0.6) (-> tgt control ctrl-xz-vel)))
                )
@@ -1031,7 +1083,9 @@
                       )
             )
           ;; fire: from the gun toward the aim point
-          (when (and (-> st out) fire? (time-elapsed? (-> st fire-time) (seconds 0.25)) (< 0.5 (-> st aim-weight)))
+          (when (and (-> st out) fire? (not (-> st reloading)) (> (-> st ammo) 0)
+                     (time-elapsed? (-> st fire-time) (seconds 0.25)) (< 0.5 (-> st aim-weight))
+                     )
             (let* ((pos (vector-copy! (new 'stack-no-clear 'vector) (-> self node-list data ASHELIN_GUN_JOINT bone transform trans)))
                    (dir (if (-> st aimed)
                             (vector-! (new 'stack-no-clear 'vector) (-> st aim-pos) pos)
@@ -1049,6 +1103,18 @@
                   (set! (-> self anim) -1)
                   )
               (enhanced-ashelin-gun-fire tgt pos dir)
+              ;; one round less; the last one starts the reload
+              (+! (-> st ammo) -1)
+              (when (<= (-> st ammo) 0)
+                (set! (-> st reloading) #t)
+                (set-time! (-> st reload-time))
+                (sound-play "gun-putaway")
+                (when (and (not moving?) (logtest? (-> tgt control status) (collide-status on-surface)))
+                  (set! (-> st trans-anim) ASHELIN_STANDING_TO_WAITING)
+                  (set! (-> self anim) -1)
+                  )
+                (format 0 "[ashelin-gun] reload~%")
+                )
               ;; how well her arm (shoulder to gun) points along the shot: 1.0 = exactly
               (let ((arm-dir (vector-! (new 'stack-no-clear 'vector)
                                        (-> self node-list data ASHELIN_GUN_JOINT bone transform trans)
@@ -1058,7 +1124,8 @@
                     )
                 (set! (-> arm-dir w) 0.0)
                 (vector-normalize! arm-dir 1.0)
-                (format 0 "[ashelin-gun] fire ~A arm-along-shot ~,,2f~%" (if (-> st aimed) "at target" "ahead") (vector-dot arm-dir dir))
+                (format 0 "[ashelin-gun] fire ~A arm-along-shot ~,,2f ammo ~D~%"
+                        (if (-> st aimed) "at target" "ahead") (vector-dot arm-dir dir) (-> st ammo))
                 )
               )
             )

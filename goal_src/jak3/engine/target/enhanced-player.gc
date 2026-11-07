@@ -100,6 +100,9 @@
 (define-extern enhanced-ashelin-gun-init (function none :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
+;; Ashelin's front kick (enhanced-ashelin-kick.gc): kicking now, and her pose for it
+(define-extern enhanced-ashelin-kick-active? (function symbol))
+(define-extern enhanced-ashelin-kick-post (function none :behavior enhanced-skin))
 ;; Sig's streamed clips (enhanced-sig.gc): his walk and his cutscenes' poses
 (define-extern enhanced-sig-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-sig-own? (function symbol :behavior enhanced-skin))
@@ -390,6 +393,10 @@
       ((>= *enhanced-player-anim* 3)
        (enhanced-skin-play (min *enhanced-player-anim* (+ -1 (-> self draw art-group length))) 1.0 (seconds 0.1))
        )
+      ;; Ashelin kicking: her idle under the kick's pose (enhanced-ashelin-kick.gc)
+      ((enhanced-ashelin-kick-active?)
+       (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.1))
+       )
       ;; Ashelin standing with her gun out: her aiming stance (enhanced-ashelin-gun.gc)
       ((enhanced-ashelin-gun-animate)
        #t
@@ -422,6 +429,8 @@
         (top (-> self char top-speed))
         )
     (or (enhanced-sig-own?)
+        ;; Ashelin's kick is posed on her own idle
+        (enhanced-ashelin-kick-active?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
          ;; not just after an attack (Jak's recovery, or the next hit of a combo, is still coming)
@@ -714,6 +723,8 @@
     )
   ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
   (enhanced-ashelin-gun-post)
+  ;; her kick's pose over all that (enhanced-ashelin-kick.gc)
+  (enhanced-ashelin-kick-post)
   ;; ja-post put its draw origin (bounds, lights, shadow) on the hips of its own animation: put it on the
   ;; hips as drawn, as do-joint-math does (its bounds' centre through the origin joint)
   (let ((b (new 'stack-no-clear 'vector)))
