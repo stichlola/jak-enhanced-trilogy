@@ -42,7 +42,10 @@ class Listener {
   void send_code(std::vector<uint8_t>& code, const std::optional<std::string>& load_name = {});
   void add_debugger(Debugger* debugger);
   bool most_recent_send_was_acked() const { return got_ack; }
-  void set_default_port(GameVersion v) { m_default_port = DECI2_PORT - 1 + (int)v; }
+  // (Enhanced: JAK_ENHANCED_INSTANCE targets that instance's gk)
+  void set_default_port(GameVersion v) {
+    m_default_port = DECI2_PORT - 1 + (int)v + enhanced_port_offset();
+  }
   MemoryMap build_memory_map();
 
  private:

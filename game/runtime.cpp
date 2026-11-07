@@ -115,7 +115,9 @@ void deci2_runner(SystemThreadInterface& iface) {
   std::function<bool()> shutdown_callback = [&]() { return iface.get_want_exit(); };
 
   // create and register server
-  Deci2Server server(shutdown_callback, DECI2_PORT - 1 + (int)g_game_version);
+  // (Enhanced: JAK_ENHANCED_INSTANCE moves the port, for parallel test games)
+  Deci2Server server(shutdown_callback,
+                     DECI2_PORT - 1 + (int)g_game_version + enhanced_port_offset());
   ee::LIBRARY_sceDeci2_register(&server);
 
   // now its ok to continue with initialization
