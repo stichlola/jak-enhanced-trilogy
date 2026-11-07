@@ -92,6 +92,14 @@ ports up by 10*n (jak3 instance 2: gk 8134, nREPL 8201) and names the logs `jak3
 -Count 3 -Game jak3 -Start desert-start -Seconds 60` starts that many small windowed games, each with
 its own config dir made from `local\testcfg`, and prints alive/crashed, fps and RAM for each.
 
+Crashes: `scripts/enhanced/crash_collect.ps1 [-Hours 24] [-Out <dir>] [-Watch [-ProcessId <gk pid>]]`
+(run through `[scriptblock]::Create`) lists gk crashes from the Application events 1000/1001 (faulting
+module+offset; `unknown` = GOAL code, the offset is then the address), matches each to its
+`log\jak3[_i<n>].*.log` by the process start time and to `%LOCALAPPDATA%\CrashDumps\gk.exe.<pid>.dmp`,
+and prints time, instance, last level lines, `[enhanced]` lines, asserts and a 40-line log tail; `-Out`
+also writes a markdown report and a zip (logs, dumps unless `-NoDumps`). `-Watch` waits for the next
+crash. Read-only: it never starts or stops a game. gk keeps only ~10 logs per name, so collect soon.
+
 ## Gameplay (GOAL, live from the REPL)
 
 | Change | Global | Default |
