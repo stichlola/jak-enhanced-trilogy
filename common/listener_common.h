@@ -5,6 +5,8 @@
  * Common types shared between the compiler and the runtime for the listener connection.
  */
 
+#include <cstdlib>
+
 #include "common/common_types.h"
 
 /*!
@@ -63,3 +65,21 @@ constexpr int DECI2_PORT = 8112;  // TODO - is this a good choice?
 constexpr int DEBUG_SERVER_PORT = 8128;
 
 constexpr u16 DECI2_PROTOCOL = 0xe042;
+
+/*!
+ * Jak Enhanced: JAK_ENHANCED_INSTANCE=<n> (1-99) runs a parallel test instance. gk's listener,
+ * goalc's nREPL and debug ports all move up by 10*n, so they never meet another game's or another
+ * instance's defaults (8112-8114, 8128-8130, 8181). Unset or 0: the usual ports.
+ */
+inline int enhanced_instance_number() {
+  const char* env = std::getenv("JAK_ENHANCED_INSTANCE");
+  if (!env) {
+    return 0;
+  }
+  int n = std::atoi(env);
+  return (n > 0 && n < 100) ? n : 0;
+}
+
+inline int enhanced_port_offset() {
+  return 10 * enhanced_instance_number();
+}

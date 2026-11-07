@@ -37,7 +37,9 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  * @param verbose : should we print debug-level messages to stdout?
  */
 void setup_logging(const std::string& game_name, bool verbose, bool disable_ansi_colors) {
-  lg::set_file(game_name);
+  // (Enhanced: a parallel test instance logs to its own file, e.g. jak3_i2.<time>.log)
+  const int instance = enhanced_instance_number();
+  lg::set_file(instance ? fmt::format("{}_i{}", game_name, instance) : game_name);
   if (verbose) {
     lg::set_file_level(lg::level::debug);
     lg::set_stdout_level(lg::level::debug);
@@ -241,6 +243,11 @@ int main(int argc, char** argv) {
   } catch (const std::exception& e) {
     lg::error("Failed to setup logging: {}", e.what());
     return 1;
+  }
+
+  if (enhanced_instance_number()) {
+    lg::info("Enhanced instance {}: listener port {}", enhanced_instance_number(),
+             DECI2_PORT - 1 + (int)game_options.game_version + enhanced_port_offset());
   }
 
   bool force_debug_next_time = false;

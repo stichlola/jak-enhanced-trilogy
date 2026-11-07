@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <regex>
 
+#include "common/listener_common.h"
 #include "common/log/log.h"
 #include "common/repl/nrepl/ReplServer.h"
 #include "common/repl/repl_wrapper.h"
@@ -26,7 +27,9 @@ void setup_logging(const bool disable_ansi_colors) {
   if (disable_ansi_colors) {
     lg::disable_ansi_colors();
   }
-  lg::set_file("compiler");
+  // (Enhanced: a parallel test instance logs to its own file)
+  const int instance = enhanced_instance_number();
+  lg::set_file(instance ? fmt::format("compiler_i{}", instance) : "compiler");
   lg::initialize();
 }
 
@@ -111,6 +114,18 @@ int main(int argc, char** argv) {
   // Load the user's REPL config
   auto repl_config = REPL::load_repl_config(username, game_version, nrepl_port);
   repl_config.temp_debug_port = debug_port;
+  // Enhanced: JAK_ENHANCED_INSTANCE=<n> moves the default ports by 10*n (explicit ports win)
+  if (const int offset = enhanced_port_offset()) {
+    if (nrepl_port == -1) {
+      repl_config.temp_nrepl_port = repl_config.get_nrepl_port() + offset;
+    }
+    if (debug_port == -1) {
+      repl_config.temp_debug_port = repl_config.get_debug_port() + offset;
+    }
+    lg::info("Enhanced instance {}: nREPL port {}, debug port {}, gk listener port {}",
+             enhanced_instance_number(), repl_config.get_nrepl_port(),
+             repl_config.get_debug_port(), DECI2_PORT - 1 + (int)game_version + offset);
+  }
 
   // Check for a custom ISO path before we instantiate the compiler.
   if (!iso_path_override.empty()) {

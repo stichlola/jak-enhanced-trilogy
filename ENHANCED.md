@@ -86,6 +86,12 @@ Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXA
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 
+Parallel test games: `JAK_ENHANCED_INSTANCE=<n>` (1-99) moves gk's listener and goalc's nREPL/debug
+ports up by 10*n (jak3 instance 2: gk 8134, nREPL 8201) and names the logs `jak3_i<n>.*.log` /
+`compiler_i<n>.*.log`; `og_repl.py --instance n` talks to that goalc. `scripts/enhanced/multi_run.ps1
+-Count 3 -Game jak3 -Start desert-start -Seconds 60` starts that many small windowed games, each with
+its own config dir made from `local\testcfg`, and prints alive/crashed, fps and RAM for each.
+
 ## Gameplay (GOAL, live from the REPL)
 
 | Change | Global | Default |
