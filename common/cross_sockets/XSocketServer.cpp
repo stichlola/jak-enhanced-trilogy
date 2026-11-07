@@ -72,7 +72,9 @@ bool XSocketServer::init_server(bool failure_may_occur) {
   }
 
   addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = INADDR_ANY;
+  // Enhanced: this machine only (the REPL and the game's listener are local). Listening on every
+  // network made Windows' firewall ask about each new gk/goalc path (test instances, shadow copies)
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons(tcp_port);
 
   if (bind(listening_socket, (sockaddr*)&addr, sizeof(addr)) < 0) {
