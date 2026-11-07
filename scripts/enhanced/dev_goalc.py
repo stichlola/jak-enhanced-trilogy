@@ -43,6 +43,66 @@ def instance_offset(n):
     return 10 * n if 0 < n < 100 else 0
 
 
+# (mi)'s progress entries: "[ 42%] [goalc   ] " + 6 chars (blank, or the seconds) + the 70-char
+# name field (MakeSystem.cpp); with \r gone, several of them run together on one line
+PROGRESS = re.compile(r"\[\s*\d{1,3}%\] \[.{8}\] (?: {6}|\d+\.\d{3} ).{0,70}")
+
+
+class LogFilter:
+    """What goes to the log file (the reply channel still gets everything): no (mi) progress
+    entries (one per target, twice: ~90% of the log), and each marker's ~25-line fake
+    "Compilation Error" block as one "-- DEVMARK-... --" line. Real errors pass untouched."""
+
+    def __init__(self, write):
+        self.write = write
+        self.buf = ""
+        self.dashes = None     # a dashed line held back: a marker block may start with it
+        self.skip = 0          # > 0: inside a marker block (lines left before giving up)
+
+    def feed(self, s):
+        self.buf += s
+        *lines, self.buf = self.buf.split("\n")
+        out = []
+        for line in lines:
+            self._line(line, out)
+        if out:
+            self.write("".join(out))
+
+    def flush(self):
+        out = []
+        if self.dashes is not None:
+            out.append(self.dashes + "\n")
+            self.dashes = None
+        if self.buf:
+            out.append(self.buf)
+            self.buf = ""
+        if out:
+            self.write("".join(out))
+
+    def _line(self, line, out):
+        if self.skip:
+            # the block ends with "[Warning] REPL Error: Compilation Error"
+            self.skip = 0 if "REPL Error" in line else self.skip - 1
+            return
+        if PROGRESS.search(line):
+            line = PROGRESS.sub("", line)
+            if not line.strip():
+                return
+        held, self.dashes = self.dashes, None
+        if held is not None:
+            m = re.search(r'\(error "(DEVMARK-[\w-]+)"\)', line)
+            if line.startswith("From object") and m:
+                # (a prompt may lead the dashed line: "g > -----...")
+                out.append(f"{held.rstrip('-')}-- {m.group(1)} --\n")
+                self.skip = 40
+                return
+            out.append(held + "\n")
+        if line.endswith("-" * 40):
+            self.dashes = line
+            return
+        out.append(line + "\n")
+
+
 class Goalc:
     def __init__(self, args):
         self.args = args
@@ -59,6 +119,7 @@ class Goalc:
         self.connected = False
         self.loaded = {}       # rel path -> sha1 of the content the game has (after (mi) or (ml))
         self.log = open(args.log, "a", encoding="utf-8", newline="\n")
+        self.log_filter = LogFilter(self._write_log)
         env = dict(os.environ)
         if self.n > 0:
             env["JAK_ENHANCED_INSTANCE"] = str(self.n)
@@ -109,11 +170,12 @@ class Goalc:
             if not b:
                 break
             s = ANSI.sub("", b.decode("utf-8", "replace")).replace("\r", "")
-            self._write_log(s)
+            self.log_filter.feed(s)
             with self.cv:
                 self.text += s
                 self.size += len(s)
                 self.cv.notify_all()
+        self.log_filter.flush()
         with self.cv:
             self.cv.notify_all()
 
