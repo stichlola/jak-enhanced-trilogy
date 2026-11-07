@@ -2445,8 +2445,10 @@
              )
         (go target-darkjak-running-attack)
         )
-    ;; Enhanced: Ashelin (enhanced-player.gc) kicks instead, standing or running (not swimming)
-    (if (and (-> self next-state)
+    ;; Enhanced: Ashelin (enhanced-player.gc) kicks instead, standing or running (not swimming).
+    ;; Off for now: the user wants her normal punch back (the kick stays for a later use)
+    (if (and #f
+             (-> self next-state)
              (= (-> self next-state name) 'target-running-attack)
              (enhanced-player-ashelin?)
              (not (logtest? (water-flag touch-water) (-> self water flags)))
