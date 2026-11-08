@@ -211,6 +211,7 @@ uniform float tune_adapt_hi = 1.0;  // the eye's adaptation lifting a dark room:
 uniform float tune_adapt_hi_lo = 0.5;  // from this brightness (max channel) to 0.9
 uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as the game drew it, at the end (0: off)
 uniform float tune_sky_enclosed_gain = 1.1;
+uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.04;   // to here, all of the game's pixel
@@ -5467,9 +5468,19 @@ void main() {
   // depth (the palace's honeycomb lattice): the bloom of the bright panes on themselves (+40%), the
   // eye's lift of the dark room (+20%) and the grade made them flat white panes at noon (box 142,104,79,
   // vanilla 74,54,44), the lattice gone
-  if (tune_sky_enclosed_keep > 0.0 && enclosed > 0.0 && d <= 1e-7) {
+  // (the palace's panes are mostly not the sky but a blended pane with the sky painted on, ~25 m
+  // away: its draw left the normal target longer than any tag. Shaded, relit and bloomed as a wall
+  // they went cream with drifting blotches at 18h, the lattice lost: those too as the game drew them.
+  // tune_pane_keep 0: as before)
+  float pane_m = 0.0;
+  if (tune_pane_keep > 0.0 && enclosed > 0.0 && z > 0.0) {
+    vec3 gn = texture(tex_T11, tex_coord).rgb * 2.0 - 1.0;
+    pane_m = smoothstep(tune_shaft_n0, tune_shaft_n1, dot(gn, gn)) * tune_pane_keep;
+  }
+  if (tune_sky_enclosed_keep > 0.0 && enclosed > 0.0 && (d <= 1e-7 || pane_m > 0.0)) {
     vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
-    c = mix(c, game_c * tune_sky_enclosed_gain, enclosed * tune_sky_enclosed_keep);
+    c = mix(c, game_c * tune_sky_enclosed_gain,
+            enclosed * tune_sky_enclosed_keep * (d <= 1e-7 ? 1.0 : pane_m));
   }
 
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
