@@ -261,6 +261,8 @@ uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in t
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;
+uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
+uniform float tune_dusk_shade = 1.0;  // the shade's blue tint let go as the sun nears the horizon (not the desert; 0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
 uniform float tune_night_lamp_hi = 0.9;
@@ -3346,6 +3348,11 @@ void main() {
     // turned the shaded sand navy)
     float lilac = sky_day * min(sun_haze * 1.25, 1.0);
     vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
+    // (the sun near the horizon outside the desert: the whole street is in shade, the tint became
+    // the frame's color and Haven's slums went deep navy at 18-19h, red near 0: as neutral as the
+    // game's own dusk light there: the shade keeps its hue)
+    float low_sun = 1.0 - smoothstep(0.08, 0.35, world_dir(sun_dir.xyz).y);
+    tint = mix(tint, vec3(1.0), low_sun * (1.0 - lilac) * tune_dusk_shade);
     // (characters: the shade only a little cooler, never the desert's lilac: taking much more red
     // than green off yellow hair and an orange Daxter turned them olive green)
     if (chr) {
@@ -3374,7 +3381,10 @@ void main() {
       float cs = (1.0 - exp(-d * 2.5)) * min(clouds.x, 1.0) * (1.0 - clouds.w) *
                  smoothstep(0.06, 0.2, sw.y) * (1.0 - smoothstep(0.75, 0.97, clouds.y));
       // (faint in the late afternoon: the low sun's light across the valley stays whole)
-      c *= vec3(1.0) - 0.5 * (1.0 - 0.75 * golden) * cs * vec3(1.03, 0.97, 0.86);
+      // (and neutral with the sun near the horizon outside the desert: over a whole dusk street the
+      // cool tint added up with the shade's and the grade's into navy)
+      float cs_low = (1.0 - smoothstep(0.1, 0.35, sw.y)) * (1.0 - sky_day * min(sun_haze * 1.25, 1.0)) * tune_dusk_shade;
+      c *= vec3(1.0) - 0.5 * (1.0 - 0.75 * golden) * cs * mix(vec3(1.03, 0.97, 0.86), vec3(0.97), cs_low);
     }
   }
 
@@ -5123,7 +5133,11 @@ void main() {
   vec3 curve = cc * cc * (3.0 - 2.0 * cc) + (c - cc);
   c = mix(c, curve, contrast * (1.0 - 0.6 * noon * day_look));
   // (less in the brightest parts: they'd go yellow)
-  c += warmth * vec3(1.0, 0.25, -0.75) * (l - 0.35) * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
+  // (a warm grade (dusk) only a little cooler in the shadows: at 18-19h the whole of a dark street
+  // is shadow, and the full split pushed Haven's slums deep navy, red near 0)
+  float wl = l - 0.35;
+  wl *= (wl < 0.0 && warmth > 0.0) ? tune_warm_shadow : 1.0;
+  c += warmth * vec3(1.0, 0.25, -0.75) * wl * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
 
   // the desert under a high sun: the game's ground comes in near white (bluish on the slopes), the
   // grade above whiter still: its highlights rolled off softly (a film shoulder) and warmed back
