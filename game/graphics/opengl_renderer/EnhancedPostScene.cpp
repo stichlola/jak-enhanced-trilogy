@@ -83,7 +83,7 @@ void EnhancedPost::build_hiz(GLuint screen_vao,
 
 // post.sky_map (tuning.json, switches in a running game)
 bool EnhancedPost::sky_map_on() const {
-  static const EnhancedTune t_sky_map("post.sky_map", 0.f);
+  static const EnhancedTune t_sky_map("post.sky_map", 1.f);
   return (float)t_sky_map > 0.5f;
 }
 
@@ -181,6 +181,60 @@ void EnhancedPost::build_sky_map(GLuint screen_vao,
     m_sky_origin[1] = m_sky_back_origin[1];
     m_sky_valid = true;
     m_sky_row = -1;
+    // (tuning.json "post.sky_map_find" 1: logs the roofed floors nearest the camera, to test at;
+    // a floor: the lowest surface, the next one over it 2.2-12 m higher, over all of a 5x5 block)
+    static const EnhancedTune t_find("post.sky_map_find", 0.f);
+    if ((float)t_find > 0.5f) {
+      std::vector<float> px((size_t)N * N * 4);
+      glReadPixels(0, 0, N, N, GL_RGBA, GL_FLOAT, px.data());
+      std::vector<float> floor_y((size_t)N * N, -1e30f), head((size_t)N * N, 0.f);
+      for (int i = 0; i < N * N; i++) {
+        const float* h = &px[(size_t)i * 4];
+        int lo = -1;
+        for (int k = 0; k < 4; k++) {
+          if (h[k] > -1e29f) {
+            lo = k;
+          }
+        }
+        if (lo >= 1) {
+          floor_y[i] = h[lo];
+          head[i] = h[lo - 1] - h[lo];
+        }
+      }
+      struct Spot {
+        float d2, x, y, z, head;
+      };
+      std::vector<Spot> spots;
+      for (int r = 2; r < N - 2; r++) {
+        for (int c = 2; c < N - 2; c++) {
+          bool ok = true;
+          const float f0 = floor_y[r * N + c];
+          for (int dr = -2; dr <= 2 && ok; dr++) {
+            for (int dc = -2; dc <= 2 && ok; dc++) {
+              const int j = (r + dr) * N + c + dc;
+              ok = floor_y[j] > -1e29f && std::abs(floor_y[j] - f0) < 0.3f * kMeter &&
+                   head[j] > 2.2f * kMeter && head[j] < 12.f * kMeter;
+            }
+          }
+          if (ok) {
+            const float x = m_sky_origin[0] + (c + 0.5f) * cell;
+            const float z = m_sky_origin[1] + (r + 0.5f) * cell;
+            const float dx = x - cam.trans[0], dz = z - cam.trans[2];
+            spots.push_back({dx * dx + dz * dz, x, f0, z, head[r * N + c]});
+          }
+        }
+      }
+      std::sort(spots.begin(), spots.end(),
+                [](const Spot& a, const Spot& b) { return a.d2 < b.d2; });
+      lg::info("[enhanced] sky map: {} roofed floor cells", spots.size());
+      int shown = 0;
+      for (size_t i = 0; i < spots.size() && shown < 8; i += std::max<size_t>(1, spots.size() / 8)) {
+        const auto& s = spots[i];
+        lg::info("[enhanced]   roofed floor at {:.1f},{:.1f},{:.1f} m, roof {:.1f} m over it, {:.0f} m off",
+                 s.x / kMeter, s.y / kMeter, s.z / kMeter, s.head / kMeter, std::sqrt(s.d2) / kMeter);
+        shown++;
+      }
+    }
   }
   glBindFramebuffer(GL_FRAMEBUFFER, fbo);
   glViewport(vp[0], vp[1], vp[2], vp[3]);
