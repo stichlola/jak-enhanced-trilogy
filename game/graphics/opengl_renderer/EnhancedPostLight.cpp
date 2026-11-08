@@ -69,6 +69,9 @@ void EnhancedPost::update_scene() {
            ((m_zone > 0 && m_zone < (int)g_world.zones.size() &&
              g_world.zones[m_zone].name.rfind("haven", 0) == 0) ||
             level.rfind("was", 0) == 0);
+  // (the night's pale-ground press is for the slums' flagstones only: on every night level it took
+  // a third off the desert and the port)
+  m_pale_ground = g_game_version == GameVersion::Jak3 && level.rfind("ctyslum", 0) == 0;
   // every visit to a zone picks its weather anew: the spells start from a random point of their
   // cycle (the first visit of a session too). A district ("haven-industrial") is a visit of its
   // town: walking into it doesn't change the weather
