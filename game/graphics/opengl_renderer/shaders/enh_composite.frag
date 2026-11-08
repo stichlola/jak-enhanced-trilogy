@@ -197,6 +197,7 @@ uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
+uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
 uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
@@ -4872,6 +4873,12 @@ void main() {
   {
     float cl = pix_tag;
     c = mix(c, max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0), (cl > 0.505 && cl < 0.535) ? 1.0 : 0.0);
+    // characters in a shadow, once more after the grade: the grade spares them the land's evening
+    // deepening and the cloth above is the game's own color, so in a wall's shade Jak's hair and
+    // Daxter stayed sunlit over near-black ground. Darker and a little cooler, like the sky-lit ground
+    if (cl > 0.3 && cl < 0.55 && rock_sh > 0.0) {
+      c *= mix(vec3(1.0), vec3(0.92, 0.96, 1.04) * (1.0 - tune_chr_dark), rock_sh);
+    }
   }
 
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
