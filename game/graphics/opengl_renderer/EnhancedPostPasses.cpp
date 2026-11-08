@@ -987,6 +987,55 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   }
   glUniform1f(glGetUniformLocation(id, "eye_adapt"), m_adapt);
   {
+    // the player's brightness (menu "Brightness"), by the hour: night (19-21 in, 5-7 out), dawn and
+    // dusk around it, day the rest. A test switch steps the presets:
+    // JAK_ENHANCED_BRIGHT_SCRIPT=<s>:<preset>,... (seconds since the first composite)
+    static const std::vector<std::pair<double, int>> script = [] {
+      std::vector<std::pair<double, int>> steps;
+      if (const char* e = std::getenv("JAK_ENHANCED_BRIGHT_SCRIPT")) {
+        std::string str(e);
+        for (size_t pos = 0; pos < str.size();) {
+          size_t end = str.find(',', pos);
+          std::string item = str.substr(pos, end == std::string::npos ? std::string::npos : end - pos);
+          size_t colon = item.find(':');
+          if (colon != std::string::npos) {
+            steps.emplace_back(std::atof(item.c_str()), std::atoi(item.c_str() + colon + 1));
+          }
+          pos = end == std::string::npos ? str.size() : end + 1;
+        }
+      }
+      return steps;
+    }();
+    static double script_t0 = -1;
+    static size_t script_next = 0;
+    if (script_t0 < 0) {
+      script_t0 = m_time;
+    }
+    while (script_next < script.size() && m_time - script_t0 >= script[script_next].first) {
+      apply_brightness(m_settings, script[script_next].second);
+      lg::info("[enhanced] brightness preset {} ({})", script[script_next].second,
+               kBrightness[std::clamp(script[script_next].second, 0, kBrightnessPresets - 1)].name);
+      script_next++;
+    }
+    const auto& s = m_settings;
+    const float hr = m_last_hour < 0.f ? 12.f : m_last_hour;
+    auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
+    const float night = m_night;
+    const float twilight = (1.f - night) * std::max(ramp(16.5f, 18.5f, hr) * (1.f - ramp(20.f, 21.5f, hr)),
+                                                    ramp(4.5f, 5.5f, hr) * (1.f - ramp(7.f, 8.5f, hr)));
+    const float day = std::max(0.f, 1.f - night - twilight);
+    // (as an offset from 1: neutral sliders give exactly 0, and the shader skips the block)
+    const float gain = day * (s.bright_day - 1.f) + twilight * (s.bright_dusk - 1.f) +
+                       night * (s.bright_night - 1.f);
+    glUniform4f(glGetUniformLocation(id, "brightness"), gain, s.shadow_lift, s.night_vis * night, 0.f);
+    static size_t logged = 0;
+    if (logged != script_next) {
+      logged = script_next;
+      lg::info("[enhanced] brightness uniform {:.3f} {:.2f} {:.2f} (hour {:.1f}, day {:.2f} twilight {:.2f} night {:.2f})",
+               gain, s.shadow_lift, s.night_vis * night, hr, day, twilight, night);
+    }
+  }
+  {
     // the light effects: the scene before and after the sprite buckets (capture_fx, this frame's
     // both), kept out of the day's grade and added back after it (fx_day: 0 at night, as before)
     const bool fx = fx_ready();

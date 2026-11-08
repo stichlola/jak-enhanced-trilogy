@@ -175,6 +175,7 @@ uniform float dawn_fog;         // the morning's low fog
 uniform float cloud_rays;       // the low sun's rays through the gaps in the clouds
 uniform vec4 jak_fx;            // Jak in view space; w: how wet he is (0..1)
 uniform float eye_adapt;        // the eye's adaptation: the picture lifted in the dark, lowered in glare
+uniform vec4 brightness;        // the player's: exposure - 1 (by the hour), shadow lift, night fill, 0
 // the light effects (Jak 3: sprites, glows, generic shots, trails): the scene right before the
 // sprite buckets (T23) and right after them (T24). What they added is kept out of the day's grade
 // (the desert's stop-down, the shoulders, the eye's adaptation squeezed it into the bright ground)
@@ -5315,6 +5316,18 @@ void main() {
   // over the sky, went from the game's 74,54,44 to clipped white panes)
   c *= eye_adapt > 1.0 ? mix(eye_adapt, 1.0, tune_adapt_hi * smoothstep(tune_adapt_hi_lo, 0.9, max(c.r, max(c.g, c.b))))
                        : eye_adapt;
+  // the player's brightness (menu "Brightness"): neutral (all 0) skips it, the picture as before.
+  // Exposure by the hour (milder on what is already bright: the sky and lamps don't clip), then a
+  // toe that raises the darks and keeps black black, by night with a faint cool fill
+  if (brightness != vec4(0.0)) {
+    float bm = max(c.r, max(c.g, c.b));
+    float bg = 1.0 + brightness.x;
+    c *= bg > 1.0 ? mix(bg, 1.0 + (bg - 1.0) * 0.35, smoothstep(0.5, 1.0, bm)) : bg;
+    float bd = 0.09 / (dot(c, vec3(0.299, 0.587, 0.114)) + 0.09);
+    bd *= bd;
+    c *= 1.0 + (brightness.y * 1.6 + brightness.z * 1.4) * bd;
+    c += brightness.z * vec3(0.55, 0.7, 1.0) * 0.018 * bd;
+  }
 
   // the game's translucent light columns (the arena's shaft down the wall): their blended draw left
   // the normal target longer than any tag; the shade, occlusion and dusk grade below then took the

@@ -248,6 +248,13 @@ class EnhancedPost {
     float photo_vignette = 0.f;    // photo mode's extra vignette
     int season = 0;                // the changing weather's season: 0 by the calendar, 1-4 spring..winter
     float vivid = 0.f;             // vivid colors: saturated greens and blues, warm sun, deep sky
+    // the player's brightness (menu "Brightness"; all neutral = the Enhanced look, pixel for pixel):
+    // exposure by day, at dawn/dusk and by night, a toe lift of the darks, a moon fill by night
+    float bright_day = 1.f;
+    float bright_dusk = 1.f;
+    float bright_night = 1.f;
+    float shadow_lift = 0.f;       // 0..1: the darks raised, black kept black
+    float night_vis = 0.f;         // 0..1: by night, a cool fill in the darks so silhouettes read
     float rain_strength = 1.0f;
     float dust_strength = 1.0f;
     bool cine_dof = true;          // depth of field in cutscenes, focused on what's in the middle
@@ -257,6 +264,26 @@ class EnhancedPost {
     float motes = 1.0f;            // out in the wild: fireflies at night, seeds and pollen by day (0 = off)
     float ambience = 0.7f;         // the ambient sounds' volume: rain, dripping, wind, crickets (0 = off)
   };
+  // the menu's brightness presets: day, dawn/dusk, night, shadow lift, night visibility (0 = neutral)
+  struct BrightnessPreset {
+    const char* name;
+    float day, dusk, night, lift, night_vis;
+  };
+  static constexpr int kBrightnessPresets = 4;
+  static constexpr BrightnessPreset kBrightness[kBrightnessPresets] = {
+      {"Enhanced original", 1.f, 1.f, 1.f, 0.f, 0.f},
+      {"Balanced", 1.05f, 1.12f, 1.3f, 0.2f, 0.25f},
+      {"More visible", 1.12f, 1.25f, 1.7f, 0.4f, 0.5f},
+      {"Readable nights", 1.f, 1.05f, 1.5f, 0.f, 0.6f},
+  };
+  static void apply_brightness(Settings& s, int preset) {
+    const auto& p = kBrightness[preset < 0 ? 0 : preset >= kBrightnessPresets ? kBrightnessPresets - 1 : preset];
+    s.bright_day = p.day;
+    s.bright_dusk = p.dusk;
+    s.bright_night = p.night;
+    s.shadow_lift = p.lift;
+    s.night_vis = p.night_vis;
+  }
 
   EnhancedPost();
   ~EnhancedPost();

@@ -610,6 +610,43 @@ void EnhancedPost::draw_menu() {
       }
     }
   }
+  // the player's brightness by the hour (all neutral = the Enhanced look, dark nights and all)
+  if (menu_section("Brightness", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::PushID("brightness");
+    ImGui::BeginDisabled(!s.enabled);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Preset:");
+    for (int i = 0; i < kBrightnessPresets; i++) {
+      const auto& p = kBrightness[i];
+      // lit while the sliders hold its values
+      const bool lit = s.bright_day == p.day && s.bright_dusk == p.dusk && s.bright_night == p.night &&
+                       s.shadow_lift == p.lift && s.night_vis == p.night_vis;
+      ImGui::SameLine(0, i == 0 ? -1.f : 0.f);
+      if (menu_segment(p.name, lit, 120, i == 0 ? 0 : i == kBrightnessPresets - 1 ? 2 : 1)) {
+        apply_brightness(s, i);
+      }
+    }
+    ImGui::SetNextItemWidth(200);
+    menu_slider_float("Day", &s.bright_day, 0.5f, 2.f, "%.2f");
+    ImGui::SameLine(260);
+    ImGui::SetNextItemWidth(200);
+    menu_slider_float("Dawn / dusk", &s.bright_dusk, 0.5f, 2.f, "%.2f");
+    ImGui::SetNextItemWidth(200);
+    menu_slider_float("Night", &s.bright_night, 0.5f, 3.f, "%.2f");
+    ImGui::SameLine(260);
+    ImGui::SetNextItemWidth(200);
+    menu_slider_float("Shadow lift", &s.shadow_lift, 0.f, 1.f, "%.2f");
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Raises the dark parts of the picture (black stays black), at every hour");
+    }
+    ImGui::SetNextItemWidth(200);
+    menu_slider_float("Night visibility", &s.night_vis, 0.f, 1.f, "%.2f");
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("By night: a faint moonlit fill in the darks, so shapes read and the night stays dark");
+    }
+    ImGui::EndDisabled();
+    ImGui::PopID();
+  }
   save_menu_settings();
   if (preset_lit >= 0) {
     if (preset_lit_settings.empty()) {
@@ -811,6 +848,11 @@ std::string EnhancedPost::menu_settings_json() const {
   j["cloud_rays"] = s.cloud_rays;
   j["lens_drops"] = s.lens_drops;
   j["vivid"] = s.vivid;
+  j["bright_day"] = s.bright_day;
+  j["bright_dusk"] = s.bright_dusk;
+  j["bright_night"] = s.bright_night;
+  j["shadow_lift"] = s.shadow_lift;
+  j["night_vis"] = s.night_vis;
   j["population"] = m_population;
   j["fov"] = g_enhanced_menu.fov.load();
   j["subtitle_size"] = g_enhanced_menu.subtitle_size.load();
@@ -914,6 +956,16 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("lens_drops", s.lens_drops);
   s.season = std::clamp(s.season, 0, 4);
   get("vivid", s.vivid);
+  get("bright_day", s.bright_day);
+  get("bright_dusk", s.bright_dusk);
+  get("bright_night", s.bright_night);
+  get("shadow_lift", s.shadow_lift);
+  get("night_vis", s.night_vis);
+  s.bright_day = std::clamp(s.bright_day, 0.5f, 2.f);
+  s.bright_dusk = std::clamp(s.bright_dusk, 0.5f, 2.f);
+  s.bright_night = std::clamp(s.bright_night, 0.5f, 3.f);
+  s.shadow_lift = std::clamp(s.shadow_lift, 0.f, 1.f);
+  s.night_vis = std::clamp(s.night_vis, 0.f, 1.f);
   get("population", m_population);
   {
     int fov = g_enhanced_menu.fov;
