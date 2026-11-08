@@ -297,6 +297,15 @@ void EnhancedPost::update_scene() {
             break;
           }
         }
+        // (test: tuning weather.test_spell = a SpellKind (5 sandstorm) holds that spell, -1 off; one
+        // log line per change)
+        static const EnhancedTune t_test_spell("weather.test_spell", -1.f);
+        if ((float)t_test_spell >= 0.f) {
+          kind = std::clamp((int)(float)t_test_spell, 0, kSpellKinds - 1);
+        }
+        if (kind != m_spell) {
+          lg::info("[enhanced] weather spell {} in {}", kSpellNames[kind], level);
+        }
         m_spell = kind;
         switch (kind) {
           case kShower:
@@ -364,6 +373,14 @@ void EnhancedPost::update_scene() {
       if (!outdoors) {
         rain = storm = clear = mist = dust = sunny = snow = 0.f;
         wet = 0.f;
+      }
+      // Spargus, behind its walls: the game never shows its sandstorm in the city (the storm's
+      // process may still run there after a trip, "rogue level entity desert-dust-storm"), and a
+      // sandstorm spell laid an orange veil over the streets at noon. Out of the gates it blows
+      // again (weather.town_dust: how much of it gets in, 1 = as before)
+      if (g_game_version == GameVersion::Jak3 && level.rfind("was", 0) == 0) {
+        static const EnhancedTune t_town_dust("weather.town_dust", 0.f);
+        dust *= std::clamp((float)t_town_dust, 0.f, 1.f);
       }
       break;
     }
@@ -476,6 +493,16 @@ void EnhancedPost::update_scene() {
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
+  {
+    // (one line per tenth of change: what feeds the post's sandstorm, and the game's own storm)
+    static int logged = -1;
+    const int now = (int)std::lround(m_dust * 10.f) * 100 + (int)std::lround(game_dust * 10.f);
+    if (now != logged) {
+      lg::info("[enhanced] dust {:.1f} (game storm {:.1f}) in {}", m_dust, game_dust,
+               level.empty() ? "none" : level);
+      logged = now;
+    }
+  }
   ease(m_storm, storm, k_weather);
   if (kFogOff) {
     fog = 0.f;
