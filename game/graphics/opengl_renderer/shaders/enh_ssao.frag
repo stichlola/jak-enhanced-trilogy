@@ -17,6 +17,13 @@ uniform float max_distance;  // game units
 uniform vec4 sun;            // xyz: key light direction in view space, w: shadow strength
 uniform float sun_length;    // game units marched toward the light
 uniform float close_up;      // cutscenes: nearer than this (game units) it all fades out (0 = off)
+// GTAO (Jimenez et al. 2016, "Practical Real-Time Strategies for Accurate Indirect Occlusion") in
+// place of the near Alchemy taps: per slice the highest horizon on each side, the visible arc between
+// them cosine-weighted against the normal. Same output; test switch until proven (0: Alchemy)
+uniform float tune_ao_gtao = 0.0;
+uniform float tune_ao_gtao_pow = 1.5;   // its visibility to this power (matches the old darkness)
+uniform float tune_ao_gtao_thick = 0.25;
+uniform float tune_ao_gtao_bias = 0.12;  // horizons opened by this much (radians)  // a sample this far behind its neighbors' horizon in r: thin, half counted
 
 // ray-traced occlusion: short rays through the levels' hierarchies (see rt_trace in
 // enh_composite.frag for the layout), world space in game units
@@ -165,6 +172,75 @@ float rt_occlusion(vec3 w, vec3 n, float noise, float dist) {
   return 1.0 - rt_ao.y * sum / float(RT_RAYS);
 }
 
+// visibility (0..1) of the hemisphere around n at p: 2 slices x 6 steps a side, r_uv the radius on
+// screen, r_world in game units
+float gtao(vec2 uv, float d, vec3 p, vec3 n, vec2 r_uv, float r_world, float noise, float spin) {
+  const float PI = 3.14159265;
+  const int SLICES = 2;
+  const int STEPS = 6;
+  vec3 view_v = normalize(-p);
+  float falloff_range = 0.615 * r_world;
+  float falloff_from = r_world - falloff_range;
+  float vis = 0.0;
+  for (int s = 0; s < SLICES; s++) {
+    float phi = (float(s) + fract(noise * 1.618)) * PI / float(SLICES);
+    vec2 dir = vec2(cos(phi), sin(phi));
+    // (the slice's direction in view space from a real point at the same depth: the game's view space
+    // may be mirrored on either axis)
+    vec3 dir3 = view_pos(uv + dir * texel * 4.0, d) - p;
+    vec3 ortho = dir3 - dot(dir3, view_v) * view_v;
+    if (dot(ortho, ortho) < 1e-12) {
+      vis += 1.0;
+      continue;
+    }
+    ortho = normalize(ortho);
+    vec3 axis = normalize(cross(ortho, view_v));
+    vec3 pn = n - axis * dot(n, axis);
+    float pn_len = length(pn);
+    float cos_n = clamp(dot(pn, view_v) / max(pn_len, 1e-6), -1.0, 1.0);
+    float n_ang = sign(dot(ortho, pn)) * acos(cos_n);
+    // side 0 toward -dir, side 1 toward +dir
+    float low0 = cos(n_ang - 0.5 * PI);
+    float low1 = cos(n_ang + 0.5 * PI);
+    float hc0 = low0, hc1 = low1;
+    for (int j = 0; j < STEPS; j++) {
+      float t = (float(j) + fract(noise + 0.37 * float(j + s))) / float(STEPS);
+      t = t * t;  // (denser near the pixel: the creases)
+      vec2 off = dir * r_uv * max(t, 1.5 * texel.x / max(r_uv.x, 1e-6));
+      for (int side = 0; side < 2; side++) {
+        vec2 suv = uv + (side == 0 ? -off : off);
+        float sd = texture(tex_T0, suv).r;
+        if (sd <= 1e-7) {
+          continue;
+        }
+        vec3 h = view_pos(suv, sd) - p;
+        float hl = length(h);
+        float shc = dot(h / max(hl, 1e-6), view_v);
+        float w = clamp((falloff_from - hl) / falloff_range + 1.0, 0.0, 1.0);
+        float lo = side == 0 ? low0 : low1;
+        shc = mix(lo, shc, w);
+        // (thin things in front: a horizon that jumps past the one so far by much counts half)
+        if (side == 0) {
+          hc0 = shc > hc0 ? mix(shc, hc0, tune_ao_gtao_thick * step(0.5, shc - hc0)) : hc0;
+        } else {
+          hc1 = shc > hc1 ? mix(shc, hc1, tune_ao_gtao_thick * step(0.5, shc - hc1)) : hc1;
+        }
+      }
+    }
+    float h0 = -acos(clamp(hc0, -1.0, 1.0));
+    float h1 = acos(clamp(hc1, -1.0, 1.0));
+    // (opened by a few degrees, as the Alchemy taps skip what rises under 7 degrees: the depth's
+    // rounding on ground seen at a grazing angle made a grey band toward the horizon)
+    h0 = n_ang + max(h0 - tune_ao_gtao_bias - n_ang, -0.5 * PI);
+    h1 = n_ang + min(h1 + tune_ao_gtao_bias - n_ang, 0.5 * PI);
+    float sin_n = sin(n_ang);
+    float arc0 = (cos_n + 2.0 * h0 * sin_n - cos(2.0 * h0 - n_ang)) * 0.25;
+    float arc1 = (cos_n + 2.0 * h1 * sin_n - cos(2.0 * h1 - n_ang)) * 0.25;
+    vis += pn_len * (arc0 + arc1);
+  }
+  return clamp(vis / float(SLICES), 0.0, 1.0);
+}
+
 void main() {
   vec2 uv = tex_coord;
   float d = texture(tex_T0, uv).r;
@@ -233,7 +309,7 @@ void main() {
 
   float sum = 0.0;
   float r2 = radius * radius * r_scale * r_scale;
-  for (int i = 0; i < SAMPLES; i++) {
+  for (int i = 0; i < (tune_ao_gtao > 0.5 ? 0 : SAMPLES); i++) {
     float t = (float(i) + 0.5) / float(SAMPLES);
     float angle = t * TURNS * 6.2831853 + spin;
     vec2 suv = uv + r_uv * t * vec2(cos(angle), sin(angle));
@@ -250,6 +326,10 @@ void main() {
   }
 
   float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
+  if (tune_ao_gtao > 0.5) {
+    float vis = gtao(uv, d, p, n, r_uv, radius * r_scale, noise, spin);
+    ao = pow(vis, tune_ao_gtao_pow * intensity / 1.4);
+  }
 
   // and a wider one, a few times the radius: rooms, alleys and the undersides of bridges darken
   // softly, not only the tight corners (gentler, and never below 0.6)
