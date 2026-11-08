@@ -598,7 +598,18 @@ class EnhancedPost {
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
   void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
-  void draw_shadow_casters(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  // (mvp: the sun map's m_light_mvp when null)
+  void draw_shadow_casters(SharedRenderState* render_state,
+                           ScopedProfilerNode& prof,
+                           const float* mvp = nullptr);
+  // the characters around Jak seen from below (their lowest point per column, a small depth map):
+  // their ground occlusion in the composite, by day and night (tuning shadow.chr_occ_m: half side)
+  void do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_chr_occ_fbo = 0;
+  GLuint m_chr_occ_tex = 0;
+  float m_chr_occ_mvp[16] = {};
+  float m_chr_occ_depth_m = 0.f;  // the map's height span (m)
+  bool m_chr_occ_ready = false;
   GLuint m_caster_bones = 0;
   size_t m_caster_bones_size = 0;
   GLuint m_caster_vao = 0;
