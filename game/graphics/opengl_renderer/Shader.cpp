@@ -361,6 +361,28 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   glDeleteShader(m_vert_shader);
   glDeleteShader(m_frag_shader);
   m_is_okay = true;
+  // (Enhanced test switch JAK_ENHANCED_SHADER_STATS: the enh_* programs' size as the driver built
+  // them, in the log. NVIDIA's program binary carries its assembly, ending in a line such as
+  // "# 2318 instructions, 63 R-regs": registers per pixel decide how many pixels run at once)
+  static const bool shader_stats = std::getenv("JAK_ENHANCED_SHADER_STATS") != nullptr;
+  if (shader_stats && shader_name.rfind("enh_", 0) == 0) {
+    GLint blen = 0;
+    glGetProgramiv(m_program, GL_PROGRAM_BINARY_LENGTH, &blen);
+    if (blen > 0) {
+      std::string bin((size_t)blen, '\0');
+      GLenum fmt = 0;
+      glGetProgramBinary(m_program, blen, nullptr, &fmt, bin.data());
+      std::string stats;
+      for (size_t at = bin.find("R-regs"); at != std::string::npos; at = bin.find("R-regs", at + 6)) {
+        const size_t from = bin.rfind('#', at);
+        if (from != std::string::npos && at - from < 80) {
+          stats += (stats.empty() ? "" : " | ") + bin.substr(from + 1, at + 6 - from - 1);
+        }
+      }
+      lg::info("[enhanced] shader {} stats: {}", shader_name,
+               stats.empty() ? fmt::format("{} bytes, no assembly text", blen) : stats);
+    }
+  }
   if (m_jitters) {
     m_jitter_loc = glGetUniformLocation(m_program, "enh_jitter");
   }
