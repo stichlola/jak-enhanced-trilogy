@@ -1520,7 +1520,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             }
           }
         }
-        glUniform4uiv(glGetUniformLocation(id, "light_tiles"), kTx * kTy / 4, tiles);
+        // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
+        // 1024 constant registers)
+        static GLuint tiles_tex = 0;
+        glActiveTexture(GL_TEXTURE28);
+        if (!tiles_tex) {
+          glGenTextures(1, &tiles_tex);
+          glBindTexture(GL_TEXTURE_2D, tiles_tex);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, kTx, kTy, 0, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                       nullptr);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+        glBindTexture(GL_TEXTURE_2D, tiles_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RED_INTEGER, GL_UNSIGNED_INT, tiles);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
       }
       glUniform1f(glGetUniformLocation(id, "light_tiles_on"), tiles_on ? 1.f : 0.f);
     }

@@ -253,13 +253,14 @@ uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of 
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
-// (light tiles, lights.tiles: measured 0.00 ms gained, and 144 more uniform vectors on a shader at
-// ~860 risk the 1024 limit of Intel/Mesa: declared only with this define, the C++ side's uniform
-// calls then find no location and do nothing)
-// #define ENH_LIGHT_TILES
+// (light tiles, lights.tiles: per 32x18 screen tile a mask of the lights that may reach it, in a small
+// integer texture: as 144 uniform vectors they pushed the composite past NVIDIA's 1024 constant
+// registers ("C6020"), and the earlier "0.00 ms gained" was read off the composite's own timer, which
+// stops before its fragment work: the tail-span after it holds that)
+#define ENH_LIGHT_TILES
 #ifdef ENH_LIGHT_TILES
-uniform uvec4 light_tiles[144];  // per 32x18 screen tile (4 a vector): bit i = light i may reach it
-uniform float light_tiles_on;     // 1: light_tiles is filled (lights.tiles)
+uniform highp usampler2D tex_T28;  // 32x18, R32UI: bit i = light i may reach the tile
+uniform float light_tiles_on;      // 1: tex_T28 is filled (lights.tiles)
 #endif
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
@@ -3581,8 +3582,7 @@ void main() {
 #ifdef ENH_LIGHT_TILES
     if (light_tiles_on > 0.5) {
       ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
-      int li = lt.y * 32 + lt.x;
-      lbits &= light_tiles[li >> 2][li & 3];
+      lbits &= texelFetch(tex_T28, lt, 0).r;
     }
 #endif
     while (lbits != 0u) {
