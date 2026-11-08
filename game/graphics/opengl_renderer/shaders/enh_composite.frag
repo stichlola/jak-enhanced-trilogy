@@ -208,6 +208,7 @@ uniform float tune_chr_gap_m = 1.6;   // ...from casters at least this far towar
 uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 the land's (desert lilac)
 uniform float tune_chr_bounce = 0.5;  // shade taken off them under a high sun (light back from the ground)
 uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun gets low (on tune_chr_dark)
+uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
 uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
 uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
@@ -3274,6 +3275,16 @@ void main() {
     if (chr) {
       chr_bounce = smoothstep(0.35, 0.85, world_dir(sun_dir.xyz).y);
       sh *= 1.0 - tune_chr_bounce * chr_bounce;
+      // (a character inside a pool of the game's own light, the arena's shaft at dusk: the map knows
+      // only the sun, the game lights the body in full, and the shade made Jak a dark silhouette on
+      // the bright floor. The bloom on the floor beside and below him says how strong that light is;
+      // his own pixel's bloom stays low, he is the dark thing in it)
+      if (tune_chr_pool > 0.0) {
+        float bl = max(max(luma(texture(tex_T1, tex_coord + vec2(0.07, -0.05)).rgb),
+                           luma(texture(tex_T1, tex_coord + vec2(-0.07, -0.05)).rgb)),
+                       luma(texture(tex_T1, tex_coord + vec2(0.0, -0.1)).rgb));
+        sh *= 1.0 - smoothstep(tune_chr_pool, tune_chr_pool * 2.5, bl) * (1.0 - chr_bounce);
+      }
     }
     rock_sh = sh;
     sun_lit *= 1.0 - sh;
