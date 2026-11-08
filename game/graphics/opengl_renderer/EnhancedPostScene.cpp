@@ -280,6 +280,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // frame, water or not; on by default: the ctyport docks after rain look the same, the puddles'
   // rays reach 150 m instead of ~25 m, +0.05 ms where there's no water)
   static const EnhancedTune t_hiz_surf("post.hiz_surf", 1.f);
+  // (not used by the AO: the shipping one is the Alchemy taps, 0.07-0.18 ms at 640x360, nothing
+  // left for a pyramid to save, and it runs in prepare(), before the pyramid exists; contact
+  // shadows march 0.5 m, a few pixels)
   m_hiz_ready = false;
   m_hiz_surf = (float)t_hiz > 0.5f && (float)t_hiz_surf > 0.5f;
   if ((float)t_hiz > 0.5f && have_scene &&
