@@ -1547,9 +1547,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // lights whose sphere's projection may touch it, so the composite's main light loop runs only
       // those. Conservative: the hull of the projected corners of each sphere's box; a sphere
       // reaching the camera plane covers every tile. lights.tiles 0: off (every pixel, every light).
+      // Default on: the main loop, the metal highlights and the air glow/halo loops use it; at
+      // 2560x1600 Spargus 21h the composite 11.6 -> 11.0 ms, frames equal to the TAA noise
       // The composite declares the uniforms only with ENH_LIGHT_TILES defined (uniform budget): without
       // it these calls find location -1 and do nothing
-      static const EnhancedTune t_tiles("lights.tiles", 0.f);
+      static const EnhancedTune t_tiles("lights.tiles", 1.f);
       constexpr int kTx = 32, kTy = 18;
       uint32_t tiles[kTx * kTy];
       const bool tiles_on = t_tiles > 0.5f;
@@ -1558,7 +1560,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         const float fx = m_last_proj[2], fy = m_last_proj[3];
         for (int i = 0; i < n; i++) {
           const float* lp = pos + i * 4;
-          const float r = lp[3];
+          // (grown to what every loop over the lights reaches: highlights and the air's glow 1.6
+          // radii, the halo ~2.4 x its spread of at least 0.01 rad)
+          const float r = std::max(1.6f * lp[3],
+                                   0.03f * std::sqrt(lp[0] * lp[0] + lp[1] * lp[1] + lp[2] * lp[2]));
           int x0 = 0, x1 = kTx - 1, y0 = 0, y1 = kTy - 1;
           if (lp[2] - r > 0.1f * kMeter) {
             float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;

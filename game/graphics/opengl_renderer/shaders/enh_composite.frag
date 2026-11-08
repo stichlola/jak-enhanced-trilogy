@@ -464,6 +464,20 @@ float light_blocked_by(vec3 from, vec3 lp, float jitter, float reach, int steps)
   return 0.0;
 }
 
+// the lights that may touch this pixel (light tiles, lights.tiles): each light's sphere grown to
+// what any loop over the lights reaches (1.6 x its radius: the highlights on metal, the glow in the
+// air along the ray; and its halo's angle), lowest index first; every light with the tiles off
+uint light_tile_bits() {
+  uint bits = light_count >= 32 ? 0xffffffffu : (1u << uint(max(light_count, 0))) - 1u;
+#ifdef ENH_LIGHT_TILES
+  if (light_tiles_on > 0.5) {
+    ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
+    bits &= texelFetch(tex_T28, lt, 0).r;
+  }
+#endif
+  return bits;
+}
+
 float light_blocked(vec3 from, vec3 lp, float jitter) {
   return light_blocked_by(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
 }
@@ -3618,13 +3632,7 @@ void main() {
     }
     // (light tiles: only the lights whose reach may touch this pixel's 32x18 screen tile, lowest
     // index first as before, so the strongest still cast the shadows)
-    uint lbits = light_count >= 32 ? 0xffffffffu : (1u << uint(light_count)) - 1u;
-#ifdef ENH_LIGHT_TILES
-    if (light_tiles_on > 0.5) {
-      ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
-      lbits &= texelFetch(tex_T28, lt, 0).r;
-    }
-#endif
+    uint lbits = light_tile_bits();
     while (lbits != 0u) {
       int i = findLSB(lbits);
       lbits &= lbits - 1u;
@@ -3789,7 +3797,8 @@ void main() {
       }
       // the lamps' highlights on it (a factory's pipes, a car's paint at night): metal's broad and
       // tinted by the metal, gloss tight and in the lamp's own color
-      for (int i = 0; i < light_count; i++) {
+      for (uint mb = light_tile_bits(); mb != 0u; mb &= mb - 1u) {
+        int i = findLSB(mb);
         vec3 tl = light_pos[i].xyz - p;
         float d = length(tl);
         float rr = d / max(light_pos[i].w, 1.0);
@@ -4447,7 +4456,9 @@ void main() {
     vec3 halo = vec3(0.0);
     vec3 shine = vec3(0.0);
     float scene_dist = z > 0.0 ? length(p) : 1e12;
-    for (int i = 0; i < min(light_count, 32); i++) {
+    const uint air_bits = light_tile_bits();
+    for (uint ab = air_bits; ab != 0u; ab &= ab - 1u) {
+      int i = findLSB(ab);
       // the light scattered toward the camera along the ray up to the scene: the integral of
       // 1 / (h^2 + (t - tc)^2), h the light's distance off the ray
       vec3 lp = light_pos[i].xyz;
@@ -4476,7 +4487,8 @@ void main() {
     // all of them together at most a soft glow (scaled down, its hue kept)
     float shine_max = max(shine.r, max(shine.g, shine.b));
     c += shine * min(1.0, 0.15 / max(shine_max, 1e-4));
-    for (int i = 0; i < min(light_count, 16); i++) {
+    for (uint hb = air_bits & 0xffffu; hb != 0u; hb &= hb - 1u) {
+      int i = findLSB(hb);
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);
       if (lp.z <= 0.0 || ld < 1.0) {
