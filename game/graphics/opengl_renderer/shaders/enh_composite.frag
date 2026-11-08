@@ -193,6 +193,9 @@ uniform float tune_night_horizon = 0.05;  // the night sky's glow along the hori
 uniform float tune_sky_keep = 1.0; // the game's lines drawn over its sky (windows) kept over ours
 uniform float tune_sky_keep_lo = 0.05;  // by how much and how sharply the levels changed it: from here
 uniform float tune_sky_keep_hi = 0.14;  // to here, all of the game's pixel
+uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
+uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
+uniform float tune_sky_night_hi = 0.04;   // to here, all of the game's pixel
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
@@ -3622,6 +3625,8 @@ void main() {
   // (the game's painted cloud cards kilometers out above the horizon count as sky: ours replaces
   // them by day, by night they're smoothed into the game's sky)
   float bolt_light = 0.0;
+  float sky_kept = 0.0;  // the game's lights over its night sky, kept as drawn
+  vec3 sky_light = vec3(0.0);
   float sky_k = z == 0.0 ? 1.0
                          : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
                                smoothstep(0.04, 0.09, world_dir(ray).y) * step(0.0, clouds.x - 0.001);
@@ -3665,6 +3670,18 @@ void main() {
                      clouds.x * (1.0 - game_w) * tune_sky_keep;
         c = mix(c, c0, keep);
       }
+      // (by night the same for the game's own sky: smoothing its cloud cards away took the lights
+      // drawn over it too (Haven's tower beacon, its searchlights, the tower's lamps). Kept where
+      // something brighter than the sky was drawn over it, sprites included (the game's whole
+      // picture), added back over the night sky below (light: replacing the pixel drew a dark box
+      // around the beacon's glow). The cards are darker cut-outs, and a sharpness test lost the
+      // beacon's even core: a hollow ring)
+      if (z == 0.0 && tune_sky_keep_night > 0.0 && sky_copy > 0.0 && game_w > 0.0) {
+        vec3 dc = max(textureLod(tex_T0, uv, 0.0).rgb - textureLod(tex_T25, uv, 0.0).rgb, 0.0);
+        sky_kept = smoothstep(tune_sky_night_lo, tune_sky_night_hi, max(dc.r, max(dc.g, dc.b))) *
+                   clouds.x * game_w * tune_sky_keep_night;
+        sky_light = dc * sky_kept;
+      }
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
       }
@@ -3690,7 +3707,9 @@ void main() {
     float up_n = world_dir(ray).y;
     c += tune_night_horizon * vec3(0.55, 0.7, 1.0) * night_dark.x *
          smoothstep(-0.02, 0.03, up_n) * (1.0 - smoothstep(0.03, 0.3, up_n));
+    c *= 1.0 - 0.5 * sky_kept;  // (the stars behind a beam dimmed)
   }
+  c += sky_light;
   // the rainbow, where the sky shows past the rain (or far behind)
   if (weather2.z > 0.0 && sky_sun.w > 0.03 && wsurf == 0.0 && (z == 0.0 || z > 150.0 * 4096.0)) {
     float up = world_dir(ray).y;

@@ -631,7 +631,9 @@ void EnhancedPost::capture_far_ocean(GLuint render_fbo, int w, int h) {
 // the Enhanced sky when that was found by local contrast instead
 void EnhancedPost::capture_sky(GLuint render_fbo, int w, int h) {
   m_sky_frame = 0;
-  if (!m_settings.enabled || m_night >= 0.999f) {  // (by night the game's own sky stays)
+  // (by night too: the game's own sky stays then, but the composite smooths its painted cloud cards
+  // away, and with them the lights drawn over the sky: Haven's tower beacon and searchlights)
+  if (!m_settings.enabled) {
     return;
   }
   if (w != m_sky_w || h != m_sky_h) {
