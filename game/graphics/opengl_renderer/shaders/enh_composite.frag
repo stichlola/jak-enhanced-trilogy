@@ -278,6 +278,8 @@ uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final p
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
 uniform float tune_night_pale_grain = 1.0;  // ...the game's own grain put back on top (planks' gaps; 0: off)
+uniform float tune_far_dbg = 0.0;  // (debug: 1-5 skip one far haze/relight term)
+uniform float tune_far_lift = 1.2;  // the desert haze lifts far ground at most this x its own luma (0: off)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
@@ -4016,6 +4018,7 @@ void main() {
   // the desert's air: a warm haze lit by the sun, thicker with distance, glowing toward the sun;
   // over the low sky too (the horizon goes golden), not up high
   if (sun_haze > 0.0 && wsurf == 0.0) {
+    vec3 c_pre_haze = c;
     float dist = z > 0.0 ? length(p) / 4096.0 : 5000.0;
     float up = max(world_dir(ray).y, 0.0);
     float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - day_look)) * (1.0 - weather.x);
@@ -4050,10 +4053,10 @@ void main() {
     float drop = tune_haze_layer > 0.5 && (tune_haze_layer < 1.5 || tex_coord.x > 0.5) ? max(-rel, 0.0) : 0.0;
     float amount = (1.0 - exp(-dist * 250.0 / max(drop, 250.0) / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // (the morning's sky clear: half the haze over it)
-    c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75 * (z > 0.0 ? 1.0 : 1.0 - 0.5 * day_look), 0.0, 1.0));
+    c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75 * (z > 0.0 ? 1.0 : 1.0 - 0.5 * day_look), 0.0, 1.0) * (tune_far_dbg == 4.0 ? 0.0 : 1.0));
     // the late afternoon: the air toward the sun's side of the horizon glows, the far mountains and
     // dunes there melt into a bright gold (by the sun's bearing, not its height: it can stand high)
-    if (golden > 0.0) {
+    if (golden > 0.0 && tune_far_dbg != 1.0) {
       vec2 sh = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
       float az = max(dot(normalize(world_dir(ray).xz + 1e-4), sh), 0.0);
       // (low down: the mountains' feet sink into it, their peaks stand out)
@@ -4066,7 +4069,7 @@ void main() {
     // bright orange over the middle distance)
     float low = (1.0 - exp(-dist * 25.0 / max(drop, 25.0) / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
     vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
-    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.3 * desert_noon()), 0.0, 1.0));
+    c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.3 * desert_noon()), 0.0, 1.0) * (tune_far_dbg == 2.0 ? 0.0 : 1.0));
     // a light sand haze far off, always in the air: the far dunes and mountains' feet sink into a
     // pale sand color, the sun shining through it (bright toward it, the mountains' shadows in it);
     // at night only a faint grey-blue, the lamps glowing in it (the halos below)
@@ -4076,7 +4079,16 @@ void main() {
       vec3 sand_c = vec3(0.9, 0.76, 0.56);
       vec3 sun_lit = sun_color() * (0.7 + 0.5 * toward * toward + 0.8 * pow(toward, 10.0)) * mix(0.6, 1.0, lit);
       vec3 sc = sand_c * mix(vec3(0.05, 0.06, 0.08), sun_lit, daylight);
-      c = mix(c, sc, clamp(far_k * sand_low * 0.38 * sun_haze, 0.0, 1.0));
+      c = mix(c, sc, clamp(far_k * sand_low * 0.38 * sun_haze, 0.0, 1.0) * (tune_far_dbg == 3.0 ? 0.0 : 1.0));
+    }
+    // (the four layers stacked on far ground: at 18h from the ground the far range and the horizon
+    // band went a flat bright beige, +65% over vanilla where the near sand is +30%. Their lift over
+    // what the ground was held to tune_far_lift x, the haze's hue kept: the range keeps its relief)
+    if (z > 0.0 && tune_far_lift > 0.0) {
+      float lpre = max(luma(c_pre_haze), 0.02);
+      float lift = luma(c) / lpre;
+      float cap = tune_far_lift + 0.5 * (1.0 - smoothstep(0.02, 0.12, lpre));  // (black rock: more)
+      c *= mix(1.0, cap / max(lift, cap), daylight);
     }
   }
   // rain mist: the distance goes grey
@@ -4139,7 +4151,7 @@ void main() {
     if (pix_tag > 0.3 && pix_tag < 0.55) {
       cover *= 1.0 - tune_dust_chr * (1.0 - smoothstep(20.0, 60.0, dist));
     }
-    c = mix(c, sand * (1.0 - 0.8 * night_dark.x), cover * 0.94);
+    c = mix(c, sand * (1.0 - 0.8 * night_dark.x), cover * 0.94 * (tune_far_dbg == 6.0 ? 0.0 : 1.0));
     dust_veil = tune_haze_layer > 0.5 ? cover * 0.94 : 0.0;
   }
   if (puff_count > 0) {
@@ -5084,7 +5096,7 @@ void main() {
       vec3 lg3 = vec3(luma(c));
       vec3 sunny = max(mix(lg3, c, 1.35), 0.0) * vec3(1.1, 0.95, 0.78);
       vec3 shade = c * vec3(0.66, 0.6, 0.6);
-      c = mix(c, mix(shade, sunny, lit), golden * far);
+      c = mix(c, mix(shade, sunny, lit), golden * far * (tune_far_dbg == 5.0 ? 0.0 : 1.0));
       // (the rocks near: the faces the low sun reaches catch it, the rest in a cool shade)
       float lit_near = smoothstep(-0.1, 0.55, dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0))));
       c *= mix(vec3(1.0), mix(vec3(0.6, 0.62, 0.72), vec3(1.5, 1.28, 1.0), lit_near), golden * (1.0 - far));
