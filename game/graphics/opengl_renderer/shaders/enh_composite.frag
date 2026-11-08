@@ -309,6 +309,7 @@ uniform float tune_probe_dbg = 0.0;   // 1: the probes' open sky (grey), 2: thei
 uniform float tune_probe_rim = 1.0;   // the characters' night sky rim x the sky their probes see (0: off)
 uniform float tune_probe_tint = 0.0;  // characters, by how much they're roofed: toward the bounce light's hue (0: off)
 uniform float tune_probe_n = 0.5;     // looked up this far out along the normal (m)
+uniform float tune_probe_shade = 0.0; // the level's shade under a roof: the bounce's hue, not the blue sky's (0: off; >= 10 shows it)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
 uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
@@ -3691,6 +3692,24 @@ void main() {
       float hw = tune_shade_hue * smoothstep(0.1, 0.45, sat) *
                  (1.0 - smoothstep(30.0 * 4096.0, 80.0 * 4096.0, z));
       tint = mix(tint, vec3(dot(tint, vec3(1.0 / 3.0))), hw);
+    }
+    // (post.probes: under a roof the shade is not lit by the blue sky but by the light coming back
+    // off the walls and floor around it: the probes' bounce hue, by how much of the sky they miss.
+    // Only the hue: the darkening stays as strong)
+    if (tune_probe_shade > 0.0 && probe_grid.w > 0.0 && !chr && sh > 0.0) {
+      vec4 pr = probe_at(view_to_world * p + cam_pos, view_to_world * surf_n);
+      float bl = luma(pr.rgb);
+      if (bl > 0.004) {
+        vec3 hue = clamp(pr.rgb / bl, vec3(0.6), vec3(1.5));
+        // (less darkening on the bounce's strong channels)
+        vec3 bt = clamp(2.0 - hue, vec3(0.4), vec3(1.4));
+        bt *= dot(tint, vec3(1.0 / 3.0)) / max(dot(bt, vec3(1.0 / 3.0)), 1e-3);
+        tint = mix(tint, bt, tune_probe_shade * (1.0 - pr.a));
+      }
+      if (tune_probe_shade > 9.5) {
+        // (>= 10: shows where it acts, red by its weight)
+        c = mix(c, vec3(1.0, 0.0, 0.0), (1.0 - pr.a) * sh);
+      }
     }
     c *= vec3(1.0) - shadow_strength * sh * tint;
     c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
