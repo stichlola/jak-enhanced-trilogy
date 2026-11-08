@@ -265,7 +265,9 @@ uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
 uniform float tune_dusk_shade = 1.0;  // the shade's blue tint let go as the sun nears the horizon (not the desert; 0: off)
 uniform float tune_cloud_in_shade = 0.3;  // cloud shadows inside the sun's shadow (1: as on sunlit ground, old)
-uniform float tune_dusk_floor = 0.6;  // the low sun's shade: never under this share of the game's color (0: off)
+uniform float tune_dusk_floor = 0.7;  // the low sun's shade: never under this share of the game's color (0: off)
+uniform float tune_dusk_floor_end = 1.0;  // that floor after the grade, in the game's hue (0: before the grade, old)
+uniform float tune_dusk_floor_soft = 0.3;  // how far under the floor before the game's hue takes over fully
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
@@ -3402,7 +3404,8 @@ void main() {
   // the low sun's shade never under a share of the game's own color: the game lights a dusk wall
   // warm and dim, and the occlusion, the sun's and the clouds' shade stacked to x0.4 of it, the
   // arena's walls beside the lit column black (vanilla 73,53,30)
-  if (tune_dusk_floor > 0.0 && dusk_floor_w > 0.0) {
+  // (here only with tune_dusk_floor_end 0: the golden and warm grade after it took its blue, see the end)
+  if (tune_dusk_floor > 0.0 && dusk_floor_w > 0.0 && tune_dusk_floor_end <= 0.0) {
     vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
     c = mix(c, max(c, game_c * tune_dusk_floor), dusk_floor_w);
   }
@@ -5320,6 +5323,19 @@ void main() {
       }
       c = mix(c, max(c, raw_scene * tune_shaft_spill), near_m * (1.0 - shaft_m));
     }
+  }
+
+  // the low sun's shade floor, last: never under tune_dusk_floor of the game's own color, and in the
+  // game's hue. Before the golden and warm grade it came back saturated orange, the blue near 0
+  // (arena wall beside the column at 19h 40,22,8, vanilla 73,53,31): a luma floor whose color is
+  // the game's, taken over the more the post went under it
+  if (tune_dusk_floor_end > 0.0 && tune_dusk_floor > 0.0 && dusk_floor_w > 0.0) {
+    vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+    vec3 fl = game_c * tune_dusk_floor;
+    float lf = luma(fl);
+    float lc = luma(c);
+    float dd = clamp((lf - lc) / max(lf, 1e-3), 0.0, 1.0);
+    c = mix(c, fl * (max(lc, lf) / max(lf, 1e-4)), dusk_floor_w * smoothstep(0.0, tune_dusk_floor_soft, dd));
   }
 
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
