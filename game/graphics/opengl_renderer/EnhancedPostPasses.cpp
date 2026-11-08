@@ -797,8 +797,12 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     // the late afternoon (16-19, eased in from 14:30 and out by 20, with the sun down: over by 19 the plain jumped from amber to a noon white): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 19.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
+    // the sun going down by the clock (16:30-18:30, out by 20:48), whatever the area's sun height
+    glUniform1f(glGetUniformLocation(id, "dusk"), m_dusk);
   }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
+  // under a roof (world.json "enclosed", indoor zones): the sky seen through its windows stays the game's
+  glUniform1f(glGetUniformLocation(id, "enclosed"), m_enclosed ? 1.f : 0.f);
   // the rock and ground pictures (custom_assets/<game>/scenery/rock_detail.png, ground_detail.png),
   // loaded on first use, with their average colors
   // (one replaced in the editor: all of them read again)

@@ -50,6 +50,12 @@
     ]
   },
 
+  // per game: levels under a roof (from the start of their names), besides the indoor zones: their
+  // fires burn as at night whatever the hour (temples, the palace's halls)
+  "enclosed": {
+    "jak3": ["temp", "tomb", "lprecurc", "waspala"]
+  },
+
   // the seasons of the "Changing" weather: the computer's calendar (northern hemisphere) or the
   // menu's pick. Each makes some spells likelier (times the zones' odds; 1 = as it is), shifts the
   // grade outdoors (warmth, saturation: plus) and quiets or wakes the animals (times)

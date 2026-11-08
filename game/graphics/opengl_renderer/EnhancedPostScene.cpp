@@ -41,13 +41,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
+  // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
+  // the vsync wait when the frame has time to spare)
+  static enh_post::PassTimer t_post_total("enh-total");
+  enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
   glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
-  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  ENH_TIMED("enh-scene-copy", glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
-  prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
+  ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
   const bool have_scene = m_ssao_ready;
   update_scene();
   if (have_scene) {
@@ -277,8 +281,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     g_enhanced_smoke_lights.count = 0;
     // in the sun's full daylight the glows' light is lost in it: a garage door's big orange glow
     // lit the sand around for tens of meters, with hard shadows of every slab (the beacons stay)
-    const float glow_day =
-        g_enhanced_sun.valid ? 1.f - std::max(m_night, night_darkness()) : 0.f;
+    // (under a roof the hour doesn't light the room: the temples' torches at noon ran at a quarter of
+    // their night strength, no warm pool on the floor in front of them. lights.enclosed_fire 0: off)
+    static const EnhancedTune t_enclosed("lights.enclosed_fire", 0.8f);
+    const float enclosed = m_enclosed ? std::clamp((float)t_enclosed, 0.f, 1.f) : 0.f;
+    const float glow_day = g_enhanced_sun.valid
+                               ? (1.f - std::max(m_night, night_darkness())) * (1.f - enclosed)
+                               : 0.f;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
       const auto& raw = g_enhanced_lights.lights[i];
       auto l = raw;  // as the game draws it, faded with distance: the light it casts
@@ -557,7 +566,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         m_fire_spawners.clear();
       }
     }
-    const float fire_night = std::max(m_night, night_darkness());
+    // (fires' spawners the same under a roof)
+    const float fire_night = std::max({m_night, night_darkness(), enclosed});
     const size_t glow_lights = candidates.size();
     for (const auto& fs : m_fire_spawners) {
       if (!on || !m_settings.fire) {
@@ -580,7 +590,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       const float reach = kind == EnhancedFires::CANDLE ? 4.f : (kind == EnhancedFires::FIRE ? 13.f : 11.f);
-      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f);
+      // (reach and strength scales: at night a torch off screen laid its full 13 m of orange over half
+      // of Spargus' street, where the game has blue moonlight)
+      static const EnhancedTune t_fire_reach("lights.fire_reach", 0.8f);
+      static const EnhancedTune t_fire_k("lights.fire_strength", 0.65f);
+      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f) * t_fire_reach;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // a placed fire close by also gets the embers and hot air (a torch's flame is often too
       // small a glow to be told a fire by its light)
@@ -618,7 +632,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       // (by day a warm glow around the flame, at night far more: a torch's full 13 m of orange
       // light by day laid a bright orange pool on the sunlit sand)
-      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps;
+      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps * t_fire_k;
       if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
         float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -726,11 +740,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             c.pos[col] += (m_bulb_pos[row] - cam.trans[row]) * cam.rot[row][col];
           }
         }
-        c.pos[3] = 14.f * kMeter;
+        // (its reach and strength: at 14 m and full strength the whole foreground of a desert night went
+        // salmon where the game has blue moonlight, a pool around Jak is enough)
+        static const EnhancedTune t_lan_r("lights.lantern_radius_m", 9.f);
+        static const EnhancedTune t_lan_k("lights.lantern_strength", 0.6f);
+        c.pos[3] = t_lan_r * kMeter;
         // a steady bulb with a faint hum in it
         const float hum = 0.97f + 0.02f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
                           0.01f * std::sin(t * 41.f);
-        const float k = m_lamp_on * hum * m_settings.light_strength;
+        const float k = m_lamp_on * hum * m_settings.light_strength * t_lan_k;
         c.color[0] = 1.25f * k;
         c.color[1] = 0.62f * k;
         c.color[2] = 0.22f * k;

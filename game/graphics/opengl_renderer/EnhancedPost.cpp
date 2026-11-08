@@ -538,6 +538,28 @@ void EnhancedPost::update_auto_quality() {
   g_enhanced_render_scale = kRenderScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
   m_gpu_query_open = true;
+  ++pass_timer_frame();
+}
+
+bool enh_post::pass_timers_on() {
+  static const EnhancedTune t_on("debug.pass_timers", 1.f);
+  return t_on > 0.5f && !enh_profiling();
+}
+
+// each timed pass's mean GPU time since the last call (ms), "shadow-map 2.10 ssao 0.80 ..."; the
+// sums start over. Under vsync the GPU clocks down to just make the frame: compare shares, or
+// measure with JAK_ENHANCED_PROFILE for absolute costs
+std::string EnhancedPost::pass_times() {
+  std::string out;
+  for (auto* t : pass_timers()) {
+    if (t->n > 0) {
+      const char* nm = std::strncmp(t->name, "enh-", 4) == 0 ? t->name + 4 : t->name;
+      out += fmt::format("{}{} {:.2f}", out.empty() ? "" : " ", nm, t->sum_ms / t->n);
+    }
+    t->sum_ms = 0.0;
+    t->n = 0;
+  }
+  return out;
 }
 
 void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
