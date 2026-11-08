@@ -847,13 +847,26 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
   glBlendFunc(GL_ONE, GL_ONE);
   glBlendEquation(GL_FUNC_ADD);
   float soft_min = 1e9f;
+  bool hdr = false;
+  float hdr_gain = 1.f;
   {
     // (Enhanced: in a half-float frame, post.hdr_scene, the quads' alpha summed past 1, which the
     // 8-bit frame clamps: later DST_ALPHA blends and the post's dust coverage read it. The frame's
     // alpha is left as it was there)
     static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
     if ((float)t_hdr_scene > 0.5f) {
+      hdr = true;
       glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+      // (the big quads, a pool of light over a floor: the screen below can't run in floats (1 - D
+      // goes negative past 1), and the plain sum no longer clips, so the pool spread as a wide
+      // saturated wash. post.glow_hdr_gain scales what they add (a constant blend factor); the
+      // composite's shoulder rolls the core toward white)
+      static const EnhancedTune t_glow_hdr_gain("post.glow_hdr_gain", 0.7f);
+      static const EnhancedTune t_glow_soft_size("post.glow_soft_size", 0.2f);
+      hdr_gain = (float)t_glow_hdr_gain;
+      if (hdr_gain < 0.999f) {
+        soft_min = (float)t_glow_soft_size;
+      }
     } else {
       // (Enhanced: in the 8-bit frame a big glow over a lit floor, the arena's light column pool,
       // clipped to one flat white-yellow blob that the post's bloom and grade then spread. post.glow_soft:
@@ -902,7 +915,10 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
     // the plain sum, so the effects' boost by day still finds all their light)
     if ((record.size >= soft_min) != soft_on) {
       soft_on = !soft_on;
-      if (soft_on) {
+      if (hdr) {
+        glBlendColor(hdr_gain, hdr_gain, hdr_gain, hdr_gain);
+        glBlendFuncSeparate(soft_on ? GL_CONSTANT_COLOR : GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+      } else if (soft_on) {
         glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ONE, GL_ONE, GL_ONE);
       } else {
         glBlendFunc(GL_ONE, GL_ONE);
