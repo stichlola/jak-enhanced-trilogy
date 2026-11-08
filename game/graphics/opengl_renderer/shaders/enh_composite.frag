@@ -273,7 +273,7 @@ uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_co
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
-uniform sampler2D tex_T29;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
+uniform sampler2D tex_T31;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
 uniform mat4 chr_occ_mvp;   // world -> that map
 uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
@@ -3928,7 +3928,7 @@ void main() {
       float rot = pixel_angle();
       float occ = 0.0;
       for (int i = 0; i < 8; i++) {
-        float d = texture(tex_T29, s.xy + vogel(i, 8, rot) * rr).r;
+        float d = texture(tex_T31, s.xy + vogel(i, 8, rot) * rr).r;
         float gap = (d - s.z) * chr_occ_on;  // m: their lowest point over this surface
         occ += d < 0.9999 ? step(-0.12, gap) * (1.0 - smoothstep(0.0, tune_chr_occ_h, gap)) : 0.0;
       }

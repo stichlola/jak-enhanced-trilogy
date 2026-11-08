@@ -1205,10 +1205,11 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   }
   {
     // the characters' lowest points around Jak (do_chr_occlusion): their ground occlusion
-    glActiveTexture(GL_TEXTURE29);
+    // (unit 31: 29 is the depth pyramid, 30 the sky map)
+    glActiveTexture(GL_TEXTURE31);
     glBindTexture(GL_TEXTURE_2D, m_chr_occ_ready ? m_chr_occ_tex : m_black_tex);
     glActiveTexture(GL_TEXTURE0);
-    glUniform1i(glGetUniformLocation(id, "tex_T29"), 29);
+    glUniform1i(glGetUniformLocation(id, "tex_T31"), 31);
     glUniformMatrix4fv(glGetUniformLocation(id, "chr_occ_mvp"), 1, GL_TRUE, m_chr_occ_mvp);
     glUniform1f(glGetUniformLocation(id, "chr_occ_on"), m_chr_occ_ready ? m_chr_occ_depth_m : 0.f);
   }
