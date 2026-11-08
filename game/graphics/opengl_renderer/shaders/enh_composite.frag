@@ -252,7 +252,8 @@ uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias alo
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
-uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
+uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
+uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
