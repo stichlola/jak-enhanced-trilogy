@@ -216,6 +216,7 @@ uniform float tune_beacon_water = 0.6;  // and how bright they get at most
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
+uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
@@ -3393,6 +3394,20 @@ void main() {
   if (gi_strength > 0.0 && wsurf == 0.0) {
     vec3 gi = texture(tex_T7, tex_coord).rgb;
     c += gi * gi_strength * (0.35 + c) * ao * (1.0 - 0.8 * night_dark.x);
+  }
+
+  // Jak's contact shadow: the ground right under his feet darker (indoors, by torchlight and at
+  // night nothing else shades it: no sun shadow, the point lights' march is short and the traced
+  // AO knows only the level, so he floated). Soft, about his footprint; less where the sun's map
+  // already draws his shadow
+  if (tune_chr_contact > 0.0 && z > 0.0 && wsurf == 0.0 && !(pix_tag > 0.3 && pix_tag < 0.55) &&
+      dot(jak_fx.xyz, jak_fx.xyz) > 4096.0 * 4096.0 && z < 40.0 * 4096.0) {
+    vec3 dv = (p - jak_fx.xyz) / 4096.0;  // meters
+    float up_m = dot(dv, up_view);
+    float r_m = length(dv - up_view * up_m);
+    float blob = (1.0 - smoothstep(0.2, 0.75, r_m)) * (1.0 - smoothstep(0.15, 0.5, abs(up_m)));
+    float in_sun = sun_dir.w > 0.0 ? sun_lit * clamp(sun_dir.w * 4.0, 0.0, 1.0) : 0.0;
+    c *= 1.0 - tune_chr_contact * blob * (1.0 - 0.6 * in_sun);
   }
 
   // materials (from the texture names, in the normals' alpha): metal reflects its surroundings
