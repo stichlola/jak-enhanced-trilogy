@@ -1760,6 +1760,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_cloud_history = false;
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
   }
+  // the world's sun shadow looks at half size (tuning "shadow.half")
+  if (have_scene) {
+    draw_sun_half(id, w, h, render_fbo, prof, render_state);
+  } else {
+    glUniform1f(glGetUniformLocation(id, "sun_half_on"), 0.f);
+  }
 
   // (test switch, what each part of the composite costs, in one run:
   // JAK_ENHANCED_COMPOSITE_OFF="sand;rock_detail;light_count,lantern": every 3 s the next group of

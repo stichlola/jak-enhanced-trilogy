@@ -2249,3 +2249,59 @@ void EnhancedPost::draw_clouds(GLuint id,
   glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);
   glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, use_rays ? 1.f : 0.f);
 }
+
+void EnhancedPost::draw_sun_half(GLuint id,
+                                 int w,
+                                 int h,
+                                 GLuint render_fbo,
+                                 ScopedProfilerNode& prof,
+                                 SharedRenderState* render_state) {
+  // the world's sun shadow looks (the map pushed off the surface, the rough one from 2 m toward the
+  // sun, the contact march) at one pixel per 2x2 by enh_sun_half, the composite's file with only them
+  // compiled in; the composite reads them back on unit 31 with the occlusion's texels and depth
+  // weights (sun_half_on 1). Characters keep theirs at full size. At 2560x1600: composite -0.6 ms for
+  // a 0.33-0.45 ms pass (desert 16h, Spargus 18h), the picture equal even rendered at 640x360.
+  // Tuning "shadow.half" 0: all in the composite, as before
+  static const EnhancedTune t_half("shadow.half", 1.f);
+  const Shader& half = render_state->shaders[ShaderId::ENH_SUN_HALF];
+  // (needs the occlusion's picture: the composite reuses ao_upsample's texels and weights, so the
+  // same size, (w + 1) / 2)
+  const bool use = (float)t_half > 0.5f && half.okay() && m_ssao_ready;
+  glUniform1f(glGetUniformLocation(id, "sun_half_on"), use ? 1.f : 0.f);
+  if (!use) {
+    return;
+  }
+  const int hw = (w + 1) / 2;
+  const int hh = (h + 1) / 2;
+  if (hw != m_sun_half_w || hh != m_sun_half_h) {
+    if (m_sun_half_fbo) {
+      glDeleteFramebuffers(1, &m_sun_half_fbo);
+      glDeleteTextures(1, &m_sun_half_tex);
+    }
+    m_sun_half_w = hw;
+    m_sun_half_h = hh;
+    glGenFramebuffers(1, &m_sun_half_fbo);
+    glGenTextures(1, &m_sun_half_tex);
+    glBindTexture(GL_TEXTURE_2D, m_sun_half_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, hw, hh, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_sun_half_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
+  glViewport(0, 0, hw, hh);
+  half.copy_uniforms_from(render_state->shaders[ShaderId::ENH_COMPOSITE]);  // (binds it)
+  ENH_TIMED("enh-sun-half", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  prof.add_draw_call();
+  glUseProgram(id);
+  glActiveTexture(GL_TEXTURE31);
+  glBindTexture(GL_TEXTURE_2D, m_sun_half_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T31"), 31);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
+}

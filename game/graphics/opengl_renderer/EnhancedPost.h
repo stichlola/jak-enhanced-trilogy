@@ -710,6 +710,13 @@ class EnhancedPost {
   GLuint m_rays_tex = 0;
   int m_rays_w = 0;
   int m_rays_h = 0;
+  // the world's sun shadow looks at half size, by enh_sun_half (unit 31, sun_half_on)
+  void draw_sun_half(GLuint id, int w, int h, GLuint render_fbo, ScopedProfilerNode& prof,
+                     SharedRenderState* render_state);
+  GLuint m_sun_half_fbo = 0;
+  GLuint m_sun_half_tex = 0;
+  int m_sun_half_w = 0;
+  int m_sun_half_h = 0;
   GLuint m_noise_tex = 0;  // gnoise as a picture (post.noise_lut, unit 20)
 
   // the area's look and weather, eased toward the current area's each frame (update_scene)

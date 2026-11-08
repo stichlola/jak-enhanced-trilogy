@@ -2245,6 +2245,9 @@ vec3 fxaa_at(vec2 uv) {
 // the occlusion and the characters' sun shadows, made at half the resolution a side: of the four
 // texels around, those at this pixel's depth (plain bilinear blurred them across the edges of
 // grass blades and pebbles, and the TAA's jitter moved those edges each frame: they flickered)
+// (the four texels and their weights, kept for sun_half_upsample: its picture has the same size)
+ivec2 up_ic[4];
+vec4 up_w = vec4(0.25);
 float ao_upsample(vec2 uv, float zc) {
   vec2 size = vec2(textureSize(tex_T2, 0));
   vec2 g = uv * size - 0.5;
@@ -2265,8 +2268,21 @@ float ao_upsample(vec2 uv, float zc) {
     float w = (bw + 1e-3) / (1.0 + dz * dz * 16.0);
     sum += texelFetch(tex_T2, ic, 0).r * w;
     wsum += w;
+    up_ic[k] = ic;
+    up_w[k] = w;
   }
+  up_w /= wsum;
   return sum / wsum;
+}
+
+// the world's sun shadow looks made at half the resolution a side (enh_sun_half, unit 31), upsampled
+// as the occlusion is: with the four texels and depth weights ao_upsample found for this pixel (both
+// pictures (w + 1) / 2 by (h + 1) / 2; it ran first, on every pixel the sun shadows shade)
+uniform float sun_half_on;
+uniform sampler2D tex_T31;
+vec3 sun_half_upsample() {
+  return texelFetch(tex_T31, up_ic[0], 0).rgb * up_w.x + texelFetch(tex_T31, up_ic[1], 0).rgb * up_w.y +
+         texelFetch(tex_T31, up_ic[2], 0).rgb * up_w.z + texelFetch(tex_T31, up_ic[3], 0).rgb * up_w.w;
 }
 
 // the terrain's pictures without their repeats showing (Inigo Quilez's "texture repetition" 3): a
@@ -2376,6 +2392,35 @@ void composite_unused() {
   bool want = cloud_rays > 0.0 && clouds.x > 0.0 && sky_sun.w > 0.0 && sky_sun.w < 0.45 && sky_sun.z > 0.1 &&
               weather.x < 0.5 && pow(max(dot(rray, sky_sun.xyz), 0.0), 3.0) * rcover > 0.005;
   color = vec4(want ? cloud_rays_lit(tex_coord) : 0.0, 0.0, 0.0, 1.0);
+}
+void composite_unused() {
+#endif
+#ifdef ENH_SUN_HALF_ONLY
+  // (the sun shadow map's two looks for the world's pixels, enh_sun_half: one pixel per 2x2, read
+  // back by the composite with depth weights (sun_half_on 1); characters keep theirs at full size.
+  // r: the map at the point pushed off along its normal; g: the rough look from 2 m toward the sun.
+  // Each wider than the composite's own tests (its soft normal is a full-size pixel's))
+  {
+    float hd = texture(tex_T3, tex_coord).r;
+    vec2 hres = vec2(0.0);
+    float hcs = 0.0;
+    if (hd > 1e-7 && shadow_strength > 0.0 && sun_dir.w > 0.0) {
+      float hz = view_z(hd);
+      vec3 hp = view_pos(tex_coord, hd);
+      vec3 hn = surface_normal(tex_coord, hp);
+      float hndl = dot(soft_normal(tex_coord, hn, hz), sun_dir.xyz);
+      if (hndl > -0.15) {
+        hres.x = sun_shadow(view_to_world * (hp + hn * (0.08 * 4096.0 + hz * 0.002)) + cam_pos);
+      }
+      if (hndl < 0.45) {
+        hres.y = sun_shadow_rough(view_to_world * (hp + sun_dir.xyz * (2.0 * 4096.0 + hz * 0.01)) + cam_pos);
+      }
+      if (hndl > -0.15 && hz < 30.0 * 4096.0) {
+        hcs = contact_shadow(hp + hn * (0.03 * 4096.0 + hz * 0.001), sun_dir.xyz);
+      }
+    }
+    color = vec4(hres, hcs, 1.0);
+  }
 }
 void composite_unused() {
 #endif
@@ -3474,7 +3519,12 @@ void composite_unused() {
     // its own head, arms and Daxter don't shade it: at noon the map put Jak in his own shadow and the
     // shade's tint turned his hair green; walls and roofs further off still do)
     bool chr_gap = chr && tune_chr_gap_m > 0.0;
-    if (ndl > 0.0 && !chr_gap) {
+    // (the world's pixels: both looks below made at half size by enh_sun_half, sun_half_on 1)
+    bool sh_half = sun_half_on > 0.5 && !chr;
+    vec3 sh_hv = sh_half ? sun_half_upsample() : vec3(0.0);
+    if (ndl > 0.0 && !chr_gap && sh_half) {
+      sh = sh_hv.x * facing;
+    } else if (ndl > 0.0 && !chr_gap) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
       sh = sun_shadow(w) * facing;
@@ -3486,7 +3536,9 @@ void composite_unused() {
     // turned away from the sun the map can't tell a shadow from the surface itself: looked at from
     // 2 m toward the sun, past the small shapes. Without it, inside a mountain's shadow the edges
     // of the rocks kept their full light
-    if (facing < 1.0 && !chr) {
+    if (facing < 1.0 && !chr && sh_half) {
+      sh = max(sh, sh_hv.y * (1.0 - facing));
+    } else if (facing < 1.0 && !chr) {
       vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
       sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
     }
@@ -3504,7 +3556,7 @@ void composite_unused() {
     // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
     if (ndl > 0.0 && z < 30.0 * 4096.0 && !chr_gap) {
       vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
-      float cs = contact_shadow(from, sun_dir.xyz);
+      float cs = sh_half ? sh_hv.z : contact_shadow(from, sun_dir.xyz);
       sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
     }
     if (tune_shadow_dbg > 0.5 && tune_shadow_dbg < 1.5) {
