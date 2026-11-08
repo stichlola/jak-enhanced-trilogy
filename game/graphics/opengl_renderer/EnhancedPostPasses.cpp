@@ -801,6 +801,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "dusk"), m_dusk);
   }
   glUniform1f(glGetUniformLocation(id, "haze_shadow"), m_haze_shadow_ready ? 1.f : 0.f);
+  // under a roof (world.json "enclosed", indoor zones): the sky seen through its windows stays the game's
+  glUniform1f(glGetUniformLocation(id, "enclosed"), m_enclosed ? 1.f : 0.f);
   // the rock and ground pictures (custom_assets/<game>/scenery/rock_detail.png, ground_detail.png),
   // loaded on first use, with their average colors
   // (one replaced in the editor: all of them read again)

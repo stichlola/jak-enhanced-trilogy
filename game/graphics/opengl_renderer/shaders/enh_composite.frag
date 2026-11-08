@@ -88,6 +88,7 @@ uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
 uniform float golden;           // the late afternoon's amber look (0..1, the area's times the hour)
 uniform float dusk;             // the sun going down by the clock (0..1: 16:30 to 18:30, out by 20:48)
+uniform float enclosed;         // under a roof (world.json "enclosed", indoor zones): 1
 uniform float noon;             // the hours around noon (0..1)
 uniform float morning;          // the desert's morning (0..1): clear blue sky, peach toward the low sun
 uniform float sky_morning;      // the area's morning sky (0..1): pink and peach toward the low sun
@@ -203,6 +204,11 @@ uniform float tune_night_horizon = 0.05;  // the night sky's glow along the hori
 uniform float tune_sky_keep = 1.0; // the game's lines drawn over its sky (windows) kept over ours
 uniform float tune_sky_keep_lo = 0.05;  // by how much and how sharply the levels changed it: from here
 uniform float tune_sky_keep_hi = 0.14;  // to here, all of the game's pixel
+uniform float tune_sky_enclosed = 1.0;  // under a roof the sky through the windows is the game's (0: ours)
+uniform float tune_adapt_hi = 1.0;  // the eye's adaptation lifting a dark room: not its bright parts (0: off)
+uniform float tune_adapt_hi_lo = 0.5;  // from this brightness (max channel) to 0.9
+uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as the game drew it, at the end (0: off)
+uniform float tune_sky_enclosed_gain = 1.1;
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.04;   // to here, all of the game's pixel
@@ -3820,6 +3826,9 @@ void main() {
   float sky_k = z == 0.0 ? 1.0
                          : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
                                smoothstep(0.04, 0.09, world_dir(ray).y) * step(0.0, clouds.x - 0.001);
+  // (under a roof the game's own sky through the windows: ours, pale and bright at noon, filled the
+  // palace's honeycomb panes between their lines, a white pane where vanilla shows the clouds)
+  sky_k *= 1.0 - enclosed * tune_sky_enclosed;
   if (sky_k > 0.0 && wsurf == 0.0) {
     vec3 c0 = c;
     if (clouds.x > 0.0) {
@@ -5285,7 +5294,10 @@ void main() {
     c += cold * bolt_light * 2.2;
   }
 
-  c *= eye_adapt;
+  // (the eye's lift of a dark room spares its bright parts: the palace's honeycomb windows at noon,
+  // over the sky, went from the game's 74,54,44 to clipped white panes)
+  c *= eye_adapt > 1.0 ? mix(eye_adapt, 1.0, tune_adapt_hi * smoothstep(tune_adapt_hi_lo, 0.9, max(c.r, max(c.g, c.b))))
+                       : eye_adapt;
 
   // the game's translucent light columns (the arena's shaft down the wall): their blended draw left
   // the normal target longer than any tag; the shade, occlusion and dusk grade below then took the
@@ -5336,6 +5348,15 @@ void main() {
     float lc = luma(c);
     float dd = clamp((lf - lc) / max(lf, 1e-3), 0.0, 1.0);
     c = mix(c, fl * (max(lc, lf) / max(lf, 1e-4)), dusk_floor_w * smoothstep(0.0, tune_dusk_floor_soft, dd));
+  }
+
+  // under a roof the sky through the windows as the game drew it, and what it drew over it with no
+  // depth (the palace's honeycomb lattice): the bloom of the bright panes on themselves (+40%), the
+  // eye's lift of the dark room (+20%) and the grade made them flat white panes at noon (box 142,104,79,
+  // vanilla 74,54,44), the lattice gone
+  if (tune_sky_enclosed_keep > 0.0 && enclosed > 0.0 && d <= 1e-7) {
+    vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+    c = mix(c, game_c * tune_sky_enclosed_gain, enclosed * tune_sky_enclosed_keep);
   }
 
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
