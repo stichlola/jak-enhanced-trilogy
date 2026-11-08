@@ -87,6 +87,7 @@ uniform float contrast;
 uniform float warmth;
 uniform float sun_haze;         // the area's warm haze lit by the sun over the distance (0..1)
 uniform float golden;           // the late afternoon's amber look (0..1, the area's times the hour)
+uniform float dusk;             // the sun going down by the clock (0..1: 16:30 to 18:30, out by 20:48)
 uniform float noon;             // the hours around noon (0..1)
 uniform float morning;          // the desert's morning (0..1): clear blue sky, peach toward the low sun
 uniform float sky_morning;      // the area's morning sky (0..1): pink and peach toward the low sun
@@ -263,6 +264,8 @@ uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effe
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
 uniform float tune_dusk_shade = 1.0;  // the shade's blue tint let go as the sun nears the horizon (not the desert; 0: off)
+uniform float tune_cloud_in_shade = 0.3;  // cloud shadows inside the sun's shadow (1: as on sunlit ground, old)
+uniform float tune_dusk_floor = 0.6;  // the low sun's shade: never under this share of the game's color (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
 uniform float tune_night_lamp_hi = 0.9;
@@ -3069,6 +3072,8 @@ void main() {
   float sun_lit = 1.0;
   // (how much of the low sun's sky fill the ground takes, set by the shadow map's test below)
   float gold_w = 1.0;
+  // (how much the low sun's shade below may take at most: never under tune_dusk_floor of the game's color)
+  float dusk_floor_w = 0.0;
   if (normal_debug != 0 && z > 0.0) {
     // the level's own normals in color, the depth-rebuilt ones in grey
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
@@ -3351,8 +3356,10 @@ void main() {
     // (the sun near the horizon outside the desert: the whole street is in shade, the tint became
     // the frame's color and Haven's slums went deep navy at 18-19h, red near 0: as neutral as the
     // game's own dusk light there: the shade keeps its hue)
-    float low_sun = 1.0 - smoothstep(0.08, 0.35, world_dir(sun_dir.xyz).y);
+    // (by the clock too: the areas' sun is still 20 deg up at 19h, the game's light already dusk)
+    float low_sun = max(1.0 - smoothstep(0.08, 0.35, world_dir(sun_dir.xyz).y), dusk);
     tint = mix(tint, vec3(1.0), low_sun * (1.0 - lilac) * tune_dusk_shade);
+    dusk_floor_w = chr ? 0.0 : low_sun * smoothstep(0.0, 0.5, sh);
     // (characters: the shade only a little cooler, never the desert's lilac: taking much more red
     // than green off yellow hair and an orange Daxter turned them olive green)
     if (chr) {
@@ -3383,11 +3390,21 @@ void main() {
       // (faint in the late afternoon: the low sun's light across the valley stays whole)
       // (and neutral with the sun near the horizon outside the desert: over a whole dusk street the
       // cool tint added up with the shade's and the grade's into navy)
-      float cs_low = (1.0 - smoothstep(0.1, 0.35, sw.y)) * (1.0 - sky_day * min(sun_haze * 1.25, 1.0)) * tune_dusk_shade;
+      float cs_low = max(1.0 - smoothstep(0.1, 0.35, sw.y), dusk) * (1.0 - sky_day * min(sun_haze * 1.25, 1.0)) * tune_dusk_shade;
+      // (a cloud only takes the sun away: where the sun's shadow already has it, little is left to
+      // take. Both together crushed the arena's walls at dusk to black, x0.65 then x0.69)
+      cs *= mix(tune_cloud_in_shade, 1.0, sun_lit);
       c *= vec3(1.0) - 0.5 * (1.0 - 0.75 * golden) * cs * mix(vec3(1.03, 0.97, 0.86), vec3(0.97), cs_low);
     }
   }
 
+  // the low sun's shade never under a share of the game's own color: the game lights a dusk wall
+  // warm and dim, and the occlusion, the sun's and the clouds' shade stacked to x0.4 of it, the
+  // arena's walls beside the lit column black (vanilla 73,53,30)
+  if (tune_dusk_floor > 0.0 && dusk_floor_w > 0.0) {
+    vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+    c = mix(c, max(c, game_c * tune_dusk_floor), dusk_floor_w);
+  }
   // dark nights: where no light reaches the world goes dark (the moon's blue left in it); what
   // shines by itself (windows, fires, lamps: the brightest pixels) stays. The lights below then
   // light the surfaces in their own colors.
