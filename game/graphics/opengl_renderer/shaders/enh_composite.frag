@@ -213,6 +213,7 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
@@ -2330,6 +2331,11 @@ void main() {
   // (test: tune_fx_ab = s, off and on in turn every that many seconds, a corner mark tells which)
   bool fx_ab_off = tune_fx_ab > 0.0 && mod(floor(haze.w / tune_fx_ab), 2.0) < 0.5;
   if (fx_ab_off) {
+    fx_w = 0.0;
+  }
+  // (not on the sky: the sun's and moon's glows go back over our sky as the game drew them. With the
+  // gain the sun was a saturated purple diamond, its quad's edge where the weight cut in)
+  if (tune_fx_sky > 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
     fx_w = 0.0;
   }
   // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our
