@@ -216,6 +216,7 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
 uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
@@ -3008,7 +3009,19 @@ void main() {
     color = vec4(own ? shown : vec3(dot(shown, vec3(0.33))), 1.0);
     return;
   }
-  c *= ao;
+  // (per channel, by the surface's own color (Jimenez's GTAO multi-bounce fit): light bounced
+  // between bright walls of a crevice keeps it their color, a deeper sand or sandstone; a grey
+  // multiply took them to a muddy grey-brown. Dark surfaces stay as dark)
+  if (tune_ao_multibounce > 0.0 && ao < 1.0) {
+    vec3 alb = clamp(c, 0.0, 1.0);
+    vec3 ka = 2.0404 * alb - 0.3324;
+    vec3 kb = -4.7951 * alb + 0.6417;
+    vec3 kc = 2.7552 * alb + 0.6903;
+    vec3 ao_mb = max(vec3(ao), ((ao * ka + kb) * ao + kc) * ao);
+    c *= mix(vec3(ao), ao_mb, tune_ao_multibounce);
+  } else {
+    c *= ao;
+  }
   // bounced light: where the surroundings hide the sky (the occluded corners, crevices, the foot of
   // a wall) the light comes from them instead, tinted by their color (an orange canyon's shadows go
   // warm, a lawn's corners green). Six taps about a meter around, on the scene as drawn
