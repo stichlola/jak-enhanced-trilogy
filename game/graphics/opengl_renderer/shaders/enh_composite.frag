@@ -232,6 +232,9 @@ uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the su
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
 uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
+uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
+uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
+uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
@@ -664,6 +667,14 @@ float pixel_angle() {
 // a surface's reflection direction, not a perfect mirror's: a still fine grain in the surface, and
 // each ray spread a little differently every frame (the TAA averages it to a soft, slightly matte
 // look). rough: the spread's size (radians, about)
+// specular AA (Kaplanyan 2016, Tokuyoshi): a Blinn-Phong exponent widened by the normal's variance
+// across the pixel, so a lobe narrower than that spread can't light single pixels the TAA rejects
+float aa_exp(float e, float var) {
+  float a2 = 2.0 / (e + 2.0);
+  a2 = min(a2 + min(var, tune_spec_aa_max), 1.0);
+  return max(2.0 / a2 - 2.0, 1.0);
+}
+
 vec3 rough_reflection(vec3 p, vec3 v, vec3 n, float z, float rough) {
   vec3 a = abs(n.x) < 0.7 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
   vec3 t = normalize(cross(n, a));
@@ -3026,6 +3037,10 @@ void main() {
   vec3 surf_n = z > 0.0 ? surface_normal(tex_coord, p) : vec3(0.0, 0.0, -1.0);
   // the same across a meter, for how the sun and the lamps fall on it: the terrain is flat triangles
   vec3 soft_n = z > 0.0 ? soft_normal(tex_coord, surf_n, z) : surf_n;
+  // (how much the normal turns inside this pixel: the highlights' specular AA. Out here, where
+  // every pixel runs, so the derivatives are defined)
+  vec3 n_dx = dFdx(surf_n), n_dy = dFdy(surf_n);
+  float n_var = tune_spec_aa * (dot(n_dx, n_dx) + dot(n_dy, n_dy));
   // how much of the sun reaches it (the shadow map's, below): the sand's glints and sheen need it
   float sun_lit = 1.0;
   if (normal_debug != 0 && z > 0.0) {
@@ -3417,7 +3432,8 @@ void main() {
     int gmat = gma > 0.83 ? 0 : (gma > 0.5 ? 1 : (gma > 0.17 ? 2 : 0));
     float gloss = tune_dry_glints <= 0.0 || (pix_tag > 0.3 && pix_tag < 0.55) ? 0.0
                 : (gmat == 1 ? 1.0 : (gmat == 2 ? 0.6 : tune_glint_stone));
-    float gexp = mix(24.0, 60.0, gloss);
+    float gexp = aa_exp(mix(24.0, 60.0, gloss), n_var);
+    float wexp = aa_exp(70.0, n_var);
     // (Jak's own shadow from a lamp on the floor right around him: the depth march blurs his body into
     // a dark box twice his width under his feet at night (the port's pier); his contact shadow is there
     // for that, as vanilla's blob)
@@ -3449,7 +3465,7 @@ void main() {
         added += light_color[i].rgb * (k * k) * lit * 1.35;
         if (wet > 0.0) {
           vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
-          glints += light_color[i].rgb * k * pow(max(dot(nn, hv), 0.0), 70.0) * lit;
+          glints += light_color[i].rgb * k * pow(max(dot(nn, hv), 0.0), wexp) * lit;
         }
         if (gloss > 0.0) {
           vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
@@ -3461,6 +3477,10 @@ void main() {
       // (metal tinted by its own color; rolled off, a few torches don't burn a white hole)
       dry *= gloss * (gmat == 1 ? mix(vec3(1.0), albedo * 2.0, 0.6) : vec3(1.0));
       dry /= 1.0 + max(dry.r, max(dry.g, dry.b));
+      // (never far past the surface as lit: grain times a glint lit one pixel of dark stone white)
+      if (tune_spec_clamp > 0.0) {
+        dry = min(dry, vec3(tune_spec_clamp * (luma(c) + luma(added) * (luma(c) + 0.12)) + 0.01));
+      }
       c += dry * ao * tune_dry_glints * (1.0 - min(wet, 1.0));
     }
     // many lamps together (a factory's red floods) saturate softly instead of adding up without end
@@ -3522,7 +3542,7 @@ void main() {
       vec3 vdir = normalize(p);
       // how rough each is: bare metal the most, then tile and paint; glass stays the clearest
       float rough = (mat == 1 ? (mfine == 2 ? 0.07 : 0.13) : (mfine == 1 ? 0.08 : 0.035)) * reflect_rough;
-      vec3 r = rough_reflection(p, vdir, nn, z, rough);
+      vec3 r = rough_reflection(p, vdir, nn, z, sqrt(rough * rough + min(n_var, tune_spec_aa_max)));
       float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
       float hit;
       // (rust reflects nothing: no trace)
