@@ -197,6 +197,9 @@ uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
+uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
+uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
+uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
@@ -2284,7 +2287,11 @@ void main() {
                            textureLod(tex_T23, uv, lod + tune_fx_wash_lod).rgb), 0.0);
     float compact = (1.0 - smoothstep(tune_fx_area0, tune_fx_area1, wide / max(luma(fx_d), 0.02))) *
                     (1.0 - smoothstep(tune_fx_wash0, tune_fx_wash1, max(wide, wider)));
-    fx_w = fx_day * smoothstep(tune_fx_min, tune_fx_min * 4.0, fm) * compact;
+    // (blended dust and smoke are no light: a tan puff over darker ground made a warm difference, and
+    // with the gain and the evening's grade it glowed as an orange orb. The sprite renderer takes
+    // their coverage out of the copy's alpha (EnhancedSpriteFx::mark_blended): they stay in the scene)
+    float dust = fx_mark > 0.5 ? smoothstep(tune_fx_dust0, tune_fx_dust1, 1.0 - textureLod(tex_T24, uv, 0.0).a) : 0.0;
+    fx_w = fx_day * smoothstep(tune_fx_min, tune_fx_min * 4.0, fm) * compact * (1.0 - dust);
     fx_under = luma(f0);
     }
   }

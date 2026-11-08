@@ -400,6 +400,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
     glActiveTexture(GL_TEXTURE0);
     glUniform1f(glGetUniformLocation(down.id(), "fx_bloom"),
                 fx ? std::clamp(1.f - m_night, 0.f, 1.f) : 0.f);
+    glUniform1f(glGetUniformLocation(down.id(), "fx_mark"), fx && m_fx_marked ? 1.f : 0.f);
   }
 
   GLuint src = scene_tex;
@@ -984,6 +985,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1i(glGetUniformLocation(id, "tex_T23"), 23);
     glUniform1i(glGetUniformLocation(id, "tex_T24"), 24);
     glUniform1f(glGetUniformLocation(id, "fx_day"), fx ? std::clamp(1.f - m_night, 0.f, 1.f) : 0.f);
+    // (and the copy after them carries 1 - the blended dust's coverage in its alpha)
+    glUniform1f(glGetUniformLocation(id, "fx_mark"), fx && m_fx_marked ? 1.f : 0.f);
     // the game's sky before the levels drew over it (capture_sky): what they drew there is kept
     // over the Enhanced sky (sky_copy: 2 with the copy before the sprites to compare, 1 without)
     const bool sky = sky_ready();

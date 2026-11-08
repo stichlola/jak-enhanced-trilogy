@@ -407,6 +407,7 @@ class EnhancedPost {
   int m_fx_h = 0;
   u64 m_fx_frame[2] = {0, 0};
   u64 m_fx_count = 0;  // begin_frame calls: a copy from this frame has m_fx_count + 1
+  bool m_fx_marked = false;  // the copy after the sprites has the blended dust's mark in its alpha
   // both copies are from this frame
   bool fx_ready() const {
     return m_fx_fbo[0] && m_fx_frame[0] == m_fx_count + 1 && m_fx_frame[1] == m_fx_count + 1;

@@ -25,6 +25,9 @@ class EnhancedSpriteFx {
                   u64 gl_texture,
                   bool alpha_blended,
                   bool additive);
+  // a normally blended draw that isn't a flame (dust, smoke, leaves): with g_enhanced_fx_blend_mark it
+  // takes its coverage out of the frame's alpha, so the composite keeps it out of the light effects
+  void mark_blended(SharedRenderState* render_state, u32 tbp, u64 gl_texture);
 
  private:
   int classify(SharedRenderState* render_state,
@@ -45,7 +48,12 @@ class EnhancedSpriteFx {
   bool m_on = false;
   int m_class_loc = -1;
   std::unordered_map<u64, int> m_classes;  // by GL texture (stable, the VRAM address isn't) + blend
+  std::unordered_map<u64, bool> m_flames;  // by GL texture: a flame's picture (not marked)
 };
+
+// set by EnhancedPost::capture_fx when it cleared the frame's alpha to 1 before the sprite buckets:
+// blended non-flame sprites then multiply it by (1 - their alpha) (EnhancedSpriteFx::mark_blended)
+extern bool g_enhanced_fx_blend_mark;
 
 /*!
  * Where the ground is under a point, from the depth buffer: a line of points below it is read back
