@@ -208,6 +208,7 @@ uniform float tune_chr_gap_m = 1.6;   // ...from casters at least this far towar
 uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 the land's (desert lilac)
 uniform float tune_chr_bounce = 0.5;  // shade taken off them under a high sun (light back from the ground)
 uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun gets low (on tune_chr_dark)
+uniform float tune_rock_sat = 0.42;   // desert rock by day: saturation cap (0: off)
 uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
 uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
@@ -5062,6 +5063,17 @@ void main() {
     c = mix(c, g, day_look * ground);
     // (under the high sun not as rich as the low sun makes it)
     c = max(mix(vec3(luma(c)), c, 1.0 - 0.2 * noon * day_look * ground), 0.0);
+  }
+  // the desert's rock by day never past a sandstone's saturation: the relight's warmth, the grade's
+  // and the morning look's stacked up and the far mountains went the most saturated orange in the
+  // frame (the low sun keeps its own, richer)
+  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0 && tune_rock_sat > 0.0 && pix_tag > 0.7 && pix_tag < 0.8) {
+    float mxr = max(c.r, max(c.g, c.b));
+    float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
+    if (satr > tune_rock_sat) {
+      float k = mix(1.0, tune_rock_sat / satr, (1.0 - min(golden * 2.0, 1.0)) * (1.0 - flame_keep));
+      c = max(mix(vec3(luma(c)), c, k), 0.0);
+    }
   }
   // sand outside the desert (Sandover's beach): in the shade never darker than the open sky
   // lights it, a soft grey-blue (the game's own morning light there near black)
