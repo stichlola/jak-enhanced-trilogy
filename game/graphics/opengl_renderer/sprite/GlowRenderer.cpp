@@ -1,5 +1,7 @@
 #include "GlowRenderer.h"
 
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
+
 #include "third-party/imgui/imgui.h"
 
 /*
@@ -834,6 +836,15 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
   // Cv = (Cs - 0) * Ad + D
   glBlendFunc(GL_ONE, GL_ONE);
   glBlendEquation(GL_FUNC_ADD);
+  {
+    // (Enhanced: in a half-float frame, post.hdr_scene, the quads' alpha summed past 1, which the
+    // 8-bit frame clamps: later DST_ALPHA blends and the post's dust coverage read it. The frame's
+    // alpha is left as it was there)
+    static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
+    if ((float)t_hdr_scene > 0.5f) {
+      glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+    }
+  }
 
   glDepthMask(GL_FALSE);
 
