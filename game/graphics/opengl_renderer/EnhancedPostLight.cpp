@@ -863,7 +863,11 @@ void EnhancedPost::read_exposure(int w, int h) {
                              ? std::pow(std::clamp(0.36f / mean, 0.8f, 1.6f), m_settings.eye_adapt * 0.6f)
                              : 1.f;
       const float tau = want < m_adapt ? 0.7f : 2.f;
-      m_adapt += (want - m_adapt) * (1.f - std::exp(-dt / tau));
+      // (not over a black frame: a level loading in, nothing drawn but a few torches. The eye
+      // opened up to +33% there, and the city's first seconds came in washed out and orange)
+      if (mean > 0.035f) {
+        m_adapt += (want - m_adapt) * (1.f - std::exp(-dt / tau));
+      }
     } else {
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
     }
