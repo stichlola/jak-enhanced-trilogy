@@ -222,6 +222,11 @@ uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1:
 uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
 uniform float tune_chr_rim = 0.6;     // characters' moon/sky rim at night (0: off)
 uniform float tune_shaft_keep = 1.0;  // the game's translucent light columns (arena shaft) kept as drawn (0: off)
+uniform float tune_shaft_lo = 0.08;  // the columns kept from this luma of the game's picture on walls (floors: 0.3)
+uniform float tune_shaft_n0 = 1.04;
+uniform float tune_shaft_n1 = 1.3;
+uniform float tune_shaft_spill = 0.8;  // the column's light on the wall beside it (0: off)
+uniform float tune_shaft_spill_r = 3.0;
 uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specular occlusion; 0: off)
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
@@ -5253,9 +5258,34 @@ void main() {
   if (tune_shaft_keep > 0.0 && z > 0.0) {
     vec3 gn = texture(tex_T11, tex_coord).rgb * 2.0 - 1.0;
     vec3 raw_scene = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
-    // (only where the game's picture is bright: a decal strip blended over a floor marks it too)
-    shaft_m = smoothstep(1.04, 1.3, dot(gn, gn)) * smoothstep(0.3, 0.5, luma(raw_scene)) * tune_shaft_keep;
+    // (only where the game's picture is bright: a decal strip blended over a floor marks it too. On
+    // walls from a lower luma: the column's dim translucent outer third was crushed to black beside its
+    // restored core, a hard vertical edge; floors keep the high gate)
+    float shaft_lo = mix(tune_shaft_lo, 0.3, smoothstep(0.6, 0.85, abs(dot(surf_n, up_view))));
+    shaft_m = smoothstep(tune_shaft_n0, tune_shaft_n1, dot(gn, gn)) *
+              smoothstep(shaft_lo, shaft_lo + 0.2, luma(raw_scene)) * tune_shaft_keep;
     c = mix(c, max(c, raw_scene), shaft_m);
+    // the column's light on the wall right beside it: within ~4% of the screen of a bright column
+    // pixel, never darker than the game's picture times a falloff (the shaded wall cut off at the
+    // column's side, 33 -> 140 luma in one step at dusk where vanilla goes 99 -> 138)
+    if (tune_shaft_spill > 0.0 && shaft_m < 0.99) {
+      // (a spiral of 8 taps turned per pixel and frame, the TAA averages it: a smooth falloff)
+      float near_m = 0.0;
+      float sj = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + haze.w * 7.13);
+      for (int k = 0; k < 8; k++) {
+        float f = (float(k) + sj) / 8.0;
+        float a = float(k) * 2.39996 + sj * 6.2832;
+        float r = 0.045 * f * tune_shaft_spill_r;
+        vec2 tuv = tex_coord + vec2(cos(a) * r * texel.x / texel.y, sin(a) * r);
+        vec3 tn = texture(tex_T11, tuv).rgb * 2.0 - 1.0;
+        float tm = smoothstep(tune_shaft_n0, tune_shaft_n1, dot(tn, tn));
+        if (tm > 0.0) {
+          tm *= smoothstep(0.3, 0.5, luma(texture(tex_T0, tuv).rgb));
+          near_m = max(near_m, tm * (1.0 - f));
+        }
+      }
+      c = mix(c, max(c, raw_scene * tune_shaft_spill), near_m * (1.0 - shaft_m));
+    }
   }
 
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
