@@ -235,6 +235,8 @@ uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of 
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
+uniform uvec4 light_tiles[144];  // per 32x18 screen tile (4 a vector): bit i = light i may reach it
+uniform float light_tiles_on;     // 1: light_tiles is filled (lights.tiles)
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
@@ -3447,7 +3449,17 @@ void main() {
       lamp_jak_keep = smoothstep(0.5 * tune_lamp_jak_m, tune_lamp_jak_m, jr) + smoothstep(0.4, 1.0, abs(jup));
       lamp_jak_keep = min(lamp_jak_keep, 1.0);
     }
-    for (int i = 0; i < light_count; i++) {
+    // (light tiles: only the lights whose reach may touch this pixel's 32x18 screen tile, lowest
+    // index first as before, so the strongest still cast the shadows)
+    uint lbits = light_count >= 32 ? 0xffffffffu : (1u << uint(light_count)) - 1u;
+    if (light_tiles_on > 0.5) {
+      ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
+      int li = lt.y * 32 + lt.x;
+      lbits &= light_tiles[li >> 2][li & 3];
+    }
+    while (lbits != 0u) {
+      int i = findLSB(lbits);
+      lbits &= lbits - 1u;
       vec3 to_light = light_pos[i].xyz - p;
       float d = length(to_light);
       float r = light_pos[i].w;
