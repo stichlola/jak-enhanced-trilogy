@@ -214,6 +214,8 @@ uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, s
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.6;  // and how bright they get at most
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
+uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
+uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
@@ -3332,6 +3334,14 @@ void main() {
     vec3 glints = vec3(0.0);  // the lights' highlights on wet ground
     bool full_day = night_dark.x <= 0.0 && sky_sun.w > 0.05 && clouds.w < 0.3 && weather.x <= 0.0;
     vec3 vdir = normalize(-p);
+    // and on dry ground: polished stone, tiles and metal catch a torch too (by the material class in
+    // the normals' alpha: metal, glossy, else a little for plain stone; never the characters)
+    vec3 dry = vec3(0.0);
+    float gma = pix_normal.a;
+    int gmat = gma > 0.83 ? 0 : (gma > 0.5 ? 1 : (gma > 0.17 ? 2 : 0));
+    float gloss = tune_dry_glints <= 0.0 || (pix_tag > 0.3 && pix_tag < 0.55) ? 0.0
+                : (gmat == 1 ? 1.0 : (gmat == 2 ? 0.6 : tune_glint_stone));
+    float gexp = mix(24.0, 60.0, gloss);
     for (int i = 0; i < light_count; i++) {
       vec3 to_light = light_pos[i].xyz - p;
       float d = length(to_light);
@@ -3354,7 +3364,17 @@ void main() {
           vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
           glints += light_color[i].rgb * k * pow(max(dot(nn, hv), 0.0), 70.0) * lit;
         }
+        if (gloss > 0.0) {
+          vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
+          dry += light_color[i].rgb * (k * k) * lit * pow(max(dot(nn, hv), 0.0), gexp) * (gexp + 8.0) / 32.0;
+        }
       }
+    }
+    if (gloss > 0.0) {
+      // (metal tinted by its own color; rolled off, a few torches don't burn a white hole)
+      dry *= gloss * (gmat == 1 ? mix(vec3(1.0), albedo * 2.0, 0.6) : vec3(1.0));
+      dry /= 1.0 + max(dry.r, max(dry.g, dry.b));
+      c += dry * ao * tune_dry_glints * (1.0 - min(wet, 1.0));
     }
     // many lamps together (a factory's red floods) saturate softly instead of adding up without end
     added /= 1.0 + mix(0.35, 0.8, night_dark.x) * max(added.r, max(added.g, added.b));
