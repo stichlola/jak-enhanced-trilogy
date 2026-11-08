@@ -580,7 +580,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       const float reach = kind == EnhancedFires::CANDLE ? 4.f : (kind == EnhancedFires::FIRE ? 13.f : 11.f);
-      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f);
+      // (reach and strength scales: at night a torch off screen laid its full 13 m of orange over half
+      // of Spargus' street, where the game has blue moonlight)
+      static const EnhancedTune t_fire_reach("lights.fire_reach", 0.8f);
+      static const EnhancedTune t_fire_k("lights.fire_strength", 0.65f);
+      c.pos[3] = reach * kMeter * (0.75f + 0.25f * m_settings.light_reach / 2.f) * t_fire_reach;
       float dist = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
       // a placed fire close by also gets the embers and hot air (a torch's flame is often too
       // small a glow to be told a fire by its light)
@@ -618,7 +622,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       // (by day a warm glow around the flame, at night far more: a torch's full 13 m of orange
       // light by day laid a bright orange pool on the sunlit sand)
-      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps;
+      float k = (0.3f + 0.95f * fire_night) * m_settings.light_strength * m_grade.lamps * t_fire_k;
       if (kind == EnhancedFires::FIRE || kind == EnhancedFires::CANDLE) {
         float seed = std::fmod(std::abs(fs[0] * 0.013f + fs[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -726,11 +730,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             c.pos[col] += (m_bulb_pos[row] - cam.trans[row]) * cam.rot[row][col];
           }
         }
-        c.pos[3] = 14.f * kMeter;
+        // (its reach and strength: at 14 m and full strength the whole foreground of a desert night went
+        // salmon where the game has blue moonlight, a pool around Jak is enough)
+        static const EnhancedTune t_lan_r("lights.lantern_radius_m", 9.f);
+        static const EnhancedTune t_lan_k("lights.lantern_strength", 0.6f);
+        c.pos[3] = t_lan_r * kMeter;
         // a steady bulb with a faint hum in it
         const float hum = 0.97f + 0.02f * std::sin(t * 17.f) * std::sin(t * 3.3f) +
                           0.01f * std::sin(t * 41.f);
-        const float k = m_lamp_on * hum * m_settings.light_strength;
+        const float k = m_lamp_on * hum * m_settings.light_strength * t_lan_k;
         c.color[0] = 1.25f * k;
         c.color[1] = 0.62f * k;
         c.color[2] = 0.22f * k;
