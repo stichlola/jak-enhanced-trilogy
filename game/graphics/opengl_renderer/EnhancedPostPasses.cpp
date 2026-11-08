@@ -316,27 +316,10 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   if (ao_tmp) {
     m_ao_frame++;
     glUniform1i(glGetUniformLocation(id, "ao_frame"), (int)(m_ao_frame & 1u));
-    // view -> previous view (as the TAA's): R^T Rp, the camera's move as an offset
     float to_prev[3][3];
     float offset[3];
-    float moved = 0.f;
-    for (int k = 0; k < 3; k++) {
-      for (int c = 0; c < 3; c++) {
-        to_prev[k][c] = 0.f;
-        for (int r = 0; r < 3; r++) {
-          to_prev[k][c] += cam.rot[r][k] * m_prev_camera.rot[r][c];
-        }
-      }
-    }
-    for (int c = 0; c < 3; c++) {
-      offset[c] = 0.f;
-      for (int r = 0; r < 3; r++) {
-        offset[c] += (cam.trans[r] - m_prev_camera.trans[r]) * m_prev_camera.rot[r][c];
-      }
-      moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
-    }
     // (a cut or a teleport: no history)
-    if (!m_prev_camera.valid || std::sqrt(moved) >= 8.f * kMeter) {
+    if (!enh_post::view_to_prev(cam, m_prev_camera, to_prev, offset)) {
       glUniform1i(glGetUniformLocation(id, "ao_temporal"), 2);
     }
     glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);

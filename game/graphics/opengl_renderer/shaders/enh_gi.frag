@@ -14,7 +14,16 @@ uniform float radius;      // game units
 uniform float max_distance;
 
 in vec2 tex_coord;
-out vec4 gi_out;
+layout(location = 0) out vec4 gi_out;
+// temporal (gi.temporal, as enh_ssao's): half the samples a frame, the other half last frame's,
+// through the reprojected history (rgb: the gathered light, a: the view distance it was found at)
+layout(location = 1) out vec4 hist_out;
+uniform int gi_temporal;   // 0 off, 1 on (history in tex_T12), 2 on, no history yet
+uniform int gi_frame;      // which half (0/1)
+uniform sampler2D tex_T12;
+uniform mat3 to_prev;
+uniform vec3 to_prev_offset;
+uniform vec2 prev_f;
 
 const int SAMPLES = 12;
 
@@ -32,6 +41,7 @@ void main() {
   vec2 uv = tex_coord;
   float d = texture(tex_T0, uv).r;
   gi_out = vec4(0.0);
+  hist_out = vec4(0.0);
   if (d <= 1e-7) {
     return;
   }
@@ -64,7 +74,9 @@ void main() {
   float noise = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   vec3 sum = vec3(0.0);
   float wsum = 0.0;
-  for (int i = 0; i < SAMPLES; i++) {
+  bool tmp = gi_temporal != 0;
+  int t_step = tmp ? 2 : 1;
+  for (int i = tmp ? gi_frame : 0; i < SAMPLES; i += t_step) {
     float t = (float(i) + 0.5) / float(SAMPLES);
     float angle = t * 7.0 * 6.2831853 + noise * 6.2831853;
     vec2 suv = uv + r_uv * sqrt(t) * vec2(cos(angle), sin(angle));
@@ -82,5 +94,20 @@ void main() {
     sum += texture(tex_T1, suv).rgb * w;
     wsum += 1.0;
   }
-  gi_out = vec4(sum / float(SAMPLES), 1.0);
+  vec3 gi = sum * float(t_step) / float(SAMPLES);
+  if (tmp) {
+    vec3 now = gi;
+    if (gi_temporal == 1) {
+      vec3 pp = to_prev * p + to_prev_offset;
+      vec2 puv = 0.5 * vec2(prev_f.x * pp.x, prev_f.y * pp.y) / pp.z + 0.5;
+      if (pp.z > 0.0 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)))) {
+        vec4 h = texture(tex_T12, puv);
+        if (abs(h.a - abs(pp.z)) < 0.03 * abs(pp.z)) {
+          gi = 0.5 * (now + h.rgb);
+        }
+      }
+    }
+    hist_out = vec4(now, dist);
+  }
+  gi_out = vec4(gi, 1.0);
 }

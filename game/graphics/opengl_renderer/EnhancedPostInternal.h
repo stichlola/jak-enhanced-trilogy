@@ -1136,4 +1136,29 @@ inline void sun_world(float out[3], bool sky = false) {
     }
   }
 }
+
+// view -> previous frame's view, R^T Rp with the camera's move as an offset ([k][c]: column k of
+// the GLSL mat3), as the TAA's. False on a cut or a teleport (no history to reproject from)
+inline bool view_to_prev(const EnhancedCamera& cam,
+                         const EnhancedCamera& prev,
+                         float to_prev[3][3],
+                         float offset[3]) {
+  float moved = 0.f;
+  for (int k = 0; k < 3; k++) {
+    for (int c = 0; c < 3; c++) {
+      to_prev[k][c] = 0.f;
+      for (int r = 0; r < 3; r++) {
+        to_prev[k][c] += cam.rot[r][k] * prev.rot[r][c];
+      }
+    }
+  }
+  for (int c = 0; c < 3; c++) {
+    offset[c] = 0.f;
+    for (int r = 0; r < 3; r++) {
+      offset[c] += (cam.trans[r] - prev.trans[r]) * prev.rot[r][c];
+    }
+    moved += (cam.trans[c] - prev.trans[c]) * (cam.trans[c] - prev.trans[c]);
+  }
+  return prev.valid && cam.valid && std::sqrt(moved) < 8.f * kMeter;
+}
 }  // namespace enh_post

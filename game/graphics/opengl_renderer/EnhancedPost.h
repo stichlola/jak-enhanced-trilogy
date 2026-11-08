@@ -427,6 +427,12 @@ class EnhancedPost {
   int m_ao_hist_cur = 0;
   bool m_ao_hist_valid = false;
   unsigned m_ao_frame = 0;
+  // (gi.temporal: the same for the indirect light, RGBA16F)
+  GLuint m_gi_hist_fbo[2] = {0, 0};
+  GLuint m_gi_hist_tex[2] = {0, 0};
+  int m_gi_hist_cur = 0;
+  bool m_gi_hist_valid = false;
+  unsigned m_gi_frame = 0;
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
