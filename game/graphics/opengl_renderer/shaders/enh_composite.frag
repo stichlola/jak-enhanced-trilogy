@@ -297,6 +297,8 @@ uniform float tune_far_lift = 1.2;  // (not at golden hour: it took the glow off
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
+uniform float tune_chr_floor_any = 0.5;  // that floor's weight with a high sun too (0: low sun only)
+uniform float tune_lantern_halo = 0.07;  // Jak's desert lantern: its wide glow (was 0.2)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
@@ -4692,7 +4694,9 @@ void main() {
     float band = exp(-sq((r - core_px * 1.7) / (core_px * 0.35))) * vis;
     float edge = exp(-sq((r - core_px * 2.05) / (core_px * 0.18))) * vis *
                  (0.6 + 0.4 * dpx.y / max(r, 1e-3));
-    float halo = exp(-r / (core_px * 4.0)) * 0.6 + exp(-r / (core_px * 16.0)) * 0.2;
+    // (the wide part held low: at 0.2 it and the bloom on top made a big orange orb beside Jak, a
+    // stranger to the dark desert night, G3)
+    float halo = exp(-r / (core_px * 4.0)) * 0.5 + exp(-r / (core_px * 16.0)) * tune_lantern_halo;
     c *= 1.0 - 0.55 * band * lantern.w;
     // white-yellow in its heart, the glow deep orange
     c += (vec3(1.0, 0.82, 0.5) * bulb + vec3(1.0, 0.7, 0.4) * edge * 0.5 +
@@ -5479,7 +5483,9 @@ void main() {
       vec3 fl = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0) * tune_chr_floor;
       float lf = luma(fl);
       float lc = luma(c);
-      float w = (1.0 - chr_bounce) * (1.0 - night_dark.x);
+      // (and at any sun height at half weight: under a roof with the sun high, the Metal Head tower,
+      // the shade path left Jak a near-black silhouette in some frames)
+      float w = max(1.0 - chr_bounce, tune_chr_floor_any) * (1.0 - night_dark.x);
       if (lf > 1e-3 && lc < lf) {
         c = mix(c, fl, w * smoothstep(0.0, 0.3, (lf - lc) / lf));
       }
