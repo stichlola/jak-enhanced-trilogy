@@ -158,6 +158,7 @@ uniform vec4 cloud_info;        // the clouds texture is ready, history to blend
 uniform float tune_spill_sat = 0.45;  // the light spill's color at most this saturated (1: off)
 uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
+uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
 uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
@@ -251,8 +252,7 @@ uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias alo
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
-uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
-uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
+uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
@@ -2763,7 +2763,20 @@ void main() {
     // shaded a little by the ripples so it keeps some texture; clearer where it's shallow, where
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
-    vec3 body = night_dim(mix(water_deep_color, water_shallow_color, clear_water) * shade);
+    vec3 body_col = mix(water_deep_color, water_shallow_color, clear_water);
+    // (the body follows the hour: full at noon, dimmer and tinted by the low sky as the sun goes
+    // down; the night's darkening is night_dim's, so the factor goes back to 1 into the night)
+    if (tune_water_hour > 0.0) {
+      float wday = smoothstep(0.02, 0.5, sky_sun.w);
+      float wk = mix(mix(1.0 - 0.45 * tune_water_hour, 1.0, wday), 1.0, night_dark.x);
+      // (and under a grey sky or rain, as the city around it dims)
+      float wover = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
+      wk *= 1.0 - tune_water_hour * (0.3 * wover + 0.15 * min(weather.x, 1.0));
+      vec3 wsk = sky_color(normalize(fwd_view + up_view * 0.2));
+      vec3 wtint = clamp(wsk / max(luma(wsk), 1e-3), vec3(0.6), vec3(1.5));
+      body_col *= wk * mix(vec3(1.0), wtint, 0.4 * tune_water_hour * (1.0 - wday));
+    }
+    vec3 body = night_dim(body_col * shade);
     // (a pond's edge: its sandy bed seen through a few cm of murky water, not the sea's light
     // turquoise: that drew a pale line along the shore, there only once the near water is drawn)
     if (pond_here) {
