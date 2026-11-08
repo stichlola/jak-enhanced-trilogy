@@ -9,6 +9,8 @@ uniform sampler2D tex_T11;   // the geometry's world normals, their length the m
 uniform mat3 view_to_world;
 uniform vec4 proj;         // a, b, fx, fy
 uniform vec2 texel;
+uniform float tune_ao_up0 = 0.5;   // ground this much facing up takes the geometry's normal...
+uniform float tune_ao_up1 = 0.7;   // ...all of it from here (the depth's normal makes dark rows)
 uniform float radius;        // game units
 uniform float intensity;
 uniform float max_distance;  // game units
@@ -214,7 +216,8 @@ void main() {
     // the terrain always, and any ground facing up: the depth's normal goes far off on level ground
     // in rows at the same screen heights in every level (straight dark lines across the ground);
     // a crate's smoothed edge leans out of "up" and keeps the depth's
-    float w = (g_tag > 0.82 && g_tag < 0.96) ? 1.0 : smoothstep(0.7, 0.85, abs(gw.y));
+    // (from 0.5: gently sloped sand at 0.7-0.85 kept a dark row at y ~198 of 360 in the desert)
+    float w = (g_tag > 0.82 && g_tag < 0.96) ? 1.0 : smoothstep(tune_ao_up0, tune_ao_up1, abs(gw.y));
     n = normalize(mix(n, gn, w));
   }
 

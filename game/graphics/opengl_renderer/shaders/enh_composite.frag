@@ -197,6 +197,7 @@ uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
+uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
 uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
@@ -2910,7 +2911,8 @@ void main() {
     float ctag = pix_tag;
     ao = mix(ao, 1.0, (ctag > 0.4 && ctag < 0.535) ? 1.0 : 0.0);  // (and their cloth, the 0.52 tag)
   }
-  if (ao_debug != 0) {
+  if (ao_debug != 0 || tune_ao_view > 0.5) {
+    // (tune_ao_view: the same view from the tuning file, in a running game)
     // right half: distance (grey: log10 of meters / 4, so 1 km = 0.75), sky in blue
     float lm = z > 0.0 ? log(z / 4096.0) / log(10.0) / 4.0 : -1.0;
     color = tex_coord.x > 0.5 ? (z > 0.0 ? vec4(vec3(lm), 1.0) : vec4(0.0, 0.0, 1.0, 1.0)) : vec4(vec3(ao), 1.0);
