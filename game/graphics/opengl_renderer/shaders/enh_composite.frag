@@ -184,6 +184,7 @@ uniform float tune_fx_gain = 2.2;    // the effects' light by day, over the scen
 uniform float tune_fx_bright = 0.8;  // more over bright ground (by the scene's brightness under them)
 uniform float tune_fx_sat = 1.0;  // their color (>1: more saturated)
 uniform float tune_gold_fill = 0.75;  // late afternoon: sand/rock never under this share of the game's color (0: off)
+uniform float tune_gold_shadow = 1.0; // ...but not inside a cast shadow on ground facing the sun (0: everywhere, old)
 uniform float tune_fx_dark = 0.2;    // the gain's share over dark ground (1: as over lit ground)
 uniform float tune_fx_dark0 = 0.04;  // the scene's luma under the effect: dark up to here...
 uniform float tune_fx_dark1 = 0.22;  // ...lit from here
@@ -229,20 +230,28 @@ uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden b
 uniform float tune_beacon_water = 0.25;  // and how bright they get at most
 uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
+uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
 uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
+// (light tiles, lights.tiles: measured 0.00 ms gained, and 144 more uniform vectors on a shader at
+// ~860 risk the 1024 limit of Intel/Mesa: declared only with this define, the C++ side's uniform
+// calls then find no location and do nothing)
+// #define ENH_LIGHT_TILES
+#ifdef ENH_LIGHT_TILES
 uniform uvec4 light_tiles[144];  // per 32x18 screen tile (4 a vector): bit i = light i may reach it
 uniform float light_tiles_on;     // 1: light_tiles is filled (lights.tiles)
+#endif
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
+uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
@@ -3046,6 +3055,8 @@ void main() {
   float n_var = tune_spec_aa * (dot(n_dx, n_dx) + dot(n_dy, n_dy));
   // how much of the sun reaches it (the shadow map's, below): the sand's glints and sheen need it
   float sun_lit = 1.0;
+  // (how much of the low sun's sky fill the ground takes, set by the shadow map's test below)
+  float gold_w = 1.0;
   if (normal_debug != 0 && z > 0.0) {
     // the level's own normals in color, the depth-rebuilt ones in grey
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
@@ -3072,6 +3083,9 @@ void main() {
     vec3 kb = -4.7951 * alb + 0.6417;
     vec3 kc = 2.7552 * alb + 0.6903;
     vec3 ao_mb = max(vec3(ao), ((ao * ka + kb) * ao + kc) * ao);
+    // (its color only: the fit also gives back light, which lifted the arena at 20h by ~5%: the
+    // dark look is deliberate. Brought back to the grey occlusion's brightness)
+    ao_mb *= mix(1.0, ao / max(luma(ao_mb), 1e-3), tune_ao_mb_luma);
     c *= mix(vec3(ao), ao_mb, tune_ao_multibounce);
   } else {
     c *= ao;
@@ -3311,6 +3325,9 @@ void main() {
       }
     }
     rock_sh = sh;
+    // (the low sun's sky fill below: only where the ground is turned from the sun, not in what a
+    // wall or a rock casts on ground that faces it: Spargus' streets at 18h went 2x brighter)
+    gold_w = 1.0 - sh * smoothstep(0.0, 0.1, ndl) * tune_gold_shadow;
     sun_lit *= 1.0 - sh;
     // the shade is lit by the blue sky only: cooler as well as darker; the sunlit side warmer
     // and fuller (light and shadow apart)
@@ -3368,7 +3385,11 @@ void main() {
     float l = luma(c);
     // (what shines by itself, by the game's own picture: the occlusion and shadows above took the
     // arena's light shaft under the threshold, and the night then turned it into a black column)
-    float keep = smoothstep(0.4, 0.85, max(l, tune_night_keep_raw * luma(texture(tex_T0, tex_coord).rgb)));
+    // (the game's own picture only from a higher threshold: from 0.4 it also spared the arena's
+    // lamp-lit floors, +7% over the old night; the shaft is far brighter)
+    float raw_l = luma(texture(tex_T0, tex_coord).rgb);
+    float keep = max(smoothstep(0.4, 0.85, l),
+                     tune_night_keep_raw * smoothstep(tune_night_raw_lo, max(tune_night_raw_lo + 0.1, 0.85), raw_l));
     vec3 moon = vec3(l) * mix(vec3(0.7, 0.82, 1.1), vec3(1.1, 0.55, 0.45), sky_kind.z);
     vec3 darkened = mix(c, moon, 0.45 * dk) * (1.0 - 0.9 * dk);
     c = mix(darkened, c, keep);
@@ -3452,11 +3473,13 @@ void main() {
     // (light tiles: only the lights whose reach may touch this pixel's 32x18 screen tile, lowest
     // index first as before, so the strongest still cast the shadows)
     uint lbits = light_count >= 32 ? 0xffffffffu : (1u << uint(light_count)) - 1u;
+#ifdef ENH_LIGHT_TILES
     if (light_tiles_on > 0.5) {
       ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
       int li = lt.y * 32 + lt.x;
       lbits &= light_tiles[li >> 2][li & 3];
     }
+#endif
     while (lbits != 0u) {
       int i = findLSB(lbits);
       lbits &= lbits - 1u;
@@ -5178,7 +5201,7 @@ void main() {
   // Never darker than this share of the game's own color (sand, rocky ground, rock), warm
   if (tune_gold_fill > 0.0 && golden > 0.0 && z > 0.0 && pix_tag > 0.55 && pix_tag < 0.95) {
     vec3 fill = texture(tex_T0, tex_coord).rgb * vec3(1.0, 0.9, 0.8) * tune_gold_fill;
-    c = mix(c, max(c, fill), golden);
+    c = mix(c, max(c, fill), golden * gold_w);
   }
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
   // are) and the near whites rolled off (above the sand, whose grain they flattened), so that nothing burns (not the flames, the game's own)

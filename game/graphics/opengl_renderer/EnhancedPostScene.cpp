@@ -1416,7 +1416,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // light tiles (clustered lights, step 1): the screen in 32x18 tiles, per tile a mask of the
       // lights whose sphere's projection may touch it, so the composite's main light loop runs only
       // those. Conservative: the hull of the projected corners of each sphere's box; a sphere
-      // reaching the camera plane covers every tile. lights.tiles 0: off (every pixel, every light)
+      // reaching the camera plane covers every tile. lights.tiles 0: off (every pixel, every light).
+      // The composite declares the uniforms only with ENH_LIGHT_TILES defined (uniform budget): without
+      // it these calls find location -1 and do nothing
       static const EnhancedTune t_tiles("lights.tiles", 0.f);
       constexpr int kTx = 32, kTy = 18;
       uint32_t tiles[kTx * kTy];
