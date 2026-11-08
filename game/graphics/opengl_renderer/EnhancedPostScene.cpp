@@ -613,10 +613,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day) * m_grade.glows;
       // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
       // far beacons and the sky's glows are bigger), and staying put
+      // (Spargus palace's braziers draw only a wide halo, 8-18 m: a fire too, its flame the size
+      // of a small one, or the grade took the flame's raw yellow to a dim orange.
+      // tuning.json "lights": {"fire_big_m": 0 = off})
+      static const EnhancedTune t_fire_big("lights.fire_big_m", 20.f);
+      const bool big_halo = l.size >= 6.f * kMeter;
       const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&
                         l.color[1] > 0.1f * l.color[0] && l.color[1] < 0.9f * l.color[0] &&
-                        l.size > 0.3f * kMeter && l.size < 6.f * kMeter && dist < 60.f * kMeter;
-      if (const auto* f = warm ? note_fire_glow(l.pos, l.size) : nullptr) {
+                        l.size > 0.3f * kMeter && l.size < std::max(6.f, (float)t_fire_big) * kMeter &&
+                        dist < 60.f * kMeter;
+      const float fire_size = big_halo ? std::min(0.2f * l.size, 2.5f * kMeter) : l.size;
+      if (const auto* f = warm ? note_fire_glow(l.pos, fire_size) : nullptr) {
         // its light flickers on top of the game's own (a seed from where it stands)
         float seed = std::fmod(std::abs(f->pos[0] * 0.013f + f->pos[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
