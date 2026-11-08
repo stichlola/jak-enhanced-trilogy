@@ -275,6 +275,7 @@ uniform float light_tiles_on;      // 1: tex_T28 is filled (lights.tiles)
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
+uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
 uniform sampler2D tex_T29;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
 uniform mat4 chr_occ_mvp;   // world -> that map
@@ -3738,6 +3739,29 @@ void main() {
     float blob = (1.0 - smoothstep(0.2, 0.75, r_m)) * (1.0 - smoothstep(0.15, 0.5, abs(up_m)));
     float in_sun = sun_dir.w > 0.0 ? sun_lit * clamp(sun_dir.w * 4.0, 0.0, 1.0) : 0.0;
     c *= 1.0 - tune_chr_contact * blob * (1.0 - 0.6 * in_sun) * (chr_occ_on > 0.0 && tune_chr_occ > 0.0 ? 0.4 : 1.0);
+  }
+
+  // low-sun-sheen: looking toward a low sun, level stone and flagstones catch a broad grazing sheen
+  // and a rough highlight (the sand has its own, below). Only in the sun, only with it low; held
+  // under the surface's own brightness so the dark look stays (tune_low_sheen 0: off)
+  if (tune_low_sheen > 0.0 && sun_dir.w > 0.0 && sun_lit > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      z < 150.0 * 4096.0 && pix_tag > 0.96 && night_dark.x < 1.0) {
+    vec3 lw = normalize(world_dir(sun_dir.xyz));
+    vec3 wn = normalize(world_dir(surf_n));
+    float lowk = (1.0 - smoothstep(0.1, 0.45, lw.y)) * smoothstep(0.0, 0.03, lw.y) * smoothstep(0.55, 0.85, wn.y);
+    if (lowk > 0.0) {
+      float ga = pix_normal.a;
+      int smat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
+      vec3 vw = -normalize(world_dir(p));  // toward the eye
+      float fres = pow(1.0 - clamp(dot(vw, wn), 0.0, 1.0), 5.0);
+      float toward = pow(max(dot(normalize(-vw.xz + 1e-4), normalize(lw.xz + 1e-4)), 0.0), 3.0);
+      float sr = max(dot(reflect(-vw, wn), lw), 0.0);
+      float lobe = pow(sr, aa_exp(18.0, n_var)) * (0.05 + 0.6 * fres);
+      float k = (fres * toward * 0.7 + lobe) * (smat == 2 ? 1.6 : (smat == 1 ? 0.6 : 1.0));
+      vec3 sheen = sun_color() * k * lowk * sun_lit * sun_dir.w * ao * (1.0 - night_dark.x) *
+                   (1.0 - min(wet, 1.0)) * tune_low_sheen;
+      c += min(sheen, vec3(luma(c) * 0.5 + 0.01));
+    }
   }
 
   // char-ground-occlusion: every character around Jak darkens what lies just below it (in the temple
