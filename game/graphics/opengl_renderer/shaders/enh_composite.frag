@@ -301,8 +301,9 @@ uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the grou
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
 uniform float tune_chr_floor_any = 0.5;  // that floor's weight with a high sun too (0: low sun only)
+uniform float tune_shade_hue = 0.9;  // near sun shade on colored ground keeps its hue (0: the full tint)
 uniform float tune_lantern_halo = 0.07;  // Jak's desert lantern: its wide glow (was 0.2)
-uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
+uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23, 9: flame_keep/weight/fx_day
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
 uniform float tune_dusk_shade = 1.0;  // the shade's blue tint let go as the sun nears the horizon (not the desert; 0: off)
@@ -3552,6 +3553,16 @@ void main() {
     if (chr) {
       tint = mix(tint, vec3(1.0, 0.98, 0.9), tune_chr_tint);
     }
+    // (near shade on a strongly colored ground keeps that ground's hue: the lilac took 4x more red
+    // than blue off the sand and the Hellcat's noon shadow was a flat blue-grey patch. Far off the
+    // lilac stays, the dunes' shade across the valley)
+    if (tune_shade_hue > 0.0) {
+      float mx = max(c.r, max(c.g, c.b));
+      float sat = mx > 1e-4 ? (mx - min(c.r, min(c.g, c.b))) / mx : 0.0;
+      float hw = tune_shade_hue * smoothstep(0.1, 0.45, sat) *
+                 (1.0 - smoothstep(30.0 * 4096.0, 80.0 * 4096.0, z));
+      tint = mix(tint, vec3(dot(tint, vec3(1.0 / 3.0))), hw);
+    }
     c *= vec3(1.0) - shadow_strength * sh * tint;
     c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
                      vec3(0.08, 0.07, 0.05);
@@ -5701,6 +5712,7 @@ void main() {
     c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
         tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : tune_fx_debug < 4.5 ? vec3(fx_day, 0.5, 0.0) :
         tune_fx_debug < 5.5 ? texture(tex_T0, tex_coord).rgb : tune_fx_debug < 6.5 ? texture(tex_T23, uv).rgb :
+        tune_fx_debug > 8.5 ? vec3(flame_keep, fx_w, fx_day) :
         tune_fx_debug > 7.5 ? vec3(shaft_m, fx_w, 0.0) :
         vec3(z / (40.0 * 4096.0), (pix_tag - 0.9) * 5.0, pix_normal.a);
   }
