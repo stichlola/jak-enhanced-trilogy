@@ -197,6 +197,8 @@ uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
+uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
+uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
@@ -4937,6 +4939,20 @@ void main() {
   }
   if (tune_fx_ab > 0.0 && tex_coord.x > 1.0 - 8.0 * texel.x && tex_coord.y < 8.0 * texel.y) {
     c = fx_ab_off ? vec3(0.0) : vec3(1.0);
+  }
+
+  // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
+  // the clamp below cut them to a flat white-yellow with the hue gone. The brightest channel rolls
+  // off from the knee (hue kept, below it nothing changes), and what was far past 1 goes toward
+  // white, as a hot core does (tune_shoulder_knee >= 1: off)
+  if (tune_shoulder_knee < 1.0) {
+    float m = max(c.r, max(c.g, c.b));
+    float k = tune_shoulder_knee;
+    if (m > k) {
+      float s = k + (1.0 - k) * (1.0 - exp(-(m - k) / (1.0 - k)));
+      vec3 t = c * (s / m);
+      c = mix(t, vec3(s), smoothstep(1.0, 1.0 + tune_shoulder_white, m) * 0.6);
+    }
   }
 
   // vignette
