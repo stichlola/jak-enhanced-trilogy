@@ -274,6 +274,8 @@ uniform float tune_cloud_in_shade = 0.3;  // cloud shadows inside the sun's shad
 uniform float tune_dusk_floor = 0.7;  // the low sun's shade: never under this share of the game's color (0: off)
 uniform float tune_dusk_floor_end = 1.0;  // that floor after the grade, in the game's hue (0: before the grade, old)
 uniform float tune_dusk_floor_soft = 0.3;  // how far under the floor before the game's hue takes over fully
+uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
+uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
@@ -4674,7 +4676,8 @@ void main() {
         // sand's made of)
         // (not by night: the moon's blue ground went grey-mauve, red +29 over vanilla at 22h)
         c = mix(vec3(luma(c)), c, mix(0.92, 0.9, low_light)) *
-            mix(mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light), vec3(1.0), clouds.w * tune_rock_night);
+            mix(mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light), vec3(1.0),
+                max(clouds.w * tune_rock_night, max(morning, sky_morning) * tune_rock_dawn));
         c *= gtint;
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
@@ -5350,6 +5353,24 @@ void main() {
     c = mix(c, fl * (max(lc, lf) / max(lf, 1e-4)), dusk_floor_w * smoothstep(0.0, tune_dusk_floor_soft, dd));
   }
 
+  // the morning's low sun: the land never much more saturated than the game draws it. The area's
+  // grade, the contrast curve (it takes the small channels: blue) and the morning's peach look
+  // stacked: Spargus' rock slabs at 7h went lime-orange (147,107,51 vs vanilla 125,101,60, peaks
+  // 228,173,93) and the sand orange-red
+  if (tune_morning_sat_cap > 0.0 && z > 0.0 && !(pix_tag > 0.3 && pix_tag < 0.55)) {
+    float mw = max(morning, sky_morning) * (1.0 - flame_keep);
+    if (mw > 0.0) {
+      vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+      float gt = max(game_c.r, max(game_c.g, game_c.b));
+      float sg = gt > 0.02 ? (gt - min(game_c.r, min(game_c.g, game_c.b))) / gt : 0.0;
+      float ct = max(c.r, max(c.g, c.b));
+      float sc = ct > 0.02 ? (ct - min(c.r, min(c.g, c.b))) / ct : 0.0;
+      float cap = max(sg * tune_morning_sat_cap, 0.15);
+      if (sc > cap) {
+        c = mix(c, max(mix(vec3(luma(c)), c, cap / sc), 0.0), mw);
+      }
+    }
+  }
   // under a roof the sky through the windows as the game drew it, and what it drew over it with no
   // depth (the palace's honeycomb lattice): the bloom of the bright panes on themselves (+40%), the
   // eye's lift of the dark room (+20%) and the grade made them flat white panes at noon (box 142,104,79,
