@@ -1755,7 +1755,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     if (reproject) {
       glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
     }
-    draw_clouds(id, w, h, reproject, render_fbo, prof);
+    draw_clouds(id, w, h, reproject, render_fbo, prof, render_state);
   } else {
     m_cloud_history = false;
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);

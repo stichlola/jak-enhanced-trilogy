@@ -26,8 +26,20 @@ class Shader {
   // the uniform values it holds now go to `fresh` (a reloaded copy); false (and a log line) when
   // one sits at another location there, which a renderer that looked it up once would miss
   bool hand_uniforms_to(const Shader& fresh, bool require_same_locations) const;
+  // Enhanced: a slim variant built from another shader's files (enh_clouds from enh_composite)
+  // takes the values its uniforms have in `src` now; the matching list is made once per program
+  // pair. Leaves this program bound.
+  void copy_uniforms_from(const Shader& src) const;
+  static std::string vert_file(const std::string& shader_name);
 
  private:
+  struct CopiedUniform {
+    int src_loc = -1;
+    int dst_loc = -1;
+    unsigned type = 0;
+  };
+  mutable std::vector<CopiedUniform> m_copy;
+  mutable u64 m_copy_src = 0, m_copy_dst = 0;
   struct TuneUniform {
     int loc = -1;
     unsigned type = 0;
@@ -109,6 +121,7 @@ enum class ShaderId {
   SHRUB_IMP = 58,   // Enhanced: its far pictures (impostors)
   SHRUB_GRASS = 59, // Enhanced: dense grass fields (EnhancedGrass)
   ENH_TERRAIN = 60, // Enhanced: a private level's own ground (EnhancedTerrain)
+  ENH_CLOUDS = 61,  // Enhanced: enh_composite with only its cloud march (ENH_CLOUD_ONLY)
   MAX_SHADERS
 };
 

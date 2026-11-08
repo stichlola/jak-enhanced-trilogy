@@ -674,7 +674,8 @@ class EnhancedPost {
   bool m_vol_ready = false;
 
   // the clouds, a pixel for every 2x2, blended over frames (draw_clouds)
-  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof);
+  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof,
+                   SharedRenderState* render_state);
   GLuint m_cloud_fbo[2] = {0, 0};
   GLuint m_cloud_tex[2] = {0, 0};
   int m_cloud_w = 0;

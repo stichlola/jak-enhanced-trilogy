@@ -2314,6 +2314,13 @@ vec3 sky_over(vec2 q) {
   return g - textureLod(tex_T25, q, 0.0).rgb;
 }
 void main() {
+#ifdef ENH_CLOUD_ONLY
+  // (the slim cloud program, enh_clouds: everything below is compiled out, so the march gets the
+  // registers it needs, not the whole composite's)
+  color = cloud_march();
+}
+void composite_unused() {
+#endif
   if (cloud_pass == 1) {
     color = cloud_march();
     return;

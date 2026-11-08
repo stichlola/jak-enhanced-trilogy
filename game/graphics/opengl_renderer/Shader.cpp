@@ -203,12 +203,17 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   const std::string scissor_adjust = "512.0 / " + scissor_height;
 
   // read the shader source
-  auto vert_src = ascii_only(
-      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
+  auto vert_src = ascii_only(file_util::read_text_file(
+      file_util::get_file_path({shader_folder, vert_file(shader_name) + ".vert"})));
   // (Enhanced: the detailed scenery's instanced models are colored like the shrubs they replace)
   const std::string frag_name = frag_file(shader_name);
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
+  // (Enhanced: the cloud pass alone, without the composite's registers: more pixels in flight)
+  if (shader_name == "enh_clouds") {
+    const auto nl = frag_src.find('\n');
+    frag_src.insert(nl == std::string::npos ? 0 : nl + 1, "#define ENH_CLOUD_ONLY 1\n");
+  }
 
   vert_src = std::regex_replace(vert_src, std::regex("HEIGHT_SCALE"), height_scale);
   vert_src = std::regex_replace(vert_src, std::regex("SCISSOR_HEIGHT"), scissor_height);
@@ -394,7 +399,63 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
 }
 
 std::string Shader::frag_file(const std::string& shader_name) {
+  if (shader_name == "enh_clouds") {
+    return "enh_composite";
+  }
   return shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
+}
+
+std::string Shader::vert_file(const std::string& shader_name) {
+  return shader_name == "enh_clouds" ? "enh_composite" : shader_name;
+}
+
+void Shader::copy_uniforms_from(const Shader& src) const {
+  if (m_copy_src != src.m_program || m_copy_dst != m_program) {
+    m_copy.clear();
+    m_copy_src = src.m_program;
+    m_copy_dst = m_program;
+    GLint count = 0;
+    glGetProgramiv(m_program, GL_ACTIVE_UNIFORMS, &count);
+    for (GLint idx = 0; idx < count; idx++) {
+      char name[256];
+      GLint size = 0;
+      GLenum type = 0;
+      glGetActiveUniform(m_program, idx, sizeof(name), nullptr, &size, &type, name);
+      if (uniform_layout(type).first < 0) {
+        continue;
+      }
+      std::string base = name;
+      if (auto b = base.find('['); b != std::string::npos) {
+        base.resize(b);
+      }
+      for (GLint e = 0; e < size; e++) {
+        const std::string el = size > 1 ? base + "[" + std::to_string(e) + "]" : std::string(name);
+        CopiedUniform c;
+        c.dst_loc = glGetUniformLocation(m_program, el.c_str());
+        c.src_loc = glGetUniformLocation(src.m_program, el.c_str());
+        c.type = type;
+        if (c.dst_loc >= 0 && c.src_loc >= 0) {
+          m_copy.push_back(c);
+        }
+      }
+    }
+    lg::info("[enhanced] shader {}: {} uniforms copied from {}", m_name, m_copy.size(), src.m_name);
+  }
+  glUseProgram(m_program);
+  for (const auto& c : m_copy) {
+    float f[16];
+    GLint i[16];
+    GLuint u[16];
+    const int kind = uniform_layout(c.type).first;
+    if (kind == 0) {
+      glGetUniformfv(src.m_program, c.src_loc, f);
+    } else if (kind == 1) {
+      glGetUniformiv(src.m_program, c.src_loc, i);
+    } else {
+      glGetUniformuiv(src.m_program, c.src_loc, u);
+    }
+    set_uniform(c.dst_loc, c.type, f, i, u);
+  }
 }
 
 void Shader::apply_tuning() const {
@@ -548,6 +609,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_SHADOW_MERC) = {"enh_shadow_merc", version};
   at(ShaderId::SHRUB_INST) = {"shrub_inst", version};
   at(ShaderId::ENH_TERRAIN) = {"enh_terrain", version};
+  at(ShaderId::ENH_CLOUDS) = {"enh_clouds", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
 
@@ -584,7 +646,7 @@ void ShaderLibrary::hot_reload() {
     auto t = std::filesystem::last_write_time(
         file_util::get_file_path({Shader::shader_folder, Shader::frag_file(name) + ".frag"}), ec);
     const auto tv = std::filesystem::last_write_time(
-        file_util::get_file_path({Shader::shader_folder, name + ".vert"}), ec);
+        file_util::get_file_path({Shader::shader_folder, Shader::vert_file(name) + ".vert"}), ec);
     t = std::max(t, tv);
     auto& seen = last[&shader - m_shaders];
     if (!forced && seen == std::filesystem::file_time_type{}) {
