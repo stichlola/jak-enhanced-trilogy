@@ -313,6 +313,7 @@ uniform float tune_phys_sky = 1.0;   // the sun's color from the air it crosses 
 uniform float tune_phys_turb = 1.0;  // x the aerosols (the haze) in it
 uniform float tune_phys_dome = 1.0;  // the sky dome's hue from the same air (single scattering), brightness kept (0: off; >= 10 shows the hue)
 uniform float tune_phys_ozone = 1.0; // x the ozone (300 DU) in the sky dome's air
+uniform float tune_phys_shade = 0.0; // the shade's tint from the sun's and the sky's colors by the same air, not the hand lilac (0: off)
 uniform float tune_probe_shade = 0.0; // the level's shade under a roof: the bounce's hue, not the blue sky's (0: off; >= 10 shows it)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
@@ -3739,6 +3740,25 @@ void main() {
     // turned the shaded sand navy)
     float lilac = sky_day * min(sun_haze * 1.25, 1.0);
     vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
+    // (tune_phys_shade: what the shade loses is the sun's share of each channel, sun / (sun + sky),
+    // with the sun's and the open sky's colors from the air model (phys_sky_hue over the dome:
+    // zenith twice, low toward and away from the sun) and their ratio from how dark the shade is.
+    // The darkening's amount stays the hand tint's)
+    if (tune_phys_shade > 0.0 && sky_sun.w > 0.0 && clouds.w < 1.0) {
+      vec3 scol = sun_color();
+      vec3 s_h = scol / max(luma(scol), 1e-4);
+      float ca = sqrt(max(1.0 - sky_sun.w * sky_sun.w, 0.0));
+      float lo_s = 0.25 * sky_sun.w, lo_c = 0.968 * ca;
+      vec3 k_h = 0.25 * (2.0 * phys_sky_hue(1.0, sky_sun.w) + phys_sky_hue(0.25, lo_s + lo_c) +
+                         phys_sky_hue(0.25, lo_s - lo_c));
+      float tm = dot(tint, vec3(1.0 / 3.0));
+      float d = clamp(shadow_strength * tm, 0.2, 0.9);
+      vec3 pt = s_h / (s_h + (1.0 - d) / d * k_h);
+      // (as dark as the hand tint by luma: by the plain mean the desert's noon shade came out 3.5% lighter)
+      pt *= luma(tint) / max(luma(pt), 1e-4);
+      float over_s = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
+      tint = mix(tint, pt, min(tune_phys_shade, 1.0) * (1.0 - clouds.w) * (1.0 - over_s));
+    }
     // (the sun near the horizon outside the desert: the whole street is in shade, the tint became
     // the frame's color and Haven's slums went deep navy at 18-19h, red near 0: as neutral as the
     // game's own dusk light there: the shade keeps its hue)
