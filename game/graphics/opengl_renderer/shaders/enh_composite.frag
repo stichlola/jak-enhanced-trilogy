@@ -155,6 +155,7 @@ uniform int cloud_pass;         // 1: this draw only marches the clouds, a pixel
 uniform sampler2D tex_T15;      // the clouds at a quarter of the pixels (last frame's in the pass)
 uniform vec4 cloud_info;        // the clouds texture is ready, history to blend in, how much of it to keep
 uniform float tune_spill_sat = 0.45;  // the light spill's color at most this saturated (1: off)
+uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
