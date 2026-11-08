@@ -20,6 +20,10 @@ uniform mat4 light_mvp;          // world (game units) -> shadow map
 uniform sampler2DShadow tex_T22;  // the far sun shadow map (2 x 1.2 km: mountains, big rocks)
 uniform mat4 light_mvp_far;
 uniform float shadow_far_on;
+uniform sampler2DShadow tex_T26;  // the middle sun shadow map (2 x 320 m, 2048: houses, rocks around)
+uniform mat4 light_mvp_mid;
+uniform float shadow_mid_on;
+uniform float shadow_mid_span;
 uniform mat3 view_to_world;
 uniform int light_count;        // dynamic lights (the game's glows), view space
 uniform vec4 light_pos[32];     // xyz, radius (game units)
@@ -198,7 +202,7 @@ uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: 
 uniform float tune_sky_night_hi = 0.04;   // to here, all of the game's pixel
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
-uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
+uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b), 5 no middle map
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
 uniform float tune_chr_gap_m = 1.6;   // ...from casters at least this far toward the sun (0: old 70 cm lookup)
 uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 the land's (desert lilac)
@@ -216,6 +220,7 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
 uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
@@ -728,11 +733,35 @@ float sun_shadow_far(vec3 w) {
   return (1.0 - lit / 9.0) * fade;
 }
 
+// the middle map: from the near one's edge out to ~320 m (31 cm texels: houses, palms and rocks
+// keep their shapes there, the far map's 59 cm blurred them to blobs); 16 taps over ~1.5 texels,
+// fading into the far map toward its edge
+float sun_shadow_mid(vec3 w) {
+  if (shadow_mid_on <= 0.0 || abs(tune_shadow_dbg - 5.0) < 0.5) {
+    return sun_shadow_far(w);
+  }
+  vec3 s = (light_mvp_mid * vec4(w, 1.0)).xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return sun_shadow_far(w);
+  }
+  vec2 e = abs(s.xy * 2.0 - 1.0);
+  float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
+  float far = fade < 1.0 ? sun_shadow_far(w) : 0.0;
+  float bias = tune_shadow_mid_bias_m / max(shadow_mid_span, 1.0);
+  float rot = pixel_angle();
+  float r = 1.5 / 2048.0;
+  float lit = 0.0;
+  for (int i = 0; i < 16; i++) {
+    lit += texture(tex_T26, vec3(s.xy + vogel(i, 16, rot) * r, s.z - bias));
+  }
+  return mix(far, 1.0 - lit / 16.0, fade);
+}
+
 // a cheap look: whether this point stands in the shadow of something (four taps, no penumbra)
 float sun_shadow_rough(vec3 w) {
   vec3 s = (light_mvp * vec4(w, 1.0)).xyz * 0.5 + 0.5;
   if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
-    return sun_shadow_far(w);
+    return sun_shadow_mid(w);
   }
   float r = 0.5 / shadow_params.y;
   float lit = texture(tex_T9, vec3(s.xy + vec2(r, r), s.z - NEAR_BIAS)) +
@@ -746,12 +775,12 @@ float sun_shadow(vec3 w) {
   vec4 l = light_mvp * vec4(w, 1.0);
   vec3 s = l.xyz * 0.5 + 0.5;
   if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0))) || abs(tune_shadow_dbg - 4.0) < 0.5) {
-    return sun_shadow_far(w);
+    return sun_shadow_mid(w);
   }
   // fade out toward the edge of the map, into the far one
   vec2 e = abs(s.xy * 2.0 - 1.0);
   float fade = 1.0 - smoothstep(0.8, 1.0, max(e.x, e.y));
-  float far = fade < 1.0 ? sun_shadow_far(w) : 0.0;
+  float far = fade < 1.0 ? sun_shadow_mid(w) : 0.0;
   if (shadow_params.w > 0.0) {
     // soft shadows (PCSS): how far above this point the things in the way are (the blockers'
     // average depth, 12 taps over 1.5 m) sets how wide the penumbra is: sharp where a wall meets
@@ -796,7 +825,7 @@ float sun_shadow(vec3 w) {
 float chr_sun_shadow(vec3 w, float gap_m) {
   vec3 s = (light_mvp * vec4(w, 1.0)).xyz * 0.5 + 0.5;
   if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
-    return sun_shadow_far(w);
+    return sun_shadow_mid(w);
   }
   float r = 0.25 / shadow_params.y;
   float bias = gap_m / shadow_params.x;

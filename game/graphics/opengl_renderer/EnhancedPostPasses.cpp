@@ -886,6 +886,15 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   // the map's depth span (2 x shadow.near_depth_m, do_shadow_map), its side 2 x range; the far
   // map's depth span for its bias in meters (it was a constant: 1.5 m along the light at 6 km)
   glUniform1f(glGetUniformLocation(id, "shadow_far_span"), m_shadow_far_span_m);
+  // the middle map (unit 26): between the near and the far one
+  const bool mid = m_shadow_ready && m_shadow_mid_ready;
+  glActiveTexture(GL_TEXTURE26);
+  glBindTexture(GL_TEXTURE_2D, mid ? m_shadow_mid_tex : m_no_shadow_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T26"), 26);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp_mid"), 1, GL_TRUE, m_light_mvp_mid);
+  glUniform1f(glGetUniformLocation(id, "shadow_mid_on"), mid ? 1.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "shadow_mid_span"), m_shadow_mid_span_m);
   glUniform4f(glGetUniformLocation(id, "shadow_params"), m_shadow_near_span_m, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,
               m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);

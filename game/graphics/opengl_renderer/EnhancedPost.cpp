@@ -385,6 +385,11 @@ EnhancedPost::~EnhancedPost() {
     glDeleteTextures(1, &m_shadow_far_tex);
     m_shadow_far_fbo = m_shadow_far_tex = 0;
   }
+  if (m_shadow_mid_fbo) {
+    glDeleteFramebuffers(1, &m_shadow_mid_fbo);
+    glDeleteTextures(1, &m_shadow_mid_tex);
+    m_shadow_mid_fbo = m_shadow_mid_tex = 0;
+  }
   if (m_shadow_fbo) {
     glDeleteFramebuffers(1, &m_shadow_fbo);
     glDeleteTextures(1, &m_shadow_tex);

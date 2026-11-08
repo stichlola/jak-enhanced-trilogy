@@ -1015,6 +1015,12 @@ const EnhancedTune kShadowFarRange("shadow.far_range_m", 1200.f);
 const EnhancedTune kShadowFarDepth("shadow.far_depth_m", 3000.f);
 // the near map's depth span, meters (its side is the menu's shadow range)
 const EnhancedTune kShadowNearDepth("shadow.near_depth_m", 300.f);
+// the middle map (between the near and the far one, 2048 texels): on/off, half its side, its
+// depth span, meters. From 80 m to ~400 m the far map's 59 cm texels left houses and rocks blobby
+const EnhancedTune kShadowMidOn("shadow.mid_on", 0.f);  // (off until shown to help: no cost measured)
+const EnhancedTune kShadowMidRange("shadow.mid_range_m", 320.f);
+const EnhancedTune kShadowMidDepth("shadow.mid_depth_m", 1000.f);
+constexpr int kMidRes = 2048;
 }  // namespace
 
 void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfilerNode& prof) {
@@ -1066,6 +1072,29 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     glReadBuffer(GL_NONE);
     glBindTexture(GL_TEXTURE_2D, 0);
     m_shadow_far_ready = false;
+  }
+  const bool mid_on = (float)kShadowMidOn > 0.5f;
+  if (mid_on && !m_shadow_mid_fbo) {
+    glGenFramebuffers(1, &m_shadow_mid_fbo);
+    glGenTextures(1, &m_shadow_mid_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_mid_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kMidRes, kMidRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_mid_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_shadow_mid_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_shadow_mid_ready = false;
+  }
+  if (!mid_on) {
+    m_shadow_mid_ready = false;
   }
 
   // what to draw: geometry 0 (the most detailed) of every tfrag and tie tree of the levels in use;
@@ -1378,6 +1407,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     if (dot < std::cos((float)t_step * 3.14159265f / 180.f)) {
       memcpy(m_shadow_dir, live, sizeof(live));
       m_shadow_far_ready = false;  // (the far map redrawn now with it, not next frame)
+      m_shadow_mid_ready = false;
     }
   }
   float f[3] = {m_shadow_dir[0], m_shadow_dir[1], m_shadow_dir[2]};
@@ -1394,7 +1424,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   float up[3] = {f[1] * right[2] - f[2] * right[1], f[2] * right[0] - f[0] * right[2],
                  f[0] * right[1] - f[1] * right[0]};
-  auto make_mvp = [&](float range, float depth, float* mvp) {
+  auto make_mvp = [&](float range, float depth, float* mvp, int res) {
     float center[3];
     // the camera looks down view +z: its forward in world is column 2 of the rotation; level (no
     // y), so looking up or down doesn't slide the map's square and its seam over the ground
@@ -1406,7 +1436,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     for (int i = 0; i < 3; i++) {
       center[i] = cam.trans[i] + fwd[i] * range * 0.5f;
     }
-    const float texel = 2.f * range / kRes;
+    const float texel = 2.f * range / res;
     float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
     float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
     float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
@@ -1423,12 +1453,14 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     mvp[12] = mvp[13] = mvp[14] = 0.f;
     mvp[15] = 1.f;
   };
-  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp);
+  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp, kRes);
   m_shadow_near_span_m = 2.f * kShadowNearDepth;  // (the composite's biases and penumbrae, in meters)
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
   float far_mvp[16];
-  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, far_mvp);
+  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, far_mvp, kRes);
+  float mid_mvp[16];
+  make_mvp(kShadowMidRange * kMeter, kShadowMidDepth * kMeter, mid_mvp, kMidRes);
 
   GLfloat old_clear_depth = 0.f;
   GLint old_depth_func = GL_GEQUAL;
@@ -1453,9 +1485,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE0);
-  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map) {
+  // (the middle map draws as the far one does (the big plants, not the small shrubs), the terrain too)
+  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map, bool mid_map = false) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
-    glViewport(0, 0, kRes, kRes);
+    glViewport(0, 0, mid_map ? kMidRes : kRes, mid_map ? kMidRes : kRes);
     glClear(GL_DEPTH_BUFFER_BIT);
     glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp);
     glBindVertexArray(m_shadow_vao);
@@ -1464,7 +1497,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       glUniform1i(u_cut, 0);
       glUniform1f(u_alpha, -1.f);
       // (not in the far map: its big texels leave stripes on the ground, its slopes show the sun anyway)
-      if (!far_map) {
+      if (!far_map || mid_map) {
         enhanced_terrain_shadow_draw();
         prof.add_draw_call();
       }
@@ -1512,11 +1545,21 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   };
   // (the far one every other frame: the sun barely moves. Its matrix changes only along with the
   // map: the new one over last frame's map made the far shadows jump while the camera moved)
+  bool far_drawn = false;
   if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
     memcpy(m_light_mvp_far, far_mvp, sizeof(far_mvp));
     m_shadow_far_span_m = 2.f * kShadowFarDepth;
     draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true);
     m_shadow_far_ready = true;
+    far_drawn = true;
+  }
+  // (the middle one on the frames the far one skips: one extra pass a frame at most. Its matrix
+  // only with its map, as the far one's)
+  if (mid_on && m_shadow_mid_fbo && (!far_drawn || !m_shadow_mid_ready)) {
+    memcpy(m_light_mvp_mid, mid_mvp, sizeof(mid_mvp));
+    m_shadow_mid_span_m = 2.f * kShadowMidDepth;
+    draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true);
+    m_shadow_mid_ready = true;
   }
   draw_levels(m_shadow_fbo, m_light_mvp, true, false);
   glDisableVertexAttribArray(1);
