@@ -1549,6 +1549,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    // the screen tiles' masks, uploaded after the beacons: per 32x18 tile r = the lights that may
+    // reach it, g/b = the beacons 0-31/32-63 whose point and halo may show in it
+    constexpr int kTx = 32, kTy = 18;
+    uint32_t tile_bits[kTx * kTy * 4] = {};
+    int tile_flags = 0;  // 1 lights, 2 beacons (light_tiles_on)
     {
       // light tiles (clustered lights, step 1): the screen in 32x18 tiles, per tile a mask of the
       // lights whose sphere's projection may touch it, so the composite's main light loop runs only
@@ -1559,11 +1564,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // The composite declares the uniforms only with ENH_LIGHT_TILES defined (uniform budget): without
       // it these calls find location -1 and do nothing
       static const EnhancedTune t_tiles("lights.tiles", 1.f);
-      constexpr int kTx = 32, kTy = 18;
-      uint32_t tiles[kTx * kTy];
       const bool tiles_on = t_tiles > 0.5f;
       if (tiles_on) {
-        std::fill(std::begin(tiles), std::end(tiles), 0u);
+        tile_flags |= 1;
         const float fx = m_last_proj[2], fy = m_last_proj[3];
         for (int i = 0; i < n; i++) {
           const float* lp = pos + i * 4;
@@ -1592,30 +1595,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
           for (int ty = y0; ty <= y1; ty++) {
             for (int tx = x0; tx <= x1; tx++) {
-              tiles[ty * kTx + tx] |= 1u << i;
+              tile_bits[(ty * kTx + tx) * 4] |= 1u << i;
             }
           }
         }
-        // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
-        // 1024 constant registers)
-        static GLuint tiles_tex = 0;
-        glActiveTexture(GL_TEXTURE28);
-        if (!tiles_tex) {
-          glGenTextures(1, &tiles_tex);
-          glBindTexture(GL_TEXTURE_2D, tiles_tex);
-          glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, kTx, kTy, 0, GL_RED_INTEGER, GL_UNSIGNED_INT,
-                       nullptr);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        }
-        glBindTexture(GL_TEXTURE_2D, tiles_tex);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RED_INTEGER, GL_UNSIGNED_INT, tiles);
-        glActiveTexture(GL_TEXTURE0);
-        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
       }
-      glUniform1f(glGetUniformLocation(id, "light_tiles_on"), tiles_on ? 1.f : 0.f);
     }
     glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
@@ -1659,6 +1643,60 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (m_settings.ssao_debug && (debug_beacons++ % 300) == 0) {
         lg::info("[enhanced] beacons: {} far glows, {} shown", beacons.size(), nb);
       }
+      // beacon tiles (beacons.tiles): the composite draws a beacon only within 40 px of its point
+      // and only when that point is on screen, so each one's tiles are that square's (the same
+      // projection as the shader's, half a tile of margin); its loop then walks only those.
+      // Default on: 2560x1600 Spargus 21h composite 11.70 -> 11.17 ms in two A/B pairs of one run,
+      // frames off/on equal to two frames of one setting (the beacons' tiles checked drawn)
+      static const EnhancedTune t_btiles("beacons.tiles", 1.f);
+      if (t_btiles > 0.5f && nb > 0) {
+        tile_flags |= 2;
+        const float fx = m_last_proj[2], fy = m_last_proj[3];
+        const float ru = 40.f / std::max(w, 1), rv = 40.f / std::max(h, 1);
+        for (int i = 0; i < nb; i++) {
+          const float* bp = bpos + i * 4;
+          if (bp[2] == 0.f) {
+            continue;
+          }
+          const float u = 0.5f * fx * bp[0] / bp[2] + 0.5f, v = 0.5f * fy * bp[1] / bp[2] + 0.5f;
+          if (!(u > 0.f && u < 1.f && v > 0.f && v < 1.f)) {
+            continue;
+          }
+          const int x0 = std::max((int)std::floor((u - ru) * kTx - 0.5f), 0);
+          const int x1 = std::min((int)std::floor((u + ru) * kTx + 0.5f), kTx - 1);
+          const int y0 = std::max((int)std::floor((v - rv) * kTy - 0.5f), 0);
+          const int y1 = std::min((int)std::floor((v + rv) * kTy + 0.5f), kTy - 1);
+          for (int ty = y0; ty <= y1; ty++) {
+            for (int tx = x0; tx <= x1; tx++) {
+              tile_bits[(ty * kTx + tx) * 4 + 1 + (i >> 5)] |= 1u << (i & 31);
+            }
+          }
+        }
+      }
+    }
+    {
+      // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
+      // 1024 constant registers)
+      if (tile_flags) {
+        static GLuint tiles_tex = 0;
+        glActiveTexture(GL_TEXTURE28);
+        if (!tiles_tex) {
+          glGenTextures(1, &tiles_tex);
+          glBindTexture(GL_TEXTURE_2D, tiles_tex);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, kTx, kTy, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                       nullptr);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+        glBindTexture(GL_TEXTURE_2D, tiles_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                        tile_bits);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
+      }
+      glUniform1f(glGetUniformLocation(id, "light_tiles_on"), (float)tile_flags);
     }
     static int debug_counter = 0;
     if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {

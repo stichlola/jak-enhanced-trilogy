@@ -266,8 +266,8 @@ uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many
 // stops before its fragment work: the tail-span after it holds that)
 #define ENH_LIGHT_TILES
 #ifdef ENH_LIGHT_TILES
-uniform highp usampler2D tex_T28;  // 32x18, R32UI: bit i = light i may reach the tile
-uniform float light_tiles_on;      // 1: tex_T28 is filled (lights.tiles)
+uniform highp usampler2D tex_T28;  // 32x18, RGBA32UI: r bit i = light i may reach the tile, g/b beacons 0-31/32-63
+uniform float light_tiles_on;      // bits: 1 r is filled (lights.tiles), 2 g/b are (beacons.tiles)
 #endif
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
@@ -472,7 +472,7 @@ float light_blocked_by(vec3 from, vec3 lp, float jitter, float reach, int steps)
 uint light_tile_bits() {
   uint bits = light_count >= 32 ? 0xffffffffu : (1u << uint(max(light_count, 0))) - 1u;
 #ifdef ENH_LIGHT_TILES
-  if (light_tiles_on > 0.5) {
+  if ((int(light_tiles_on + 0.5) & 1) != 0) {
     ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
     bits &= texelFetch(tex_T28, lt, 0).r;
   }
@@ -4589,7 +4589,19 @@ void main() {
   // however far it is (the game's own glow shrinks to nothing), hidden behind what's in front
   float aspect_px = texel.y / texel.x;
   float night_air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + sun_haze * 0.4;
-  for (int i = 0; i < beacon_count; i++) {
+  // (beacon tiles, beacons.tiles: only the beacons whose 40 px square touches this pixel's tile)
+  uvec2 bbits = uvec2(beacon_count >= 32 ? 0xffffffffu : (1u << uint(max(beacon_count, 0))) - 1u,
+                      beacon_count >= 64 ? 0xffffffffu
+                                         : (beacon_count > 32 ? (1u << uint(beacon_count - 32)) - 1u : 0u));
+#ifdef ENH_LIGHT_TILES
+  if ((int(light_tiles_on + 0.5) & 2) != 0) {
+    ivec2 bt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
+    bbits &= texelFetch(tex_T28, bt, 0).gb;
+  }
+#endif
+  for (int bw = 0; bw < 2; bw++)
+  for (uint bb = bw == 0 ? bbits.x : bbits.y; bb != 0u; bb &= bb - 1u) {
+    int i = findLSB(bb) + 32 * bw;
     vec3 bp = beacon_pos[i].xyz;
     vec2 buv = 0.5 * vec2(proj.z * bp.x, proj.w * bp.y) / bp.z + 0.5;
     vec2 dpx = (tex_coord - buv) / texel.y;
