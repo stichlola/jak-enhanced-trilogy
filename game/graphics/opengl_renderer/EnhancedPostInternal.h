@@ -54,14 +54,81 @@ inline bool enh_profiling() {
   static const bool on = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
   return on;
 }
-#define ENH_TIMED(name, ...)                        \
-  if (enh_profiling()) {                            \
-    glFinish();                                     \
-    auto timed_node = prof.make_scoped_child(name); \
-    __VA_ARGS__;                                    \
-    glFinish();                                     \
-  } else {                                          \
-    __VA_ARGS__;                                    \
+// Otherwise each pass is timed on the GPU without waiting: two timestamp queries a pass, in a ring
+// of 4 frames, read back when they're done (they nest; ~0.01 ms in all). EnhancedPost::pass_times
+// gives the averages ("[enhanced] passes ..." in the log every 5 s). tuning.json
+// "debug": {"pass_timers": 0} turns them off.
+namespace enh_post {
+struct PassTimer {
+  const char* name;
+  GLuint q[4][2] = {};
+  bool used[4] = {};
+  double sum_ms = 0.0;
+  int n = 0;
+  explicit PassTimer(const char* nm);
+};
+inline std::vector<PassTimer*>& pass_timers() {
+  static std::vector<PassTimer*> all;
+  return all;
+}
+inline PassTimer::PassTimer(const char* nm) : name(nm) {
+  pass_timers().push_back(this);
+}
+inline unsigned& pass_timer_frame() {
+  static unsigned f = 0;
+  return f;
+}
+bool pass_timers_on();
+struct PassTimerScope {
+  PassTimer* t = nullptr;
+  int slot = 0;
+  explicit PassTimerScope(PassTimer& timer) {
+    if (!pass_timers_on()) {
+      return;
+    }
+    t = &timer;
+    if (!t->q[0][0]) {
+      glGenQueries(8, &t->q[0][0]);
+    }
+    slot = pass_timer_frame() & 3;
+    if (t->used[slot]) {
+      // (4 frames old: done by now nearly always; if not, that sample is dropped, never waited for)
+      GLint ready = 0;
+      glGetQueryObjectiv(t->q[slot][1], GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (ready) {
+        GLuint64 a = 0, b = 0;
+        glGetQueryObjectui64v(t->q[slot][0], GL_QUERY_RESULT, &a);
+        glGetQueryObjectui64v(t->q[slot][1], GL_QUERY_RESULT, &b);
+        if (b > a) {
+          t->sum_ms += (double)(b - a) * 1e-6;
+          t->n++;
+        }
+      }
+      t->used[slot] = false;
+    }
+    glQueryCounter(t->q[slot][0], GL_TIMESTAMP);
+  }
+  ~PassTimerScope() {
+    if (t) {
+      glQueryCounter(t->q[slot][1], GL_TIMESTAMP);
+      t->used[slot] = true;
+    }
+  }
+  PassTimerScope(const PassTimerScope&) = delete;
+  PassTimerScope& operator=(const PassTimerScope&) = delete;
+};
+}  // namespace enh_post
+
+#define ENH_TIMED(name, ...)                         \
+  if (enh_profiling()) {                             \
+    glFinish();                                      \
+    auto timed_node = prof.make_scoped_child(name);  \
+    __VA_ARGS__;                                     \
+    glFinish();                                      \
+  } else {                                           \
+    static enh_post::PassTimer enh_pass_timer(name); \
+    enh_post::PassTimerScope enh_pass_scope(enh_pass_timer); \
+    __VA_ARGS__;                                     \
   }
 
 namespace enh_post {

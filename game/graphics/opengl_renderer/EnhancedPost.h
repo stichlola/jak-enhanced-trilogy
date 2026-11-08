@@ -769,6 +769,7 @@ class EnhancedPost {
   float gpu_ms() const { return m_gpu_ms; }
   float gpu_post_ms() const { return m_gpu_post_ms; }
   int auto_level() const { return m_auto_level; }
+  static std::string pass_times();
 
  private:
   GLuint m_gpu_query[4][3] = {};  // frame start, post start, post end

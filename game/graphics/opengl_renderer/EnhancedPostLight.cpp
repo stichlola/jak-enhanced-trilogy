@@ -1549,7 +1549,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
     memcpy(m_light_mvp_far, far_mvp, sizeof(far_mvp));
     m_shadow_far_span_m = 2.f * kShadowFarDepth;
-    draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true);
+    ENH_TIMED("enh-shadow-far", draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true));
     m_shadow_far_ready = true;
     far_drawn = true;
   }
@@ -1558,16 +1558,16 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   if (mid_on && m_shadow_mid_fbo && (!far_drawn || !m_shadow_mid_ready)) {
     memcpy(m_light_mvp_mid, mid_mvp, sizeof(mid_mvp));
     m_shadow_mid_span_m = 2.f * kShadowMidDepth;
-    draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true);
+    ENH_TIMED("enh-shadow-mid", draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true));
     m_shadow_mid_ready = true;
   }
-  draw_levels(m_shadow_fbo, m_light_mvp, true, false);
+  ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
   glDisableVertexAttribArray(1);
   glBindVertexArray(0);
   // characters only with the sun (or moon) above ~7 degrees: lower, a 2 m character casts a band
   // tens of meters long that follows it around (the game's own short shadow stays)
   if (m_settings.shadow_casters && sun[1] / len > 0.12f) {
-    draw_shadow_casters(render_state, prof);
+    ENH_TIMED("enh-shadow-chars", draw_shadow_casters(render_state, prof));
     g_enhanced_casters.cast = true;
   }
   glDisable(GL_POLYGON_OFFSET_FILL);

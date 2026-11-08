@@ -41,13 +41,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
+  // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
+  // the vsync wait when the frame has time to spare)
+  static enh_post::PassTimer t_post_total("enh-total");
+  enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
   glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
-  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  ENH_TIMED("enh-scene-copy", glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
-  prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof);
+  ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
   const bool have_scene = m_ssao_ready;
   update_scene();
   if (have_scene) {
