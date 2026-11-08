@@ -2148,11 +2148,49 @@ void EnhancedPost::draw_clouds(GLuint id,
   m_cloud_cur = 1 - cur;
   m_cloud_history = true;
 
-  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
-  glViewport(0, 0, w, h);
   glActiveTexture(GL_TEXTURE15);
   glBindTexture(GL_TEXTURE_2D, m_cloud_tex[cur]);
   glActiveTexture(GL_TEXTURE0);
+  // the low sun's rays through the gaps in the clouds at the clouds' size, by enh_cloud_rays (its
+  // own program: in the composite their 20 reads a pixel took 1.4 ms at 2560x1600, desert 16h),
+  // read back bilinearly on unit 30 (cloud_info.w 1). Tuning "clouds.rays_slim" 0: in the composite
+  static const EnhancedTune t_rays_slim("clouds.rays_slim", 1.f);
+  const Shader& rays = render_state->shaders[ShaderId::ENH_CLOUD_RAYS];
+  const bool use_rays = (float)t_rays_slim > 0.5f && rays.okay();
+  if (use_rays) {
+    if (cw != m_rays_w || ch != m_rays_h) {
+      if (m_rays_fbo) {
+        glDeleteFramebuffers(1, &m_rays_fbo);
+        glDeleteTextures(1, &m_rays_tex);
+      }
+      m_rays_w = cw;
+      m_rays_h = ch;
+      glGenFramebuffers(1, &m_rays_fbo);
+      glGenTextures(1, &m_rays_tex);
+      glBindTexture(GL_TEXTURE_2D, m_rays_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, cw, ch, 0, GL_RED, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_rays_tex, 0);
+      glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
+    glViewport(0, 0, cw, ch);
+    rays.copy_uniforms_from(render_state->shaders[ShaderId::ENH_COMPOSITE]);  // (binds it)
+    ENH_TIMED("enh-cloud-rays", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    prof.add_draw_call();
+    glUseProgram(id);
+    glActiveTexture(GL_TEXTURE30);
+    glBindTexture(GL_TEXTURE_2D, m_rays_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T30"), 30);
+  }
+
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
   glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);
-  glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, 0.f);
+  glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, use_rays ? 1.f : 0.f);
 }

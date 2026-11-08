@@ -122,6 +122,7 @@ enum class ShaderId {
   SHRUB_GRASS = 59, // Enhanced: dense grass fields (EnhancedGrass)
   ENH_TERRAIN = 60, // Enhanced: a private level's own ground (EnhancedTerrain)
   ENH_CLOUDS = 61,  // Enhanced: enh_composite with only its cloud march (ENH_CLOUD_ONLY)
+  ENH_CLOUD_RAYS = 62,  // Enhanced: enh_composite with only the rays through the clouds (ENH_RAYS_ONLY)
   MAX_SHADERS
 };
 

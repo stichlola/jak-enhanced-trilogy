@@ -276,6 +276,7 @@ uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_co
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
+uniform sampler2D tex_T30;  // the rays through the clouds at the clouds' size (enh_cloud_rays, cloud_info.w 1)
 uniform sampler2D tex_T29;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
 uniform mat4 chr_occ_mvp;   // world -> that map
 uniform float chr_occ_on;   // its height span (m); 0: none this frame
@@ -2322,11 +2323,44 @@ vec3 sky_over(vec2 q) {
   vec3 g = sky_copy > 1.5 ? textureLod(tex_T23, q, 0.0).rgb : textureLod(tex_T0, q, 0.0).rgb;
   return g - textureLod(tex_T25, q, 0.0).rgb;
 }
+// the rays through the gaps in the clouds: how much open sky (sky pixels with little cloud) lies
+// along the line from here back to the low sun, 0..1
+float cloud_rays_lit(vec2 at) {
+  vec2 suv = vec2(sky_sun.x * proj.z, sky_sun.y * proj.w) / sky_sun.z * 0.5 + 0.5;
+  vec2 to_sun = suv - at;
+  ivec2 csize = textureSize(tex_T15, 0);
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  float lit = 0.0;
+  for (int i = 0; i < 10; i++) {
+    vec2 q = at + to_sun * (float(i) + jit) / 10.0;
+    if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0 || textureLod(tex_T3, q, 0.0).r > 1e-7) {
+      continue;
+    }
+    vec4 cl = texelFetch(tex_T15, ivec2(q * vec2(csize)), 0);
+    if (cl.a >= 0.0 && !isnan(cl.a)) {
+      lit += cl.a * cl.a;
+    }
+  }
+  return lit / 10.0;
+}
+
 void main() {
 #ifdef ENH_CLOUD_ONLY
   // (the slim cloud program, enh_clouds: everything below is compiled out, so the march gets the
   // registers it needs, not the whole composite's)
   color = cloud_march();
+}
+void composite_unused() {
+#endif
+#ifdef ENH_RAYS_ONLY
+  // (the rays alone, enh_cloud_rays: one pixel per 2x2 into a small target the composite reads
+  // back; in the composite their 20 reads a pixel cost 1.4 ms at 2560x1600, desert 16h)
+  // (only where the composite asks: the same tests)
+  vec3 rray = normalize(vec3((tex_coord.x * 2.0 - 1.0) / proj.z, (tex_coord.y * 2.0 - 1.0) / proj.w, 1.0));
+  float rcover = smoothstep(0.1, 0.35, clouds.y) * (1.0 - smoothstep(0.75, 1.0, clouds.y));
+  bool want = cloud_rays > 0.0 && clouds.x > 0.0 && sky_sun.w > 0.0 && sky_sun.w < 0.45 && sky_sun.z > 0.1 &&
+              weather.x < 0.5 && pow(max(dot(rray, sky_sun.xyz), 0.0), 3.0) * rcover > 0.005;
+  color = vec4(want ? cloud_rays_lit(tex_coord) : 0.0, 0.0, 0.0, 1.0);
 }
 void composite_unused() {
 #endif
@@ -4187,22 +4221,9 @@ void composite_unused() {
     float toward = pow(max(dot(ray, sky_sun.xyz), 0.0), 3.0);
     float cover = smoothstep(0.1, 0.35, clouds.y) * (1.0 - smoothstep(0.75, 1.0, clouds.y));
     if (toward * cover > 0.01) {
-      vec2 suv = vec2(sky_sun.x * proj.z, sky_sun.y * proj.w) / sky_sun.z * 0.5 + 0.5;
-      vec2 to_sun = suv - tex_coord;
-      ivec2 csize = textureSize(tex_T15, 0);
-      float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-      float lit = 0.0;
-      for (int i = 0; i < 10; i++) {
-        vec2 q = tex_coord + to_sun * (float(i) + jit) / 10.0;
-        if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0 || texture(tex_T3, q).r > 1e-7) {
-          continue;
-        }
-        vec4 cl = texelFetch(tex_T15, ivec2(q * vec2(csize)), 0);
-        if (cl.a >= 0.0 && !isnan(cl.a)) {
-          lit += cl.a * cl.a;
-        }
-      }
-      c += sun_color() * smoothstep(0.15, 0.9, lit / 10.0) * toward * cover * cloud_rays * 0.45 *
+      // (cloud_info.w 1: marched at the clouds' size by enh_cloud_rays, read back here)
+      float lit = cloud_info.w > 0.5 ? textureLod(tex_T30, tex_coord, 0.0).r : cloud_rays_lit(tex_coord);
+      c += sun_color() * smoothstep(0.15, 0.9, lit) * toward * cover * cloud_rays * 0.45 *
            (1.0 - smoothstep(0.25, 0.45, sky_sun.w));
     }
   }

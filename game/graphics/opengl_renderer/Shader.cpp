@@ -210,9 +210,11 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
   // (Enhanced: the cloud pass alone, without the composite's registers: more pixels in flight)
-  if (shader_name == "enh_clouds") {
+  // (and the cloud rays alone, enh_cloud_rays)
+  if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays") {
     const auto nl = frag_src.find('\n');
-    frag_src.insert(nl == std::string::npos ? 0 : nl + 1, "#define ENH_CLOUD_ONLY 1\n");
+    frag_src.insert(nl == std::string::npos ? 0 : nl + 1,
+                    shader_name == "enh_clouds" ? "#define ENH_CLOUD_ONLY 1\n" : "#define ENH_RAYS_ONLY 1\n");
   }
 
   vert_src = std::regex_replace(vert_src, std::regex("HEIGHT_SCALE"), height_scale);
@@ -421,14 +423,14 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
 }
 
 std::string Shader::frag_file(const std::string& shader_name) {
-  if (shader_name == "enh_clouds") {
+  if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays") {
     return "enh_composite";
   }
   return shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
 }
 
 std::string Shader::vert_file(const std::string& shader_name) {
-  return shader_name == "enh_clouds" ? "enh_composite" : shader_name;
+  return shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" ? "enh_composite" : shader_name;
 }
 
 void Shader::copy_uniforms_from(const Shader& src) const {
@@ -632,6 +634,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::SHRUB_INST) = {"shrub_inst", version};
   at(ShaderId::ENH_TERRAIN) = {"enh_terrain", version};
   at(ShaderId::ENH_CLOUDS) = {"enh_clouds", version};
+  at(ShaderId::ENH_CLOUD_RAYS) = {"enh_cloud_rays", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
 

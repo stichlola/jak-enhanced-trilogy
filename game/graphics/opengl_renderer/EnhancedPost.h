@@ -693,6 +693,10 @@ class EnhancedPost {
   int m_cloud_h = 0;
   int m_cloud_cur = 0;
   bool m_cloud_history = false;
+  GLuint m_rays_fbo = 0;  // the rays through the clouds at the clouds' size (enh_cloud_rays)
+  GLuint m_rays_tex = 0;
+  int m_rays_w = 0;
+  int m_rays_h = 0;
 
   // the area's look and weather, eased toward the current area's each frame (update_scene)
   struct Grade {

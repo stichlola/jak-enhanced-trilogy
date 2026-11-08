@@ -381,6 +381,10 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(2, m_cloud_fbo);
     glDeleteTextures(2, m_cloud_tex);
   }
+  if (m_rays_fbo) {
+    glDeleteFramebuffers(1, &m_rays_fbo);
+    glDeleteTextures(1, &m_rays_tex);
+  }
   if (m_shadow_far_fbo) {
     glDeleteFramebuffers(1, &m_shadow_far_fbo);
     glDeleteTextures(1, &m_shadow_far_tex);
