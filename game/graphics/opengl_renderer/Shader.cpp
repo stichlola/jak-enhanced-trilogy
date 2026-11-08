@@ -248,6 +248,36 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
         "  }\n}\n";
   }
 
+  // Enhanced: the game's fragment shaders write their colour clamped to 0..1, as an RGBA8 frame
+  // stores it. In a half-float frame (post.hdr_scene) the PS2 shaders' "color *= 2" kept up to 2.0
+  // per fragment: an alpha past 1 made SRC_ALPHA / ONE_MINUS_SRC_ALPHA blends add light (1 - a < 0
+  // takes it away), and HUD textures (the minimap) came out over-bright. Only additive sums of
+  // several fragments go past 1 now, which is what the float frame is for. Shaders that copy the
+  // frame itself (distortion, depth cue, glow probe reads) keep their values.
+  // JAK_ENHANCED_FRAG_CLAMP=0 turns it off.
+  {
+    static const bool clamp_on = [] {
+      const char* e = std::getenv("JAK_ENHANCED_FRAG_CLAMP");
+      return !(e && e[0] == '0');
+    }();
+    static const char* const keep[] = {"sprite_distort", "sprite_distort_instanced", "slow_time",
+                                       "depth_cue", "post_processing", "simple_texture",
+                                       "glow_probe_read", "glow_probe_read_debug",
+                                       "glow_probe_downsample", "glow_depth_copy"};
+    bool skip = !clamp_on || shader_name.rfind("enh_", 0) == 0;
+    for (const char* k : keep) {
+      skip = skip || shader_name == k;
+    }
+    std::smatch out;
+    if (!skip && std::regex_search(frag_src, out, std::regex("out\\s+vec4\\s+(\\w+)\\s*;"))) {
+      const std::string var = out[1].str();
+      frag_src = std::regex_replace(frag_src, std::regex("void\\s+main\\s*\\(\\s*\\)"),
+                                    "void enh_unclamped_main()");
+      frag_src += "\nvoid main() {\n  enh_unclamped_main();\n  " + var + " = clamp(" + var +
+                  ", 0.0, 1.0);\n}\n";
+    }
+  }
+
   // Enhanced TAA: wrap main() to add the frame's sub-pixel jitter to the final position
   m_jitters = enhanced_jitters(shader_name);
   if (m_jitters) {
