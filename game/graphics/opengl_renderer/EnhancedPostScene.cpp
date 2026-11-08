@@ -50,6 +50,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
   // the vsync wait when the frame has time to spare)
+  const auto post_cpu0 = std::chrono::steady_clock::now();
   static enh_post::PassTimer t_post_total("enh-total");
   enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
@@ -60,7 +61,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
   const bool have_scene = m_ssao_ready;
-  update_scene();
+  // (where the post's GPU time goes between the named passes: the whole interval from here to the
+  // composite's draw on the GPU's clock, which counts its idle time while the CPU sets the composite
+  // up, and the CPU's own time for it; "[enhanced] post cpu" in the log every 5 s)
+  static enh_post::PassTimer t_setup_gap("enh-setup-span");
+  auto setup_span = std::make_unique<enh_post::PassTimerScope>(t_setup_gap);
+  const auto setup_cpu0 = std::chrono::steady_clock::now();  update_scene();
   if (have_scene) {
     // (and the common level: the HUD's textures are there, enhanced_character_hud)
     auto levels = render_state->loader->get_in_use_levels();
@@ -1723,7 +1729,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (probe_group >= 0) {
     glBeginQuery(GL_TIME_ELAPSED, probe.query);
   }
-  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  setup_span.reset();
+  {
+    static double cpu_setup = 0.0, cpu_total = 0.0;
+    static int cpu_n = 0;
+    static auto cpu_t = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    cpu_setup += std::chrono::duration<double, std::milli>(now - setup_cpu0).count();
+    cpu_total += std::chrono::duration<double, std::milli>(now - post_cpu0).count();
+    cpu_n++;
+    if (std::chrono::duration<double>(now - cpu_t).count() >= 5.0) {
+      lg::info("[enhanced] post cpu: to composite {:.2f} ms, of it setup {:.2f} ms (n={})",
+               cpu_total / cpu_n, cpu_setup / cpu_n, cpu_n);
+      cpu_setup = cpu_total = 0.0;
+      cpu_n = 0;
+      cpu_t = now;
+    }
+  }  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   if (probe_group >= 0) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
@@ -1731,6 +1753,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     probe.sum[probe_group] += ns / 1e6;
     probe.count[probe_group]++;
   }
+  static enh_post::PassTimer t_tail_span("enh-tail-span");
+  enh_post::PassTimerScope tail_span(t_tail_span);
   prof.add_draw_call();
   glBindSampler(13, 0);
   if (taa && taa_mode == 1) {
