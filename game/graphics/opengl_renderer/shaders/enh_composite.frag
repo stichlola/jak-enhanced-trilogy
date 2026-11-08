@@ -268,6 +268,7 @@ uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in t
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
+uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
@@ -5292,6 +5293,18 @@ void main() {
       // (toward brown, not grey-blue: dark yellow hair taking the cool tint read olive green)
       vec3 shade_tint = mix(vec3(0.92, 0.96, 1.04), vec3(1.0, 0.93, 0.86), tune_chr_dusk_warm * mix(0.5, 1.0, dusk));
       c *= mix(vec3(1.0), shade_tint * (1.0 - dk), rock_sh);
+    }
+    // (and at a low sun never darker than this share of the game's own color, in its hue: in a
+    // Spargus street at 18h the shade, the grade and the darkening above crushed Jak near black,
+    // face and clothes murky, where the game has him readable. Not by night: the night keeps its own)
+    if (tune_chr_floor > 0.0 && cl > 0.3 && cl < 0.55 && z > 0.0) {
+      vec3 fl = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0) * tune_chr_floor;
+      float lf = luma(fl);
+      float lc = luma(c);
+      float w = (1.0 - chr_bounce) * (1.0 - night_dark.x);
+      if (lf > 1e-3 && lc < lf) {
+        c = mix(c, fl, w * smoothstep(0.0, 0.3, (lf - lc) / lf));
+      }
     }
   }
 
