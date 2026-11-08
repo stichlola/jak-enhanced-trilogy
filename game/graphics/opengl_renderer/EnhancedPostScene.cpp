@@ -281,8 +281,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     g_enhanced_smoke_lights.count = 0;
     // in the sun's full daylight the glows' light is lost in it: a garage door's big orange glow
     // lit the sand around for tens of meters, with hard shadows of every slab (the beacons stay)
-    const float glow_day =
-        g_enhanced_sun.valid ? 1.f - std::max(m_night, night_darkness()) : 0.f;
+    // (under a roof the hour doesn't light the room: the temples' torches at noon ran at a quarter of
+    // their night strength, no warm pool on the floor in front of them. lights.enclosed_fire 0: off)
+    static const EnhancedTune t_enclosed("lights.enclosed_fire", 0.8f);
+    const float enclosed = m_enclosed ? std::clamp((float)t_enclosed, 0.f, 1.f) : 0.f;
+    const float glow_day = g_enhanced_sun.valid
+                               ? (1.f - std::max(m_night, night_darkness())) * (1.f - enclosed)
+                               : 0.f;
     for (int i = 0; on && i < g_enhanced_lights.count; i++) {
       const auto& raw = g_enhanced_lights.lights[i];
       auto l = raw;  // as the game draws it, faded with distance: the light it casts
@@ -561,7 +566,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         m_fire_spawners.clear();
       }
     }
-    const float fire_night = std::max(m_night, night_darkness());
+    // (fires' spawners the same under a roof)
+    const float fire_night = std::max({m_night, night_darkness(), enclosed});
     const size_t glow_lights = candidates.size();
     for (const auto& fs : m_fire_spawners) {
       if (!on || !m_settings.fire) {

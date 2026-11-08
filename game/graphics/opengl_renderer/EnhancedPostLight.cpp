@@ -81,6 +81,10 @@ void EnhancedPost::update_scene() {
     m_visit_offset = std::uniform_real_distribution<double>(0.0, 100000.0)(rng);
   }
   const WorldZone& zone = g_world.zones[m_zone];
+  m_enclosed = !zone.weather.outdoors;
+  for (const auto& prefix : g_world.enclosed[game_index()]) {
+    m_enclosed = m_enclosed || level.rfind(prefix, 0) == 0;
+  }
   // night from 19 to 21 in, from 5 to 7 out
   auto ramp = [](float a, float b, float x) { return std::clamp((x - a) / (b - a), 0.f, 1.f); };
   m_night = std::max(ramp(19.f, 21.f, hour), 1.f - ramp(5.f, 7.f, hour));

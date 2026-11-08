@@ -729,6 +729,7 @@ class EnhancedPost {
   std::vector<std::array<float, 4>> m_fire_spawners;  // world xyz, kind (EnhancedFires)
   double m_fire_spawners_time = 0.0;
   double m_headlights_time = -1.0;
+  bool m_enclosed = false;  // under a roof (world.json "enclosed", or an indoor zone)
   bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)

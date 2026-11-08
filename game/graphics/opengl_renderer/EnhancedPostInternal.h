@@ -200,6 +200,8 @@ struct World {
   float rough[3] = {1.f, 1.f, 1.f};
   std::vector<WorldZone> zones;  // [0]: "other", for the levels in no zone
   std::vector<std::pair<std::string, int>> prefixes[3];
+  // levels under a roof (temples, palace halls): their fires burn at night strength by day
+  std::vector<std::string> enclosed[3];
   Season seasons[4];
 };
 inline World g_world;
@@ -836,6 +838,11 @@ inline void load_world() {
         }
         for (const auto& prefix : entry.at("prefixes")) {
           w.prefixes[g].emplace_back(prefix.get<std::string>(), idx);
+        }
+      }
+      if (j.contains("enclosed") && j["enclosed"].contains(games[g])) {
+        for (const auto& prefix : j["enclosed"][games[g]]) {
+          w.enclosed[g].push_back(prefix.get<std::string>());
         }
       }
     }
