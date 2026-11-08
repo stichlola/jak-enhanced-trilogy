@@ -266,6 +266,8 @@ uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet 
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
+uniform float tune_night_pale = 1.0;       // night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
+uniform float tune_night_pale_knee = 0.025; // ...above this luma (after the night darkening)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
@@ -3469,6 +3471,19 @@ void main() {
     vec3 moon = vec3(l) * mix(vec3(0.7, 0.82, 1.1), vec3(1.1, 0.55, 0.45), sky_kind.z);
     vec3 darkened = mix(c, moon, 0.45 * dk) * (1.0 - 0.9 * dk);
     c = mix(darkened, c, keep);
+    // pale ground under the moon (the slums' flagstones at 21h): the brightest thing in the frame,
+    // lilac-white like snow over near-black walls, and the lamps' pools barely read on it. Up-facing
+    // ground away from the lamps (their bloom) is pressed toward the walls' level above a knee, by
+    // 40% at most: only darker, the lamps and windows then stand out
+    if (tune_night_pale > 0.0 && z > 0.0 && wsurf == 0.0 && (tune_night_pale < 1.5 || tex_coord.x > 0.5)) {
+      float upf = smoothstep(0.55, 0.8, abs(world_dir(surf_n).y));
+      float pool = smoothstep(0.03, 0.15, luma(texture(tex_T1, tex_coord).rgb));
+      float lc = luma(c);
+      float knee = tune_night_pale_knee;
+      float target = lc > knee ? knee + (lc - knee) * 0.35 : lc;
+      float w = upf * (1.0 - pool) * smoothstep(0.3, 0.8, dk) * min(tune_night_pale, 1.0);
+      c *= mix(1.0, max(target / max(lc, 1e-4), 0.6), w);
+    }
     float seen = 0.0;
     for (int j = 0; j < 4; j++) {
       for (int i = 0; i < 5; i++) {
