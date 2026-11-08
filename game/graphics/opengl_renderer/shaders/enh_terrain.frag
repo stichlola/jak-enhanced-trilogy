@@ -5,6 +5,7 @@
 
 layout (location = 0) out vec4 color;
 layout (location = 1) out vec4 enh_normal_out;
+layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 
 in vec4 fragment_color;
 in float fogginess;
@@ -38,6 +39,7 @@ float grain_steep(sampler2D t, vec3 n, float luma) {
 }
 
 void main() {
+  enh_albedo_out = vec4(0.0);
   if (enh_water > 0.5) {
     // small moving ripples, the sky at a grazing look, deep color straight down
     vec2 p = enh_world.xz;

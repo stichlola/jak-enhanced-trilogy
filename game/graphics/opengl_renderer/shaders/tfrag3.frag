@@ -2,6 +2,7 @@
 
 layout (location = 0) out vec4 color;
 layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
+layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 in vec3 enh_normal;
 in vec3 enh_pos;  // world position (relative to the camera where known)
 
@@ -135,6 +136,7 @@ float enh_dither() {
 }
 
 void main() {
+  enh_albedo_out = vec4(0.0);
   if (enh_lod_kind != 0 && enh_lod.y > 0.0 &&
       smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) <= enh_dither()) {
     discard;
@@ -171,6 +173,7 @@ void main() {
       T0 = texture(tex_T0, tex_coord.xy);
     }
     color = fragment_color * T0;
+    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
   } else {
     color = fragment_color/2;
   }

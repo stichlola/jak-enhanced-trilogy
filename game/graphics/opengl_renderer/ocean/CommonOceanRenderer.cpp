@@ -350,6 +350,7 @@ void CommonOceanRenderer::flush_near(SharedRenderState* render_state, ScopedProf
     // (the normal: the surface's pass only, written as it is)
     const GLboolean write_normal = bucket == 0;
     glColorMaski(1, write_normal, write_normal, write_normal, write_normal);
+    glColorMaski(2, write_normal, write_normal, write_normal, write_normal);  // (albedo: none)
     glBlendFunci(1, GL_ONE, GL_ZERO);
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_ogl.index_buffer[bucket]);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_next_free_index[bucket] * sizeof(u32),

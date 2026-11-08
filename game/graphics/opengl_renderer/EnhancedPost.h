@@ -52,6 +52,7 @@ extern bool g_enhanced_lights_private;
 struct EnhancedNormals {
   GLuint fbo = 0;
   bool enabled = true;
+  bool albedo = false;  // also the third target: the level's albedo (lights.albedo, M1)
 };
 extern EnhancedNormals g_enhanced_normals;
 
@@ -387,6 +388,9 @@ class EnhancedPost {
   GLuint m_normal_fbo = 0;  // the level normals, resolved (no msaa)
   GLuint m_normal_tex = 0;
   bool m_normals_ready = false;
+  GLuint m_albedo_fbo = 0;  // the level albedo, resolved (lights.albedo)
+  GLuint m_albedo_tex = 0;
+  bool m_albedo_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
   int m_ssao_w = 0;

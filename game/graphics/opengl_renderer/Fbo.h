@@ -12,6 +12,7 @@ struct Fbo {
   std::optional<GLuint> tex_id;
   std::optional<GLuint> zbuf_stencil_id;
   std::optional<GLuint> normal_tex_id;  // Enhanced: level normals (color attachment 1)
+  std::optional<GLuint> albedo_tex_id;  // Enhanced: level albedo (color attachment 2)
 
   bool multisampled = false;
   int multisample_count = 0;  // Should be 1 if multisampled is disabled
@@ -50,6 +51,11 @@ struct Fbo {
       if (normal_tex_id) {
         glDeleteTextures(1, &normal_tex_id.value());
         normal_tex_id.reset();
+      }
+
+      if (albedo_tex_id) {
+        glDeleteTextures(1, &albedo_tex_id.value());
+        albedo_tex_id.reset();
       }
 
       valid = false;

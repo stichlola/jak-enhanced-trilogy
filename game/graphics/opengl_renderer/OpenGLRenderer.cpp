@@ -965,6 +965,21 @@ Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil, bool hdr = fals
                    nullptr);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, ntex, 0);
     }
+    // Enhanced: and their albedo (the texture's color before the baked light; a: that light's
+    // brightness), written only while the albedo target is on (lights.albedo)
+    GLuint atex;
+    glGenTextures(1, &atex);
+    result.albedo_tex_id = atex;
+    if (use_multisample) {
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, atex);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGBA8, w, h, GL_TRUE);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D_MULTISAMPLE, atex,
+                             0);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, atex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, atex, 0);
+    }
   }
   // attach texture to framebuffer as target for colors
 

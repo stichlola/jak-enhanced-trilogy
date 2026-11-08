@@ -165,6 +165,7 @@ DoubleDraw setup_opengl_from_draw_mode(DrawMode mode, u32 tex_unit, bool mipmap)
   const GLboolean write_normal = !should_enable_blend && mode.get_depth_write_enable() &&
                                  !alpha_hack_to_disable_z_write;
   glColorMaski(1, write_normal, write_normal, write_normal, write_normal);
+  glColorMaski(2, write_normal, write_normal, write_normal, write_normal);  // (and the albedo)
   double_draw.aref_first = alpha_min;
   return double_draw;
 }

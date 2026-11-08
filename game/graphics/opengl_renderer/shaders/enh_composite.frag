@@ -278,6 +278,11 @@ uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final p
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
 uniform float tune_night_pale_grain = 1.0;  // ...the game's own grain put back on top (planks' gaps; 0: off)
+uniform sampler2D tex_T27;  // the level's albedo (lights.albedo; a: baked light / 2, 0 = none)
+uniform float albedo_on;
+uniform float tune_albedo_dbg = 0.0;   // (test: 1 the albedo target, 2 its baked light, right half)
+uniform float tune_albedo_gain = 0.5;  // the albedo as the lamps' surface color: times this
+uniform float tune_albedo_mix = 1.0;   // ...instead of the lit color (0: the lit color, as before)
 uniform float tune_far_dbg = 0.0;  // (debug: 1-5 skip one far haze/relight term)
 uniform float tune_far_lift = 1.2;  // the desert haze lifts far ground at most this x its own luma (0: off)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
@@ -3479,6 +3484,15 @@ void main() {
   // adapt: a dark view is brought up some (from a few points of the scene), a view with lights in
   // it isn't, so they keep their contrast.
   vec3 albedo = c;
+  // (lights.albedo, M1: the surface's own color, the texture before the game's baked light, where
+  // the level wrote it. The lamps and fires light that, not the color the night already darkened:
+  // their pools read on pale stone and dock wood. a = 0: none (characters, water, effects))
+  if (albedo_on > 0.5 && z > 0.0 && tune_albedo_mix > 0.0) {
+    vec4 alb = texture(tex_T27, tex_coord);
+    if (alb.a > 0.0) {
+      albedo = mix(albedo, alb.rgb * tune_albedo_gain, tune_albedo_mix);
+    }
+  }
   float exposure = 1.0;
   if (night_dark.x > 0.0) {
     float dk = night_dark.x;
@@ -5605,6 +5619,11 @@ void main() {
     c = texture(tex_T0, tex_coord).rgb;
   }
 
+  // (test: lights.albedo's target: 1 its color, 2 the baked light (a), the right half only)
+  if (tune_albedo_dbg > 0.5 && tex_coord.x > 0.5) {
+    vec4 ad = texture(tex_T27, tex_coord);
+    c = tune_albedo_dbg < 1.5 ? ad.rgb : vec3(ad.a);
+  }
   color = vec4(clamp(c, 0.0, 1.0) * color_mult.rgb * color_mult.a, 1.0) + color_add;
   // dither to the 8-bit target: a triangular +-1 step of interleaved gradient noise, turned every
   // frame (the TAA then averages it into finer steps): no bands in the sky and the dark shade

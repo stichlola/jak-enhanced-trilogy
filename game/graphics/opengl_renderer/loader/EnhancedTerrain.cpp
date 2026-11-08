@@ -489,6 +489,7 @@ void enhanced_draw_terrain_water(const TfragRenderSettings& settings,
   glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
   glDepthMask(GL_FALSE);
   glColorMaski(1, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   glDisable(GL_PRIMITIVE_RESTART);
   glBindVertexArray(g_t.water_vao);
   glDrawElements(GL_TRIANGLES, g_t.water_indices, GL_UNSIGNED_INT, nullptr);
@@ -496,6 +497,7 @@ void enhanced_draw_terrain_water(const TfragRenderSettings& settings,
   glBindVertexArray(0);
   glEnable(GL_PRIMITIVE_RESTART);
   glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glDepthMask(GL_TRUE);
   glDisable(GL_BLEND);
   glUniform1f(glGetUniformLocation(sh.id(), "enh_water"), 0.f);

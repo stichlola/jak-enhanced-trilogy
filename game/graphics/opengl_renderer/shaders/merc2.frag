@@ -2,6 +2,7 @@
 
 layout (location = 0) out vec4 color;
 layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
+layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 in vec4 vtx_color;
 in vec2 vtx_st;
 in float fog;
@@ -45,6 +46,7 @@ const int MAT_LENS = 8;
 const float BUMP_K[9] = float[9](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0);
 
 void main() {
+  enh_albedo_out = vec4(0.0);
   // (here, ahead of the discard: derivatives aren't defined for the pixels it drops)
   vec2 st_dx = dFdx(vtx_st);
   vec2 st_dy = dFdy(vtx_st);
