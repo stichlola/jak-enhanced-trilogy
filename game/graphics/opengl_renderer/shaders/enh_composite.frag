@@ -286,7 +286,7 @@ uniform float tune_albedo_dbg = 0.0;   // (test: 1 the albedo target, 2 its bake
 uniform float tune_albedo_gain = 0.5;  // the albedo as the lamps' surface color: times this
 uniform float tune_albedo_mix = 1.0;   // ...instead of the lit color (0: the lit color, as before)
 uniform float tune_far_dbg = 0.0;  // (debug: 1-5 skip one far haze/relight term)
-uniform float tune_far_lift = 0.0;  // (off: it took the golden-hour glow off the far range) the desert haze lifts far ground at most this x its own luma (0: off)
+uniform float tune_far_lift = 1.2;  // (not at golden hour: it took the glow off the far range) the desert haze lifts far ground at most this x its own luma (0: off)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
@@ -4104,7 +4104,9 @@ void main() {
       float lpre = max(luma(c_pre_haze), 0.02);
       float lift = luma(c) / lpre;
       float cap = tune_far_lift + 0.5 * (1.0 - smoothstep(0.02, 0.12, lpre));  // (black rock: more)
-      c *= mix(1.0, cap / max(lift, cap), daylight);
+      // (not at golden hour: there the glow on the far range is the look, the reference picture's;
+      // by golden's onset, not its value: the desert's is 0.5 at 18h)
+      c *= mix(1.0, cap / max(lift, cap), daylight * (1.0 - smoothstep(0.0, 0.2, golden)));
     }
   }
   // rain mist: the distance goes grey
