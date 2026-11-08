@@ -197,6 +197,12 @@ uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b)
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
+uniform float tune_chr_gap_m = 1.6;   // ...from casters at least this far toward the sun (0: old 70 cm lookup)
+uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 the land's (desert lilac)
+uniform float tune_chr_bounce = 0.5;  // shade taken off them under a high sun (light back from the ground)
+uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun gets low (on tune_chr_dark)
+uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
+uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
 uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
 uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
 uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specular occlusion; 0: off)
@@ -761,6 +767,23 @@ float sun_shadow(vec3 w) {
     }
   }
   return mix(far, 1.0 - lit / 16.0, fade);
+}
+
+// a character's sun shadow: only casters at least gap_m toward the sun (not its own body); 8 taps
+// over 25 cm, a soft edge as it walks into a wall's shade
+float chr_sun_shadow(vec3 w, float gap_m) {
+  vec3 s = (light_mvp * vec4(w, 1.0)).xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return sun_shadow_far(w);
+  }
+  float r = 0.25 / shadow_params.y;
+  float bias = gap_m / shadow_params.x;
+  float rot = pixel_angle();
+  float lit = 0.0;
+  for (int i = 0; i < 8; i++) {
+    lit += texture(tex_T9, vec3(s.xy + vogel(i, 8, rot) * r, s.z - bias));
+  }
+  return 1.0 - lit / 8.0;
 }
 
 // a view direction (view space) in world axes (y up)
@@ -2107,6 +2130,7 @@ float flare_ghost(vec2 at, float aspect, float rad) {
 
 // how much of the sun the shadow map blocks here (the rock's light below asks)
 float rock_sh = 0.0;
+float chr_bounce = 0.0;  // (a character's shade lit back by the ground: the sun's height, 0..1)
 // what the levels drew over the game's sky here (tex_T25: the sky as the sky bucket drew it; the
 // scene compared before the sprites when that copy is there)
 vec3 sky_over(vec2 q) {
@@ -3124,10 +3148,18 @@ void main() {
     sun_lit = smoothstep(0.0, 0.15, ndl);
     float facing = smoothstep(0.0, 0.3, ndl);
     float sh = 0.0;
-    if (ndl > 0.0) {
+    // (a character with tune_chr_gap_m > 0: only casters at least that far toward the sun count, so
+    // its own head, arms and Daxter don't shade it: at noon the map put Jak in his own shadow and the
+    // shade's tint turned his hair green; walls and roofs further off still do)
+    bool chr_gap = chr && tune_chr_gap_m > 0.0;
+    if (ndl > 0.0 && !chr_gap) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
       sh = sun_shadow(w) * facing;
+    }
+    if (chr_gap) {
+      vec3 w = view_to_world * (p + nn * (0.05 * 4096.0)) + cam_pos;
+      sh = chr_sun_shadow(w, tune_chr_gap_m) * tune_chr_shade;
     }
     // turned away from the sun the map can't tell a shadow from the surface itself: looked at from
     // 2 m toward the sun, past the small shapes. Without it, inside a mountain's shadow the edges
@@ -3139,7 +3171,7 @@ void main() {
     // a character standing in a wall's shadow: the game lights it in full anyway (its own lights
     // know no shadows), and the faces turned from the sun skipped the map above, so Jak glowed
     // sunlit inside the shade. Looked up 70 cm toward the sun, past the body's own thickness
-    if (chr) {
+    if (chr && !chr_gap) {
       vec3 w3 = view_to_world * (p + sun_dir.xyz * (0.7 * 4096.0 + z * 0.002)) + cam_pos;
       sh = max(sh, sun_shadow(w3) * tune_chr_shade);
     }
@@ -3148,13 +3180,19 @@ void main() {
     }
     // contact shadows: the shadow map is too coarse for a foot on the ground, a hand on a hip, a
     // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
-    if (ndl > 0.0 && z < 30.0 * 4096.0) {
+    if (ndl > 0.0 && z < 30.0 * 4096.0 && !chr_gap) {
       vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
       float cs = contact_shadow(from, sun_dir.xyz);
       sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
     }
     if (tune_shadow_dbg > 0.5 && tune_shadow_dbg < 1.5) {
       sh = 0.0;  // (test: no sun shadows)
+    }
+    // (a character in shade under a high sun: lit back by the bright ground around it, so less deep;
+    // dark yellow hair and a dark orange Daxter read olive green at noon)
+    if (chr) {
+      chr_bounce = smoothstep(0.35, 0.85, world_dir(sun_dir.xyz).y);
+      sh *= 1.0 - tune_chr_bounce * chr_bounce;
     }
     rock_sh = sh;
     sun_lit *= 1.0 - sh;
@@ -3165,6 +3203,11 @@ void main() {
     // turned the shaded sand navy)
     float lilac = sky_day * min(sun_haze * 1.25, 1.0);
     vec3 tint = mix(mix(vec3(1.05, 0.97, 0.8), vec3(1.05, 0.95, 0.72), sky_day), vec3(1.15, 0.85, 0.3), lilac);
+    // (characters: the shade only a little cooler, never the desert's lilac: taking much more red
+    // than green off yellow hair and an orange Daxter turned them olive green)
+    if (chr) {
+      tint = mix(tint, vec3(1.0, 0.98, 0.9), tune_chr_tint);
+    }
     c *= vec3(1.0) - shadow_strength * sh * tint;
     c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
                      vec3(0.08, 0.07, 0.05);
@@ -4887,7 +4930,14 @@ void main() {
     // deepening and the cloth above is the game's own color, so in a wall's shade Jak's hair and
     // Daxter stayed sunlit over near-black ground. Darker and a little cooler, like the sky-lit ground
     if (cl > 0.3 && cl < 0.55 && rock_sh > 0.0) {
-      c *= mix(vec3(1.0), vec3(0.92, 0.96, 1.04) * (1.0 - tune_chr_dark), rock_sh);
+      // (the lower the sun, the deeper and duller the shade: at dusk the hair and Daxter stayed
+      // bright and saturated over near-black ground)
+      float dusk = 1.0 - chr_bounce;
+      float dk = min(tune_chr_dark + tune_chr_dusk * dusk, 0.9);
+      c = mix(c, mix(vec3(luma(c)), c, 1.0 - tune_chr_dusk_desat * dusk), rock_sh);
+      // (toward brown, not grey-blue: dark yellow hair taking the cool tint read olive green)
+      vec3 shade_tint = mix(vec3(0.92, 0.96, 1.04), vec3(1.0, 0.93, 0.86), tune_chr_dusk_warm * mix(0.5, 1.0, dusk));
+      c *= mix(vec3(1.0), shade_tint * (1.0 - dk), rock_sh);
     }
   }
 
