@@ -154,6 +154,8 @@ uniform vec4 clouds;            // amount (0 = off), sky cover, time (s), night 
 uniform int cloud_pass;         // 1: this draw only marches the clouds, a pixel for every 2x2
 uniform sampler2D tex_T15;      // the clouds at a quarter of the pixels (last frame's in the pass)
 uniform vec4 cloud_info;        // the clouds texture is ready, history to blend in, how much of it to keep
+uniform float tune_spill_sat = 0.45;  // the light spill's color at most this saturated (1: off)
+uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
 uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
@@ -3504,6 +3506,17 @@ void main() {
   if (light_spill > 0.0 && night_dark.x > 0.0 && z > 0.0 && wsurf == 0.0) {
     vec3 spill = texture(tex_T1, tex_coord).rgb;
     float self_lit = smoothstep(0.4, 0.85, luma(albedo));
+    // (an effect's colored cloud in the bloom, a fight's violet smoke around Jak, lit the whole
+    // character in its hue: magenta Jak in the slums at 21h. The spill's own color held to a pale
+    // tint (violet to magenta only: the windows' and fires' warm spill stays), and on characters (in front of the cloud, not lit by it) a part of it)
+    float sp_top = max(spill.r, max(spill.g, spill.b));
+    float sp_chroma = sp_top > 1e-4 ? (sp_top - min(spill.r, min(spill.g, spill.b))) / sp_top : 0.0;
+    if (tune_spill_sat < 1.0 && sp_chroma > tune_spill_sat && spill.g < min(spill.r, spill.b)) {
+      spill = mix(vec3(luma(spill)), spill, tune_spill_sat / sp_chroma);
+    }
+    if (pix_tag > 0.3 && pix_tag < 0.55) {
+      spill *= tune_spill_chr;
+    }
     c += albedo * min(spill, vec3(0.5)) * 1.3 * light_spill * night_dark.x * (1.0 - self_lit);
   }
 

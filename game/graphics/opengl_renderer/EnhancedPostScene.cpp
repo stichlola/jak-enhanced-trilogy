@@ -268,6 +268,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float pos[4];  // view space, radius
       float color[4];
       float score;
+      bool violet = false;  // an effect's violet glow (shots, dark eco clouds)
     };
     std::vector<Candidate> candidates;
     struct Fire {
@@ -378,9 +379,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (l.color[1] < 0.5f * std::min(l.color[0], l.color[2])) {
         intensity *= 0.35f;
         c.pos[3] = std::min(c.pos[3], 8.f * kMeter);
+        c.violet = true;
       }
       for (int k = 0; k < 3; k++) {
         c.color[k] = l.color[k] / peak * intensity;
+      }
+      {  // (tuning.json "lights": {"dump": <m>}: the glows within that many meters, every 7th, in the log)
+        static const EnhancedTune t_dump("lights.dump", 0.f);
+        static int dump_n = 0;
+        if (t_dump > 0.f && dist < t_dump * kMeter && (dump_n++ % 7) == 0) {
+          lg::info("[enhanced] glowlight d {:.1f} size {:.2f} raw {:.2f} {:.2f} {:.2f} fade {:.2f} -> {:.2f} {:.2f} {:.2f} r {:.1f}",
+                   dist / kMeter, raw.size / kMeter, raw.color[0], raw.color[1], raw.color[2], raw.fade,
+                   c.color[0], c.color[1], c.color[2], c.pos[3] / kMeter);
+        }
       }
       c.color[3] = 0.f;
       c.score = bright * c.pos[3] / (dist + c.pos[3]);
@@ -400,7 +411,30 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
-    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
+    // (a fight's dark eco cloud is a dozen violet glows side by side: each faint, together they lit
+    // Jak saturated magenta in the slums at 21h. Their summed light held to that of a few, and paler)
+    // (tuning.json: "lights": {"violet_max", "violet_pale"}; violet_max 0: off)
+    {
+      static const EnhancedTune t_violet_max("lights.violet_max", 2.5f);
+      static const EnhancedTune t_violet_pale("lights.violet_pale", 0.5f);
+      int nv = 0;
+      for (const auto& c : candidates) {
+        nv += c.violet ? 1 : 0;
+      }
+      if (t_violet_max > 0.f && nv > 0) {
+        const float k = std::min(1.f, t_violet_max / (float)nv);
+        const float pale = std::clamp((float)t_violet_pale, 0.f, 1.f);
+        for (auto& c : candidates) {
+          if (!c.violet) {
+            continue;
+          }
+          const float y = 0.3f * c.color[0] + 0.59f * c.color[1] + 0.11f * c.color[2];
+          for (int i = 0; i < 3; i++) {
+            c.color[i] = (c.color[i] + (y - c.color[i]) * pale) * k;
+          }
+        }
+      }
+    }    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
     // seconds; one gone from right in front of the camera was put out or destroyed: forgotten)
     for (size_t i = 0; on && i < m_lamps.size();) {
       auto& l = m_lamps[i];
