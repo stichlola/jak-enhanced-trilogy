@@ -216,6 +216,7 @@ uniform float tune_adapt_hi = 1.0;  // the eye's adaptation lifting a dark room:
 uniform float tune_adapt_hi_lo = 0.5;  // from this brightness (max channel) to 0.9
 uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as the game drew it, at the end (0: off)
 uniform float tune_sky_enclosed_gain = 1.1;
+uniform float tune_smoke_floor = 1.0;  // under a roof: blended smoke's added light back, up to the game's colour (0: off)
 uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
@@ -5553,6 +5554,17 @@ void main() {
     vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
     c = mix(c, game_c * tune_sky_enclosed_gain,
             enclosed * tune_sky_enclosed_keep * (d <= 1e-7 ? 1.0 : pane_m));
+  }
+
+  // (indoor smoke and dust the game blended over the floor (the palace hall's grey wisps) stay in the
+  // scene and were relit and graded as floor: their light went with the floor's (grey-wisp share
+  // 0.14% of the lower half vs vanilla 0.21%). What they added, back, never past the game's colour)
+  if (tune_smoke_floor > 0.0 && enclosed > 0.0 && z > 0.0) {
+    vec3 sm = max(fx_rest, 0.0) * (1.0 - fx_w);
+    if (max(sm.r, max(sm.g, sm.b)) > 0.004) {
+      vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+      c = mix(c, max(c, min(game_c, c + sm * tune_smoke_floor)), enclosed);
+    }
   }
 
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
