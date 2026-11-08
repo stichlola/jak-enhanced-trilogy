@@ -445,6 +445,8 @@ void EnhancedPost::prepare(GLuint scene_tex,
   }
   // the levels' ray tracing hierarchies (occlusion, reflections)
   ENH_TIMED("enh-rt-update", update_rt(render_state));
+  // the open sky straight up around the camera (post.sky_map: the rain stays off what's roofed)
+  ENH_TIMED("enh-sky-map", build_sky_map(screen_vao, render_state, prof));
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
     // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
@@ -624,7 +626,7 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
   }
   // the hierarchies are taken from the loader whatever the settings (the roof over Jak is traced on
   // the CPU); on the GPU only for the ray-traced reflections and occlusion
-  const bool on_gpu = m_settings.ray_traced > 0 || rt_ao_on();
+  const bool on_gpu = m_settings.ray_traced > 0 || rt_ao_on() || sky_map_on();
   auto levels = render_state->loader->get_in_use_levels();
   std::vector<u64> in_use;
   for (auto* lev : levels) {
@@ -1014,6 +1016,16 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "hiz_levels"), m_hiz_ready ? m_hiz_levels : 0);
   glUniform2f(glGetUniformLocation(id, "hiz_size"), (float)m_hiz_w, (float)m_hiz_h);
   glUniform1i(glGetUniformLocation(id, "hiz_surf"), m_hiz_ready && m_hiz_surf ? 1 : 0);
+  // the sky map (unit 30, post.sky_map)
+  {
+    const bool sky = m_sky_valid && sky_map_on();
+    glActiveTexture(GL_TEXTURE30);
+    glBindTexture(GL_TEXTURE_2D, sky ? m_skymap_tex[m_sky_front] : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T30"), 30);
+    glUniform4f(glGetUniformLocation(id, "sky_map"), m_sky_origin[0], m_sky_origin[1],
+                kSkyMapCell * kMeter, sky ? (float)kSkyMapSize : 0.f);
+  }
   glUniform4f(glGetUniformLocation(id, "shadow_params"), m_shadow_near_span_m, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,
               m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);

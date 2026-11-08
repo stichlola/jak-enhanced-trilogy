@@ -81,6 +81,111 @@ void EnhancedPost::build_hiz(GLuint screen_vao,
   m_hiz_ready = true;
 }
 
+// post.sky_map (tuning.json, switches in a running game)
+bool EnhancedPost::sky_map_on() const {
+  static const EnhancedTune t_sky_map("post.sky_map", 0.f);
+  return (float)t_sky_map > 0.5f;
+}
+
+// the sky map: kSkyMapSize^2 rays straight down from high over the camera, a band of rows a frame
+// into the back texture; swapped in whole. Traced again when the camera has gone a quarter of the
+// map from its center or the levels change
+void EnhancedPost::build_sky_map(GLuint screen_vao,
+                                 SharedRenderState* render_state,
+                                 ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!sky_map_on() || !m_rt_ready || !cam.valid) {
+    if (!sky_map_on()) {
+      m_sky_valid = false;
+      m_sky_row = -1;
+    }
+    return;
+  }
+  constexpr int N = kSkyMapSize;
+  const float cell = kSkyMapCell * kMeter;
+  const float half = N * cell * 0.5f;
+  if (!m_skymap_tex[0]) {
+    glGenTextures(2, m_skymap_tex);
+    glGenFramebuffers(2, m_skymap_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_skymap_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, N, N, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_skymap_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  if (m_sky_row < 0) {
+    // start a new one? (camera a quarter of the map off the front's center, other levels, none yet)
+    const float cx = m_sky_origin[0] + half, cz = m_sky_origin[1] + half;
+    const bool moved = std::abs(cam.trans[0] - cx) > half * 0.5f ||
+                       std::abs(cam.trans[2] - cz) > half * 0.5f;
+    if (!m_sky_valid || moved || m_sky_levels != m_rt_in_use) {
+      // (the corner on a 16-cell grid: the texels fall on the same world spots each time)
+      const float snap = 16.f * cell;
+      m_sky_back_origin[0] = std::floor((cam.trans[0] - half) / snap) * snap;
+      m_sky_back_origin[1] = std::floor((cam.trans[2] - half) / snap) * snap;
+      m_sky_top = cam.trans[1] + 300.f * kMeter;
+      m_sky_levels = m_rt_in_use;
+      m_sky_row = 0;
+    }
+  }
+  if (m_sky_row < 0) {
+    return;
+  }
+  // (tuning.json "post.sky_map_rows": rows traced a frame)
+  static const EnhancedTune t_rows("post.sky_map_rows", 32.f);
+  const int band = std::clamp((int)(float)t_rows, 1, N);
+  const int back = 1 - m_sky_front;
+  GLint vp[4], sc[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_SCISSOR_BOX, sc);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& sh = render_state->shaders[ShaderId::ENH_SKY_MAP];
+  sh.activate();
+  const auto id = sh.id();
+  for (int i = 0; i < 2; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  glUniform4f(glGetUniformLocation(id, "grid"), m_sky_back_origin[0], m_sky_back_origin[1], cell,
+              m_sky_top);
+  glUniform1f(glGetUniformLocation(id, "span"), 600.f * kMeter);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[back]);
+  const int rows = std::min(band, N - m_sky_row);
+  glViewport(0, 0, N, N);
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(0, m_sky_row, N, rows);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glScissor(sc[0], sc[1], sc[2], sc[3]);
+  if (!had_scissor) {
+    glDisable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_sky_row += rows;
+  if (m_sky_row >= N) {
+    m_sky_front = back;
+    m_sky_origin[0] = m_sky_back_origin[0];
+    m_sky_origin[1] = m_sky_back_origin[1];
+    m_sky_valid = true;
+    m_sky_row = -1;
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,

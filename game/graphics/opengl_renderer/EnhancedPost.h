@@ -446,6 +446,24 @@ class EnhancedPost {
   int m_hiz_levels = 0;
   bool m_hiz_ready = false;
   bool m_hiz_surf = false;  // post.hiz_surf: puddles, metal, glass on the pyramid too
+  // the sky map (post.sky_map, tech-rt-probe-gi M1): the open sky straight up, traced through the
+  // levels' hierarchies. A grid around the camera, kSkyMapSize cells a side; each texel the heights
+  // of the first four surfaces from the top (RGBA32F, game units, -1e30: none), so a point below a
+  // roof is under cover, and the lowest one over it says how far slanted rain reaches under. Traced into the back texture a band of rows a frame, swapped in when it's complete.
+  // First user: the rain (no wet ground, puddles or splashes under roofs and awnings)
+  static constexpr int kSkyMapSize = 256;
+  static constexpr float kSkyMapCell = 0.5f;  // meters
+  bool sky_map_on() const;
+  void build_sky_map(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_skymap_tex[2] = {0, 0};
+  GLuint m_skymap_fbo[2] = {0, 0};
+  int m_sky_front = 0;           // the texture the composite reads
+  bool m_sky_valid = false;      // the front one is complete
+  int m_sky_row = -1;            // the back one's next band (-1: not tracing)
+  float m_sky_origin[2] = {0, 0};      // the front's corner (world x, z, game units)
+  float m_sky_back_origin[2] = {0, 0};
+  float m_sky_top = 0.f;         // where the back one's rays start (world y)
+  std::vector<u64> m_sky_levels;  // the levels it was traced through
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean

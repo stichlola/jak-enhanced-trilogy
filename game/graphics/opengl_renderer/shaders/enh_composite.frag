@@ -281,6 +281,13 @@ uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final p
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
 uniform float tune_night_pale_grain = 1.0;  // ...the game's own grain put back on top (planks' gaps; 0: off)
+// the sky map (post.sky_map): per world cell the height of the topmost surface over it, traced
+uniform sampler2D tex_T30;
+uniform vec4 sky_map;       // corner x, z, cell size (game units), cells a side (0: none)
+uniform float tune_sky_map_n = 0.6;     // looked up this far out along the normal (m: walls stay wet)
+uniform float tune_sky_map_gap = 0.4;   // a surface this far over the point (m) starts to cover it...
+uniform float tune_sky_map_soft = 1.2;  // ...all of it this much higher
+uniform float tune_sky_map_dbg = 0.0;   // 1: the open sky shown (green open, red covered)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
 uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
@@ -954,6 +961,56 @@ float chr_sun_shadow(vec3 w, float gap_m) {
 // a view direction (view space) in world axes (y up)
 vec3 world_dir(vec3 dv) {
   return vec3(dot(right_view, dv), dot(up_view, dv), dot(fwd_view, dv));
+}
+
+// how open to the sky straight above world point w (game units) is, n its world normal: 1 open
+// (or off the map), 0 under a roof. The four cells around it compared each, then blended (PCF)
+uniform float tune_sky_map_slant = 0.35;  // the rain's slant: a cover H over a point shelters it
+                                          // only reaching this x H past it every way (0: straight down)
+// open (1) or covered (0) at world xz, height y (game units); in low_out the lowest surface over
+// it in the four cells around (the ceiling right above, not the roof on top: -1e30 none)
+float sky_open_at(vec2 xz, float y, out float low_out) {
+  vec2 f = clamp((xz - sky_map.xy) / sky_map.z - 0.5, vec2(0.0), vec2(sky_map.w - 2.0));
+  ivec2 i = ivec2(floor(f));
+  vec2 fr = f - vec2(i);
+  float gap = tune_sky_map_gap * 4096.0, soft = max(tune_sky_map_soft, 0.01) * 4096.0;
+  float over = y + gap;
+  vec4 c0 = texelFetch(tex_T30, i, 0), c1 = texelFetch(tex_T30, i + ivec2(1, 0), 0);
+  vec4 c2 = texelFetch(tex_T30, i + ivec2(0, 1), 0), c3 = texelFetch(tex_T30, i + ivec2(1, 1), 0);
+  vec4 top = vec4(c0.x, c1.x, c2.x, c3.x);  // (the first surface from the top: the highest)
+  vec4 open = 1.0 - smoothstep(vec4(over), vec4(over + soft), top);
+  vec4 big = vec4(1e30);
+  vec4 lo = min(min(mix(big, c0, greaterThan(c0, vec4(over))), mix(big, c1, greaterThan(c1, vec4(over)))),
+                min(mix(big, c2, greaterThan(c2, vec4(over))), mix(big, c3, greaterThan(c3, vec4(over)))));
+  float low = min(min(lo.x, lo.y), min(lo.z, lo.w));
+  low_out = low > 1e29 ? -1e30 : low;
+  return mix(mix(open.x, open.y, fr.x), mix(open.z, open.w, fr.x), fr.y);
+}
+
+float sky_open(vec3 w, vec3 n) {
+  if (sky_map.w < 1.0) {
+    return 1.0;
+  }
+  vec3 q = w + n * (tune_sky_map_n * 4096.0);
+  vec2 f = (q.xz - sky_map.xy) / sky_map.z - 0.5;
+  if (any(lessThan(f, vec2(0.0))) || any(greaterThan(f, vec2(sky_map.w - 2.0)))) {
+    return 1.0;
+  }
+  float low;
+  float o = sky_open_at(q.xz, q.y, low);
+  // (rain falls slanted: under a high cover the drops still reach a point near its edge. Four taps
+  // around it, as far out as the lowest cover over it is high x the slant: open if any sees the sky)
+  if (o < 0.99 && tune_sky_map_slant > 0.0) {
+    float r = clamp((low - q.y) * tune_sky_map_slant, 0.0, 12.0 * 4096.0);
+    float t2;
+    o = max(o, sky_open_at(q.xz + vec2(r, 0.0), q.y, t2));
+    o = max(o, sky_open_at(q.xz - vec2(r, 0.0), q.y, t2));
+    o = max(o, sky_open_at(q.xz + vec2(0.0, r), q.y, t2));
+    o = max(o, sky_open_at(q.xz - vec2(0.0, r), q.y, t2));
+  }
+  // (fades back to open toward the map's edge)
+  vec2 e = abs(f / (sky_map.w - 1.0) * 2.0 - 1.0);
+  return mix(o, 1.0, smoothstep(0.85, 1.0, max(e.x, e.y)));
 }
 
 float hash1(vec2 q) {
@@ -3318,6 +3375,15 @@ void main() {
   float wet_flat = 0.0;  // level ground, where puddles stay after the rest has dried
   float wet_gloss = 1.0;  // how much of a sheen the rain gives it (wood and walls drink it, tfrag3.frag)
   vec3 wet_n = vec3(0.0);
+  // (the sky map, post.sky_map: none of the rain under roofs and awnings)
+  float rain_open = 1.0;
+  if (sky_map.w > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      (max(weather.w, puddle_level) > 0.0 || tune_sky_map_dbg > 0.5)) {
+    rain_open = sky_open(view_to_world * p + cam_pos, view_to_world * surf_n);
+  }
+  if (tune_sky_map_dbg > 0.5 && z > 0.0) {
+    c = mix(c, vec3(1.0 - rain_open, rain_open, 0.0) * max(luma(c), 0.08) * 2.0, 0.7);
+  }
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
     {
@@ -3329,11 +3395,11 @@ void main() {
     }
     // (out to the horizon: far away the ground still reads soaked, only the puddles' detail goes)
     wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view));
-    wet = weather.w * wet_flat;
+    wet = weather.w * wet_flat * rain_open;
     c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
     // what isn't level ground (grass, bushes, rocks, walls): soaked too, darker and deeper in color,
     // with a wet sheen at grazing angles and drops glinting on it up close
-    float wet_side = weather.w * (1.0 - wet_flat);
+    float wet_side = weather.w * (1.0 - wet_flat) * rain_open;
     if (wet_side > 0.01) {
       vec3 wq = (view_to_world * p + cam_pos) / 4096.0;
       // (streaks: noise stretched down the slope, where the rain runs off)
@@ -3929,21 +3995,22 @@ void main() {
 
   // wet ground: puddles in the dips of a world-space noise, raindrop rings in them, and the
   // surroundings reflected (strongest in the puddles and at grazing angles: the neon on a wet street)
-  if (wet > 0.01 || wet_flat * puddle_level > 0.01) {
+  if (wet > 0.01 || wet_flat * puddle_level * rain_open > 0.01) {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
     // wide puddles: low-frequency dips with a ragged rim. A thunderstorm floods them wider; as they
     // dry they draw back into the deepest dips, still water while the street around has dried
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
-                   (1.0 - smoothstep(350.0 * 4096.0, 700.0 * 4096.0, z)) * step(0.001, puddle_level);
+                   (1.0 - smoothstep(350.0 * 4096.0, 700.0 * 4096.0, z)) * step(0.001, puddle_level) *
+                   rain_open;
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
     wet = max(wet, puddle * wet_flat * water);
     // (a damp dark rim around a drying puddle)
-    float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle);
+    float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle) * rain_open;
     c *= 1.0 - 0.25 * puddle * wet - 0.3 * max(wet - soaked, 0.0) - 0.15 * max(rim - soaked, 0.0);
-    vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
+    vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * rain_open * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
     // outside the puddles the wet ground is rough: a fine noise breaks its reflection up
     vec2 rough = vec2(gnoise(ww.xz * 9.0), gnoise(ww.xz * 9.0 + 5.3)) * (1.0 - puddle) *
                  (1.0 - smoothstep(10.0 * 4096.0, 30.0 * 4096.0, z));
@@ -3987,7 +4054,7 @@ void main() {
         }
       }
       float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
-      c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * 0.55;
+      c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * rain_open * 0.55;
     }
     // further out: the drops as sparkles about a pixel big, on what faces up, out to 350 m
     if (weather.x > 0.0 && z > 6.0 * 4096.0 && z < 350.0 * 4096.0) {
@@ -3995,7 +4062,7 @@ void main() {
       float fade = smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z) *
                    (1.0 - smoothstep(220.0 * 4096.0, 350.0 * 4096.0, z)) *
                    smoothstep(0.7, 0.9, dot(wet_n, up_view));
-      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * 0.6;
+      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * rain_open * 0.6;
     }
   }
 
