@@ -218,6 +218,9 @@ uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as
 uniform float tune_sky_enclosed_gain = 1.1;
 uniform float tune_smoke_floor = 1.0;  // under a roof: blended smoke's added light back, up to the game's colour (0: off)
 uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
+uniform float tune_night_win = 1.0;        // lit window panes at night: their light (0 = off)
+uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
+uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
@@ -5589,6 +5592,29 @@ void main() {
       vec3 gh = game_c * (lc / lg);
       float w = tune_night_hue * night_hue_k * clouds.w * (1.0 - smoothstep(tune_night_hue_lo, tune_night_hue_hi, lc)) * (1.0 - flame_keep);
       c = mix(c, max(gh, 0.0), w);
+    }
+  }
+  // (test: tune_night_win >= 10 shows the glossy pixels magenta, the window panes cyan)
+  if (tune_night_win > 9.0 && z > 0.0 && pix_normal.a > 0.17 && pix_normal.a < 0.5) {
+    c = pix_tag > 0.985 && pix_tag < 0.9925 ? vec3(0.0, 1.0, 1.0) : vec3(1.0, 0.0, 1.0);
+  }
+  // at night some of the window panes are lit from inside (EnhancedMaterials.h's kWindow: glossy,
+  // 0.99 long): a warm light, one in tune_night_win_share of the world's cells (a pane's room), each
+  // its own strength; above the bloom's knee so the far city gets points of light, and the water's
+  // reflections take them. The dark around them stays as dark
+  if (tune_night_win > 0.0 && clouds.w > 0.0 && z > 0.0 && pix_normal.a > 0.17 && pix_normal.a < 0.5 &&
+      pix_tag > 0.985 && pix_tag < 0.9925) {
+    vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
+    vec3 cell = floor(wp / vec3(tune_night_win_cell, tune_night_win_cell * 1.25, tune_night_win_cell));
+    float h1 = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+    float h2 = fract(sin(dot(cell, vec3(269.5, 183.3, 246.1))) * 43758.5453);
+    float lit = step(h1, tune_night_win_share) * smoothstep(0.3, 0.8, clouds.w);
+    if (lit > 0.0) {
+      // (warm to pale, by the room; the pane's own picture kept as a little shading over it)
+      vec3 wc = mix(vec3(1.0, 0.62, 0.3), vec3(1.0, 0.85, 0.6), h2) * mix(0.6, 1.0, fract(h2 * 7.3));
+      float pic = luma(texture(tex_T0, tex_coord).rgb);
+      wc *= tune_night_win * (0.75 + 0.5 * smoothstep(0.0, 0.3, pic));
+      c = mix(c, max(c, wc), lit);
     }
   }
   // under a roof the sky through the windows as the game drew it, and what it drew over it with no
