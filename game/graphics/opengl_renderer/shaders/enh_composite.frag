@@ -220,6 +220,7 @@ uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
 uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
 uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
 uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
+uniform float tune_chr_rim = 0.6;     // characters' moon/sky rim at night (0: off)
 uniform float tune_shaft_keep = 1.0;  // the game's translucent light columns (arena shaft) kept as drawn (0: off)
 uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specular occlusion; 0: off)
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
@@ -5193,6 +5194,14 @@ void main() {
       vec3 shade_tint = mix(vec3(0.92, 0.96, 1.04), vec3(1.0, 0.93, 0.86), tune_chr_dusk_warm * mix(0.5, 1.0, dusk));
       c *= mix(vec3(1.0), shade_tint * (1.0 - dk), rock_sh);
     }
+  }
+
+  // characters at night: a faint rim of the moon's and sky's light along their edges, so Jak and
+  // Daxter read against the dark dock (the scene stays as dark; only the silhouette's last pixels)
+  if (tune_chr_rim > 0.0 && night_dark.x > 0.0 && pix_tag > 0.3 && pix_tag < 0.55 && z > 0.0) {
+    float ndv = clamp(dot(surf_n, normalize(-p)), 0.0, 1.0);
+    float rim = pow(1.0 - ndv, 3.0) * night_dark.x * ao * (1.0 - 0.6 * rock_sh);
+    c += vec3(0.42, 0.52, 0.78) * rim * tune_chr_rim * (0.35 + luma(c));
   }
 
   // the low sun's sky fill: the ground turned from it is still lit by the whole bright sky and the
