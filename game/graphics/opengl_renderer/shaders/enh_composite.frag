@@ -266,6 +266,7 @@ uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet 
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
+uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
@@ -1198,7 +1199,7 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
 // the sandstorm's air at a world point (m): rolling clouds of sand stretched along the wind and
 // carried by it (the game storm's own wind), thicker near the ground, with fine streamers blowing
 // low over it close by. Roughly 1 on average.
-float dust_density(vec3 w, float near) {
+float dust_density(vec3 w, float near, float ground) {
   vec2 dir = dust_wind.xy;
   vec2 q = w.xz - dust_wind.zw;
   // along the wind, up, across it; the clouds boil slowly as they go
@@ -1213,18 +1214,28 @@ float dust_density(vec3 w, float near) {
     float fine = vnoise3(sf * vec3(1.0 / 3.0, 1.0 / 0.5, 1.0 / 0.4) + vec3(3.0, 0.0, 9.0));
     dens += near * 0.9 * smoothstep(0.55, 0.9, fine);
   }
-  // thicker toward the ground (taken as a little under the camera)
-  float h = w.y - (cam_pos.y / 4096.0 - 3.0);
-  return dens * mix(1.0, 0.35, smoothstep(0.0, 40.0, h));
+  // thicker toward the ground (taken as a little under the camera, or the ray's end when lower:
+  // flying over the desert the ground is far under the camera), thin high up
+  float h = w.y - ground;
+  return dens * mix(1.0, 0.35, smoothstep(0.0, 40.0, h)) * mix(1.0, 0.12, smoothstep(40.0, 160.0, h));
 }
 
 // how much of the dust hides the scene along a view ray (view space, unit) up to dist (m), marched
 // through the volume close up (where its shapes show) and in one step past that
-float dust_cover(vec3 ray_view, float dist, float amount, float jitter) {
+float dust_cover(vec3 ray_view, float dist, float amount, float jitter, bool surface) {
   vec3 wd = world_dir(ray_view);
   vec3 o = cam_pos / 4096.0;
   float k = 0.006 * amount + 0.03 * amount * amount * amount;  // extinction per meter
   float march = min(dist, 160.0);
+  // (the ground: a little under the camera, or where the ray ends when that is lower. In the Hellcat
+  // 100+ m up, "3 m under the camera" filled the whole way down with the storm's thickest air and
+  // the desert went one beige veil, the rocks chalk white; tune_haze_layer 0: as before)
+  float ground = cam_pos.y / 4096.0 - 3.0;
+  float end_h = 0.0;
+  if (tune_haze_layer > 0.5 && (tune_haze_layer < 1.5 || gl_FragCoord.x > 0.5 / texel.x)) {
+    ground = surface ? min(ground, o.y + wd.y * dist) : ground;
+    end_h = surface ? max(o.y - ground, 0.0) : 0.0;
+  }
   float tau = 0.0;
   float prev = 0.0;
   const int N = 12;
@@ -1233,12 +1244,12 @@ float dust_cover(vec3 ray_view, float dist, float amount, float jitter) {
     float u = (float(i) + jitter) / float(N);
     float t = march * u * u;
     float near = 1.0 - smoothstep(4.0, 14.0, t);
-    tau += dust_density(o + wd * t, near) * (t - prev) * k;
+    tau += dust_density(o + wd * t, near, ground) * (t - prev) * k;
     prev = t;
   }
-  tau += dust_density(o + wd * march, 0.0) * (march - prev) * k;
-  // the rest of the way, at the average
-  tau += max(dist - march, 0.0) * k * 0.8;
+  tau += dust_density(o + wd * march, 0.0, ground) * (march - prev) * k;
+  // the rest of the way, at the average (of the part of it inside the thick low layer)
+  tau += max(dist - march, 0.0) * k * 0.8 * 60.0 / max(end_h, 60.0);
   return 1.0 - exp(-tau);
 }
 
@@ -3980,10 +3991,14 @@ void main() {
       hc = mix(hc, mix(vec3(0.76, 0.85, 0.96), vec3(1.0, 0.84, 0.64), azm * azm * clamp(morning / max(day_look, 1e-3), 0.0, 1.0)), day_look);
     }
     hc *= (0.9 + (0.5 * toward * toward + 0.6 * pow(toward, 12.0)) * lit) * mix(0.62, 1.0, lit);
-    float amount = (1.0 - exp(-dist / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // and dust hanging low over the sand far off: the feet of the mountains and the far dunes
     // fade into it, their tops stand out (height over the camera's, m)
     float rel = z > 0.0 ? world_dir(p).y / 4096.0 : 0.0;
+    // (the haze and the dust are layers over the ground: seen from high above (the Hellcat, a cliff)
+    // a ray crosses only their thickness, not its whole length. Without this, in flight every term
+    // took the whole way down as far air and the desert went one pale beige, the rocks chalk white)
+    float drop = tune_haze_layer > 0.5 && (tune_haze_layer < 1.5 || tex_coord.x > 0.5) ? max(-rel, 0.0) : 0.0;
+    float amount = (1.0 - exp(-dist * 250.0 / max(drop, 250.0) / 1600.0)) * exp(-up * (z > 0.0 ? 3.0 : 3.5));
     // (the morning's sky clear: half the haze over it)
     c = mix(c, hc, clamp(amount * sun_haze * daylight * 0.75 * (z > 0.0 ? 1.0 : 1.0 - 0.5 * day_look), 0.0, 1.0));
     // the late afternoon: the air toward the sun's side of the horizon glows, the far mountains and
@@ -3999,14 +4014,14 @@ void main() {
     }
     // (the dust in a pale sand color: in the haze's own, under an afternoon sun, it laid a band of
     // bright orange over the middle distance)
-    float low = (1.0 - exp(-dist / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
+    float low = (1.0 - exp(-dist * 25.0 / max(drop, 25.0) / 450.0)) * exp(-max(rel + 5.0, 0.0) / 18.0) * 0.6;
     vec3 dc = mix(vec3(luma(hc)) * vec3(1.06, 0.98, 0.86), hc, 0.3);
     c = mix(c, dc, clamp(low * sun_haze * daylight * 0.75 * (1.0 - 0.3 * desert_noon()), 0.0, 1.0));
     // a light sand haze far off, always in the air: the far dunes and mountains' feet sink into a
     // pale sand color, the sun shining through it (bright toward it, the mountains' shadows in it);
     // at night only a faint grey-blue, the lamps glowing in it (the halos below)
     {
-      float far_k = 1.0 - exp(-max(dist - 60.0, 0.0) / 700.0);
+      float far_k = 1.0 - exp(-max(dist - 60.0, 0.0) * 80.0 / max(drop, 80.0) / 700.0);
       float sand_low = exp(-max(rel + 8.0, 0.0) / 140.0) * (z > 0.0 ? 1.0 : exp(-up * 9.0));
       vec3 sand_c = vec3(0.9, 0.76, 0.56);
       vec3 sun_lit = sun_color() * (0.7 + 0.5 * toward * toward + 0.8 * pow(toward, 10.0)) * mix(0.6, 1.0, lit);
@@ -4059,14 +4074,18 @@ void main() {
   // dust: the game's sandstorm (its intensity and its wind), as a volume in the world: rolling
   // clouds of sand carried by the wind, streamers low over the ground close by; lit by the sun,
   // brighter looking toward it
+  // (how much of the pixel the sandstorm's dust hides: the material relights below are the surface's,
+  // not the dust's; on the veil they made the storm's rocks chalk white)
+  float dust_veil = 0.0;
   if (weather.y > 0.0) {
     float dust = weather.y;
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.15;
     vec3 sand = mix(vec3(0.8, 0.63, 0.42) * (0.3 + 0.8 * daylight), fog_color, 0.25);
     sand *= 1.0 + pow(max(dot(ray, sky_sun.xyz), 0.0), 4.0) * 0.6 * daylight;
     float dist = z > 0.0 ? length(p) / 4096.0 : 3000.0;
-    float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832);
+    float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832, z > 0.0);
     c = mix(c, sand * (1.0 - 0.8 * night_dark.x), cover * 0.94);
+    dust_veil = tune_haze_layer > 0.5 ? cover * 0.94 : 0.0;
   }
   if (puff_count > 0) {
     float daylight = clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) + 0.12;
@@ -5089,6 +5108,7 @@ void main() {
     vec3 air = mix(vec3(0.9, 0.97, 1.08), vec3(1.08, 1.0, 0.88), smoothstep(0.35, 0.95, toward));
     c = mix(c, c * air, far_k * 0.6);
   }
+  vec3 pre_relight = c;
   if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
     float tag = pix_tag;
     if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
@@ -5165,6 +5185,7 @@ void main() {
       c *= mix(vec3(1.0), mix(vec3(0.8, 0.84, 0.95), vec3(noon_sunlit), sun_lit), k);
     }
   }
+  c = mix(c, pre_relight, dust_veil);
   // the desert at noon: the game's dusty fog and the area's warm grade made everything sepia; the
   // light's white back (the sky's blue kept), a touch brighter
   if (z > 0.0 && wsurf == 0.0) {
