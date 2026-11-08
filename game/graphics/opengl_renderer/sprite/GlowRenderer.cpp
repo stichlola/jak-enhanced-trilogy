@@ -467,6 +467,16 @@ void GlowRenderer::add_sprite_pass_3(const SpriteGlowOutput& data, int sprite_id
   record.draw_mode = m_default_draw_mode;
   record.tbp = 0;
   record.idx = m_next_index;
+  {
+    float x0 = vtx[0].x, x1 = vtx[0].x, y0 = vtx[0].y, y1 = vtx[0].y;
+    for (int i = 1; i < 4; i++) {
+      x0 = std::min(x0, vtx[i].x);
+      x1 = std::max(x1, vtx[i].x);
+      y0 = std::min(y0, vtx[i].y);
+      y1 = std::max(y1, vtx[i].y);
+    }
+    record.size = std::max((x1 - x0) / 512.f, (y1 - y0) / 256.f);
+  }
 
   u32* idx = alloc_index(5);
   // flip first two - fan -> strip
@@ -836,6 +846,7 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
   // Cv = (Cs - 0) * Ad + D
   glBlendFunc(GL_ONE, GL_ONE);
   glBlendEquation(GL_FUNC_ADD);
+  float soft_min = 1e9f;
   {
     // (Enhanced: in a half-float frame, post.hdr_scene, the quads' alpha summed past 1, which the
     // 8-bit frame clamps: later DST_ALPHA blends and the post's dust coverage read it. The frame's
@@ -843,8 +854,18 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
     static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
     if ((float)t_hdr_scene > 0.5f) {
       glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+    } else {
+      // (Enhanced: in the 8-bit frame a big glow over a lit floor, the arena's light column pool,
+      // clipped to one flat white-yellow blob that the post's bloom and grade then spread. post.glow_soft:
+      // the quads are "screened" on, D + S * (1 - D), a soft knee instead of a hard clip: over dark
+      // ground nearly the same light, over a bright floor its texture stays; from a quad
+      // post.glow_soft_size big, a share of the screen)
+      static const EnhancedTune t_glow_soft("post.glow_soft", 1.f);
+      static const EnhancedTune t_glow_soft_size("post.glow_soft_size", 0.2f);
+      soft_min = (float)t_glow_soft > 0.5f ? (float)t_glow_soft_size : 1e9f;
     }
   }
+  bool soft_on = false;
 
   glDepthMask(GL_FALSE);
 
@@ -877,6 +898,16 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     }
 
+    // (only the big quads, pools of light over a floor: a lamp's or a thruster's small glow keeps
+    // the plain sum, so the effects' boost by day still finds all their light)
+    if ((record.size >= soft_min) != soft_on) {
+      soft_on = !soft_on;
+      if (soft_on) {
+        glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ONE, GL_ONE, GL_ONE);
+      } else {
+        glBlendFunc(GL_ONE, GL_ONE);
+      }
+    }
     prof.add_draw_call();
     prof.add_tri(2);
     glDrawElements(GL_TRIANGLE_STRIP, 5, GL_UNSIGNED_INT, (void*)(record.idx * sizeof(u32)));
