@@ -307,6 +307,7 @@ uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker t
 uniform float tune_chr_floor_any = 0.5;  // that floor's weight with a high sun too (0: low sun only)
 uniform float tune_shade_hue = 0.9;  // near sun shade on colored ground keeps its hue (0: the full tint)
 uniform float tune_lantern_halo = 0.07;  // Jak's desert lantern: its wide glow (was 0.2)
+uniform float tune_flame_wide = 1.0; // a reported fire's taller flames (the slums' sheets of fire, ~4 m) kept by their warm color
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23, 9: flame_keep/weight/fx_day
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
@@ -2516,6 +2517,7 @@ void main() {
   // (the flames' place on screen: kept out of the daylight's corrections and the highlights'
   // bleaching further down, which took their orange to a pale yellow, green and blue by day)
   float flame_keep = 0.0;
+  float flame_tall = 0.0;
   for (int i = 0; i < fire_count; i++) {
     float aa = dot(fire_axis(i), fire_axis(i));
     if (fire_pos[i].z < 1.0 * 4096.0 || aa <= 1e-10) {
@@ -2526,10 +2528,22 @@ void main() {
     float across = (rel.x * fire_axis(i).y - rel.y * fire_axis(i).x) / aa;
     flame_keep = max(flame_keep, (1.0 - smoothstep(0.7, 1.3, abs(across))) *
                                      smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(1.6, 2.4, along)));
+    // (a barrel's flame is ~1 m, but the slums' rubble burns in sheets 3-4 m tall and as wide: only
+    // their foot was kept, the rest went through the night's grade and bleached to a pale yellow
+    // with orange blotches. Up to ~9 flame sizes, by color below)
+    flame_tall = max(flame_tall, (1.0 - smoothstep(3.0, 5.0, abs(across))) *
+                                     smoothstep(-1.4, -0.8, along) * (1.0 - smoothstep(7.0, 10.0, along)));
   }  // (the flame's own pixels only, by the game's colors: a sprite with no depth of its own, it was
   // shaded as the trunk or the wall behind it, in its shadow: green-blue and dim)
   vec3 flame_raw = texture(tex_T0, tex_coord).rgb;
   flame_keep *= smoothstep(0.3, 0.5, luma(flame_raw));
+  // (the tall part: warm and bright in the game's own colors, orange to yellow (red over green over
+  // blue, clearly warm). A wall the game lit orange beside it is dimmer and left alone. Kept raw it
+  // went paler still (the game's sum of sprites is a pale cream there): these get their orange
+  // back below instead, past the grade)
+  float flame_warm = tune_flame_wide * flame_tall * (1.0 - flame_keep) * smoothstep(0.38, 0.55, luma(flame_raw)) *
+                     step(flame_raw.g, flame_raw.r + 0.02) * step(flame_raw.b, flame_raw.g + 0.02) *
+                     smoothstep(0.12, 0.25, flame_raw.r - flame_raw.b);
   // (and the fires the game doesn't report (the desert's torches aren't particle spawners): by
   // their color, yellow to white hot and brighter than anything sunlit (red at its full: the
   // brightest grass in the noon sun stops short of it). Not over the land: the sand's sunlit patches are as pale; in front of a trunk
@@ -5459,6 +5473,15 @@ void main() {
     }
   }
   c = mix(c, flame_base, flame_keep);
+  // (a tall flame's body: its orange back where the sum of sprites went cream, the white-hot spots kept)
+  if (flame_warm > 0.0) {
+    float fl = luma(c);
+    vec3 orange = vec3(1.0, 0.62, 0.24) * fl / luma(vec3(1.0, 0.62, 0.24));
+    vec3 sat = mix(vec3(fl), c, 1.35);
+    vec3 warm = max(mix(sat, orange, 0.35 * (1.0 - smoothstep(0.88, 0.99, fl))), 0.0);
+    warm *= fl / max(luma(warm), 1e-3);  // (no brighter: only the hue)
+    c = mix(c, warm, flame_warm);
+  }
   // see-through cloth (Jak's tunic and scarf: the 0.52 tag) as the game draws it: the post's light
   // and shade made it look transparent
   {
@@ -5718,7 +5741,7 @@ void main() {
     c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
         tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : tune_fx_debug < 4.5 ? vec3(fx_day, 0.5, 0.0) :
         tune_fx_debug < 5.5 ? texture(tex_T0, tex_coord).rgb : tune_fx_debug < 6.5 ? texture(tex_T23, uv).rgb :
-        tune_fx_debug > 8.5 ? vec3(flame_keep, fx_w, fx_day) :
+        tune_fx_debug > 8.5 ? vec3(flame_keep, fx_w, max(fx_day, flame_warm)) :
         tune_fx_debug > 7.5 ? vec3(shaft_m, fx_w, 0.0) :
         vec3(z / (40.0 * 4096.0), (pix_tag - 0.9) * 5.0, pix_normal.a);
   }
