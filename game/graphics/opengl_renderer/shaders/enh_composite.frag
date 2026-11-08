@@ -209,6 +209,7 @@ uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 t
 uniform float tune_chr_bounce = 0.5;  // shade taken off them under a high sun (light back from the ground)
 uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun gets low (on tune_chr_dark)
 uniform float tune_rock_sat = 0.42;   // desert rock by day: saturation cap (0: off)
+uniform float tune_lamp_jak_m = 2.5;  // lamps' shadows let go within this far of Jak's feet (m; 0: off)
 uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
 uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
@@ -3413,6 +3414,17 @@ void main() {
     float gloss = tune_dry_glints <= 0.0 || (pix_tag > 0.3 && pix_tag < 0.55) ? 0.0
                 : (gmat == 1 ? 1.0 : (gmat == 2 ? 0.6 : tune_glint_stone));
     float gexp = mix(24.0, 60.0, gloss);
+    // (Jak's own shadow from a lamp on the floor right around him: the depth march blurs his body into
+    // a dark box twice his width under his feet at night (the port's pier); his contact shadow is there
+    // for that, as vanilla's blob)
+    float lamp_jak_keep = 1.0;
+    if (tune_lamp_jak_m > 0.0 && dot(jak_fx.xyz, jak_fx.xyz) > 4096.0 * 4096.0) {
+      vec3 jd = (p - jak_fx.xyz) / 4096.0;
+      float jup = dot(jd, up_view);
+      float jr = length(jd - up_view * jup);
+      lamp_jak_keep = smoothstep(0.5 * tune_lamp_jak_m, tune_lamp_jak_m, jr) + smoothstep(0.4, 1.0, abs(jup));
+      lamp_jak_keep = min(lamp_jak_keep, 1.0);
+    }
     for (int i = 0; i < light_count; i++) {
       vec3 to_light = light_pos[i].xyz - p;
       float d = length(to_light);
@@ -3428,7 +3440,7 @@ void main() {
         // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
         // (not in full daylight: a torch's shadow doesn't show under the sun)
         if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5 && !full_day) {
-          lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter);
+          lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter) * lamp_jak_keep;
         }
         added += light_color[i].rgb * (k * k) * lit * 1.35;
         if (wet > 0.0) {
