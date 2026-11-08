@@ -309,6 +309,8 @@ uniform float tune_probe_dbg = 0.0;   // 1: the probes' open sky (grey), 2: thei
 uniform float tune_probe_rim = 1.0;   // the characters' night sky rim x the sky their probes see (0: off)
 uniform float tune_probe_tint = 0.0;  // characters, by how much they're roofed: toward the bounce light's hue (0: off)
 uniform float tune_probe_n = 0.5;     // looked up this far out along the normal (m)
+uniform float tune_phys_sky = 0.0;   // the sun's color from the air it crosses (Rayleigh + the area's haze), not the hand ramp (0: off)
+uniform float tune_phys_turb = 1.0;  // x the aerosols (the haze) in it
 uniform float tune_probe_shade = 0.0; // the level's shade under a roof: the bounce's hue, not the blue sky's (0: off; >= 10 shows it)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
@@ -1726,11 +1728,32 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
   return add * clouds.w;
 }
 
+// (tune_phys_sky: the sun's color from the air its light crosses, not a hand-picked ramp per area)
+// what reaches the ground of the sun's light at height h (sine), relative to the sun overhead (so
+// noon is white: the eye adapts): Rayleigh (lambda^-4) plus aerosols (Angstrom, lambda^-1.3) at
+// 680/550/440 nm, over the air mass (Kasten-Young). The aerosols are the area's own haze (the
+// desert's dust: sun_haze) and the red sunset's thick sky (sky_kind.w)
+vec3 sun_transmit(float h) {
+  float e = clamp(h, -0.02, 1.0);
+  float deg = degrees(asin(e));
+  float m = min(1.0 / (max(e, 0.0) + 0.50572 * pow(max(deg + 6.07995, 0.5), -1.6364)), 38.0);
+  // (the desert's full haze as 0.12: at 0.26 the 18h sun went blood red, the golden look gone)
+  float beta = (0.04 + 0.08 * sun_haze + 0.25 * sky_kind.w) * tune_phys_turb;
+  vec3 tau = vec3(0.042, 0.100, 0.249) + beta * vec3(1.65, 2.18, 2.91);
+  return exp(-tau * (m - 1.0));
+}
+
 // the sun's color by its height, the moon's at night
 vec3 sun_color() {
   vec3 col = mix(vec3(1.0, 0.5, 0.28), vec3(1.0, 0.96, 0.9), smoothstep(0.05, 0.35, sky_sun.w));
   // the red sunset: the low sun through a thick sky, deep orange-red and strong
   col = mix(col, vec3(1.25, 0.36, 0.1), sky_kind.w * (1.0 - smoothstep(0.1, 0.45, sky_sun.w)));
+  if (tune_phys_sky > 0.0) {
+    // (only its hue: as bright as the ramp's, the picture's light stays where it was)
+    vec3 t = sun_transmit(sky_sun.w);
+    vec3 ph = min(t / max(luma(t), 1e-5), vec3(2.2)) * luma(col);
+    col = mix(col, ph, min(tune_phys_sky, 1.0));
+  }
   return mix(col, vec3(0.13, 0.15, 0.22), clouds.w);
 }
 
