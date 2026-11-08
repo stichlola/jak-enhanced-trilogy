@@ -235,6 +235,7 @@ uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of 
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
 uniform float tune_spec_aa_max = 0.18;  // at most this much roughness^2 added
 uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many times the lit surface (0: off)
+uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
@@ -3438,6 +3439,7 @@ void main() {
     // a dark box twice his width under his feet at night (the port's pier); his contact shadow is there
     // for that, as vanilla's blob)
     float lamp_jak_keep = 1.0;
+    vec3 flash_add = vec3(0.0);  // the explosions' and shots' flash, apart from the lamps
     if (tune_lamp_jak_m > 0.0 && dot(jak_fx.xyz, jak_fx.xyz) > 4096.0 * 4096.0) {
       vec3 jd = (p - jak_fx.xyz) / 4096.0;
       float jup = dot(jd, up_view);
@@ -3454,15 +3456,20 @@ void main() {
         float ndl = dot(soft_n, to_light / max(d, 1.0));
         // (a light Jak carries stands low over the ground: mostly wrapped around the shapes, or it
         // draws every triangle of the terrain and leaves the steps black)
-        float lit = light_color[i].a < 0.5 ? clamp(ndl * 0.85 + 0.15, 0.0, 1.0)
-                                           : clamp(ndl * 0.3 + 0.7, 0.0, 1.0);
+        bool flash = light_color[i].a > 1.5 && tune_flash > 0.0;
+        bool lamp = light_color[i].a < 0.5 || light_color[i].a > 1.5;  // (2: a flash, lit as a lamp)
+        float lit = lamp ? clamp(ndl * 0.85 + 0.15, 0.0, 1.0)
+                                 : clamp(ndl * 0.3 + 0.7, 0.0, 1.0);
         // the strongest lights (sorted first) cast shadows where they still matter
         // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
         // (not in full daylight: a torch's shadow doesn't show under the sun)
-        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && light_color[i].a < 0.5 && !full_day) {
+        if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && lamp && !full_day) {
           lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter) * lamp_jak_keep;
         }
         added += light_color[i].rgb * (k * k) * lit * 1.35;
+        if (flash) {
+          flash_add += light_color[i].rgb * (k * k) * lit * 1.35;
+        }
         if (wet > 0.0) {
           vec3 hv = normalize(to_light / max(d, 1.0) + vdir);
           glints += light_color[i].rgb * k * pow(max(dot(nn, hv), 0.0), wexp) * lit;
@@ -3494,6 +3501,15 @@ void main() {
       c += (c + 0.12) * added * ao;
     }
     c += glints * wet * 1.6 * (1.0 + night_dark.x) * wet_gloss;
+    // (an explosion's flash: the lamps' soft ceiling above kept it to a torch's light, and in a
+    // torch-lit room at night a blast lit nothing. On top of that, its own much higher roll-off:
+    // the room flashes)
+    float fm = max(flash_add.r, max(flash_add.g, flash_add.b));
+    if (fm > 0.0) {
+      flash_add *= tune_flash / (1.0 + 0.25 * fm * tune_flash);
+      c += (night_dark.x > 0.0 ? albedo * mix(1.0, 1.6, night_dark.x) : c) * flash_add * ao +
+           0.12 * flash_add * ao;
+    }
   }
 
   // indirect light: what the surroundings send, tinted by this surface's own color

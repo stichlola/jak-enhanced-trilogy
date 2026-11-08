@@ -504,7 +504,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.color[0] = tint[0] * k;
       c.color[1] = tint[1] * k;
       c.color[2] = tint[2] * k;
-      c.color[3] = 0.f;
+      // (2: a flash, lit in the composite past the lamps' soft ceiling; the charging flicker a lamp)
+      c.color[3] = b.kind == 2 ? 0.f : 2.f;
       c.score = 1e6f;
       candidates.push_back(c);
     }
