@@ -220,7 +220,7 @@ uniform float tune_smoke_floor = 1.0;  // under a roof: blended smoke's added li
 uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
-uniform float tune_sky_night_hi = 0.04;   // to here, all of the game's pixel
+uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
 uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b), 5 no middle map
@@ -273,6 +273,12 @@ uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_co
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
+uniform sampler2D tex_T29;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
+uniform mat4 chr_occ_mvp;   // world -> that map
+uniform float chr_occ_on;   // its height span (m); 0: none this frame
+uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
+uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
+uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3743,7 +3749,31 @@ void composite_unused() {
     float r_m = length(dv - up_view * up_m);
     float blob = (1.0 - smoothstep(0.2, 0.75, r_m)) * (1.0 - smoothstep(0.15, 0.5, abs(up_m)));
     float in_sun = sun_dir.w > 0.0 ? sun_lit * clamp(sun_dir.w * 4.0, 0.0, 1.0) : 0.0;
-    c *= 1.0 - tune_chr_contact * blob * (1.0 - 0.6 * in_sun);
+    c *= 1.0 - tune_chr_contact * blob * (1.0 - 0.6 * in_sun) * (chr_occ_on > 0.0 && tune_chr_occ > 0.0 ? 0.4 : 1.0);
+  }
+
+  // char-ground-occlusion: every character around Jak darkens what lies just below it (in the temple
+  // at noon and in the slums at night they stood on the flagstones pasted on). Their lowest point per
+  // column, seen from below: 8 taps over a soft reach, each by the gap down to this surface; less
+  // where the sun map already draws their shadow
+  if (tune_chr_occ > 0.0 && chr_occ_on > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      !(pix_tag > 0.3 && pix_tag < 0.55) && z < 30.0 * 4096.0) {
+    vec3 s = (chr_occ_mvp * vec4(view_to_world * p + cam_pos, 1.0)).xyz * 0.5 + 0.5;
+    if (all(greaterThan(s, vec3(0.0))) && all(lessThan(s, vec3(1.0)))) {
+      // (the map's half side in m: the mvp's x scale is 1 / half in game units)
+      float half_m = 1.0 / (chr_occ_mvp[0][0] * 4096.0);
+      float rr = tune_chr_occ_r / (2.0 * half_m);
+      float rot = pixel_angle();
+      float occ = 0.0;
+      for (int i = 0; i < 8; i++) {
+        float d = texture(tex_T29, s.xy + vogel(i, 8, rot) * rr).r;
+        float gap = (d - s.z) * chr_occ_on;  // m: their lowest point over this surface
+        occ += d < 0.9999 ? step(-0.12, gap) * (1.0 - smoothstep(0.0, tune_chr_occ_h, gap)) : 0.0;
+      }
+      occ /= 8.0;
+      float in_sun = sun_dir.w > 0.0 ? sun_lit * clamp(sun_dir.w * 4.0, 0.0, 1.0) : 0.0;
+      c *= 1.0 - tune_chr_occ * occ * (1.0 - 0.7 * in_sun);
+    }
   }
 
   // materials (from the texture names, in the normals' alpha): metal reflects its surroundings

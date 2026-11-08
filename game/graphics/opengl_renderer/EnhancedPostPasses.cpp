@@ -377,6 +377,10 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }
+  m_chr_occ_ready = false;
+  if (m_settings.shadow_map && m_settings.shadow_casters && g_enhanced_camera.valid) {
+    ENH_TIMED("enh-chr-occ", do_chr_occlusion(render_state, prof));
+  }
   // the levels' ray tracing hierarchies (occlusion, reflections)
   ENH_TIMED("enh-rt-update", update_rt(render_state));
   if (m_settings.ssao) {
@@ -1111,6 +1115,15 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
       }
     }
     glUniform4f(glGetUniformLocation(id, "jak_fx"), jv[0], jv[1], jv[2], m_jak_wet);
+  }
+  {
+    // the characters' lowest points around Jak (do_chr_occlusion): their ground occlusion
+    glActiveTexture(GL_TEXTURE29);
+    glBindTexture(GL_TEXTURE_2D, m_chr_occ_ready ? m_chr_occ_tex : m_black_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T29"), 29);
+    glUniformMatrix4fv(glGetUniformLocation(id, "chr_occ_mvp"), 1, GL_TRUE, m_chr_occ_mvp);
+    glUniform1f(glGetUniformLocation(id, "chr_occ_on"), m_chr_occ_ready ? m_chr_occ_depth_m : 0.f);
   }
   glUniform1f(glGetUniformLocation(id, "lens_drops"), m_movie > 0.5f ? 0.f : m_settings.lens_drops);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,

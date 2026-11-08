@@ -1836,7 +1836,8 @@ void EnhancedPost::add_wind_shadow_draws(const LevelData* lev,
 // The characters drawn this frame (see EnhancedCasters), skinned again with their bones and drawn
 // into the shadow map. Their bones put them in camera space: back to the world with the camera.
 void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
-                                       ScopedProfilerNode& prof) {
+                                       ScopedProfilerNode& prof,
+                                       const float* mvp) {
   auto& cs = g_enhanced_casters;
   cs.capture = false;  // later merc draws (HUD) don't cast
   if (cs.draws.empty()) {
@@ -1861,7 +1862,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   shader.activate();
   const auto id = shader.id();
   const auto& cam = g_enhanced_camera;
-  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp ? mvp : m_light_mvp);
   // world = cam - rot * merc camera space (the view space negated; rot as stored, see EnhancedCamera)
   glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
   glUniform3f(glGetUniformLocation(id, "cam_trans"), cam.trans[0], cam.trans[1], cam.trans[2]);
@@ -1899,6 +1900,71 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
     prof.add_draw_call();
   }
   glBindVertexArray(0);
+}
+
+// char-ground-occlusion: under a roof or at night there is no sun shadow, so the characters stood on
+// the floor with no contact darkening. Their lowest point per column around Jak (an orthographic map
+// looking up, 256^2): the composite darkens what lies just below them, softly by the height gap.
+void EnhancedPost::do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  m_chr_occ_ready = false;
+  static const EnhancedTune t_half("shadow.chr_occ_m", 6.f);
+  const float half_m = std::clamp((float)t_half, 0.f, 32.f);
+  if (half_m <= 0.f || g_enhanced_casters.draws.empty() || !g_enhanced_camera.valid ||
+      !g_enhanced_player.valid) {
+    return;
+  }
+  constexpr int kRes = 256;
+  if (!m_chr_occ_fbo) {
+    glGenFramebuffers(1, &m_chr_occ_fbo);
+    glGenTextures(1, &m_chr_occ_tex);
+    glBindTexture(GL_TEXTURE_2D, m_chr_occ_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_chr_occ_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_chr_occ_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  // x, z around Jak to -1..1; height: depth 0 at 4 m below him, 1 at 4 m above (the lowest wins)
+  constexpr float kM = 4096.f;
+  const float r = half_m * kM;
+  const float hh = 4.f * kM;
+  const auto& pl = g_enhanced_player.pos;
+  const float m[16] = {1.f / r, 0.f, 0.f, -pl[0] / r,  //
+                       0.f, 0.f, 1.f / r, -pl[2] / r,  //
+                       0.f, 1.f / hh, 0.f, -pl[1] / hh,  //
+                       0.f, 0.f, 0.f, 1.f};
+  memcpy(m_chr_occ_mvp, m, sizeof(m));
+  m_chr_occ_depth_m = 8.f;
+
+  GLfloat old_clear_depth = 0.f;
+  GLint old_depth_func = GL_GEQUAL;
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+  glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glClearDepth(1.0);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_chr_occ_fbo);
+  glViewport(0, 0, kRes, kRes);
+  glClear(GL_DEPTH_BUFFER_BIT);
+  glActiveTexture(GL_TEXTURE0);
+  draw_shadow_casters(render_state, prof, m_chr_occ_mvp);
+  glDisable(GL_PRIMITIVE_RESTART);
+  glClearDepth(old_clear_depth);
+  glDepthFunc(old_depth_func);
+  m_chr_occ_ready = true;
 }
 
 void EnhancedPost::do_volume(SharedRenderState* render_state,
