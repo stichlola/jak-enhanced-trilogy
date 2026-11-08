@@ -274,8 +274,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   }
 
   // (post.hiz 1: the water's reflection walks a depth pyramid, 400 m instead of 80 m; 0: the old
-  // per-step march)
-  static const EnhancedTune t_hiz("post.hiz", 0.f);
+  // per-step march; on by default: same look as the march, +0.06..0.13 ms)
+  static const EnhancedTune t_hiz("post.hiz", 1.f);
   m_hiz_ready = false;
   if ((float)t_hiz > 0.5f && have_scene && m_settings.water_reflections &&
       (m_ocean_ready || m_far_ocean_ready)) {
