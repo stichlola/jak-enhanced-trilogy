@@ -218,7 +218,10 @@ uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as
 uniform float tune_sky_enclosed_gain = 1.1;
 uniform float tune_smoke_floor = 1.0;  // under a roof: blended smoke's added light back, up to the game's colour (0: off)
 uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
-uniform float tune_night_win = 1.0;        // lit window panes at night: their light (0 = off)
+uniform float tune_lawn = 1.0;             // lawns' macro variation and moss at their occluded feet (0 = off)
+uniform float tune_lawn_var = 0.12;        // its light and dark
+uniform float tune_lawn_ao = 1.2;          // the moss-dark dirt where the occlusion is
+uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
 uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
 uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
@@ -275,6 +278,7 @@ uniform float light_tiles_on;      // 1: tex_T28 is filled (lights.tiles)
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
+uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
 uniform sampler2D tex_T31;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
 uniform mat4 chr_occ_mvp;   // world -> that map
@@ -3965,6 +3969,29 @@ void main() {
     c *= 1.0 - tune_chr_contact * blob * (1.0 - 0.6 * in_sun) * (chr_occ_on > 0.0 && tune_chr_occ > 0.0 ? 0.4 : 1.0);
   }
 
+  // low-sun-sheen: looking toward a low sun, level stone and flagstones catch a broad grazing sheen
+  // and a rough highlight (the sand has its own, below). Only in the sun, only with it low; held
+  // under the surface's own brightness so the dark look stays (tune_low_sheen 0: off)
+  if (tune_low_sheen > 0.0 && sun_dir.w > 0.0 && sun_lit > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      z < 150.0 * 4096.0 && pix_tag > 0.96 && night_dark.x < 1.0) {
+    vec3 lw = normalize(world_dir(sun_dir.xyz));
+    vec3 wn = normalize(world_dir(surf_n));
+    float lowk = (1.0 - smoothstep(0.1, 0.45, lw.y)) * smoothstep(0.0, 0.03, lw.y) * smoothstep(0.55, 0.85, wn.y);
+    if (lowk > 0.0) {
+      float ga = pix_normal.a;
+      int smat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
+      vec3 vw = -normalize(world_dir(p));  // toward the eye
+      float fres = pow(1.0 - clamp(dot(vw, wn), 0.0, 1.0), 5.0);
+      float toward = pow(max(dot(normalize(-vw.xz + 1e-4), normalize(lw.xz + 1e-4)), 0.0), 3.0);
+      float sr = max(dot(reflect(-vw, wn), lw), 0.0);
+      float lobe = pow(sr, aa_exp(18.0, n_var)) * (0.05 + 0.6 * fres);
+      float k = (fres * toward * 0.7 + lobe) * (smat == 2 ? 1.6 : (smat == 1 ? 0.6 : 1.0));
+      vec3 sheen = sun_color() * k * lowk * sun_lit * sun_dir.w * ao * (1.0 - night_dark.x) *
+                   (1.0 - min(wet, 1.0)) * tune_low_sheen;
+      c += min(sheen, vec3(luma(c) * 0.5 + 0.01));
+    }
+  }
+
   // char-ground-occlusion: every character around Jak darkens what lies just below it (in the temple
   // at noon and in the slums at night they stood on the flagstones pasted on). Their lowest point per
   // column, seen from below: 8 taps over a soft reach, each by the gap down to this surface; less
@@ -4965,6 +4992,27 @@ void main() {
   // way to grey, so a strong cast (the desert's yellow afternoons) doesn't tint everything
   if (clouds.w < 0.99) {
     c *= mix(vec3(1.0), white_balance, 0.35 * (1.0 - clouds.w));
+  }
+
+  // lawns (plain level ground, facing up, green in the game's colors: the forest's floor): one flat
+  // evenly lit carpet. A slow light and dark and an olive to deep-green drift over tens of meters,
+  // and moss-dark dirt where the occlusion is (the feet of rocks, trunks and grass tufts)
+  // (test: tune_lawn >= 10 shows the lawn's weight)
+  // (the forest's floor reads in the rock band, 0.75: kept to green pixels, mossy rock gets it too)
+  if (tune_lawn > 0.0 && z > 0.0 && wsurf == 0.0 && pix_normal.a > 0.83 &&
+      (pix_tag > 0.955 || (pix_tag > 0.7 && pix_tag < 0.8)) && dot(surf_n, up_view) > 0.7) {
+    vec3 raw = texture(tex_T0, tex_coord).rgb;
+    // (by the green over the red: at dusk the game's own light turns the forest's lawn teal)
+    float green = smoothstep(0.015, 0.05, raw.g - raw.r) * (1.0 - smoothstep(0.04, 0.12, raw.b - raw.g)) * min(tune_lawn, 1.0);
+    if (green > 0.0) {
+      vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
+      float v = gnoise(wp.xz / 23.0 + 4.7) * 0.65 + gnoise(wp.xz / 7.0 + 1.9) * 0.35;
+      float h = gnoise(wp.xz / 41.0 + 9.3);
+      vec3 tint = mix(vec3(0.92, 1.0, 1.06), vec3(1.1, 1.02, 0.82), smoothstep(-0.5, 0.5, h));
+      vec3 lc = c * (1.0 + tune_lawn_var * v) * tint;
+      lc = mix(lc, lc * vec3(0.72, 0.66, 0.5), clamp((1.0 - ao) * tune_lawn_ao, 0.0, 0.6));
+      c = tune_lawn > 9.0 ? vec3(green * 0.1) : mix(c, lc, green);
+    }
   }
 
   // rock and cliffs (normals written 0.75 long: tfrag3.frag): the game's textures are a blur up
