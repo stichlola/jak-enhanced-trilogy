@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: ISC
 #include "player.h"
 
+#include <cstdlib>
+#include <cstring>
 #include <fstream>
 
 #include "sfxblock.h"
@@ -89,6 +91,19 @@ long Player::sound_callback([[maybe_unused]] cubeb_stream* stream,
                             void* output_buffer,
                             long nframes) {
   ((Player*)user)->Tick((s16Output*)output_buffer, nframes);
+  // Test runs are silent: JAK_ENHANCED_MUTE=1, or any test instance (JAK_ENHANCED_INSTANCE >= 1).
+  // The synth still ticks, so sound-driven game timing is unchanged.
+  static const bool muted = [] {
+    const char* m = std::getenv("JAK_ENHANCED_MUTE");
+    if (m && *m) {
+      return std::atoi(m) != 0;
+    }
+    const char* inst = std::getenv("JAK_ENHANCED_INSTANCE");
+    return inst && std::atoi(inst) >= 1;
+  }();
+  if (muted) {
+    std::memset(output_buffer, 0, sizeof(s16Output) * nframes);
+  }
   return nframes;
 }
 
