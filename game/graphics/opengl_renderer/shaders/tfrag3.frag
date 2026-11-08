@@ -45,10 +45,10 @@ vec4 enh_pack_normal(vec3 n) {
   // as a normal 0.9 long (the composite draws the wind's ripples on it)
   // (the rougher classes a step under 1.0, still plain scenery to the composite's tests)
   float a = enh_material == 1 || enh_material == 8 || enh_material == 9 ? 2.0 / 3.0
-            : (enh_material == 2 || enh_material == 10 ? 1.0 / 3.0 : 1.0);
+            : (enh_material == 2 || enh_material == 10 || enh_material == 11 ? 1.0 / 3.0 : 1.0);
   float tag_len = enh_material == 3 ? 0.9 : (enh_material == 4 ? 0.75 : (enh_material == 5 ? 0.6 : 1.0));
   if (enh_material >= 6) {
-    tag_len = enh_material == 6 || enh_material == 9 ? 0.99 : 0.995;
+    tag_len = enh_material == 6 || enh_material == 9 || enh_material == 11 ? 0.99 : 0.995;
   }
   return vec4(n * tag_len * 0.5 + 0.5, a);
 }

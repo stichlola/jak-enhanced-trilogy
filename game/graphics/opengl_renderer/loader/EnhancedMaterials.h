@@ -33,7 +33,8 @@ enum EnhancedMaterial : u8 {
   kRustyMetal = 8,
   kPaintedMetal = 9,
   kTile = 10,
-  kEnhMaterialCount = 11
+  kWindow = 11,  // glossy, 0.99 long: a window pane (the composite lights some of them at night)
+  kEnhMaterialCount = 12
 };
 constexpr u8 kEnhMaterialMask = 0x0f;
 constexpr u8 kEnhMatHoles = 0x10;  // the texture has see-through texels (the level's list only)
@@ -148,8 +149,11 @@ inline u8 enhanced_material(std::string name) {
   if (has({"rust", "old", "dirt", "grime", "moss", "mud", "sand", "rock", "wood", "cloth"})) {
     return kPlain;
   }
-  if (has({"glass", "marble", "wet", "puddle", "shiny", "polish", "crystal", "gem", "jewel"}) ||
-      (has({"window"}) && !has({"frame", "sill"}))) {
+  // (window panes: glossy, and told apart for the night's lit windows)
+  if (has({"window"}) && !has({"frame", "sill"})) {
+    return kWindow;
+  }
+  if (has({"glass", "marble", "wet", "puddle", "shiny", "polish", "crystal", "gem", "jewel"})) {
     return kGlossy;
   }
   if (has({"metal", "steel", "pipe", "chrome", "iron", "grate", "gold", "copper", "brass", "bolt",
@@ -333,9 +337,9 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     // sand's ripples and grade)
     lg::info(
         "[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} rusty, {} painted, "
-        "{} glossy, {} tile, {} wall, {} wood, {} plain",
+        "{} glossy, {} window, {} tile, {} wall, {} wood, {} plain",
         lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
-        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kTile], count[kWall],
+        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kWindow], count[kTile], count[kWall],
         count[kWood], count[kPlain]);
   }
   return m;
