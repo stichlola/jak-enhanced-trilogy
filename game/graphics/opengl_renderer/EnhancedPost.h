@@ -200,8 +200,11 @@ class EnhancedPost {
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
     int ray_traced = 0;  // off by default for now: still has artifacts
     // ambient occlusion traced through the levels' geometry (short rays from every pixel)
-    // off until proven under roofs and arches. Cost now (post.rt_ao_temporal, 1 ray a pixel a frame
-    // accumulated): +0.06 ms at 640x360 (~0.5 ms at 1080p), the old 6 rays +0.26 ms
+    // Off, opt-in. Cost (post.rt_ao_temporal, 1 ray a pixel a frame accumulated): +0.06 ms at
+    // 640x360 in the open wascity-start courtyard, +0.5 ms in the Hip Hog (ceilings and benches
+    // inside the 3 m rays); the old 6 rays +0.26 ms outside. No visible win in either place: the
+    // screen-space AO already gives the same corners, and a roof is farther than 3 m. Occlusion by
+    // what is far (sky visibility under roofs) belongs to probes (tech-rt-probe-gi), not per pixel.
     bool rt_ao = false;
     float rt_ao_length = 3.0f;     // meters
     float rt_ao_strength = 1.0f;
