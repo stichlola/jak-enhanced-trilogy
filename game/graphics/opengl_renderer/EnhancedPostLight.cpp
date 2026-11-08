@@ -1494,7 +1494,37 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     mvp[12] = mvp[13] = mvp[14] = 0.f;
     mvp[15] = 1.f;
   };
-  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp, kRes);
+  // (shadow.near_cache: the near map's static part kept between frames, its square snapped in steps
+  // of shadow.near_cache_snap_texels; each frame only the wind-blown trees and the characters are
+  // drawn over a copy of it. Off: the whole near map every frame, as before)
+  static const EnhancedTune t_near_cache("shadow.near_cache", 0.f);
+  static const EnhancedTune t_near_snap("shadow.near_cache_snap_texels", 16.f);
+  const bool near_cache = (float)t_near_cache > 0.5f && !g_enhanced_menu.blank_world;
+  float near_mvp[16];
+  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, near_mvp, kRes,
+           near_cache ? std::max(1.f, std::floor((float)t_near_snap)) : 1.f);
+  if (!near_cache) {
+    memcpy(m_light_mvp, near_mvp, sizeof(near_mvp));
+  }
+  if (near_cache && !m_shadow_near_static_fbo) {
+    glGenFramebuffers(1, &m_shadow_near_static_fbo);
+    glGenTextures(1, &m_shadow_near_static_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_near_static_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_near_static_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                           m_shadow_near_static_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_shadow_near_static_ready = false;
+  }
+  if (!near_cache) {
+    m_shadow_near_static_ready = false;
+  }
   m_shadow_near_span_m = 2.f * kShadowNearDepth;  // (the composite's biases and penumbrae, in meters)
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
@@ -1527,10 +1557,14 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE0);
   // (the middle map draws as the far one does (the big plants, not the small shrubs), the terrain too)
-  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map, bool mid_map = false) {
+  // (part: 0 everything, 1 all but the wind-blown trees, 2 only those, over what the map holds)
+  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map, bool mid_map = false,
+                         int part = 0) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, mid_map ? kMidRes : kRes, mid_map ? kMidRes : kRes);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    if (part != 2) {
+      glClear(GL_DEPTH_BUFFER_BIT);
+    }
     glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp);
     glBindVertexArray(m_shadow_vao);
     glEnableVertexAttribArray(0);
@@ -1546,7 +1580,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     }
     for (auto& [lid, draws] : m_shadow_draws) {
       for (auto& d : draws) {
-        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big)) {
+        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big) ||
+            (part == 1 && d.wind) || (part == 2 && !d.wind)) {
           continue;
         }
         glUniform1i(u_cut, d.cut);
@@ -1634,12 +1669,37 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     ENH_TIMED("enh-shadow-mid", draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true));
     m_shadow_mid_ready = true;
   }
-  ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
-  // (how often the far and middle maps were drawn, every ~5 s)
+  if (near_cache) {
+    // the static part when stale (as the far map), then a copy of it plus the trees each frame;
+    // the live map's matrix is always the static part's
+    m_shadow_near_age++;
+    if (!m_shadow_near_static_ready ||
+        stale(near_mvp, m_light_mvp_near_static, m_shadow_near_gen, m_shadow_near_age)) {
+      m_shadow_near_gen = m_shadow_draws_gen;
+      m_shadow_near_age = 0;
+      m_shadow_cache_near_n++;
+      memcpy(m_light_mvp_near_static, near_mvp, sizeof(near_mvp));
+      ENH_TIMED("enh-shadow-near-static",
+                draw_levels(m_shadow_near_static_fbo, m_light_mvp_near_static, false, false, false, 1));
+      m_shadow_near_static_ready = true;
+    }
+    memcpy(m_light_mvp, m_light_mvp_near_static, sizeof(m_light_mvp));
+    auto near_live = [&]() {
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, m_shadow_near_static_fbo);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_shadow_fbo);
+      glBlitFramebuffer(0, 0, kRes, kRes, 0, 0, kRes, kRes, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      draw_levels(m_shadow_fbo, m_light_mvp, true, false, false, 2);
+    };
+    ENH_TIMED("enh-shadow-near", near_live());
+  } else {
+    ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
+  }
+  // (how often the far, middle and near static maps were drawn, every ~5 s)
   if (++m_shadow_cache_frames >= 300) {
-    lg::info("[enhanced] shadow maps drawn: far {} mid {} of {} frames (cache {})",
-             m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_frames, cache ? "on" : "off");
-    m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = 0;
+    lg::info("[enhanced] shadow maps drawn: far {} mid {} near {} of {} frames (cache {}, near cache {})",
+             m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_near_n, m_shadow_cache_frames,
+             cache ? "on" : "off", near_cache ? "on" : "off");
+    m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = m_shadow_cache_near_n = 0;
   }
   glDisableVertexAttribArray(1);
   glBindVertexArray(0);

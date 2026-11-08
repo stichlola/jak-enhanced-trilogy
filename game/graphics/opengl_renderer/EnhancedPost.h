@@ -601,6 +601,16 @@ class EnhancedPost {
   u32 m_shadow_far_age = 0;
   u32 m_shadow_mid_age = 0;
   u32 m_shadow_cache_frames = 0, m_shadow_cache_far_n = 0, m_shadow_cache_mid_n = 0;
+  // the near map's static part (tuning shadow.near_cache): the levels' geometry without the
+  // wind-blown trees, kept between frames as the far map is; each frame it is copied into the live
+  // near map and only the trees and the characters are drawn over it
+  GLuint m_shadow_near_static_fbo = 0;
+  GLuint m_shadow_near_static_tex = 0;
+  bool m_shadow_near_static_ready = false;
+  float m_light_mvp_near_static[16] = {};
+  u32 m_shadow_near_gen = 0;
+  u32 m_shadow_near_age = 0;
+  u32 m_shadow_cache_near_n = 0;
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes
