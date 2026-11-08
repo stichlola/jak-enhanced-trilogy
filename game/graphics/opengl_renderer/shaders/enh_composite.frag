@@ -280,6 +280,13 @@ uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final p
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
 uniform float tune_night_pale_grain = 1.0;  // ...the game's own grain put back on top (planks' gaps; 0: off)
+uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
+uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
+uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
+uniform int tune_hiz_iters = 40;          // the water's Hi-Z reflection: tiles visited at most
+uniform float tune_hiz_range_m = 400.0;   // ...on water up to this far (faded over its last quarter)
+uniform float tune_hiz_len_m = 400.0;     // ...rays this long
+uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta)
 uniform sampler2D tex_T27;  // the level's albedo (lights.albedo; a: baked light / 2, 0 = none)
 uniform float albedo_on;
 uniform float tune_albedo_dbg = 0.0;   // (test: 1 the albedo target, 2 its baked light, right half)
@@ -930,6 +937,82 @@ vec3 world_dir(vec3 dv) {
 
 float hash1(vec2 q) {
   return fract(sin(dot(q, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+// a reflected ray through the Hi-Z pyramid (tex_T29, post.hiz): view space p along r, at most
+// max_len; it walks the screen a tile at a time, a level up while nothing in the tile reaches it,
+// a level down where something might, and stops on a pixel whose surface it passes just behind.
+// Surfaces nearer than the water (z0) are what stands before it, never reflected. 1: hit at uv.
+float hiz_trace(vec3 p, vec3 r, float z0, float max_len, float jitter, out vec2 uv) {
+  uv = vec2(0.0);
+  float len = max_len;
+  if (r.z < 0.0) {
+    len = min(len, (p.z - 0.5 * 4096.0) / -r.z);  // toward the camera: up to half a meter off it
+  }
+  if (len <= 0.0) {
+    return 0.0;
+  }
+  vec3 e = p + r * len;
+  float k0 = 1.0 / p.z, k1 = 1.0 / e.z;  // 1/z goes linearly along the screen
+  vec2 s0 = (0.5 * vec2(proj.z * p.x, proj.w * p.y) * k0 + 0.5) * hiz_size;
+  vec2 s1 = (0.5 * vec2(proj.z * e.x, proj.w * e.y) * k1 + 0.5) * hiz_size;
+  vec2 d = s1 - s0;
+  float dl = length(d);
+  if (dl < 1.0) {
+    return 0.0;
+  }
+  vec2 inv = 1.0 / vec2(abs(d.x) < 1e-5 ? 1e-5 : d.x, abs(d.y) < 1e-5 ? 1e-5 : d.y);
+  vec2 te = (vec2(d.x > 0.0 ? hiz_size.x : 0.0, d.y > 0.0 ? hiz_size.y : 0.0) - s0) * inv;
+  float tmax = min(1.0, min(te.x, te.y));  // where it leaves the screen
+  ivec2 size0 = ivec2(hiz_size);
+  int top = hiz_levels - 1;
+  int lvl = min(2, top);
+  float t = (1.0 + jitter) / dl;  // (from 1-2 pixels off, a different start each frame: the TAA
+                                  // averages the pixel steps away)
+  float eps = 0.01 / dl;
+  for (int i = 0; i < tune_hiz_iters; i++) {
+    if (t >= tmax) {
+      break;
+    }
+    vec2 s = s0 + d * t;
+    int cs = 1 << lvl;
+    ivec2 lsize = max(size0 >> lvl, ivec2(1));
+    ivec2 c = clamp(ivec2(s) >> lvl, ivec2(0), lsize - 1);
+    vec2 lo = vec2(c * cs);
+    vec2 hi = vec2((c + 1) * cs);
+    if (c.x == lsize.x - 1) {
+      hi.x = hiz_size.x;  // (the last tile of a level also holds the odd leftover pixels)
+    }
+    if (c.y == lsize.y - 1) {
+      hi.y = hiz_size.y;
+    }
+    vec2 tc = (vec2(d.x > 0.0 ? hi.x : lo.x, d.y > 0.0 ? hi.y : lo.y) - s0) * inv;
+    float t_exit = min(min(tc.x, tc.y), tmax);
+    float zc = texelFetch(tex_T29, c, lvl).r;
+    float k_in = mix(k0, k1, t), k_out = mix(k0, k1, t_exit);
+    if (1.0 / min(k_in, k_out) < zc) {
+      t = t_exit + eps;  // the whole tile lies behind the ray: the next one, bigger
+      lvl = min(lvl + 1, top);
+      continue;
+    }
+    if (lvl > 0) {
+      if (k_out < k_in && abs(k1 - k0) > 1e-20) {
+        // going away: on to where the ray gets as deep as the tile's nearest surface
+        t = clamp((1.0 / zc - k0) / (k1 - k0), t, t_exit);
+      }
+      lvl--;
+      continue;
+    }
+    // a pixel the ray reaches: a hit when it's just behind its surface (not what stands before the
+    // water, not a wall far in front of the ray)
+    float z_front = 1.0 / max(k_in, k_out);
+    if (zc > z0 * 0.97 && z_front - zc < 4096.0 + 0.05 * zc) {
+      uv = (vec2(c) + 0.5) / hiz_size;
+      return 1.0;
+    }
+    t = t_exit + eps;
+  }
+  return 0.0;
 }
 
 float fbm(vec2 q) {
@@ -2817,7 +2900,18 @@ void main() {
     }
     vec3 ssr = refl;
     float ssr_hit = 0.0;
-    if (z < 80.0 * 4096.0) {
+    bool hiz = hiz_levels > 0 && !(abs(tune_hiz_dbg - 1.0) < 0.5 && tex_coord.x < 0.5);
+    if (hiz && z < tune_hiz_range_m * 4096.0) {
+      // (post.hiz: a tile at a time through the depth pyramid, 5x the old march's reach)
+      vec2 huv;
+      if (hiz_trace(p, r, z, tune_hiz_len_m * 4096.0,
+                    hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0), huv) > 0.5) {
+        vec2 edge = min(huv, 1.0 - huv);
+        ssr_hit = smoothstep(0.0, 0.08, edge.x) * smoothstep(0.0, 0.15, edge.y) *
+                  (1.0 - smoothstep(0.75 * tune_hiz_range_m * 4096.0, tune_hiz_range_m * 4096.0, z));
+        ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
+      }
+    } else if (z < 80.0 * 4096.0) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
       // start each pixel's march a little further along (the TAA averages the steps away: no
       // staircase where the reflection meets what it reflects)

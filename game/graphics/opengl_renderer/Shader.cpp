@@ -520,6 +520,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_TERRAIN) = {"enh_terrain", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
+  at(ShaderId::ENH_HIZ) = {"enh_hiz", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

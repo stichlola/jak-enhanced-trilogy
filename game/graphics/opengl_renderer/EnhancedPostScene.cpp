@@ -5,6 +5,82 @@
 
 using namespace enh_post;
 
+// post.hiz: the depth copy's view depths (sky and the sea itself: far) and their mip chain of
+// nearest depths, R32F, at most 10 levels (a 1080p frame's tiles up to 512 pixels). ~0.05 ms.
+void EnhancedPost::build_hiz(GLuint screen_vao,
+                             SharedRenderState* render_state,
+                             ScopedProfilerNode& prof) {
+  const int w = m_ssao_w, h = m_ssao_h;
+  if (w != m_hiz_w || h != m_hiz_h || !m_hiz_tex) {
+    if (m_hiz_tex) {
+      glDeleteTextures(1, &m_hiz_tex);
+      glDeleteFramebuffers(1, &m_hiz_fbo);
+    }
+    m_hiz_w = w;
+    m_hiz_h = h;
+    m_hiz_levels = 1;
+    while (m_hiz_levels < 10 && (w >> m_hiz_levels) > 0 && (h >> m_hiz_levels) > 0) {
+      m_hiz_levels++;
+    }
+    glGenTextures(1, &m_hiz_tex);
+    glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+    // (each level half the one before, rounded down: the shaders take level L as size >> L)
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glTexImage2D(GL_TEXTURE_2D, l, GL_R32F, std::max(1, w >> l), std::max(1, h >> l), 0, GL_RED,
+                   GL_FLOAT, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &m_hiz_fbo);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  const bool sea = m_far_ocean_ready && m_ocean_w == w && m_ocean_h == h;
+  auto& sh = render_state->shaders[ShaderId::ENH_HIZ];
+  sh.activate();
+  const auto id = sh.id();
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(id, "has_sea"), sea ? 1 : 0);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_hiz_fbo);
+  ENH_TIMED("enh-hiz", {
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hiz_tex, l);
+      glViewport(0, 0, std::max(1, w >> l), std::max(1, h >> l));
+      if (l == 0) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sea ? m_ocean_depth[2] : m_black_tex);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+        glUniform1i(glGetUniformLocation(id, "mode"), 0);
+      } else {
+        // (reads only the level before: base = max = l - 1, no feedback with the level drawn)
+        glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, l - 1);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, l - 1);
+        glUniform1i(glGetUniformLocation(id, "mode"), 1);
+        glUniform2i(glGetUniformLocation(id, "src_size"), std::max(1, w >> (l - 1)),
+                    std::max(1, h >> (l - 1)));
+      }
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      prof.add_draw_call();
+    }
+  });
+  glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, m_hiz_levels - 1);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  m_hiz_ready = true;
+}
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,
@@ -195,6 +271,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     scene_tex = resolve_taa(m_scene_tex);
   } else if (!taa) {
     m_taa_history = false;
+  }
+
+  // (post.hiz 1: the water's reflection walks a depth pyramid, 400 m instead of 80 m; 0: the old
+  // per-step march)
+  static const EnhancedTune t_hiz("post.hiz", 0.f);
+  m_hiz_ready = false;
+  if ((float)t_hiz > 0.5f && have_scene && m_settings.water_reflections &&
+      (m_ocean_ready || m_far_ocean_ready)) {
+    build_hiz(screen_vao, render_state, prof);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);

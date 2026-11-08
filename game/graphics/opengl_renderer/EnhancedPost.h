@@ -424,6 +424,15 @@ class EnhancedPost {
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
   std::array<float, 4> m_last_proj = {0, 0, 1, 1};
+  // Hi-Z: the nearest view depth per tile, a mip chain over the depth copy (sky and sea = far),
+  // for the water's screen-space reflection (post.hiz)
+  void build_hiz(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_hiz_tex = 0;
+  GLuint m_hiz_fbo = 0;
+  int m_hiz_w = 0;
+  int m_hiz_h = 0;
+  int m_hiz_levels = 0;
+  bool m_hiz_ready = false;
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean
