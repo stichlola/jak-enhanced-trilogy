@@ -187,9 +187,10 @@ $rows = @(
   New-Row @{ Name = 'air-train-ride'; Start = 'desert-warp'; Seconds = 90; Shots = @(10, 60); Env = @{ JAK_ENHANCED_AIR_TRAIN = '1' }; MinSim = 0.75; MaxDiff = 7.0
     Levels = @('^des', '^cty'); Expect = @((E '\[air-train\] found' 'train found'), (E '\[air-train\] gate "?air-train' 'train state'),
       (E '\[air-train\] use train .* to "?ctyport-warp' 'train used')) }
-  # the arena's first training: the orbs (arena-token) up and drawn (bright floor: 1.18 % measured)
+  # the arena's first training: the orbs (arena-token) up and drawn (bright floor: 1.18 % measured,
+  # 0.48 % since the composite's highlight shoulder (gfx-polish) rolls off near-white pixels)
   New-Row @{ Name = 'arena-training'; Start = 'game-start'; Seconds = 40; Env = @{ JAK_ENHANCED_CENSUS = '1' }; Shots = @(35)
-    Levels = @('^wasstad'); Bright = 0.008; Expect = @((E '\[census\] .* tokens (?<v>\d+)' 'orbs alive' -MinV 1)) }
+    Levels = @('^wasstad'); Bright = 0.003; Expect = @((E '\[census\] .* tokens (?<v>\d+)' 'orbs alive' -MinV 1)) }
   # the playable characters: run, jumps, punch (Ashelin: her front kick), spin kick, the body-jump metric
   # (windowed: a picture of each body), then their guns (headless: the test scripts' lines)
   New-Row @{ Name = 'player-jak'; Seconds = 45; Env = @{ JAK_ENHANCED_PLAYER = 'jak'; JAK_ENHANCED_PLAYER_TEST = 'run' }; Shots = @(14)
