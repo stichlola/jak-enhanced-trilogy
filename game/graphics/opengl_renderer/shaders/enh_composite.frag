@@ -255,7 +255,10 @@ uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
-uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
+uniform float tune_fx_ab = 0.0;
+uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
+uniform float tune_night_lamp_lo = 0.15;
+uniform float tune_night_lamp_hi = 0.9;
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
 uniform vec4 dust_wind;         // the wind (world xz, unit), how far it carried the dust (m)
@@ -3532,7 +3535,13 @@ void main() {
     if (night_dark.x > 0.0) {
       // at night the light shows the surface's own color, brighter
       // (the game tints the night blue: the surface's own color, warmer, under a lamp)
-      vec3 own = albedo * mix(vec3(1.0), vec3(1.3, 1.05, 0.72), night_dark.x);
+      // (only near the flame: the faint outer part of a lamp's pool loses its hue toward the moon's,
+      // as dim light does to the eye. Jak's lantern and Spargus' torches laid salmon over all the
+      // moonlit ground in front of the camera, where the game has blue; tune_night_lamp_cool 0: off)
+      float lamp_warm = mix(1.0, smoothstep(tune_night_lamp_lo, tune_night_lamp_hi, luma(added)),
+                            tune_night_lamp_cool * night_dark.x);
+      added = mix(vec3(luma(added)) * vec3(0.86, 0.96, 1.12), added, lamp_warm);
+      vec3 own = albedo * mix(vec3(1.0), vec3(1.3, 1.05, 0.72), night_dark.x * lamp_warm);
       c += (own + 0.12) * added * ao;
     } else {
       c += (c + 0.12) * added * ao;
