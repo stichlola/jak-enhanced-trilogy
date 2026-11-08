@@ -602,6 +602,12 @@
 (define *enhanced-sig-foot-down-l* #f)
 (define *enhanced-sig-foot-down-r* #f)
 
+;; on Jak's run: how much his feet come in toward his midline (0-1, by enhanced-skin-run-weight)
+(define *enhanced-sig-run-narrow* 0.3)
+;; and how much less he lifts his feet than Jak (0-1). With *enhanced-skin-run-lift*: ankle spread against
+;; hip width 0.85 -> 0.71 at a run
+(define *enhanced-sig-run-step* 0.45)
+
 (defbehavior enhanced-sig-legs enhanced-skin ()
   "Sized, in Jak's pose: his ankles where Jak's are against his root, forward and back as far as Jak's (so
    his feet stay planted at Jak's speed: his legs are longer), sideways and up scaled by his size. His feet
@@ -653,8 +659,18 @@
             (let ((f (vector-dot o fwd)))
               (vector-float*! t o size)
               (vector+float*! t t fwd (* f (- 1.0 size)))
+              ;; running: his feet closer to his midline (Jak's run spread at his size looked wide-legged)
+              (let ((k (* *enhanced-sig-run-narrow* (enhanced-skin-run-weight tgt)))
+                    (along (vector-dot t fwd))
+                    )
+                (when (< 0.0 k)
+                  (set! (-> t x) (- (-> t x) (* k (- (-> t x) (* along (-> fwd x))))))
+                  (set! (-> t z) (- (-> t z) (* k (- (-> t z) (* along (-> fwd z))))))
+                  )
+                )
               )
-            (set! (-> t y) (+ sh (* size (- (-> o y) jh))))
+            ;; (running: his feet lifted less than Jak's high-kneed run has them, at his size a gallop)
+            (set! (-> t y) (+ sh (* size (- (-> o y) jh) (- 1.0 (* *enhanced-sig-run-step* (enhanced-skin-run-weight tgt))))))
             (vector+! t t sroot)
             ;; planted: Jak's ankle within 5 cm of its standing height, on the ground, not attacking (his
             ;; attacks slide on purpose)

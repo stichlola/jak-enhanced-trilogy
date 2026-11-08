@@ -487,6 +487,23 @@
   dst
   )
 
+;; a sized character on Jak's walk and run (above its own walk's speeds): how much higher its main and
+;; hips go: with its legs' IK (enhanced-sig-legs) Sig's legs are straighter, leg extension (hip to ankle
+;; against thigh plus shin) 0.77 -> 0.88 at a run (Jak's 0.74): less of a crouch at his height
+(define *enhanced-skin-run-lift* (meters 0.35))
+
+(defun enhanced-skin-run-weight ((jak target))
+  "0-1: Jak walking or running on the ground, from 4.5 m/s (0) to 7.5 m/s and up (1)."
+  (if (and (logtest? (-> jak control status) (collide-status on-surface))
+           (not (focus-test? jak in-air pilot pilot-riding edge-grab pole flut board mech tube))
+           (-> jak state)
+           (or (= (-> jak state name) 'target-walk) (= (-> jak state name) 'target-gun-walk))
+           )
+      (fmax 0.0 (fmin 1.0 (/ (- (-> jak control ctrl-xz-vel) (meters 4.5)) (meters 3.0))))
+      0.0
+      )
+  )
+
 (defbehavior enhanced-skin-retarget enhanced-skin ((w float))
   "Pose Ashelin as Jak is, by w (0-1): each of her mapped joints turned as his is from his bind pose
    (both are bound standing the same way), placed at the end of her own parent bone (her proportions),
@@ -563,6 +580,9 @@
                      (vector-! jpos (-> rot trans) root)
                      (vector+float*! (-> rot trans) root jpos (-> self size))
                      )
+                   ;; running on the ground: higher, so its legs stay about as straight as Jak's (his
+                   ;; stride on its longer legs bent its knees into a crouch)
+                   (+! (-> rot trans y) (* *enhanced-skin-run-lift* (enhanced-skin-run-weight jak)))
                    )
                  (set! (-> rot trans w) 1.0)
                  )
