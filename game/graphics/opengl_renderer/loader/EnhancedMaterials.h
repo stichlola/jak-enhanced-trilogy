@@ -34,7 +34,8 @@ enum EnhancedMaterial : u8 {
   kPaintedMetal = 9,
   kTile = 10,
   kWindow = 11,  // glossy, 0.99 long: a window pane (the composite lights some of them at night)
-  kEnhMaterialCount = 12
+  kLamp = 12,    // plain, 0.2 long: a lamp, a lit sign (the composite lights them at night)
+  kEnhMaterialCount = 13
 };
 constexpr u8 kEnhMaterialMask = 0x0f;
 constexpr u8 kEnhMatHoles = 0x10;  // the texture has see-through texels (the level's list only)
@@ -100,6 +101,27 @@ inline u8 enhanced_material(std::string name) {
   // ("environment" holds "iron": the sky's and sea's environment maps aren't metal)
   for (size_t at; (at = name.find("environment")) != std::string::npos;) {
     name.replace(at, 11, "env");
+  }
+  // lamps and lit signs (Haven's city-bluelight, ctyslumc-light-blue, citywide-stadium-lightbank, the
+  // Hip Hog's hiphog-exterior-*-on neons): their picture is the light. Not a lamp's post or pole, a
+  // highlight, a search light's environment map, a beam or a fade
+  {
+    std::string base = name;
+    while (!base.empty() && base.back() >= '0' && base.back() <= '9') {
+      base.pop_back();
+    }
+    auto ends = [&](const char* w) {
+      size_t n = std::char_traits<char>::length(w);
+      return base.size() >= n && base.compare(base.size() - n, n, w) == 0;
+    };
+    const bool not_lamp = has({"post", "pole", "stand", "base", "env", "shadow", "beam", "shaft", "fade",
+                               "highlit", "highlight", "search", "spot", "sky", "sun", "moon", "flash",
+                               "lightning", "dark", "off"});
+    if (!not_lamp && (has({"lamp", "neon", "lantern", "bulb", "litup", "lightbank", "light-blue", "light-red",
+                           "light-green", "light-yellow", "light-orange", "light-white"}) ||
+                      ends("light") || ends("light-") || ends("-on"))) {
+      return kLamp;
+    }
   }
   // the ground's sand (not sandstone, not a sandbag, not Misty Island's quicksand: mud);
   // Sandover's beaches (bch-beach-01, vil-beach-01path, vil1-medres-beach: not its rocks and grass)
@@ -177,7 +199,8 @@ enum EnhancedCharMaterial : u8 {
   kCharCloth = 5,
   kCharFur = 6,
   kCharEye = 7,
-  kCharLens = 8
+  kCharLens = 8,
+  kCharLamp = 9  // a prop's lamp or lit sign (enhanced_material's kLamp): merc2.frag writes it 0.2 long
 };
 
 inline u8 enhanced_char_material(std::string name) {
@@ -207,6 +230,10 @@ inline u8 enhanced_char_material(std::string name) {
     }
     return false;
   };
+  // a prop's lamps and lit signs (the Hip Hog's neons): as the levels' (the composite lights them at night)
+  if (enhanced_material(name) == kLamp) {
+    return kCharLamp;
+  }
   // reflections and animation targets are no surface of their own
   if (has({"environment", "envmap", "reflection", "-dest", "shadow", "glow"})) {
     return kCharDefault;
@@ -337,9 +364,9 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     // sand's ripples and grade)
     lg::info(
         "[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} rusty, {} painted, "
-        "{} glossy, {} window, {} tile, {} wall, {} wood, {} plain",
+        "{} glossy, {} window, {} lamp, {} tile, {} wall, {} wood, {} plain",
         lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
-        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kWindow], count[kTile], count[kWall],
+        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kWindow], count[kLamp], count[kTile], count[kWall],
         count[kWood], count[kPlain]);
   }
   return m;
@@ -365,6 +392,10 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   }
   u8 m = materials && tex >= 0 && tex < (int)materials->size() ? (*materials)[tex] : kPlain;
   u8 kind = m & kEnhMaterialMask;
+  // (lamps: Jak 3 only until tried in the others)
+  if (kind == kLamp && render_state->version != GameVersion::Jak3) {
+    kind = kPlain;
+  }
   glUniform1i(cached_loc[slot], kind);
   // the relief (tfrag3.frag): solid rock and walls drawn plainly; Jak 3 only until tried in the others
   // (the rock's a blur stretched over whole cliffs: its shapes are big, it takes twice the height)

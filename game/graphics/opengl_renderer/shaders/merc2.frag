@@ -42,8 +42,9 @@ const int MAT_CLOTH = 5;
 const int MAT_FUR = 6;
 const int MAT_EYE = 7;
 const int MAT_LENS = 8;
+const int MAT_LAMP = 9;  // a lamp, a lit sign on a prop: written 0.2 long, the composite lights it at night
 // the relief's height per material: faces have lines painted on them, glass has none
-const float BUMP_K[9] = float[9](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0);
+const float BUMP_K[10] = float[10](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
 
 void main() {
   enh_albedo_out = vec4(0.0);
@@ -169,7 +170,7 @@ void main() {
       n = normalize(n - bump_g * (dot(n, sn) < 0.0 ? -1.0 : 1.0));
     }
     // (0.52: see-through cloth, the composite puts the game's own color back over it)
-    enh_normal_out = flen > 0.0 ? vec4(n * (enh_cloth != 0 ? 0.52 : 0.45) * 0.5 + 0.5, 1.0) : vec4(0.0);
+    enh_normal_out = flen > 0.0 ? vec4(n * (enh_mat == MAT_LAMP ? 0.2 : (enh_cloth != 0 ? 0.52 : 0.45)) * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
   // Enhanced: the relief in the key light, where the surface isn't already turned away from it

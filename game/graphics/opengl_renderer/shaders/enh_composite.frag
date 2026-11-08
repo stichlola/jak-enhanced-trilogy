@@ -225,6 +225,8 @@ uniform float tune_lawn_ao = 1.2;          // the moss-dark dirt where the occlu
 uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
 uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
 uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
+uniform float tune_night_lamp = 1.0;       // lamps and lit signs at night: their picture as light (0 = off, >= 10 shows the tags)
+uniform float tune_night_lamp_gain = 1.6;  // how bright, over their texture's color
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
@@ -5702,6 +5704,25 @@ void main() {
       wc *= tune_night_win * (0.75 + 0.5 * smoothstep(0.0, 0.3, pic));
       c = mix(c, max(c, wc), lit);
     }
+  }
+  // lamps and lit signs (EnhancedMaterials.h's kLamp: plain, 0.2 long): at night the game's palette
+  // darkens them with the walls, the far city went a flat silhouette. Their own picture (the albedo,
+  // before the baked light) as light, its bright parts only (the fitting's dark frame stays dark),
+  // so the city across the harbour gets points of light and the water's reflections take them
+  if (tune_night_lamp > 9.0 && z > 0.0 && pix_tag > 0.12 && pix_tag < 0.28 && pix_normal.a > 0.83) {
+    c = vec3(1.0, 1.0, 0.0);  // (test: the lamps' tag, yellow)
+  }
+  if (tune_night_lamp > 0.0 && clouds.w > 0.0 && z > 0.0 && pix_tag > 0.12 && pix_tag < 0.28 &&
+      pix_normal.a > 0.83) {
+    vec3 alb = texture(tex_T27, tex_coord).rgb;
+    // (props (merc) write no albedo: the game's own color, lifted toward the picture's)
+    if (max(alb.r, max(alb.g, alb.b)) < 0.004) {
+      vec3 gc = texture(tex_T0, tex_coord).rgb;
+      alb = gc * min(0.6 / max(max(gc.r, max(gc.g, gc.b)), 0.02), 4.0);
+    }
+    float la = max(alb.r, max(alb.g, alb.b));
+    vec3 lc = alb * tune_night_lamp_gain * smoothstep(0.15, 0.5, la) * min(tune_night_lamp, 1.0);
+    c = mix(c, max(c, min(lc, vec3(1.0))), smoothstep(0.3, 0.8, clouds.w));
   }
   // under a roof the sky through the windows as the game drew it, and what it drew over it with no
   // depth (the palace's honeycomb lattice): the bloom of the bright panes on themselves (+40%), the

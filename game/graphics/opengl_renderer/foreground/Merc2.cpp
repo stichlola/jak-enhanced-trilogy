@@ -1516,6 +1516,10 @@ void Merc2::do_draws(const Draw* draw_array,
     } else {
       mat = enhanced_anim_slot_char_material(render_state->version, -(draw.texture + 1));
     }
+    // (lamps: Jak 3 only until tried in the others)
+    if (mat == kCharLamp && render_state->version != GameVersion::Jak3) {
+      mat = kCharDefault;
+    }
     if (mat != last_mat) {
       glUniform1i(uniforms.enh_mat, mat);
       last_mat = mat;
