@@ -347,6 +347,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_vol_ready = false;
   m_shadow_ready = false;
   g_enhanced_casters.cast = false;
+  g_enhanced_casters.keep_game = false;
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }

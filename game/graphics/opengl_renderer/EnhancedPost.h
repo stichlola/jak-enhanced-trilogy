@@ -104,7 +104,10 @@ struct EnhancedCasters {
   // the shadow map drew them (this frame, or the last one for the game's buckets): the game's own
   // character shadows (Shadow2) and the screen-space sun shadows are left out, a second, wrong one
   bool cast = false;
-  u32 alignment = 1;     // bone vectors per uniform buffer offset alignment
+  // ...but with a low sun the game's own short shadow stays too (the map's is a long band away from
+  // the feet, and the character floats): tuning shadow.game_chars_below_deg
+  bool keep_game = false;
+  u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
   // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2

@@ -1648,6 +1648,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   if (m_settings.shadow_casters && sun[1] / len > 0.12f) {
     ENH_TIMED("enh-shadow-chars", draw_shadow_casters(render_state, prof));
     g_enhanced_casters.cast = true;
+    // (below ~25 degrees the map's character shadow is a long band off the feet: the game's own
+    // short one stays under them too, or they float (Spargus street at 18h); 0: never)
+    static const EnhancedTune t_keep_game("shadow.game_chars_below_deg", 25.f);
+    g_enhanced_casters.keep_game =
+        sun[1] / len < std::sin(std::clamp((float)t_keep_game, 0.f, 90.f) * 3.14159265f / 180.f);
   }
   glDisable(GL_POLYGON_OFFSET_FILL);
   glDisable(GL_PRIMITIVE_RESTART);
