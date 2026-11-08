@@ -220,6 +220,7 @@ uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
 uniform float tune_chr_dusk_warm = 1.0;    // that shade toward brown (0: cool grey-blue)
 uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
 uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
+uniform float tune_shaft_keep = 1.0;  // the game's translucent light columns (arena shaft) kept as drawn (0: off)
 uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specular occlusion; 0: off)
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
@@ -5226,6 +5227,19 @@ void main() {
 
   c *= eye_adapt;
 
+  // the game's translucent light columns (the arena's shaft down the wall): their blended draw left
+  // the normal target longer than any tag; the shade, occlusion and dusk grade below then took the
+  // wall behind for the surface and the column vanished (vanilla draws it). Never darker than the
+  // game's own picture there (its effects taken out: they come back below)
+  float shaft_m = 0.0;
+  if (tune_shaft_keep > 0.0 && z > 0.0) {
+    vec3 gn = texture(tex_T11, tex_coord).rgb * 2.0 - 1.0;
+    vec3 raw_scene = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+    // (only where the game's picture is bright: a decal strip blended over a floor marks it too)
+    shaft_m = smoothstep(1.04, 1.3, dot(gn, gn)) * smoothstep(0.3, 0.5, luma(raw_scene)) * tune_shaft_keep;
+    c = mix(c, max(c, raw_scene), shaft_m);
+  }
+
   // the light effects back, over the graded scene (not stopped down with the bright ground, not
   // adapted to the glare): a gain by day, more over bright ground, their color back, and the sum
   // rolled off at the top with its hue kept
@@ -5249,6 +5263,7 @@ void main() {
     c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
         tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : tune_fx_debug < 4.5 ? vec3(fx_day, 0.5, 0.0) :
         tune_fx_debug < 5.5 ? texture(tex_T0, tex_coord).rgb : tune_fx_debug < 6.5 ? texture(tex_T23, uv).rgb :
+        tune_fx_debug > 7.5 ? vec3(shaft_m, fx_w, 0.0) :
         vec3(z / (40.0 * 4096.0), (pix_tag - 0.9) * 5.0, pix_normal.a);
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
