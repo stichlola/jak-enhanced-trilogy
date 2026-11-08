@@ -309,8 +309,10 @@ uniform float tune_probe_dbg = 0.0;   // 1: the probes' open sky (grey), 2: thei
 uniform float tune_probe_rim = 1.0;   // the characters' night sky rim x the sky their probes see (0: off)
 uniform float tune_probe_tint = 0.0;  // characters, by how much they're roofed: toward the bounce light's hue (0: off)
 uniform float tune_probe_n = 0.5;     // looked up this far out along the normal (m)
-uniform float tune_phys_sky = 0.0;   // the sun's color from the air it crosses (Rayleigh + the area's haze), not the hand ramp (0: off)
+uniform float tune_phys_sky = 1.0;   // the sun's color from the air it crosses (Rayleigh + the area's haze), not the hand ramp (0: off)
 uniform float tune_phys_turb = 1.0;  // x the aerosols (the haze) in it
+uniform float tune_phys_dome = 1.0;  // the sky dome's hue from the same air (single scattering), brightness kept (0: off; >= 10 shows the hue)
+uniform float tune_phys_ozone = 1.0; // x the ozone (300 DU) in the sky dome's air
 uniform float tune_probe_shade = 0.0; // the level's shade under a roof: the bounce's hue, not the blue sky's (0: off; >= 10 shows it)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
@@ -1733,14 +1735,47 @@ vec3 night_sky(vec3 dv, vec3 base, float px) {
 // noon is white: the eye adapts): Rayleigh (lambda^-4) plus aerosols (Angstrom, lambda^-1.3) at
 // 680/550/440 nm, over the air mass (Kasten-Young). The aerosols are the area's own haze (the
 // desert's dust: sun_haze) and the red sunset's thick sky (sky_kind.w)
-vec3 sun_transmit(float h) {
+float air_mass(float h) {
   float e = clamp(h, -0.02, 1.0);
   float deg = degrees(asin(e));
-  float m = min(1.0 / (max(e, 0.0) + 0.50572 * pow(max(deg + 6.07995, 0.5), -1.6364)), 38.0);
+  return min(1.0 / (max(e, 0.0) + 0.50572 * pow(max(deg + 6.07995, 0.5), -1.6364)), 38.0);
+}
+// the zenith optical depths at 680/550/440 nm: Rayleigh, and the aerosols (Angstrom lambda^-1.3)
+float phys_beta() {
   // (the desert's full haze as 0.12: at 0.26 the 18h sun went blood red, the golden look gone)
-  float beta = (0.04 + 0.08 * sun_haze + 0.25 * sky_kind.w) * tune_phys_turb;
-  vec3 tau = vec3(0.042, 0.100, 0.249) + beta * vec3(1.65, 2.18, 2.91);
-  return exp(-tau * (m - 1.0));
+  return (0.04 + 0.08 * sun_haze + 0.25 * sky_kind.w) * tune_phys_turb;
+}
+const vec3 kTauRay = vec3(0.042, 0.100, 0.249);
+const vec3 kTauAer = vec3(1.65, 2.18, 2.91);
+vec3 sun_transmit(float h) {
+  vec3 tau = kTauRay + phys_beta() * kTauAer;
+  return exp(-tau * (air_mass(h) - 1.0));
+}
+
+// (tune_phys_dome: the sky's own color by the same air) single scattering over a flat layer of air
+// (Rayleigh and aerosols sharing one height): at optical depth t the sun's light has crossed t m_s of
+// it, the scattered part another (tau - t) m_v to the eye, so per channel
+//   L = sum(tau_i P_i) / tau * m_v (e^(-tau m_s) - e^(-tau m_v)) / (m_v - m_s)
+// with Rayleigh's phase (1 + cos^2) and the aerosols' forward lobe (Henyey-Greenstein, g 0.7), white
+// balanced on the sun overhead like sun_transmit. Only its hue is used: the brightness stays ours
+vec3 phys_sky_hue(float up, float cs) {
+  float b = phys_beta();
+  vec3 tr = kTauRay, ta = b * kTauAer, tau = tr + ta;
+  // (the view's air mass capped at 10: the flat layer's 38 at the horizon, without the many
+  // scatterings that whiten it, made the whole low sky deep red at sunset, even away from the sun)
+  float mv = min(air_mass(max(up, 0.0)), 10.0);
+  float ms = air_mass(sky_sun.w);
+  float pr = 0.75 * (1.0 + cs * cs);
+  float g = 0.7;
+  float pa = (1.0 - g * g) / pow(max(1.0 + g * g - 2.0 * g * cs, 1e-4), 1.5) * 0.25;
+  vec3 dm = vec3(mv - ms);
+  vec3 ex = abs(mv - ms) < 1e-3 ? tau * exp(-tau * mv)
+                                 : (exp(-tau * ms) - exp(-tau * mv)) / dm;
+  // (ozone, Chappuis band, 300 DU: absorbs the green along both paths. Without it the morning's low sky
+  // went olive-green; with it the twilight's pink and violet overhead and opposite the sun)
+  vec3 oz = vec3(0.004, 0.027, 0.001) * tune_phys_ozone;
+  vec3 l = (tr * pr + ta * pa) / tau * mv * max(ex, 0.0) * exp(tau - oz * (ms + mv - 1.0));
+  return min(l / max(luma(l), 1e-6), vec3(2.5));
 }
 
 // the sun's color by its height, the moon's at night
@@ -1825,6 +1860,16 @@ vec3 sky_color(vec3 dv) {
     // (and wide and low on the sun's side: the yellow-peach glow along the horizon)
     mcol = mix(mcol, vec3(1.0, 0.82, 0.55), clamp(pow(az, 6.0) * exp(-up * 3.5) * 0.85 * pink, 0.0, 1.0));
     col = mix(col, mcol, sky_day * (1.0 - over));
+  }
+  if (tune_phys_dome > 0.0) {
+    // (by day, clear: the hand hues per area and hour (lilac, pink, the sunset's band) give way to the
+    // air's; overcast and night keep theirs. >= 10: the model's hue at full brightness)
+    float pw = (1.0 - over) * (1.0 - clouds.w) * smoothstep(-0.04, 0.03, sky_sun.w);
+    vec3 ph = phys_sky_hue(up, dot(dv, sky_sun.xyz));
+    if (tune_phys_dome >= 10.0) {
+      return ph * 0.5;
+    }
+    col = mix(col, ph * luma(col), min(tune_phys_dome, 1.0) * pw);
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * sky_day);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
