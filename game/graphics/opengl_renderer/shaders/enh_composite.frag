@@ -271,7 +271,8 @@ uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as th
 uniform float tune_night_pale = 1.0;       // night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
 uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final picture)
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
-uniform float tune_night_pale_cap = 0.55;   // ...never under this x its luma (-45% at most)
+uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
+uniform float tune_night_pale_grain = 1.0;  // ...the game's own grain put back on top (planks' gaps; 0: off)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
@@ -5520,6 +5521,18 @@ void main() {
     float knee = tune_night_pale_knee;
     float target = lc > knee ? knee + (lc - knee) * tune_night_pale_slope : lc;
     c *= mix(1.0, max(target / max(lc, 1e-4), tune_night_pale_cap), pale_w);
+    // (the press flattens what it presses: the port's boards at 20h one even lilac sheet with no
+    // plank lines. The game picture's own grain (each pixel against its neighbours 2 px away) put back
+    // on top, so the gaps and the grain read again)
+    if (tune_night_pale_grain > 0.0) {
+      vec2 o = 2.0 * texel;
+      float m = 0.25 * (luma(texture(tex_T0, tex_coord + vec2(o.x, 0.0)).rgb) +
+                        luma(texture(tex_T0, tex_coord - vec2(o.x, 0.0)).rgb) +
+                        luma(texture(tex_T0, tex_coord + vec2(0.0, o.y)).rgb) +
+                        luma(texture(tex_T0, tex_coord - vec2(0.0, o.y)).rgb));
+      float gr = clamp(luma(texture(tex_T0, tex_coord).rgb) / max(m, 1e-3), 0.6, 1.4);
+      c *= mix(1.0, gr, tune_night_pale_grain * pale_w);
+    }
   }
 
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
