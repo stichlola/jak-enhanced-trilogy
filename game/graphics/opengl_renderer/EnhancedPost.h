@@ -433,6 +433,7 @@ class EnhancedPost {
   int m_hiz_h = 0;
   int m_hiz_levels = 0;
   bool m_hiz_ready = false;
+  bool m_hiz_surf = false;  // post.hiz_surf: puddles, metal, glass on the pyramid too
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean

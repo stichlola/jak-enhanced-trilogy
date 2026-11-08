@@ -287,6 +287,8 @@ uniform int tune_hiz_iters = 40;          // the water's Hi-Z reflection: tiles 
 uniform float tune_hiz_range_m = 400.0;   // ...on water up to this far (faded over its last quarter)
 uniform float tune_hiz_len_m = 400.0;     // ...rays this long
 uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta)
+uniform int hiz_surf;      // puddles, metal, glass: their reflection on Hi-Z too (post.hiz_surf)
+uniform float tune_hiz_surf_len_m = 150.0;  // ...rays this long (the march: ~25 m)
 uniform sampler2D tex_T27;  // the level's albedo (lights.albedo; a: baked light / 2, 0 = none)
 uniform float albedo_on;
 uniform float tune_albedo_dbg = 0.0;   // (test: 1 the albedo target, 2 its baked light, right half)
@@ -669,6 +671,8 @@ vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float
   return night_dim(mix(env, ssr, ssr_hit));
 }
 
+float hiz_trace(vec3 p, vec3 r, float z0, float max_len, float jitter, out vec2 uv);
+
 // what a surface reflects along r (view space): the scene where the ray meets the depth buffer
 // (a short march), else the screen where the ray vanishes (the sky, far hills); hit: how sure
 vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
@@ -683,7 +687,20 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) +
                     haze.w * 7.13);
   vec3 q = p + r * (0.05 * 4096.0 + z * 0.002 + step_len * jit);
-  for (int i = 0; i < 20; i++) {
+  // (post.hiz + tune_hiz_surf: rays going away walk the depth pyramid, out to tune_hiz_surf_len_m
+  // instead of the march's ~25 m; toward the camera the march, which also finds what stands nearer)
+  bool hiz = hiz_levels > 0 && hiz_surf > 0 && r.z > 0.0 &&
+             !(abs(tune_hiz_dbg - 1.0) < 0.5 && tex_coord.x < 0.5);
+  if (hiz) {
+    vec2 huv;
+    if (hiz_trace(p + r * (0.05 * 4096.0 + z * 0.002), r, z, tune_hiz_surf_len_m * 4096.0,
+                  jit, huv) > 0.5) {
+      vec2 edge = min(huv, 1.0 - huv);
+      hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
+      ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
+    }
+  }
+  for (int i = 0; i < (hiz ? 0 : 20); i++) {
     float used = step_len;
     q += r * step_len;
     step_len *= 1.15;

@@ -276,9 +276,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // (post.hiz 1: the water's reflection walks a depth pyramid, 400 m instead of 80 m; 0: the old
   // per-step march; on by default: same look as the march, +0.06..0.13 ms)
   static const EnhancedTune t_hiz("post.hiz", 1.f);
+  // (post.hiz_surf 1: puddles, metal and glass reflect through it too, so it's built on every
+  // frame, water or not; on by default: the ctyport docks after rain look the same, the puddles'
+  // rays reach 150 m instead of ~25 m, +0.05 ms where there's no water)
+  static const EnhancedTune t_hiz_surf("post.hiz_surf", 1.f);
   m_hiz_ready = false;
-  if ((float)t_hiz > 0.5f && have_scene && m_settings.water_reflections &&
-      (m_ocean_ready || m_far_ocean_ready)) {
+  m_hiz_surf = (float)t_hiz > 0.5f && (float)t_hiz_surf > 0.5f;
+  if ((float)t_hiz > 0.5f && have_scene &&
+      (m_hiz_surf || (m_settings.water_reflections && (m_ocean_ready || m_far_ocean_ready)))) {
     build_hiz(screen_vao, render_state, prof);
   }
 

@@ -946,6 +946,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1i(glGetUniformLocation(id, "tex_T29"), 29);
   glUniform1i(glGetUniformLocation(id, "hiz_levels"), m_hiz_ready ? m_hiz_levels : 0);
   glUniform2f(glGetUniformLocation(id, "hiz_size"), (float)m_hiz_w, (float)m_hiz_h);
+  glUniform1i(glGetUniformLocation(id, "hiz_surf"), m_hiz_ready && m_hiz_surf ? 1 : 0);
   glUniform4f(glGetUniformLocation(id, "shadow_params"), m_shadow_near_span_m, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,
               m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);
