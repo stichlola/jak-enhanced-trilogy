@@ -797,6 +797,7 @@ class EnhancedPost {
   GLuint m_adapt_pbo[2] = {0, 0};
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
+  bool m_adapt_half[2] = {false, false};  // that buffer holds half floats (an RGBA16F scene)
   float m_adapt = 1.f;
   float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
   float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak

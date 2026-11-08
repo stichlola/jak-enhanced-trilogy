@@ -824,19 +824,37 @@ void EnhancedPost::read_exposure(int w, int h) {
     glGenBuffers(2, m_adapt_pbo);
     for (int i = 0; i < 2; i++) {
       glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[i]);
-      glBufferData(GL_PIXEL_PACK_BUFFER, kN * 4, nullptr, GL_STREAM_READ);
+      // (8 bytes a pixel: room for half floats)
+      glBufferData(GL_PIXEL_PACK_BUFFER, kN * 8, nullptr, GL_STREAM_READ);
     }
   }
+  // (an RGBA16F scene, post.hdr_scene, is read in its own half floats: asked for as bytes, the
+  // driver converted on the CPU, waiting for the GPU at each of the 48 reads, +5 ms CPU a frame)
+  auto half_to_float = [](uint16_t v) {
+    const int e = (v >> 10) & 0x1f;
+    const int m = v & 0x3ff;
+    const float f = e == 0    ? std::ldexp((float)m, -24)
+                    : e == 31 ? 65504.f
+                              : std::ldexp((float)(m | 0x400), e - 25);
+    return (v & 0x8000) ? -f : f;
+  };
   const float dt = m_adapt_time > 0.0 ? (float)std::clamp(m_time - m_adapt_time, 0.0, 0.2) : 0.f;
   m_adapt_time = m_time;
   const int prev = 1 - m_adapt_cur;
   if (m_adapt_pending[prev]) {
     glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[prev]);
-    if (auto* d = (const uint8_t*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, kN * 4,
+    const bool half = m_adapt_half[prev];
+    if (auto* d = (const uint8_t*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, kN * (half ? 8 : 4),
                                                    GL_MAP_READ_BIT)) {
       float sum = 0.f;
       for (int i = 0; i < kN; i++) {
-        const float l = (0.3f * d[i * 4] + 0.59f * d[i * 4 + 1] + 0.11f * d[i * 4 + 2]) / 255.f;
+        float c[3];
+        for (int k = 0; k < 3; k++) {
+          // (past 1 counted as 1, as the 8-bit frame clips it)
+          c[k] = half ? std::clamp(half_to_float(((const uint16_t*)d)[i * 4 + k]), 0.f, 1.f)
+                      : d[i * 4 + k] / 255.f;
+        }
+        const float l = 0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2];
         sum += std::log(std::max(l, 0.02f));
       }
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
@@ -852,12 +870,17 @@ void EnhancedPost::read_exposure(int w, int h) {
     m_adapt_pending[prev] = false;
   }
   glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
+  GLint comp = GL_UNSIGNED_NORMALIZED;
+  glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
+  const bool half = comp == GL_FLOAT;
+  m_adapt_half[m_adapt_cur] = half;
   glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
   int i = 0;
   for (int y = 0; y < 6; y++) {
     for (int x = 0; x < 8; x++) {
-      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                   (void*)(intptr_t)(i++ * 4));
+      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
+                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
     }
   }
   glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
