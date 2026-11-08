@@ -69,6 +69,27 @@
 (defconstant ASHELIN_GUN_MAGAZINE 20)
 (defconstant ASHELIN_GUN_RELOAD (seconds 1.1))
 
+;; Her idle (ashelin-idle0) is the oasis AI's combat-ready loop: under a second long, her whole body rocks
+;; ~6 cm back and forth and her chest scales 0.93-1.20 (breathing) every cycle. Fine on a distant NPC, too
+;; much under the player's close camera: standing, she plays it slower and only part of its motion away
+;; from its first frame (the pose the hand-made idle turns were made on). Eyes (blinks) keep all of it.
+(deftype enhanced-ashelin-idle-ref (structure)
+  ((ok    symbol)
+   (local matrix 64 :inline)   ;; idle0's first frame: each joint to its parent
+   )
+  )
+
+(define *enhanced-ashelin-idle-ref* (new 'global 'enhanced-ashelin-idle-ref))
+(set! (-> *enhanced-ashelin-idle-ref* ok) #f)
+(define *enhanced-ashelin-idle-rate* 0.6)  ;; her idle's playback rate (the NPC's: 1)
+(define *enhanced-ashelin-idle-amp* 0.4)   ;; how much of its motion away from its first frame stays (0-1)
+(defconstant ASHELIN_EYES 23)
+
+(defun enhanced-skin-idle-rate ((ch enhanced-character))
+  "Its idle's playback rate (enhanced-skin-animate): Ashelin's is slowed, the others' as their NPC plays it."
+  (if (string= (-> ch name) "ashelin") *enhanced-ashelin-idle-rate* 1.0)
+  )
+
 (define *enhanced-ashelin-gun* (new 'global 'enhanced-ashelin-gun-state))
 (set! (-> *enhanced-ashelin-gun* pid) 0)
 (set! (-> *enhanced-ashelin-gun* out) #f)
@@ -195,6 +216,22 @@
       ;; holstered: the gun as far from her right thigh as in her bind pose (arms down, the gun at her side)
       (matrix-4x4-inverse! inv (-> self bind-world ASHELIN_GUN_RTHIGH))
       (matrix*! (-> st holster) (-> self bind-world ASHELIN_GUN_JOINT) inv)
+      ;; her idle's first frame (the calmed idle's rest), each joint to its parent
+      (let ((ref *enhanced-ashelin-idle-ref*))
+        (ja-channel-set! 1)
+        (ja :group! (the-as art-joint-anim (-> self draw art-group data (-> self char idle))) :num! min)
+        (ja-post)
+        (dotimes (k (min 64 (-> nodes length)))
+          ;; (main against her root: her prejoint's matrix isn't one to invert)
+          (let ((p (if (= k 3) 0 (enhanced-ashelin-gun-parent nodes k))))
+            (when (and (> k 2) (>= p 0) (< p k))
+              (matrix-4x4-inverse! inv (-> nodes data p bone transform))
+              (matrix*! (-> ref local k) (-> nodes data k bone transform) inv)
+              )
+            )
+          )
+        (set! (-> ref ok) #t)
+        )
       ;; the aiming stance, once: her bones at its first frame, the arm's joints to their parents
       (ja-channel-set! 1)
       (ja :group! (the-as art-joint-anim (-> self draw art-group data ASHELIN_STANDING_IDLE)) :num! min)
@@ -901,6 +938,43 @@
   (none)
   )
 
+(defbehavior enhanced-ashelin-idle-calm! enhanced-skin ((w float))
+  "By w (standing in her idle): each joint (from main down) keeps only *enhanced-ashelin-idle-amp* of
+   its idle's motion away from the idle's first frame: turns, offsets and the chest's scale (rows lerped,
+   not renormalized). Her eyes keep their blink. Parents first, what hangs from them follows."
+  (let* ((st *enhanced-ashelin-gun*)
+         (ref *enhanced-ashelin-idle-ref*)
+         (nodes (-> self node-list))
+         (n (min 64 (-> nodes length)))
+         (amp (lerp 1.0 *enhanced-ashelin-idle-amp* w))
+         (local (new 'stack-no-clear 'matrix))
+         (inv (new 'stack-no-clear 'matrix))
+         )
+    (when (and (-> ref ok) (< amp 1.0))
+      (dotimes (k n)
+        (matrix-copy! (-> st before k) (-> nodes data k bone transform))
+        )
+      (dotimes (k n)
+        (let ((p (if (= k 3) 0 (enhanced-ashelin-gun-parent nodes k))))
+          (when (and (> k 2) (>= p 0) (< p k))
+            (matrix-4x4-inverse! inv (-> st before p))
+            (matrix*! local (-> st before k) inv)
+            (when (!= k ASHELIN_EYES)
+              (dotimes (r 4)
+                (vector-lerp! (-> local vector r) (-> ref local k vector r) (-> local vector r) amp)
+                (set! (-> local vector r w) 0.0)
+                )
+              (set! (-> local trans w) 1.0)
+              )
+            (matrix*! (-> nodes data k bone transform) local (-> nodes data p bone transform))
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defun enhanced-ashelin-gun-test-step ((tgt target))
   "JAK_ENHANCED_ASHELIN_GUN_TEST: unarmed run 6-9 s; 12 s in, the gun out; fire standing 14-18 s; run firing 20-23 s;
    stand 24 s, fire again 26-29 s; put away at 32 s."
@@ -1073,6 +1147,10 @@
               )
             )
           ;; her arm, then the gun: in her hand while out, else in the holster
+          ;; her idle calmer (standing unarmed in it)
+          (if (< 0.0 (-> st idle-weight))
+              (enhanced-ashelin-idle-calm! (-> st idle-weight))
+              )
           (if (or (< 0.0 (-> st blend)) (< 0.0 (-> st aim-weight)) (< 0.0 (-> st rest-weight)) (< 0.0 (-> st idle-weight)))
               (enhanced-ashelin-gun-pose (-> st blend) (if (-> st out) (-> st aim-weight) 0.0) (-> st rest-weight) (-> st idle-weight))
               )

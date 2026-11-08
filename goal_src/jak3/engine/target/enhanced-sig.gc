@@ -17,7 +17,8 @@
 ;; wasdoors idle (sig-highres-idle-wasdoors, Spargus' gate). Standing, he plays that idle; moving, his right
 ;; arm takes its pose over his walk (or Jak's run). Out and away, the gun goes between his back and his hand
 ;; in 0.3 s; charging and firing, his forearm and hand tip it forward along Jak's shot. Unarmed, standing,
-;; his arms rest closer to his body than his idle has them.
+;; he plays the same wasdoors idle with his right arm as its left one, mirrored; walking unarmed, his arms
+;; swing less than his museum walk (and Jak's walk and run) have them.
 ;; JAK_ENHANCED_SIG_GUN_TEST=1 (test boots): idle front and side, a walk, out, firing standing and walking,
 ;; away, with [sig-gun] log lines ("[sig-gun] shot <name>": when to take a screenshot).
 
@@ -161,6 +162,34 @@
 (defconstant SIG_GUN 26)
 (defconstant SIG_BLAST 27)    ;; the Peacemaker's muzzle (child of the gun)
 (defconstant SIG_IDLE_ARMED 4) ;; sig-highres-idle-wasdoors: the gun upright in his right hand
+(defconstant SIG_IDLE_PLAIN 3) ;; sig-highres-idle: one frame only (a cutscene's base pose), arms hanging
+
+;; His unarmed right arm. His plain idle is a single frame (nothing moves), so standing he plays the
+;; wasdoors idle (his NPC's at Spargus' gate: wider stance, a weight shift) also unarmed; its right arm
+;; holds the gun up, so unarmed his right arm and fingers take the plain idle's turns instead (joint to
+;; parent, captured at init), carried by his wasdoors chest.
+(deftype enhanced-sig-arms (structure)
+  ((ok    symbol)
+   (arm   uint8 80)           ;; per joint: hangs from his right shoulder (1, not the gun) or his left (2)
+   (mirror int8 80)           ;; per right arm joint: its left twin (same place in the left arm's chain)
+   (local matrix 80 :inline)  ;; the plain idle: joint to its parent
+   )
+  )
+
+(defun enhanced-sig-mirror! ((dst matrix) (src matrix))
+  "dst = src mirrored left to right (a joint to its parent). His rig's left and right joints are mirror
+   images across x (plain idle: Lshoulder quaternion x y z w, Rshoulder x -y -z w): S src S, S = (-1 1 1)."
+  (matrix-copy! dst src)
+  (set! (-> dst vector 0 y) (- (-> dst vector 0 y)))
+  (set! (-> dst vector 0 z) (- (-> dst vector 0 z)))
+  (set! (-> dst vector 1 x) (- (-> dst vector 1 x)))
+  (set! (-> dst vector 2 x) (- (-> dst vector 2 x)))
+  (set! (-> dst trans x) (- (-> dst trans x)))
+  dst
+  )
+
+(define *enhanced-sig-plain-arms* (new 'global 'enhanced-sig-arms))
+(set! (-> *enhanced-sig-plain-arms* ok) #f)
 
 (deftype enhanced-sig-gun-state (structure)
   ((pid         int32)              ;; his enhanced-skin process (0: none)
@@ -349,6 +378,53 @@
       (set! (-> st aim-weight) 0.0)
       (set! (-> st rest-weight) 0.0)
       (set! (-> st was-out) #f)
+      ;; the plain idle's right arm, for standing unarmed
+      (let ((ra *enhanced-sig-plain-arms*))
+        (set! (-> ra ok) #f)
+        (when (-> self draw art-group data SIG_IDLE_PLAIN)
+          (ja-channel-set! 1)
+          (ja :group! (the-as art-joint-anim (-> self draw art-group data SIG_IDLE_PLAIN)) :num! min)
+          (ja-post)
+          (dotimes (k (min 80 (-> nodes length)))
+            (set! (-> ra arm k) 0)
+            (let ((p (enhanced-sig-gun-parent nodes k)))
+              (when (and (> k 0) (!= k SIG_GUN) (>= p 0) (< p k)
+                         (or (= k SIG_RSHOULDER) (= k SIG_LSHOULDER) (nonzero? (-> ra arm p)))
+                         )
+                (set! (-> ra arm k) (cond
+                                      ((= k SIG_RSHOULDER) 1)
+                                      ((= k SIG_LSHOULDER) 2)
+                                      (else (-> ra arm p))
+                                      )
+                      )
+                (matrix-4x4-inverse! inv (-> nodes data p bone transform))
+                (matrix*! (-> ra local k) (-> nodes data k bone transform) inv)
+                )
+              )
+            )
+          ;; each right arm joint's left twin: the n-th of the right chain is the n-th of the left one
+          (let ((li 0))
+            (dotimes (k (min 80 (-> nodes length)))
+              (set! (-> ra mirror k) -1)
+              (when (= (-> ra arm k) 1)
+                (let ((found -1)
+                      (seen 0)
+                      )
+                  (dotimes (m (min 80 (-> nodes length)))
+                    (when (= (-> ra arm m) 2)
+                      (if (and (< found 0) (= seen li)) (set! found m))
+                      (+! seen 1)
+                      )
+                    )
+                  (set! (-> ra mirror k) found)
+                  (+! li 1)
+                  )
+                )
+              )
+            )
+          (set! (-> ra ok) #t)
+          )
+        )
       (ja-channel-set! 1)
       (ja :group! (the-as art-joint-anim (-> self draw art-group data SIG_IDLE_ARMED)) :num! min)
       (ja-post)
@@ -778,11 +854,32 @@
   (none)
   )
 
+;; walking unarmed: how far both arms go toward his plain idle's hanging ones (0-1). His museum walk
+;; swings each arm up to shoulder height, Jak's walk and run (his pose, taken above his own walk's speeds)
+;; swing them far out at his size: both look exaggerated on him.
+(define *enhanced-sig-calm-weight* 0.0)
+(define *enhanced-sig-calm-own* 0.55)   ;; on his own walk
+(define *enhanced-sig-calm-jak* 0.4)    ;; on Jak's walk and run
+
+(defun enhanced-sig-plain-arm-weight ((k int) (rest-w float))
+  "Joint k's weight toward his plain idle's arm: standing unarmed (rest-w) his right arm, walking
+   (*enhanced-sig-calm-weight*) both arms; 0 for his other joints."
+  (let ((ra *enhanced-sig-plain-arms*))
+    (cond
+      ((not (and (-> ra ok) (< k 80))) 0.0)
+      ((= (-> ra arm k) 1) (fmax rest-w *enhanced-sig-calm-weight*))
+      ((= (-> ra arm k) 2) *enhanced-sig-calm-weight*)
+      (else 0.0)
+      )
+    )
+  )
+
 (defbehavior enhanced-sig-hold-pose enhanced-skin ((out-w float) (rest-w float))
   "His arms and gun over what his bones have now (what hangs from them following): by rest-w (standing
    unarmed) his arms in closer to his body, the left forearm forward; by out-w the wasdoors idle's right
    arm and the gun from his back to his hand."
   (let* ((st *enhanced-sig-gun*)
+         (ra *enhanced-sig-plain-arms*)
          (nodes (-> self node-list))
          (n (min 80 (-> nodes length)))
          (local (new 'stack-no-clear 'matrix))
@@ -820,7 +917,7 @@
                       )
                 (ahead (case slot
                          ((1) (degrees 4))   ;; right forearm: already forward, a little more
-                         ((3) (degrees 18))  ;; left forearm: from back to along his side
+                         ((3) (degrees 4))   ;; left forearm: the wasdoors idle has it along his side
                          (else (degrees 0))
                          )
                        )
@@ -855,11 +952,38 @@
                (set! (-> st moved k) 1)
                )
              )
-            ((or (and (>= slot 0) (< 0.0 out-w)) (and (>= rest 0) (< 0.0 rest-w)) (nonzero? (-> st moved p)))
-             (let ((bone (-> nodes data k bone transform)))
+            ((or (and (>= slot 0) (< 0.0 out-w)) (and (>= rest 0) (< 0.0 rest-w)) (nonzero? (-> st moved p))
+                 (< 0.0 (enhanced-sig-plain-arm-weight k rest-w))
+                 )
+             (let ((bone (-> nodes data k bone transform))
+                   (pw (enhanced-sig-plain-arm-weight k rest-w))
+                   )
                ;; its own, where its parent is now
                (matrix-4x4-inverse! inv (-> st before p))
                (matrix*! local (-> st before k) inv)
+               ;; toward his plain idle's hanging arm: standing unarmed, his right one (the wasdoors idle
+               ;; holds the gun up); walking, both, part way (his walk swings them up to his shoulders)
+               (when (< 0.0 pw)
+                 (let ((m (if (< k 80) (-> ra mirror k) -1)))
+                   ;; standing: the right arm as the wasdoors idle's left one, mirrored
+                   (when (and (< 0.0 rest-w) (>= m 0))
+                     (let ((mp (enhanced-sig-gun-parent nodes m)))
+                       (matrix-4x4-inverse! inv (-> st before mp))
+                       (matrix*! mixed (-> st before m) inv)
+                       (enhanced-sig-mirror! inv mixed)
+                       (matrix-copy! mixed local)
+                       (enhanced-matrix-blend-rows! local mixed inv rest-w mixed)
+                       (vector-copy! (-> local trans) (-> mixed trans))
+                       )
+                     )
+                   ;; walking: both toward the plain idle's
+                   (when (< 0.0 *enhanced-sig-calm-weight*)
+                     (matrix-copy! mixed local)
+                     (enhanced-matrix-blend-rows! local mixed (-> ra local k) *enhanced-sig-calm-weight* mixed)
+                     (vector-copy! (-> local trans) (-> mixed trans))
+                     )
+                   )
+                 )
                (matrix*! bone local (-> nodes data p bone transform))
                ;; unarmed, standing: the rest turn (about the joint)
                (when (and (>= rest 0) (< 0.0 rest-w))
@@ -994,6 +1118,18 @@
                (if (and (not out?) (= (-> self anim) (-> self char idle))) (- 1.0 (-> self pose-blend)) 0.0)
                (* 5.0 (seconds-per-frame))
                )
+        ;; walking unarmed: his arms calmer (his own walk or Jak's walk and run)
+        (seek! *enhanced-sig-calm-weight*
+               (if (and (not out?) (not attack?)
+                        (< (meters 0.3) (-> tgt control ctrl-xz-vel))
+                        (logtest? (-> tgt control status) (collide-status on-surface))
+                        (-> tgt state) (= (-> tgt state name) 'target-walk)
+                        )
+                   (lerp *enhanced-sig-calm-own* *enhanced-sig-calm-jak* (-> self pose-blend))
+                   0.0
+                   )
+               (* 4.0 (seconds-per-frame))
+               )
         (when (!= out? (-> st was-out))
           (set! (-> st was-out) out?)
           (format 0 "[sig-gun] ~A~%" (if out? "out" "away"))
@@ -1023,7 +1159,7 @@
                (out-w (* (-> st out-blend) att))
                (two-w (* (fmin *enhanced-sig-two-weight* (-> st out-blend)) att))
                )
-          (if (or (< 0.0 out-w) (< 0.0 (-> st rest-weight)))
+          (if (or (< 0.0 out-w) (< 0.0 (-> st rest-weight)) (< 0.0 *enhanced-sig-calm-weight*))
               (enhanced-sig-hold-pose out-w (-> st rest-weight))
               )
           (if (< 0.0 two-w)

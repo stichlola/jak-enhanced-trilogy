@@ -100,6 +100,7 @@
 (define-extern enhanced-ashelin-gun-init (function none :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
+(define-extern enhanced-skin-idle-rate (function enhanced-character float))
 ;; Ashelin's front kick (enhanced-ashelin-kick.gc): kicking now, and her pose for it
 (define-extern enhanced-ashelin-kick-active? (function symbol))
 (define-extern enhanced-ashelin-kick-post (function none :behavior enhanced-skin))
@@ -300,8 +301,10 @@
 ;; (he's much taller). His gun (26, on his prejoint) goes with his right hand (16) when out.
 (let ((ch (enhanced-character-new "sig" "sig-highres-ag" "lsig" skel-enhanced-sig *enhanced-skin-sig-joint*)))
   (enhanced-character-bones! ch 3 17 16 26)
-  ;; his walk: the museum's (streamed, MU2ANIMS.STR), in his art group's slot 5 once loaded
-  (enhanced-character-anims! ch 3 5 -1 -1)
+  ;; his idle: the wasdoors one (4: his plain idle, 3, is a single frame, nothing moves; enhanced-sig.gc
+  ;; gives it his plain idle's right arm when unarmed); his walk: the museum's (streamed, MU2ANIMS.STR),
+  ;; in his art group's slot 5 once loaded
+  (enhanced-character-anims! ch 4 5 -1 -1)
   (set! (-> ch stream-spool) "museum-2-anims")
   (set! (-> ch stream-anim) "sig-highres-sig-walk")
   (set! (-> ch stream-slot) 5)
@@ -416,7 +419,7 @@
        #t
        )
       ((or (focus-test? tgt pilot) (not walk?) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
-       (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.2))
+       (enhanced-skin-play (-> ch idle) (enhanced-skin-idle-rate ch) (seconds 0.2))
        )
       ((or (< (-> ch jog) 0) (< speed (if (= cur (-> ch jog)) (meters 3.5) (meters 4.2))))
        (enhanced-skin-play (-> ch walk)
