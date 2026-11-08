@@ -1174,6 +1174,10 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
         const std::string passes = EnhancedPost::pass_times();
         if (!passes.empty()) {
           lg::info("[enhanced] passes {}", passes);
+        } else if (m_enhanced_post->active()) {
+          // (a silent failure shows: timers off ("debug": {"pass_timers": 0}), JAK_ENHANCED_PROFILE,
+          // or no timestamp came back)
+          lg::info("[enhanced] passes none (n=0)");
         }
       }
       if (settings.gpu_sync && std::getenv("JAK_ENHANCED_PROFILE")) {
