@@ -159,6 +159,7 @@ uniform float tune_spill_sat = 0.45;  // the light spill's color at most this sa
 uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
+uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
 uniform float cloud_shadows;    // the clouds shade the ground (0 = off)
@@ -286,7 +287,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b)
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_night_pale = 1.0;       // (Haven's slums only: pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
@@ -2850,13 +2851,21 @@ void main() {
     }
     vec3 ssr = refl;
     float ssr_hit = 0.0;
-    if (z < 80.0 * 4096.0) {
+    // (out to tune_water_ssr_far: a harbour's far shore, 60-150 m off, mirrored in the flat water at
+    // dusk and night; the march's steps grow with the distance, 32 of them still reach ~500 m)
+    float ssr_far = max(tune_water_ssr_far, 80.0) * 4096.0;
+    // far off the view grazes the water: a ripple tilted a degree toward the eye sent the ray down
+    // into the sea and nothing was found. There the march follows the calm surface's mirror ray
+    // (a planar mirror) and the ripples bend the picture it finds instead
+    float mirror_k = smoothstep(25.0 * 4096.0, 50.0 * 4096.0, z) * step(80.5, tune_water_ssr_far);
+    vec3 rs = normalize(mix(r, reflect(vdir, up_view), mirror_k));
+    if (z < ssr_far) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
       // start each pixel's march a little further along (the TAA averages the steps away: no
       // staircase where the reflection meets what it reflects)
-      vec3 q = p + r * step_len * hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0);
+      vec3 q = p + rs * step_len * hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0);
       for (int i = 0; i < 32; i++) {
-        q += r * step_len;
+        q += rs * step_len;
         step_len *= 1.12;
         if (q.z <= 0.0) {
           break;  // came back toward the camera
@@ -2873,12 +2882,13 @@ void main() {
         float scene_z = view_z(sd);
         // (not what stands between the camera and the water, the rock Jak's on: a wave tilted
         // toward the eye sent the ray back into it, dark blots on the sea)
-        if (scene_z < z * 0.97) {
+        // (the mirror's: only a little nearer, a far quay rises 2-5 m behind the water's edge)
+        if (scene_z < mix(z * 0.97, z - 0.5 * 4096.0, mirror_k)) {
           continue;
         }
         if (q.z > scene_z && q.z - scene_z < step_len + 4096.0) {
           // home in on where the ray meets the surface (halving the last step)
-          vec3 lo = q - r * step_len / 1.12;
+          vec3 lo = q - rs * step_len / 1.12;
           vec3 hi = q;
           for (int k = 0; k < 5; k++) {
             vec3 mid = (lo + hi) * 0.5;
@@ -2894,7 +2904,9 @@ void main() {
           // picture it ends in a hard line otherwise)
           vec2 edge = min(quv, 1.0 - quv);
           ssr_hit = smoothstep(0.0, 0.08, edge.x) * smoothstep(0.0, 0.15, edge.y) *
-                    (1.0 - smoothstep(50.0 * 4096.0, 80.0 * 4096.0, z));
+                    (1.0 - smoothstep(ssr_far * mix(0.625, 0.8, mirror_k), ssr_far, z));
+          // (the mirror's picture wobbled by the ripples, mostly sideways)
+          quv = clamp(quv + clamp(slope * vec2(0.15, 0.06), -0.015, 0.015) * mirror_k, 0.001, 0.999);
           ssr = texture(tex_T0, quv).rgb;
           break;
         }
@@ -2907,6 +2919,9 @@ void main() {
     wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
     if (abs(tune_water_dbg - 3.0) < 0.5) {
       wc = body;  // (test: no reflection)
+    }
+    if (abs(tune_water_dbg - 5.0) < 0.5) {
+      wc = vec3(ssr_hit, z / ssr_far, fresnel);  // (test: the traced reflection's hits, distance, fresnel)
     }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
