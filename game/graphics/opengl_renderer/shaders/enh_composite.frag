@@ -173,6 +173,7 @@ uniform int beacon_count;       // far glows drawn as points of light: view spac
 uniform vec4 beacon_pos[64];
 uniform vec4 beacon_color[64];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
+uniform float pale_ground;      // 1 in Haven's slums (pale flagstones): the night's pale-ground press
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform float lens_drops;       // raindrops on the lens in a downpour (0 = off)
 uniform float chroma;           // colors split at the screen's edges: a hit, Dark Jak (0..1)
@@ -274,7 +275,7 @@ uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet 
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
-uniform float tune_night_pale = 0.0;       // (off: it darkened every night level, not just the slums) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
+uniform float tune_night_pale = 1.0;       // (Haven's slums only: pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
 uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final picture)
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
@@ -3519,7 +3520,7 @@ void main() {
     if (tune_night_pale > 0.0 && z > 0.0 && wsurf == 0.0 && (tune_night_pale < 1.5 || tex_coord.x > 0.5)) {
       float upf = smoothstep(0.55, 0.8, abs(world_dir(surf_n).y));
       float pool = smoothstep(0.03, 0.15, luma(texture(tex_T1, tex_coord).rgb));
-      float w = upf * (1.0 - pool) * smoothstep(0.1, 0.45, dk) * min(tune_night_pale, 1.0);
+      float w = upf * (1.0 - pool) * smoothstep(0.1, 0.45, dk) * min(tune_night_pale, 1.0) * pale_ground;
       pale_w = w;
     }
     float seen = 0.0;
