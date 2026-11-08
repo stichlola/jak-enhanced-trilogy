@@ -308,6 +308,7 @@ uniform float tune_night_hue = 0.8;  // night: the dim land's hue toward the gam
 uniform float tune_night_hue_lo = 0.3;
 uniform float tune_night_hue_hi = 0.6;
 uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G3: Jak pink and pasted on the moonlit desert; 0: off)
+uniform float tune_chr_gold_rim = 0.7;  // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
@@ -5443,6 +5444,16 @@ void main() {
     c += vec3(0.42, 0.52, 0.78) * rim * tune_chr_rim * (0.35 + luma(c));
   }
 
+  // characters at golden hour: the low sun catches their edges on its side, most when it is behind
+  // them (Jak flat and dark against the warm ground at Spargus 18h). Not in the shadow map's shade
+  if (tune_chr_gold_rim > 0.0 && golden > 0.0 && sky_sun.w > 0.0 && pix_tag > 0.3 && pix_tag < 0.55 && z > 0.0) {
+    vec3 v = normalize(-p);
+    float ndv = clamp(dot(surf_n, v), 0.0, 1.0);
+    float side = clamp(dot(surf_n, sky_sun.xyz), 0.0, 1.0);
+    float back = smoothstep(-0.4, 0.6, dot(-v, sky_sun.xyz));
+    float rim = pow(1.0 - ndv, 3.0) * (0.3 + 0.7 * side) * back * golden * sun_lit * (1.0 - 0.6 * rock_sh);
+    c += sun_color() * rim * tune_chr_gold_rim * (0.3 + luma(c));
+  }
   // the low sun's sky fill: the ground turned from it is still lit by the whole bright sky and the
   // sunlit dunes around. The rocky ground's low-light darkening (x0.5), the relight, the golden
   // stop-down and the deepening of dark parts stacked up to x0.4 of the game's color, and a near
