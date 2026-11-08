@@ -464,6 +464,19 @@ class EnhancedPost {
   float m_sky_back_origin[2] = {0, 0};
   float m_sky_top = 0.f;         // where the back one's rays start (world y)
   std::vector<u64> m_sky_levels;  // the levels it was traced through
+  // the light probes (post.probes, tech-rt-probe-gi M2): a grid around the camera, each probe the
+  // levels' light coming back to it from all around (one bounce, rgb) and its open sky (a), traced
+  // a few rays a frame and blended over the frames (RGBA16F, kProbeY slices side by side in x)
+  static constexpr int kProbeX = 32, kProbeY = 8, kProbeZ = 32;
+  static constexpr float kProbeCell = 2.f;  // meters
+  bool probes_on() const;
+  void build_probes(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_probe_tex[2] = {0, 0};
+  GLuint m_probe_fbo[2] = {0, 0};
+  int m_probe_front = 0;
+  bool m_probe_valid = false;
+  int m_probe_cell[3] = {0, 0, 0};  // the front grid's corner, in cells
+  float m_probe_frame = 0.f;
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean

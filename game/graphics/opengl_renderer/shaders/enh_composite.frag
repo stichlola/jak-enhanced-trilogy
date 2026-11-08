@@ -297,6 +297,14 @@ uniform float tune_sky_map_n = 0.6;     // looked up this far out along the norm
 uniform float tune_sky_map_gap = 0.4;   // a surface this far over the point (m) starts to cover it...
 uniform float tune_sky_map_soft = 1.2;  // ...all of it this much higher
 uniform float tune_sky_map_dbg = 0.0;   // 1: the open sky shown (green open, red covered)
+// the light probes (post.probes): a grid around the camera, 32 x 8 x 32 at 2 m (8 slices of 32 side
+// by side in x); rgb the levels' light back to it from all around (one bounce), a its open sky
+uniform sampler2D tex_T32;
+uniform vec4 probe_grid;    // corner x, y, z, cell size (game units; 0: none)
+uniform float tune_probe_dbg = 0.0;   // 1: the probes' open sky (grey), 2: their bounce light
+uniform float tune_probe_rim = 1.0;   // the characters' night sky rim x the sky their probes see (0: off)
+uniform float tune_probe_tint = 0.0;  // characters, by how much they're roofed: toward the bounce light's hue (0: off)
+uniform float tune_probe_n = 0.5;     // looked up this far out along the normal (m)
 uniform sampler2D tex_T29;  // Hi-Z: the nearest view depth per tile, mipmapped (post.hiz; sky, sea: 1e30)
 uniform int hiz_levels;     // its levels (0: none this frame, the water marches the depth as before)
 uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
@@ -1022,6 +1030,42 @@ float sky_open(vec3 w, vec3 n) {
   // (fades back to open toward the map's edge)
   vec2 e = abs(f / (sky_map.w - 1.0) * 2.0 - 1.0);
   return mix(o, 1.0, smoothstep(0.85, 1.0, max(e.x, e.y)));
+}
+
+// the probes at world point w (game units), n its world normal: the 8 around it, trilinear, each
+// weighed by being on the surface's side (a probe under the floor or behind the wall sees none of
+// the sky and would leak its dark through). Off the grid across: open sky, no bounce
+vec4 probe_at(vec3 w, vec3 n) {
+  if (probe_grid.w <= 0.0) {
+    return vec4(0.0, 0.0, 0.0, 1.0);
+  }
+  vec3 q = w + n * (tune_probe_n * 4096.0);
+  vec3 f = (q - probe_grid.xyz) / probe_grid.w - 0.5;
+  const ivec3 dims = ivec3(32, 8, 32);
+  // (over or under the grid: its top or bottom layer, not the open sky: the grid is only 16 m
+  // high, and a hall's upper walls read as open)
+  f.y = clamp(f.y, 0.0, float(dims.y) - 1.0);
+  if (any(lessThan(f, vec3(0.0))) || any(greaterThan(f, vec3(dims) - 1.0))) {
+    return vec4(0.0, 0.0, 0.0, 1.0);
+  }
+  ivec3 i0 = min(ivec3(floor(f)), dims - 2);
+  vec3 fr = f - vec3(i0);
+  vec4 sum = vec4(0.0);
+  float wsum = 0.0;
+  for (int k = 0; k < 8; k++) {
+    ivec3 o = ivec3(k & 1, (k >> 1) & 1, k >> 2);
+    ivec3 ci = i0 + o;
+    vec3 tw = mix(1.0 - fr, fr, vec3(o));
+    vec3 pp = probe_grid.xyz + (vec3(ci) + 0.5) * probe_grid.w;
+    float side = smoothstep(-0.1, 0.3, dot(normalize(pp - w), n));
+    float wk = tw.x * tw.y * tw.z * (side + 1e-3);
+    sum += texelFetch(tex_T32, ivec2(ci.x + ci.y * dims.x, ci.z), 0) * wk;
+    wsum += wk;
+  }
+  vec4 r = sum / max(wsum, 1e-6);
+  // (fades back to open toward the grid's edge)
+  vec3 e = abs(f / (vec3(dims) - 1.0) * 2.0 - 1.0);
+  return mix(r, vec4(0.0, 0.0, 0.0, 1.0), smoothstep(0.8, 1.0, max(e.x, e.z)));
 }
 
 float hash1(vec2 q) {
@@ -3395,6 +3439,10 @@ void main() {
   if (tune_sky_map_dbg > 0.5 && z > 0.0) {
     c = mix(c, vec3(1.0 - rain_open, rain_open, 0.0) * max(luma(c), 0.08) * 2.0, 0.7);
   }
+  if (tune_probe_dbg > 0.5 && z > 0.0) {
+    vec4 pr = probe_at(view_to_world * p + cam_pos, view_to_world * surf_n);
+    c = tune_probe_dbg < 1.5 ? vec3(pr.a) * 0.6 : pr.rgb;
+  }
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
     {
@@ -5625,10 +5673,27 @@ void main() {
 
   // characters at night: a faint rim of the moon's and sky's light along their edges, so Jak and
   // Daxter read against the dark dock (the scene stays as dark; only the silhouette's last pixels)
+  // (post.probes: their probes' open sky, none under a roof)
+  vec4 chr_probe = vec4(0.0, 0.0, 0.0, 1.0);
+  if (probe_grid.w > 0.0 && pix_tag > 0.3 && pix_tag < 0.55 && z > 0.0) {
+    chr_probe = probe_at(view_to_world * p + cam_pos, view_to_world * surf_n);
+  }
   if (tune_chr_rim > 0.0 && night_dark.x > 0.0 && pix_tag > 0.3 && pix_tag < 0.55 && z > 0.0) {
     float ndv = clamp(dot(surf_n, normalize(-p)), 0.0, 1.0);
-    float rim = pow(1.0 - ndv, 3.0) * night_dark.x * ao * (1.0 - 0.6 * rock_sh);
+    float rim = pow(1.0 - ndv, 3.0) * night_dark.x * ao * (1.0 - 0.6 * rock_sh) *
+                mix(1.0, smoothstep(0.1, 0.7, chr_probe.a), tune_probe_rim);
     c += vec3(0.42, 0.52, 0.78) * rim * tune_chr_rim * (0.35 + luma(c));
+  }
+  // characters under a roof: the hue of the light coming back from the walls and floor around
+  // them (their probes' bounce), the brightness kept
+  if (tune_probe_tint > 0.0 && probe_grid.w > 0.0 && pix_tag > 0.3 && pix_tag < 0.55 && z > 0.0) {
+    float bl = luma(chr_probe.rgb);
+    if (bl > 0.01) {
+      vec3 hue = clamp(chr_probe.rgb / bl, vec3(0.6), vec3(1.5));
+      vec3 tinted = c * hue;
+      tinted *= luma(c) / max(luma(tinted), 1e-4);
+      c = mix(c, tinted, tune_probe_tint * (1.0 - chr_probe.a));
+    }
   }
 
   // characters at golden hour: the low sun catches their edges on its side, most when it is behind

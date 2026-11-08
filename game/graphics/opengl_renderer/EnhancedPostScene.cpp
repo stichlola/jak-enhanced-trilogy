@@ -240,6 +240,116 @@ void EnhancedPost::build_sky_map(GLuint screen_vao,
   glViewport(vp[0], vp[1], vp[2], vp[3]);
 }
 
+// post.probes (tuning.json, switches in a running game)
+bool EnhancedPost::probes_on() const {
+  static const EnhancedTune t_probes("post.probes", 0.f);
+  return (float)t_probes > 0.5f;
+}
+
+// the light probes: every probe of the grid around the camera traces post.probe_rays rays a frame
+// (a band of the grid in every post.probe_every: 8192 probes) and blends them over what it had;
+// the grid moves by whole cells
+void EnhancedPost::build_probes(GLuint screen_vao,
+                                SharedRenderState* render_state,
+                                ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!probes_on() || !m_rt_ready || !cam.valid || !g_enhanced_tod.valid) {
+    m_probe_valid = false;
+    return;
+  }
+  constexpr int W = kProbeX * kProbeY, H = kProbeZ;
+  const float cell = kProbeCell * kMeter;
+  if (!m_probe_tex[0]) {
+    glGenTextures(2, m_probe_tex);
+    glGenFramebuffers(2, m_probe_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_probe_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_probe_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  // the corner: the camera at the grid's middle across, a quarter up (more of it below: the ground
+  // and the characters on it), in whole cells
+  const int cc[3] = {(int)std::floor(cam.trans[0] / cell) - kProbeX / 2,
+                     (int)std::floor(cam.trans[1] / cell) - kProbeY * 3 / 4,
+                     (int)std::floor(cam.trans[2] / cell) - kProbeZ / 2};
+  const int sh[3] = {cc[0] - m_probe_cell[0], cc[1] - m_probe_cell[1], cc[2] - m_probe_cell[2]};
+  const bool keep = m_probe_valid && std::abs(sh[0]) < kProbeX && std::abs(sh[1]) < kProbeY &&
+                    std::abs(sh[2]) < kProbeZ;
+  static const EnhancedTune t_rays("post.probe_rays", 8.f);
+  static const EnhancedTune t_blend("post.probe_blend", 0.25f);
+  static const EnhancedTune t_every("post.probe_every", 8.f);
+  static const EnhancedTune t_range("post.probe_range_m", 40.f);
+  const int back = 1 - m_probe_front;
+  GLint vp[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& shd = render_state->shaders[ShaderId::ENH_PROBES];
+  shd.activate();
+  const auto id = shd.id();
+  for (int i = 0; i < 3; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glActiveTexture(GL_TEXTURE12);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, m_rt_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_probe_tex[m_probe_front]);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  float tod[8 * 4];
+  for (int p = 0; p < 8; p++) {
+    for (int ch = 0; ch < 4; ch++) {
+      u32 word = (u32)g_enhanced_tod.itimes[p / 2][(p % 2) * 2 + ch / 2];
+      u32 hw = (ch % 2) ? (word >> 16) : word;
+      tod[p * 4 + ch] = (hw & 0xff) / 64.f;
+    }
+  }
+  glUniform4fv(glGetUniformLocation(id, "rt_tod"), 8, tod);
+  glUniform4f(glGetUniformLocation(id, "grid"), cc[0] * cell, cc[1] * cell, cc[2] * cell, cell);
+  glUniform4i(glGetUniformLocation(id, "shift"), sh[0], sh[1], sh[2], keep ? 1 : 0);
+  glUniform3i(glGetUniformLocation(id, "dims"), kProbeX, kProbeY, kProbeZ);
+  m_probe_frame += 1.f;
+  if (m_probe_frame > 4096.f) {
+    m_probe_frame = 0.f;
+  }
+  glUniform1f(glGetUniformLocation(id, "frame"), m_probe_frame);
+  glUniform1f(glGetUniformLocation(id, "blend"), std::clamp((float)t_blend, 0.01f, 1.f));
+  glUniform1f(glGetUniformLocation(id, "tmax"), std::max((float)t_range, 1.f) * kMeter);
+  glUniform1i(glGetUniformLocation(id, "rays"), std::clamp((int)(float)t_rays, 1, 64));
+  glUniform1i(glGetUniformLocation(id, "every"), std::clamp((int)(float)t_every, 1, kProbeZ / 4));
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[back]);
+  glViewport(0, 0, W, H);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  if (had_scissor) {
+    glEnable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_probe_front = back;
+  for (int i = 0; i < 3; i++) {
+    m_probe_cell[i] = cc[i];
+  }
+  m_probe_valid = true;
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,

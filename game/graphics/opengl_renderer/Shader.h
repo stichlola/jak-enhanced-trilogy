@@ -111,6 +111,7 @@ enum class ShaderId {
   ENH_TERRAIN = 60, // Enhanced: a private level's own ground (EnhancedTerrain)
   ENH_HIZ = 61,     // Enhanced: the depth pyramid (post.hiz)
   ENH_SKY_MAP = 62, // Enhanced: the open sky straight up, traced (post.sky_map)
+  ENH_PROBES = 63,  // Enhanced: light probes around the camera, traced (post.probes)
   MAX_SHADERS
 };
 
