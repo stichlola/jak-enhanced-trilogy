@@ -216,6 +216,8 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
+uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
@@ -3649,7 +3651,18 @@ void main() {
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
       // (the sprites in front of it: the chimneys' smoke, glows)
-      c = max(c + fx_rest * clouds.x * (1.0 - game_w), 0.0);
+      // (the sun's and moon's glows among them: their faint outskirts stopped at the quad's edge, a
+      // square over our sky, so the faintest light is let go; and their core, clipped white in the
+      // game's picture, had nothing left to add over a sky as bright: a hollow lilac ring. Where the
+      // sprites clipped the game's sky to white it stays white)
+      vec3 fr_pos = max(fx_rest, 0.0);
+      vec3 fr = fx_rest - fr_pos + max(fr_pos - tune_fx_sky_edge, 0.0) * (1.0 + tune_fx_sky_edge * 4.0);
+      c = max(c + fr * clouds.x * (1.0 - game_w), 0.0);
+      if (fx_day > 0.0 && z == 0.0 && tune_fx_sky_core > 0.0) {
+        vec3 f1s = textureLod(tex_T24, uv, 0.0).rgb;
+        float core = smoothstep(0.93, 0.99, min(f1s.r, min(f1s.g, f1s.b))) * smoothstep(0.01, 0.04, luma(fx_all));
+        c = max(c, vec3(tune_fx_sky_core * core * clouds.x * (1.0 - game_w)));
+      }
       // (and what the game drew over its sky without depth: the palace's honeycomb windows, glass
       // and grates, went with the sky, blown to a white pane. Their lines put back over ours: where
       // the levels changed the game's sky (sky_over), and sharply, against what they did 3 px
