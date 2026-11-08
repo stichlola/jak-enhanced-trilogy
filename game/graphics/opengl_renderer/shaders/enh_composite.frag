@@ -211,6 +211,9 @@ uniform float tune_chr_dark = 0.5;   // and how much darker they get after the g
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
 uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
+uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
+uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
@@ -2698,11 +2701,14 @@ void main() {
     refl = reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0,
                               1.0 - smoothstep(150.0 * 4096.0, 200.0 * 4096.0, z));
     wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
+    if (abs(tune_water_dbg - 3.0) < 0.5) {
+      wc = body;  // (test: no reflection)
+    }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
     // column toward the eye (a harbor at night); it reaches much further than the lamp's light
     float lamp_night = max(night_dark.x, clouds.w);
-    if ((light_count > 0 || spot_count > 0) && lamp_night > 0.0) {
+    if ((light_count > 0 || spot_count > 0) && lamp_night > 0.0 && abs(tune_water_dbg - 1.0) > 0.5) {
       vec3 lsum = vec3(0.0);
       for (int i = 0; i < light_count; i++) {
         vec3 tl = light_pos[i].xyz - p;
@@ -2732,13 +2738,23 @@ void main() {
     }
     // the far lights too (across a harbor, the desert's fires by an oasis): thin columns of light
     // broken up by the waves
-    for (int i = 0; i < beacon_count; i++) {
+    // (summed, then hidden where the reflected ray meets a wall first and rolled off like the lamps'
+    // columns: in the harbor at night the near ones added up to flat white blocks and wide red and
+    // pink bands with hard sides, where vanilla's water is plain dark blue)
+    vec3 bsum = vec3(0.0);
+    float bwide = mix(90.0, 220.0, tune_beacon_soft);
+    for (int i = 0; i < (abs(tune_water_dbg - 2.0) < 0.5 ? 0 : beacon_count); i++) {
       vec3 l = normalize(beacon_pos[i].xyz - p);
       float nh = max(dot(n, normalize(l - vdir)), 0.0);
       float fade = exp(-length(beacon_pos[i].xyz) / (1800.0 * 4096.0));
-      wc += beacon_color[i].rgb * beacon_color[i].w * fade * (pow(nh, 700.0) * 3.0 + pow(nh, 90.0) * 0.08) *
-            (0.4 + 0.6 * water_strength);
+      bsum += beacon_color[i].rgb * beacon_color[i].w * fade * (pow(nh, 700.0) * 3.0 + pow(nh, bwide) * 0.08);
     }
+    if (tune_beacon_soft > 0.0) {
+      vec3 soft = bsum * (1.0 - 0.9 * ssr_hit);
+      soft = soft / (1.0 + max(soft.r, max(soft.g, soft.b))) * tune_beacon_water;
+      bsum = mix(bsum, soft, tune_beacon_soft);
+    }
+    wc += bsum * (0.4 + 0.6 * water_strength);
 
     // sun glints: a tight highlight plus a broad sheen toward the sun
     if (sun_dir.w > 0.0) {
@@ -4983,6 +4999,9 @@ void main() {
   if (tune_fx_debug > 0.5) {
     c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
         tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : vec3(fx_day, 0.5, 0.0);
+  }
+  if (abs(tune_water_dbg - 4.0) < 0.5) {
+    c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
   }
   if (tune_shadow_dbg > 1.5) {
     c = vec3(rock_sh, sun_lit, pix_tag);  // (test: the shadow, the sun's light, the material tag)
