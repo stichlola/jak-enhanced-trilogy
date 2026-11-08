@@ -5,6 +5,54 @@
 
 using namespace enh_post;
 
+namespace {
+// How far the GPU runs behind the CPU at a point of the post: a timestamp query (written when the
+// GPU gets there) against the GPU's clock read by the CPU as it queues it (glGetInteger64v
+// GL_TIMESTAMP, no wait). Near 0 = the GPU was idle, waiting for these commands (starved by the
+// CPU or by commands still sitting in the driver); large = it was busy with earlier work. Read 4
+// frames later, never waited for; "debug": {"cpu_profile": 1} logs it every 5 s.
+struct LagProbe {
+  const char* name;
+  GLuint q[4] = {};
+  GLint64 cpu[4] = {};
+  bool used[4] = {};
+  double sum = 0.0;
+  int n = 0, starved = 0;
+  void mark(unsigned frame) {
+    if (!q[0]) {
+      glGenQueries(4, q);
+    }
+    const int s = frame & 3;
+    if (used[s]) {
+      GLint ready = 0;
+      glGetQueryObjectiv(q[s], GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (ready) {
+        GLuint64 g = 0;
+        glGetQueryObjectui64v(q[s], GL_QUERY_RESULT, &g);
+        const double lag = ((double)(GLint64)g - (double)cpu[s]) * 1e-6;
+        if (lag > -5.0 && lag < 100.0) {
+          sum += lag;
+          n++;
+          starved += lag < 0.05 ? 1 : 0;
+        }
+      }
+      used[s] = false;
+    }
+    glQueryCounter(q[s], GL_TIMESTAMP);
+    glGetInteger64v(GL_TIMESTAMP, &cpu[s]);
+    used[s] = true;
+  }
+  std::string report() {
+    std::string out = n ? fmt::format("{} {:.2f} ({}% idle)", name, sum / n, 100 * starved / n) : "";
+    sum = 0.0;
+    n = starved = 0;
+    return out;
+  }
+};
+LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"}, g_lag_taa{"taa"},
+    g_lag_end{"end"};
+}  // namespace
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,
@@ -51,6 +99,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
   // the vsync wait when the frame has time to spare)
   const auto post_cpu0 = std::chrono::steady_clock::now();
+  // (test switch "debug": {"post_flush": n}: glFlush at points of the post, so the GPU gets the
+  // queued commands before the CPU's next long stretch of setup; bits 1 before the post, 2 after
+  // prepare, 4 after the composite)
+  static const EnhancedTune t_post_flush("debug.post_flush", 0.f);
+  const int post_flush = (int)(float)t_post_flush;
+  if (post_flush & 1) {
+    glFlush();
+  }
+  static const EnhancedTune t_cpu_profile("debug.cpu_profile", 0.f);
+  const bool lag_probes = (float)t_cpu_profile > 0.5f;
+  if (lag_probes) {
+    g_lag_start.mark(pass_timer_frame());
+  }
   static enh_post::PassTimer t_post_total("enh-total");
   enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
@@ -60,6 +121,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
+  if (post_flush & 2) {
+    glFlush();
+  }
   const bool have_scene = m_ssao_ready;
   // (where the post's GPU time goes between the named passes: the whole interval from here to the
   // composite's draw on the GPU's clock, which counts its idle time while the CPU sets the composite
@@ -1758,17 +1822,36 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     if (std::chrono::duration<double>(now - cpu_t).count() >= 5.0) {
       lg::info("[enhanced] post cpu: to composite {:.2f} ms, of it setup {:.2f} ms (n={})",
                cpu_total / cpu_n, cpu_setup / cpu_n, cpu_n);
+      if (lag_probes) {
+        lg::info("[enhanced] gpu lag behind cpu (ms): frame {:.2f}, {}, {}, {}, {}, {}", m_gpu_lag_ms,
+                 g_lag_start.report(), g_lag_composite.report(), g_lag_blit.report(), g_lag_taa.report(), g_lag_end.report());
+      }
       cpu_setup = cpu_total = 0.0;
       cpu_n = 0;
       cpu_t = now;
     }
-  }  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  }
+  if (lag_probes) {
+    g_lag_composite.mark(pass_timer_frame());
+  }
+  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  {
+    // (test switch "debug": {"gpu_burn": n}: the composite drawn n more times, the same picture,
+    // to make the graphics card the bottleneck when testing the auto quality)
+    static const EnhancedTune t_gpu_burn("debug.gpu_burn", 0.f);
+    for (int i = 0; i < std::min(64, (int)(float)t_gpu_burn); i++) {
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+  }
   if (probe_group >= 0) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
     glGetQueryObjectui64v(probe.query, GL_QUERY_RESULT, &ns);
     probe.sum[probe_group] += ns / 1e6;
     probe.count[probe_group]++;
+  }
+  if (post_flush & 4) {
+    glFlush();
   }
   static enh_post::PassTimer t_tail_span("enh-tail-span");
   enh_post::PassTimerScope tail_span(t_tail_span);
@@ -1779,7 +1862,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (lag_probes) {
+      g_lag_blit.mark(pass_timer_frame());
+    }
     resolve_taa(m_scene_tex);
+    if (lag_probes) {
+      g_lag_taa.mark(pass_timer_frame());
+    }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taa_fbo[1 - m_taa_cur]);  // (the one just written)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -1788,6 +1877,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
 
+  if (lag_probes) {
+    g_lag_end.mark(pass_timer_frame());
+  }
   // the end of this frame's 3D and post work, for the auto quality
   if (m_gpu_query_open) {
     glQueryCounter(m_gpu_query[m_gpu_query_slot][2], GL_TIMESTAMP);

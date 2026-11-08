@@ -821,6 +821,7 @@ class EnhancedPost {
  public:
   float gpu_ms() const { return m_gpu_ms; }
   float gpu_post_ms() const { return m_gpu_post_ms; }
+  float gpu_lag_ms() const { return m_gpu_lag_ms; }
   int auto_level() const { return m_auto_level; }
   static std::string pass_times();
 
@@ -832,6 +833,15 @@ class EnhancedPost {
   float m_gpu_ms = 0.f;
   float m_gpu_post_ms = 0.f;
   float m_gpu_other_ms = 0.f;  // the frame's GPU time outside the post pass, when it was measurable
+  // how far the GPU is behind the CPU when a frame starts (its frame-start timestamp against the
+  // GPU clock the CPU read as it queued it), smoothed: near 0 = the GPU waited for the CPU, so it
+  // has time to spare whatever its (lowered) clock makes the passes read; several ms = it's still
+  // drawing the frame before, the graphics card is what holds the frame back
+  GLint64 m_gpu_cpu_t0[4] = {};
+  float m_gpu_lag_ms = 0.f;
+  double m_gpu_room_since = 0.0;  // since when the GPU waits for the CPU at 60 fps (0 = it doesn't)
+  double m_auto_up_at = -1e9;     // the last step back up, and how long to wait before the next
+  double m_auto_up_wait = 10.0;
   float m_frame_ms = 16.7f;    // the real frame time (the CPU's clock), smoothed
   double m_last_frame = 0.0;
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)
