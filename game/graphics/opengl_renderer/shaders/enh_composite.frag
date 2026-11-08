@@ -266,6 +266,7 @@ uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadow
 uniform float tune_dusk_shade = 1.0;  // the shade's blue tint let go as the sun nears the horizon (not the desert; 0: off)
 uniform float tune_cloud_in_shade = 0.3;  // cloud shadows inside the sun's shadow (1: as on sunlit ground, old)
 uniform float tune_dusk_floor = 0.6;  // the low sun's shade: never under this share of the game's color (0: off)
+uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
 uniform float tune_night_lamp_hi = 0.9;
@@ -4659,7 +4660,9 @@ void main() {
         c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + mix(1.1, 2.2, noon) * fine), 0.25);
         // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
         // sand's made of)
-        c = mix(vec3(luma(c)), c, mix(0.92, 0.9, low_light)) * mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light);
+        // (not by night: the moon's blue ground went grey-mauve, red +29 over vanilla at 22h)
+        c = mix(vec3(luma(c)), c, mix(0.92, 0.9, low_light)) *
+            mix(mix(vec3(1.12, 1.0, 0.86), vec3(1.12, 1.0, 0.88), low_light), vec3(1.0), clouds.w * tune_rock_night);
         c *= gtint;
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
