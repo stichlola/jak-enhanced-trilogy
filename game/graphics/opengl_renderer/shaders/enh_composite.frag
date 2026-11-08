@@ -371,7 +371,14 @@ vec2 hash2(vec2 q) {
   return -1.0 + 2.0 * fract((p3.xx + p3.yz) * p3.zy);
 }
 
+// (noise_lut 1: read from tex_T20, the same noise as a picture, EnhancedPostPasses: 64 cells a
+// side, 16 texels each, repeating past them; a bilinear read instead of four hashes)
+uniform float noise_lut;
+uniform sampler2D tex_T20;
 float gnoise(vec2 x) {
+  if (noise_lut > 0.5) {
+    return textureLod(tex_T20, x * (1.0 / 64.0) + 0.5 / 1024.0, 0.0).r;
+  }
   vec2 i = floor(x);
   vec2 f = fract(x);
   vec2 u = f * f * (3.0 - 2.0 * f);

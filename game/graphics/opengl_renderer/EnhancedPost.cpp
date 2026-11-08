@@ -385,6 +385,9 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(1, &m_rays_fbo);
     glDeleteTextures(1, &m_rays_tex);
   }
+  if (m_noise_tex) {
+    glDeleteTextures(1, &m_noise_tex);
+  }
   if (m_shadow_far_fbo) {
     glDeleteFramebuffers(1, &m_shadow_far_fbo);
     glDeleteTextures(1, &m_shadow_far_tex);

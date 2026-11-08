@@ -697,6 +697,7 @@ class EnhancedPost {
   GLuint m_rays_tex = 0;
   int m_rays_w = 0;
   int m_rays_h = 0;
+  GLuint m_noise_tex = 0;  // gnoise as a picture (post.noise_lut, unit 20)
 
   // the area's look and weather, eased toward the current area's each frame (update_scene)
   struct Grade {
