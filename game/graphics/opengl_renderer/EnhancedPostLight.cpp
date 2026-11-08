@@ -1111,6 +1111,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
       continue;
     }
     auto& draws = m_shadow_draws[lev->load_id];
+    m_shadow_draws_gen++;
     const auto& name = lev->level->level_name;
     const bool cut = (name == "mhcitya" || name == "ctyport") && enhanced_has_piazza();
     // (test: JAK_ENHANCED_SHADOW_SKIP=lev1,lev2 casts nothing from those levels: bisecting a
@@ -1395,6 +1396,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         }
       }
       it = m_shadow_draws.erase(it);
+      m_shadow_draws_gen++;
     } else {
       ++it;
     }
@@ -1428,7 +1430,15 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   float up[3] = {f[1] * right[2] - f[2] * right[1], f[2] * right[0] - f[0] * right[2],
                  f[0] * right[1] - f[1] * right[0]};
-  auto make_mvp = [&](float range, float depth, float* mvp, int res) {
+  // (shadow.cache: the far and middle maps kept between frames, their square snapped in steps of
+  // several texels so it moves less often; still whole texels, the edges don't crawl. Off: as before,
+  // the far map every other frame, the middle one on the frames between)
+  static const EnhancedTune t_cache("shadow.cache", 0.f);
+  static const EnhancedTune t_cache_snap("shadow.cache_snap_texels", 16.f);
+  static const EnhancedTune t_cache_age("shadow.cache_max_frames", 120.f);
+  const bool cache = (float)t_cache > 0.5f && !g_enhanced_menu.blank_world;
+  const float cache_snap = cache ? std::max(1.f, std::floor((float)t_cache_snap)) : 1.f;
+  auto make_mvp = [&](float range, float depth, float* mvp, int res, float snap = 1.f) {
     float center[3];
     // the camera looks down view +z: its forward in world is column 2 of the rotation; level (no
     // y), so looking up or down doesn't slide the map's square and its seam over the ground
@@ -1444,8 +1454,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
     float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
     float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
-    cr = std::floor(cr / texel) * texel;
-    cu = std::floor(cu / texel) * texel;
+    cr = std::floor(cr / (texel * snap)) * texel * snap;
+    cu = std::floor(cu / (texel * snap)) * texel * snap;
     const float rows[3][4] = {{right[0] / range, right[1] / range, right[2] / range, -cr / range},
                               {up[0] / range, up[1] / range, up[2] / range, -cu / range},
                               {f[0] / depth, f[1] / depth, f[2] / depth, -cf / depth}};
@@ -1462,9 +1472,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
   float far_mvp[16];
-  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, far_mvp, kRes);
+  make_mvp(kShadowFarRange * kMeter, kShadowFarDepth * kMeter, far_mvp, kRes, cache_snap);
   float mid_mvp[16];
-  make_mvp(kShadowMidRange * kMeter, kShadowMidDepth * kMeter, mid_mvp, kMidRes);
+  make_mvp(kShadowMidRange * kMeter, kShadowMidDepth * kMeter, mid_mvp, kMidRes, cache_snap);
 
   GLfloat old_clear_depth = 0.f;
   GLint old_depth_func = GL_GEQUAL;
@@ -1550,7 +1560,36 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   // (the far one every other frame: the sun barely moves. Its matrix changes only along with the
   // map: the new one over last frame's map made the far shadows jump while the camera moved)
   bool far_drawn = false;
-  if (m_shadow_far_fbo && (m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready)) {
+  // (cached: a map is stale when its square moved (rows 0-1 of the matrix), its depth window slid
+  // more than 5%, the casters' levels changed or it is shadow.cache_max_frames old)
+  auto stale = [&](const float* want, const float* have, u32 gen, u32 age) {
+    for (int i = 0; i < 8; i++) {
+      if (want[i] != have[i]) {
+        return true;
+      }
+    }
+    return std::abs(want[11] - have[11]) > 0.05f || gen != m_shadow_draws_gen ||
+           age >= (u32)std::max(1.f, (float)t_cache_age);
+  };
+  bool far_due = m_shadow_far_frame++ % 2 == 0 || !m_shadow_far_ready;
+  bool mid_due = true;
+  if (cache) {
+    m_shadow_far_age++;
+    m_shadow_mid_age++;
+    far_due = !m_shadow_far_ready ||
+              stale(far_mvp, m_light_mvp_far, m_shadow_far_gen, m_shadow_far_age);
+    mid_due = !m_shadow_mid_ready ||
+              stale(mid_mvp, m_light_mvp_mid, m_shadow_mid_gen, m_shadow_mid_age);
+    // (both due while flying fast: take turns, one extra pass a frame at most, as without the cache)
+    if (far_due && mid_due && mid_on && m_shadow_far_ready && m_shadow_mid_ready &&
+        m_shadow_far_frame % 2 == 1) {
+      far_due = false;
+    }
+  }
+  if (m_shadow_far_fbo && far_due) {
+    m_shadow_far_gen = m_shadow_draws_gen;
+    m_shadow_far_age = 0;
+    m_shadow_cache_far_n++;
     memcpy(m_light_mvp_far, far_mvp, sizeof(far_mvp));
     m_shadow_far_span_m = 2.f * kShadowFarDepth;
     ENH_TIMED("enh-shadow-far", draw_levels(m_shadow_far_fbo, m_light_mvp_far, true, true));
@@ -1559,13 +1598,22 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   // (the middle one on the frames the far one skips: one extra pass a frame at most. Its matrix
   // only with its map, as the far one's)
-  if (mid_on && m_shadow_mid_fbo && (!far_drawn || !m_shadow_mid_ready)) {
+  if (mid_on && m_shadow_mid_fbo && mid_due && (!far_drawn || !m_shadow_mid_ready)) {
+    m_shadow_mid_gen = m_shadow_draws_gen;
+    m_shadow_mid_age = 0;
+    m_shadow_cache_mid_n++;
     memcpy(m_light_mvp_mid, mid_mvp, sizeof(mid_mvp));
     m_shadow_mid_span_m = 2.f * kShadowMidDepth;
     ENH_TIMED("enh-shadow-mid", draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true));
     m_shadow_mid_ready = true;
   }
   ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
+  // (how often the far and middle maps were drawn, every ~5 s)
+  if (++m_shadow_cache_frames >= 300) {
+    lg::info("[enhanced] shadow maps drawn: far {} mid {} of {} frames (cache {})",
+             m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_frames, cache ? "on" : "off");
+    m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = 0;
+  }
   glDisableVertexAttribArray(1);
   glBindVertexArray(0);
   // characters only with the sun (or moon) above ~7 degrees: lower, a 2 m character casts a band

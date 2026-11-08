@@ -590,6 +590,14 @@ class EnhancedPost {
   bool m_shadow_mid_ready = false;
   float m_light_mvp_mid[16] = {};
   float m_shadow_mid_span_m = 2000.f;
+  // the far and middle maps kept between frames (tuning shadow.cache): redrawn only when their
+  // snapped square moves, the light turns, the casters' levels change, or they get old
+  u32 m_shadow_draws_gen = 0;   // +1 whenever a level's casters come or go
+  u32 m_shadow_far_gen = 0;
+  u32 m_shadow_mid_gen = 0;
+  u32 m_shadow_far_age = 0;
+  u32 m_shadow_mid_age = 0;
+  u32 m_shadow_cache_frames = 0, m_shadow_cache_far_n = 0, m_shadow_cache_mid_n = 0;
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes
