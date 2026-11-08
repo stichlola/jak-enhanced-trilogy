@@ -48,8 +48,8 @@ namespace ImGui {
 extern ImFont* g_ui_font_bold;  // debug_gui.cpp: the menu title's font
 }
 
-// JAK_ENHANCED_PROFILE=1: each pass waits for the GPU before and after, so the log's profile shows
-// what each one costs on the graphics card
+// JAK_ENHANCED_PROFILE=1: each pass also gets a node in the renderer's profile (CPU time); the GPU
+// time of each is the pass timers' log line below
 inline bool enh_profiling() {
   static const bool on = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
   return on;
@@ -119,16 +119,21 @@ struct PassTimerScope {
 };
 }  // namespace enh_post
 
-#define ENH_TIMED(name, ...)                         \
-  if (enh_profiling()) {                             \
-    glFinish();                                      \
-    auto timed_node = prof.make_scoped_child(name);  \
-    __VA_ARGS__;                                     \
-    glFinish();                                      \
-  } else {                                           \
-    static enh_post::PassTimer enh_pass_timer(name); \
-    enh_post::PassTimerScope enh_pass_scope(enh_pass_timer); \
-    __VA_ARGS__;                                     \
+// The wrapped call gets the pass's own profiler node as `prof`, so a timed pass inside a timed pass
+// becomes its child: adding siblings to the outer node instead grew the vector that holds the open
+// node (dangling pointer, "finish() not called"). GPU time comes from the timestamp pair, never a
+// glFinish (which changed the frame being measured).
+#define ENH_TIMED(name, ...)                                   \
+  {                                                            \
+    static enh_post::PassTimer enh_pass_timer(name);           \
+    enh_post::PassTimerScope enh_pass_scope(enh_pass_timer);   \
+    if (enh_profiling()) {                                     \
+      auto enh_timed_node = prof.make_scoped_child(name);      \
+      [[maybe_unused]] auto& prof = enh_timed_node;            \
+      __VA_ARGS__;                                             \
+    } else {                                                   \
+      __VA_ARGS__;                                             \
+    }                                                          \
   }
 
 namespace enh_post {

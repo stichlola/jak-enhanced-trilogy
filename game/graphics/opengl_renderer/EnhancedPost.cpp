@@ -543,7 +543,7 @@ void EnhancedPost::update_auto_quality() {
 
 bool enh_post::pass_timers_on() {
   static const EnhancedTune t_on("debug.pass_timers", 1.f);
-  return t_on > 0.5f && !enh_profiling();
+  return t_on > 0.5f;
 }
 
 // each timed pass's mean GPU time since the last call (ms), "shadow-map 2.10 ssao 0.80 ..."; the
