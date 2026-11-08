@@ -222,7 +222,7 @@ uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage
 uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
-uniform float tune_beacon_water = 0.6;  // and how bright they get at most
+uniform float tune_beacon_water = 0.25;  // and how bright they get at most
 uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
