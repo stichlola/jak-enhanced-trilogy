@@ -125,6 +125,7 @@ class GlowRenderer {
     u32 tbp;
     DrawMode draw_mode;
     u32 idx;
+    float size = 0.f;  // (Enhanced) the quad's larger side, as a share of the screen
   };
 
   std::array<SpriteRecord, kMaxSprites> m_sprite_records;

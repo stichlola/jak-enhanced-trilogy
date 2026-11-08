@@ -213,6 +213,7 @@ void Generic2::setup_opengl_for_draw_mode(const DrawMode& draw_mode,
   glUniform1i(m_ogl.enh_cloth, cloth ? 1 : 0);
   if (normals_on) {
     glColorMaski(1, cloth, cloth, cloth, cloth);
+    glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);  // (no albedo)
   }
   if (draw_mode.get_depth_write_enable() && !see_through) {
     glDepthMask(GL_TRUE);

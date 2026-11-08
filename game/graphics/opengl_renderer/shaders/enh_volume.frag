@@ -21,6 +21,12 @@ uniform float frame;
 uniform sampler2DShadow tex_T1;  // sun shadow map
 uniform int shadow_on;
 uniform mat4 light_mvp;          // world (game units) -> shadow map
+// the nearest lamps and fires (view space, game units; w: reach) lighting a thin air of their own,
+// with no mist (volume.local_lights): halos and glow around them. vl_air: density (/m), gain
+uniform int vl_count;
+uniform vec4 vl_pos[8];
+uniform vec4 vl_color[8];
+uniform vec2 vl_air;
 
 in vec2 tex_coord;
 out vec4 color;
@@ -97,6 +103,10 @@ void main() {
   float max_z = mist.z * METER;
   vec2 ndc = uv * 2.0 - 1.0;
   vec3 dir = vec3(ndc.x / proj.z, ndc.y / proj.w, 1.0);  // view ray with z = 1
+  // (lights only, no mist: the march need not go past the lights' 40 m)
+  if (mist.x <= 0.0) {
+    max_z = 60.0 * METER;
+  }
   float end = (z > 0.0 ? min(z, max_z) : max_z);
   float ray_len = end * length(dir);
   vec3 step_v = dir * (end / float(STEPS));
@@ -117,7 +127,25 @@ void main() {
 
   vec3 scattered = vec3(0.0);
   float trans = 1.0;
+  vec3 dir_n = normalize(dir);
   for (int i = 0; i < STEPS; i++) {
+    // the lamps' light in the air: each light's color by a smooth inverse square inside its reach,
+    // scattered toward the camera with a mild forward lobe (Henyey-Greenstein g = 0.3)
+    if (vl_count > 0) {
+      vec3 lsum = vec3(0.0);
+      for (int k = 0; k < vl_count; k++) {
+        vec3 d = p - vl_pos[k].xyz;
+        float r = max(vl_pos[k].w, METER);
+        float q = dot(d, d) / (r * r);
+        if (q < 1.0) {
+          float f = (1.0 - q) * (1.0 - q) / (1.0 + 8.0 * q);
+          float ct = dot(d, -dir_n) * inversesqrt(max(dot(d, d), 1.0));
+          float ph = 0.0703 / pow(1.09 - 0.6 * ct, 1.5);  // (1 - g^2) / (4 pi (1 + g^2 - 2 g ct)^1.5)
+          lsum += vl_color[k].rgb * f * ph;
+        }
+      }
+      scattered += trans * lsum * (vl_air.x * ds) * vl_air.y * 12.566;
+    }
     float sigma = density(p);
     if (sigma > 1e-6) {
       float vis = sun_dir.w > 0.0 ? sun_visible(p) : 0.0;

@@ -95,8 +95,8 @@ EnhancedNormalTarget::EnhancedNormalTarget() {
   if ((GLuint)bound != g_enhanced_normals.fbo) {
     return;  // drawing somewhere else (texture animation, offscreen)
   }
-  const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-  glDrawBuffers(2, both);
+  const GLenum all[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+  glDrawBuffers(g_enhanced_normals.albedo ? 3 : 2, all);
   m_on = true;
 }
 
@@ -105,6 +105,7 @@ EnhancedNormalTarget::~EnhancedNormalTarget() {
     const GLenum color = GL_COLOR_ATTACHMENT0;
     glDrawBuffers(1, &color);
     glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   }
 }
 
@@ -543,7 +544,7 @@ void EnhancedPost::update_auto_quality() {
 
 bool enh_post::pass_timers_on() {
   static const EnhancedTune t_on("debug.pass_timers", 1.f);
-  return t_on > 0.5f && !enh_profiling();
+  return t_on > 0.5f;
 }
 
 // each timed pass's mean GPU time since the last call (ms), "shadow-map 2.10 ssao 0.80 ..."; the
@@ -591,16 +592,23 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   g_enhanced_casters.capture =
       m_settings.enabled && m_settings.shadow_map && m_settings.shadow_casters;
   g_enhanced_normals.enabled = m_settings.enabled && m_settings.geometry_normals;
+  // (the level's albedo as a third target: tuning lights.albedo 1; off until proven)
+  static const EnhancedTune t_albedo("lights.albedo", 0.f);
+  g_enhanced_normals.albedo = g_enhanced_normals.enabled && (float)t_albedo > 0.5f;
   if (g_enhanced_normals.enabled && g_enhanced_normals.fbo) {
     // a = 0: no normal (the post pass rebuilds one from depth there)
     GLint prev = 0;
     glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &prev);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, g_enhanced_normals.fbo);
-    const GLenum both[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, both);
+    const GLenum all[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+    glDrawBuffers(g_enhanced_normals.albedo ? 3 : 2, all);
     glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     const float zero[4] = {0.f, 0.f, 0.f, 0.f};
     glClearBufferfv(GL_COLOR, 1, zero);
+    if (g_enhanced_normals.albedo) {
+      glColorMaski(2, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+      glClearBufferfv(GL_COLOR, 2, zero);
+    }
     const GLenum color = GL_COLOR_ATTACHMENT0;
     glDrawBuffers(1, &color);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, prev);
@@ -727,13 +735,19 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
   glActiveTexture(GL_TEXTURE0);
   glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_tex);
-  if (w != m_fx_w || h != m_fx_h) {
+  // (half floats while the frame is, post.hdr_scene: an additive pool over a bright floor past 1 left
+  // "after - before" its clip contour, a jagged edge)
+  static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
+  static bool fx_hdr = false;
+  const bool hdr_scene = (float)t_hdr_scene > 0.5f;
+  if (w != m_fx_w || h != m_fx_h || hdr_scene != fx_hdr) {
     if (m_fx_fbo[0]) {
       glDeleteFramebuffers(2, m_fx_fbo);
       glDeleteTextures(2, m_fx_tex);
     }
     m_fx_w = w;
     m_fx_h = h;
+    fx_hdr = hdr_scene;
     glGenFramebuffers(2, m_fx_fbo);
     glGenTextures(2, m_fx_tex);
     // (with mips: how far an effect spreads tells a shot or a flame from a wash of light over the
@@ -744,7 +758,7 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
     }
     for (int i = 0; i < 2; i++) {
       glBindTexture(GL_TEXTURE_2D, m_fx_tex[i]);
-      glTexStorage2D(GL_TEXTURE_2D, levels, GL_RGBA8, w, h);
+      glTexStorage2D(GL_TEXTURE_2D, levels, hdr_scene ? GL_RGBA16F : GL_RGBA8, w, h);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

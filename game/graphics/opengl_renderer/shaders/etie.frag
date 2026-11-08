@@ -2,6 +2,7 @@
 
 layout (location = 0) out vec4 color;
 layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0 for none
+layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 
 in vec4 fragment_color;
 in vec3 tex_coord;
@@ -16,6 +17,7 @@ uniform int gfx_hack_no_tex;
 
 
 void main() {
+  enh_albedo_out = vec4(0.0);
   enh_normal_out = vec4(0.0);
   if (gfx_hack_no_tex == 0) {
     //vec4 T0 = texture(tex_T0, tex_coord);

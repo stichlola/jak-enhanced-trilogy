@@ -12,6 +12,7 @@
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
 #include "game/graphics/opengl_renderer/ProgressRenderer.h"
 #include "game/graphics/opengl_renderer/ShadowRenderer.h"
@@ -909,9 +910,13 @@ void OpenGLRenderer::init_bucket_renderers_jak1() {
 }
 
 namespace {
-Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil) {
+Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil, bool hdr = false) {
   Fbo result;
   bool use_multisample = msaa > 1;
+  // (Enhanced: half floats, so lights, glows and effects that add up past 1 aren't clipped; the
+  // post's input for an HDR path, post.hdr_scene)
+  const GLenum color_fmt = hdr ? GL_RGBA16F : GL_RGBA8;
+  result.hdr = hdr;
 
   // make framebuffer object
   glGenFramebuffers(1, &result.fbo_id);
@@ -925,10 +930,11 @@ Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil) {
   glActiveTexture(GL_TEXTURE0);
   if (use_multisample) {
     glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, tex);
-    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGBA8, w, h, GL_TRUE);
+    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, color_fmt, w, h, GL_TRUE);
   } else {
     glBindTexture(GL_TEXTURE_2D, tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, color_fmt, w, h, 0, GL_RGBA, hdr ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE,
+                 nullptr);
   }
   // make depth and stencil buffers that will hold the... depth and stencil buffers
   if (make_zbuf_and_stencil) {
@@ -958,6 +964,21 @@ Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil) {
       glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
                    nullptr);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, ntex, 0);
+    }
+    // Enhanced: and their albedo (the texture's color before the baked light; a: that light's
+    // brightness), written only while the albedo target is on (lights.albedo)
+    GLuint atex;
+    glGenTextures(1, &atex);
+    result.albedo_tex_id = atex;
+    if (use_multisample) {
+      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, atex);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGBA8, w, h, GL_TRUE);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D_MULTISAMPLE, atex,
+                             0);
+    } else {
+      glBindTexture(GL_TEXTURE_2D, atex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, atex, 0);
     }
   }
   // attach texture to framebuffer as target for colors
@@ -1303,10 +1324,14 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
   window_fb.multisample_count = 1;
   window_fb.multisampled = false;
 
-  // see if the render FBO is still applicable
+  // see if the render FBO is still applicable (Enhanced: and its color format, post.hdr_scene,
+  // switched live from the tuning file)
+  static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
+  const bool hdr_scene = (float)t_hdr_scene > 0.5f;
   if (settings.save_screenshot || window_resized || !m_fbo_state.render_fbo ||
       !m_fbo_state.render_fbo->matches(settings.game_res_w, settings.game_res_h,
-                                       settings.msaa_samples)) {
+                                       settings.msaa_samples) ||
+      m_fbo_state.render_fbo->hdr != hdr_scene) {
     // doesn't match, set up a new one for these settings
     lg::info("FBO Setup: requested {}x{}, msaa {}", settings.game_res_w, settings.game_res_h,
              settings.msaa_samples);
@@ -1320,7 +1345,7 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
 
     // create a fbo to render to, with the desired settings
     m_fbo_state.resources.render_buffer =
-        make_fbo(settings.game_res_w, settings.game_res_h, settings.msaa_samples, true);
+        make_fbo(settings.game_res_w, settings.game_res_h, settings.msaa_samples, true, hdr_scene);
     m_fbo_state.render_fbo = &m_fbo_state.resources.render_buffer;
 
     if (settings.msaa_samples != 1) {
@@ -1330,7 +1355,7 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
       // we'll need a temporary fbo to do the msaa resolve step
       // non-multisampled, and doesn't need z/stencil
       m_fbo_state.resources.resolve_buffer =
-          make_fbo(settings.game_res_w, settings.game_res_h, 1, false);
+          make_fbo(settings.game_res_w, settings.game_res_h, 1, false, hdr_scene);
     } else {
       lg::info("FBO Setup: not using second temporary buffer");
     }

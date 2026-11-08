@@ -1051,6 +1051,7 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   glDisable(GL_CULL_FACE);
   glDepthMask(GL_TRUE);
   glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glColorMaski(2, GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);  // (the ground's albedo kept)
 
   glBindVertexArray(g_gl.vao);
   glBindBuffer(GL_ARRAY_BUFFER, g_gl.vbo);

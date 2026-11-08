@@ -42,6 +42,11 @@ void EnhancedPost::free_ssao() {
     glDeleteTextures(1, &m_normal_tex);
     m_normal_fbo = m_normal_tex = 0;
   }
+  if (m_albedo_fbo) {
+    glDeleteFramebuffers(1, &m_albedo_fbo);
+    glDeleteTextures(1, &m_albedo_tex);
+    m_albedo_fbo = m_albedo_tex = 0;
+  }
   if (m_depth_fbo) {
     glDeleteFramebuffers(1, &m_depth_fbo);
     glDeleteTextures(1, &m_depth_tex);
@@ -101,6 +106,17 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glBindFramebuffer(GL_FRAMEBUFFER, m_normal_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_normal_tex, 0);
 
+    glGenFramebuffers(1, &m_albedo_fbo);
+    glGenTextures(1, &m_albedo_tex);
+    glBindTexture(GL_TEXTURE_2D, m_albedo_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_albedo_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_albedo_tex, 0);
+
     // (the occlusion and the characters' sun shadows at half the resolution a side: blurred anyway,
     // a quarter of the pixels to march)
     glGenFramebuffers(2, m_ao_fbo);
@@ -132,6 +148,16 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glReadBuffer(GL_COLOR_ATTACHMENT0);
     m_normals_ready = true;
+  }
+  // and their albedo (lights.albedo)
+  m_albedo_ready = false;
+  if (g_enhanced_normals.albedo && src_fbo == g_enhanced_normals.fbo) {
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
+    glReadBuffer(GL_COLOR_ATTACHMENT2);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_albedo_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    m_albedo_ready = true;
   }
 
   glDisable(GL_DEPTH_TEST);
@@ -347,6 +373,7 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_vol_ready = false;
   m_shadow_ready = false;
   g_enhanced_casters.cast = false;
+  g_enhanced_casters.keep_game = false;
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }
@@ -355,7 +382,11 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
     // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
-    if (m_settings.volume && m_fade_volume > 0.f && m_ssao_ready && m_fog > 0.01f) {
+    // (also for the lamps' and fires' light in the air, with no mist: volume.local_lights)
+    // (the lights alone cost far less than the mist: kept to the auto quality's second level)
+    if (m_settings.volume && m_ssao_ready &&
+        ((m_fade_volume > 0.f && m_fog > 0.01f) ||
+         (m_fade_gi > 0.f && m_fog <= 0.01f && volume_lights_on()))) {
       ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
     if (m_settings.gi && m_fade_gi > 0.f && m_ssao_ready) {
@@ -742,7 +773,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               m_shadow_ready ? m_settings.shadow_strength * g_enhanced_sun.shadow * (1.f - 0.7f * m_night) : 0.f);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
-  glUniform1f(glGetUniformLocation(id, "volume_fade"), m_fade_volume);
+  // (the volume holds only the lights' glow in the air, no mist: not dimmed by the night)
+  glUniform1f(glGetUniformLocation(id, "vol_lights_only"), m_vol_ready && m_fog <= 0.01f ? 1.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "volume_fade"),
+              m_vol_ready && m_fog <= 0.01f ? m_fade_gi : m_fade_volume);
   glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
               m_vol_h ? 1.f / m_vol_h : 0.f);
   glUniform1f(glGetUniformLocation(id, "gi_strength"),
@@ -899,6 +933,12 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp_mid"), 1, GL_TRUE, m_light_mvp_mid);
   glUniform1f(glGetUniformLocation(id, "shadow_mid_on"), mid ? 1.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "shadow_mid_span"), m_shadow_mid_span_m);
+  // the level albedo (unit 27, lights.albedo)
+  glActiveTexture(GL_TEXTURE27);
+  glBindTexture(GL_TEXTURE_2D, m_albedo_ready ? m_albedo_tex : m_black_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T27"), 27);
+  glUniform1f(glGetUniformLocation(id, "albedo_on"), m_albedo_ready ? 1.f : 0.f);
   glUniform4f(glGetUniformLocation(id, "shadow_params"), m_shadow_near_span_m, 2.f * m_settings.shadow_range,
               m_settings.shadow_softness,
               m_settings.soft_shadows && m_auto_level < 3 ? 1.f : 0.f);

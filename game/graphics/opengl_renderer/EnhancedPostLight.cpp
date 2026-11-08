@@ -297,6 +297,15 @@ void EnhancedPost::update_scene() {
             break;
           }
         }
+        // (test: tuning weather.test_spell = a SpellKind (5 sandstorm) holds that spell, -1 off; one
+        // log line per change)
+        static const EnhancedTune t_test_spell("weather.test_spell", -1.f);
+        if ((float)t_test_spell >= 0.f) {
+          kind = std::clamp((int)(float)t_test_spell, 0, kSpellKinds - 1);
+        }
+        if (kind != m_spell) {
+          lg::info("[enhanced] weather spell {} in {}", kSpellNames[kind], level);
+        }
         m_spell = kind;
         switch (kind) {
           case kShower:
@@ -364,6 +373,14 @@ void EnhancedPost::update_scene() {
       if (!outdoors) {
         rain = storm = clear = mist = dust = sunny = snow = 0.f;
         wet = 0.f;
+      }
+      // Spargus, behind its walls: the game never shows its sandstorm in the city (the storm's
+      // process may still run there after a trip, "rogue level entity desert-dust-storm"), and a
+      // sandstorm spell laid an orange veil over the streets at noon. Out of the gates it blows
+      // again (weather.town_dust: how much of it gets in, 1 = as before)
+      if (g_game_version == GameVersion::Jak3 && level.rfind("was", 0) == 0) {
+        static const EnhancedTune t_town_dust("weather.town_dust", 0.f);
+        dust *= std::clamp((float)t_town_dust, 0.f, 1.f);
       }
       break;
     }
@@ -476,6 +493,16 @@ void EnhancedPost::update_scene() {
   ease(m_grade.clouds, want.clouds, k_weather);
   ease(m_rain, rain * s.rain_strength, k_weather);
   ease(m_dust, dust * s.dust_strength, k_weather);
+  {
+    // (one line per tenth of change: what feeds the post's sandstorm, and the game's own storm)
+    static int logged = -1;
+    const int now = (int)std::lround(m_dust * 10.f) * 100 + (int)std::lround(game_dust * 10.f);
+    if (now != logged) {
+      lg::info("[enhanced] dust {:.1f} (game storm {:.1f}) in {}", m_dust, game_dust,
+               level.empty() ? "none" : level);
+      logged = now;
+    }
+  }
   ease(m_storm, storm, k_weather);
   if (kFogOff) {
     fog = 0.f;
@@ -1467,7 +1494,37 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     mvp[12] = mvp[13] = mvp[14] = 0.f;
     mvp[15] = 1.f;
   };
-  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, m_light_mvp, kRes);
+  // (shadow.near_cache: the near map's static part kept between frames, its square snapped in steps
+  // of shadow.near_cache_snap_texels; each frame only the wind-blown trees and the characters are
+  // drawn over a copy of it. Off: the whole near map every frame, as before)
+  static const EnhancedTune t_near_cache("shadow.near_cache", 0.f);
+  static const EnhancedTune t_near_snap("shadow.near_cache_snap_texels", 16.f);
+  const bool near_cache = (float)t_near_cache > 0.5f && !g_enhanced_menu.blank_world;
+  float near_mvp[16];
+  make_mvp(m_settings.shadow_range * kMeter, kShadowNearDepth * kMeter, near_mvp, kRes,
+           near_cache ? std::max(1.f, std::floor((float)t_near_snap)) : 1.f);
+  if (!near_cache) {
+    memcpy(m_light_mvp, near_mvp, sizeof(near_mvp));
+  }
+  if (near_cache && !m_shadow_near_static_fbo) {
+    glGenFramebuffers(1, &m_shadow_near_static_fbo);
+    glGenTextures(1, &m_shadow_near_static_tex);
+    glBindTexture(GL_TEXTURE_2D, m_shadow_near_static_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_shadow_near_static_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D,
+                           m_shadow_near_static_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_shadow_near_static_ready = false;
+  }
+  if (!near_cache) {
+    m_shadow_near_static_ready = false;
+  }
   m_shadow_near_span_m = 2.f * kShadowNearDepth;  // (the composite's biases and penumbrae, in meters)
   // the far map: the mountains, big rocks and trees out to ~1.2 km, the low sun's long shadows
   // there (the near map is 2 x 80 m)
@@ -1500,10 +1557,14 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE0);
   // (the middle map draws as the far one does (the big plants, not the small shrubs), the terrain too)
-  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map, bool mid_map = false) {
+  // (part: 0 everything, 1 all but the wind-blown trees, 2 only those, over what the map holds)
+  auto draw_levels = [&](GLuint fbo, const float* mvp, bool wind, bool far_map, bool mid_map = false,
+                         int part = 0) {
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     glViewport(0, 0, mid_map ? kMidRes : kRes, mid_map ? kMidRes : kRes);
-    glClear(GL_DEPTH_BUFFER_BIT);
+    if (part != 2) {
+      glClear(GL_DEPTH_BUFFER_BIT);
+    }
     glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp);
     glBindVertexArray(m_shadow_vao);
     glEnableVertexAttribArray(0);
@@ -1519,7 +1580,8 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     }
     for (auto& [lid, draws] : m_shadow_draws) {
       for (auto& d : draws) {
-        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big)) {
+        if ((d.wind && (!m_settings.shadow_casters || !wind)) || (d.shrub && far_map != d.big) ||
+            (part == 1 && d.wind) || (part == 2 && !d.wind)) {
           continue;
         }
         glUniform1i(u_cut, d.cut);
@@ -1607,12 +1669,37 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     ENH_TIMED("enh-shadow-mid", draw_levels(m_shadow_mid_fbo, m_light_mvp_mid, true, true, true));
     m_shadow_mid_ready = true;
   }
-  ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
-  // (how often the far and middle maps were drawn, every ~5 s)
+  if (near_cache) {
+    // the static part when stale (as the far map), then a copy of it plus the trees each frame;
+    // the live map's matrix is always the static part's
+    m_shadow_near_age++;
+    if (!m_shadow_near_static_ready ||
+        stale(near_mvp, m_light_mvp_near_static, m_shadow_near_gen, m_shadow_near_age)) {
+      m_shadow_near_gen = m_shadow_draws_gen;
+      m_shadow_near_age = 0;
+      m_shadow_cache_near_n++;
+      memcpy(m_light_mvp_near_static, near_mvp, sizeof(near_mvp));
+      ENH_TIMED("enh-shadow-near-static",
+                draw_levels(m_shadow_near_static_fbo, m_light_mvp_near_static, false, false, false, 1));
+      m_shadow_near_static_ready = true;
+    }
+    memcpy(m_light_mvp, m_light_mvp_near_static, sizeof(m_light_mvp));
+    auto near_live = [&]() {
+      glBindFramebuffer(GL_READ_FRAMEBUFFER, m_shadow_near_static_fbo);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_shadow_fbo);
+      glBlitFramebuffer(0, 0, kRes, kRes, 0, 0, kRes, kRes, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+      draw_levels(m_shadow_fbo, m_light_mvp, true, false, false, 2);
+    };
+    ENH_TIMED("enh-shadow-near", near_live());
+  } else {
+    ENH_TIMED("enh-shadow-near", draw_levels(m_shadow_fbo, m_light_mvp, true, false));
+  }
+  // (how often the far, middle and near static maps were drawn, every ~5 s)
   if (++m_shadow_cache_frames >= 300) {
-    lg::info("[enhanced] shadow maps drawn: far {} mid {} of {} frames (cache {})",
-             m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_frames, cache ? "on" : "off");
-    m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = 0;
+    lg::info("[enhanced] shadow maps drawn: far {} mid {} near {} of {} frames (cache {}, near cache {})",
+             m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_near_n, m_shadow_cache_frames,
+             cache ? "on" : "off", near_cache ? "on" : "off");
+    m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = m_shadow_cache_near_n = 0;
   }
   glDisableVertexAttribArray(1);
   glBindVertexArray(0);
@@ -1621,6 +1708,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   if (m_settings.shadow_casters && sun[1] / len > 0.12f) {
     ENH_TIMED("enh-shadow-chars", draw_shadow_casters(render_state, prof));
     g_enhanced_casters.cast = true;
+    // (below ~25 degrees the map's character shadow is a long band off the feet: the game's own
+    // short one stays under them too, or they float (Spargus street at 18h); 0: never)
+    static const EnhancedTune t_keep_game("shadow.game_chars_below_deg", 25.f);
+    g_enhanced_casters.keep_game =
+        sun[1] / len < std::sin(std::clamp((float)t_keep_game, 0.f, 90.f) * 3.14159265f / 180.f);
   }
   glDisable(GL_POLYGON_OFFSET_FILL);
   glDisable(GL_PRIMITIVE_RESTART);
@@ -1857,6 +1949,42 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
   glUniform1i(glGetUniformLocation(id, "shadow_on"), m_shadow_ready);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  {
+    // the nearest lights in the air (volume_lights_on): world -> this frame's view space
+    static const EnhancedTune t_air("volume.light_air", 0.06f);
+    static const EnhancedTune t_gain("volume.light_gain", 1.f);
+    static const EnhancedTune t_halo_r("volume.light_halo_m", 8.f);  // a halo's reach (m), at most
+    static const EnhancedTune t_max_r("volume.light_max_m", 60.f);  // lights reaching farther (the sky's): none
+    constexpr int kVol = 8;
+    float vpos[kVol * 4] = {}, vcol[kVol * 4] = {};
+    int nv = 0;
+    const auto& sl = g_enhanced_smoke_lights;
+    if (volume_lights_on() && m_settings.lights) {
+      for (int i = 0; i < sl.count && nv < kVol; i++) {
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (sl.pos[i][row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        // (only those within 40 m of the camera, plus their reach)
+        const float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        const float reach = 40.f * 4096.f + sl.pos[i][3];
+        // (a halo hugs its lamp: the slums' street lamps reach 27-30 m, as halos they washed a whole wall pale)
+        if (d2 > reach * reach || sl.pos[i][3] > t_max_r * 4096.f) {
+          continue;
+        }
+        std::memcpy(vpos + nv * 4, v, sizeof(float) * 3);
+        vpos[nv * 4 + 3] = std::min(sl.pos[i][3], (float)t_halo_r * 4096.f);
+        std::memcpy(vcol + nv * 4, sl.color[i], sizeof(float) * 3);
+        nv++;
+      }
+    }
+    glUniform1i(glGetUniformLocation(id, "vl_count"), nv);
+    glUniform4fv(glGetUniformLocation(id, "vl_pos"), kVol, vpos);
+    glUniform4fv(glGetUniformLocation(id, "vl_color"), kVol, vcol);
+    glUniform2f(glGetUniformLocation(id, "vl_air"), (float)t_air, (float)t_gain);
+  }
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
   glBindVertexArray(0);

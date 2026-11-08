@@ -21,17 +21,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     snd::ambience::set_targets(silent);
     return;
   }
-  if (w != m_scene_w || h != m_scene_h) {
+  // (the scene's copy in half floats too while the game's frame is (post.hdr_scene, OpenGLRenderer's
+  // make_fbo): the light past 1 reaches the post)
+  static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
+  static bool scene_hdr = false;
+  const bool hdr_scene = (float)t_hdr_scene > 0.5f;
+  if (w != m_scene_w || h != m_scene_h || hdr_scene != scene_hdr) {
     if (m_scene_fbo) {
       glDeleteFramebuffers(1, &m_scene_fbo);
       glDeleteTextures(1, &m_scene_tex);
     }
     m_scene_w = w;
     m_scene_h = h;
+    scene_hdr = hdr_scene;
     glGenFramebuffers(1, &m_scene_fbo);
     glGenTextures(1, &m_scene_tex);
     glBindTexture(GL_TEXTURE_2D, m_scene_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, hdr_scene ? GL_RGBA16F : GL_RGBA8, w, h, 0, GL_RGBA,
+                 hdr_scene ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -43,6 +50,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
   // the vsync wait when the frame has time to spare)
+  const auto post_cpu0 = std::chrono::steady_clock::now();
   static enh_post::PassTimer t_post_total("enh-total");
   enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
@@ -53,7 +61,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
   const bool have_scene = m_ssao_ready;
-  update_scene();
+  // (where the post's GPU time goes between the named passes: the whole interval from here to the
+  // composite's draw on the GPU's clock, which counts its idle time while the CPU sets the composite
+  // up, and the CPU's own time for it; "[enhanced] post cpu" in the log every 5 s)
+  static enh_post::PassTimer t_setup_gap("enh-setup-span");
+  auto setup_span = std::make_unique<enh_post::PassTimerScope>(t_setup_gap);
+  const auto setup_cpu0 = std::chrono::steady_clock::now();  update_scene();
   if (have_scene) {
     // (and the common level: the HUD's textures are there, enhanced_character_hud)
     auto levels = render_state->loader->get_in_use_levels();
@@ -171,6 +184,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform2f(glGetUniformLocation(rid, "keep"), m_settings.taa_history,
                 m_settings.taa_history_fast);
     glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
+    glUniform1f(glGetUniformLocation(rid, "time_s"), (float)m_time);
     ENH_TIMED("enh-taa", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
     prof.add_draw_call();
     m_taa_cur = 1 - cur;
@@ -260,6 +274,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float pos[4];  // view space, radius
       float color[4];
       float score;
+      bool violet = false;  // an effect's violet glow (shots, dark eco clouds)
     };
     std::vector<Candidate> candidates;
     struct Fire {
@@ -370,9 +385,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (l.color[1] < 0.5f * std::min(l.color[0], l.color[2])) {
         intensity *= 0.35f;
         c.pos[3] = std::min(c.pos[3], 8.f * kMeter);
+        c.violet = true;
       }
       for (int k = 0; k < 3; k++) {
         c.color[k] = l.color[k] / peak * intensity;
+      }
+      {  // (tuning.json "lights": {"dump": <m>}: the glows within that many meters, every 7th, in the log)
+        static const EnhancedTune t_dump("lights.dump", 0.f);
+        static int dump_n = 0;
+        if (t_dump > 0.f && dist < t_dump * kMeter && (dump_n++ % 7) == 0) {
+          lg::info("[enhanced] glowlight d {:.1f} size {:.2f} raw {:.2f} {:.2f} {:.2f} fade {:.2f} -> {:.2f} {:.2f} {:.2f} r {:.1f}",
+                   dist / kMeter, raw.size / kMeter, raw.color[0], raw.color[1], raw.color[2], raw.fade,
+                   c.color[0], c.color[1], c.color[2], c.pos[3] / kMeter);
+        }
       }
       c.color[3] = 0.f;
       c.score = bright * c.pos[3] / (dist + c.pos[3]);
@@ -392,7 +417,30 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
-    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
+    // (a fight's dark eco cloud is a dozen violet glows side by side: each faint, together they lit
+    // Jak saturated magenta in the slums at 21h. Their summed light held to that of a few, and paler)
+    // (tuning.json: "lights": {"violet_max", "violet_pale"}; violet_max 0: off)
+    {
+      static const EnhancedTune t_violet_max("lights.violet_max", 2.5f);
+      static const EnhancedTune t_violet_pale("lights.violet_pale", 0.5f);
+      int nv = 0;
+      for (const auto& c : candidates) {
+        nv += c.violet ? 1 : 0;
+      }
+      if (t_violet_max > 0.f && nv > 0) {
+        const float k = std::min(1.f, t_violet_max / (float)nv);
+        const float pale = std::clamp((float)t_violet_pale, 0.f, 1.f);
+        for (auto& c : candidates) {
+          if (!c.violet) {
+            continue;
+          }
+          const float y = 0.3f * c.color[0] + 0.59f * c.color[1] + 0.11f * c.color[2];
+          for (int i = 0; i < 3; i++) {
+            c.color[i] = (c.color[i] + (y - c.color[i]) * pale) * k;
+          }
+        }
+      }
+    }    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
     // seconds; one gone from right in front of the camera was put out or destroyed: forgotten)
     for (size_t i = 0; on && i < m_lamps.size();) {
       auto& l = m_lamps[i];
@@ -1472,7 +1520,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             }
           }
         }
-        glUniform4uiv(glGetUniformLocation(id, "light_tiles"), kTx * kTy / 4, tiles);
+        // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
+        // 1024 constant registers)
+        static GLuint tiles_tex = 0;
+        glActiveTexture(GL_TEXTURE28);
+        if (!tiles_tex) {
+          glGenTextures(1, &tiles_tex);
+          glBindTexture(GL_TEXTURE_2D, tiles_tex);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, kTx, kTy, 0, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                       nullptr);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+        glBindTexture(GL_TEXTURE_2D, tiles_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RED_INTEGER, GL_UNSIGNED_INT, tiles);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
       }
       glUniform1f(glGetUniformLocation(id, "light_tiles_on"), tiles_on ? 1.f : 0.f);
     }
@@ -1681,7 +1746,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (probe_group >= 0) {
     glBeginQuery(GL_TIME_ELAPSED, probe.query);
   }
-  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  setup_span.reset();
+  {
+    static double cpu_setup = 0.0, cpu_total = 0.0;
+    static int cpu_n = 0;
+    static auto cpu_t = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    cpu_setup += std::chrono::duration<double, std::milli>(now - setup_cpu0).count();
+    cpu_total += std::chrono::duration<double, std::milli>(now - post_cpu0).count();
+    cpu_n++;
+    if (std::chrono::duration<double>(now - cpu_t).count() >= 5.0) {
+      lg::info("[enhanced] post cpu: to composite {:.2f} ms, of it setup {:.2f} ms (n={})",
+               cpu_total / cpu_n, cpu_setup / cpu_n, cpu_n);
+      cpu_setup = cpu_total = 0.0;
+      cpu_n = 0;
+      cpu_t = now;
+    }
+  }  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   if (probe_group >= 0) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
@@ -1689,6 +1770,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     probe.sum[probe_group] += ns / 1e6;
     probe.count[probe_group]++;
   }
+  static enh_post::PassTimer t_tail_span("enh-tail-span");
+  enh_post::PassTimerScope tail_span(t_tail_span);
   prof.add_draw_call();
   glBindSampler(13, 0);
   if (taa && taa_mode == 1) {

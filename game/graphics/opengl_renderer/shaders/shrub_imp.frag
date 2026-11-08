@@ -6,6 +6,7 @@
 
 layout (location = 0) out vec4 color;
 layout (location = 1) out vec4 enh_normal_out;  // world normal, a = 0 for none
+layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 
 in vec4 fragment_color;
 in float fogginess;
@@ -36,6 +37,7 @@ float noise() {
 }
 
 void main() {
+  enh_albedo_out = vec4(0.0);
   // the game's proto takes over at the far end (its own dither: shrub.frag's)
   if (enh_lod.y > 0.0) {
     ivec2 p = ivec2(gl_FragCoord.xy) & 3;
@@ -88,6 +90,7 @@ void main() {
   enh_normal_out = vec4(normalize(enh_imp_turn * n) * (enh_stone > 0.5 ? 0.75 : 0.97) * 0.5 + 0.5, 1.0);
 
   color = fragment_color * T0;
+  enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
   // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each
   // other, deepest at its foot (the models nearer read dark, their far pictures cream puffs)
   // (less of it on a stone: its faces are in the picture, only the foot's contact shade is missing)

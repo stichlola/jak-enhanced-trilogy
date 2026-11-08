@@ -52,6 +52,7 @@ extern bool g_enhanced_lights_private;
 struct EnhancedNormals {
   GLuint fbo = 0;
   bool enabled = true;
+  bool albedo = false;  // also the third target: the level's albedo (lights.albedo, M1)
 };
 extern EnhancedNormals g_enhanced_normals;
 
@@ -104,7 +105,10 @@ struct EnhancedCasters {
   // the shadow map drew them (this frame, or the last one for the game's buckets): the game's own
   // character shadows (Shadow2) and the screen-space sun shadows are left out, a second, wrong one
   bool cast = false;
-  u32 alignment = 1;     // bone vectors per uniform buffer offset alignment
+  // ...but with a low sun the game's own short shadow stays too (the map's is a long band away from
+  // the feet, and the character floats): tuning shadow.game_chars_below_deg
+  bool keep_game = false;
+  u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
   // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2
@@ -411,6 +415,9 @@ class EnhancedPost {
   GLuint m_normal_fbo = 0;  // the level normals, resolved (no msaa)
   GLuint m_normal_tex = 0;
   bool m_normals_ready = false;
+  GLuint m_albedo_fbo = 0;  // the level albedo, resolved (lights.albedo)
+  GLuint m_albedo_tex = 0;
+  bool m_albedo_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
   int m_ssao_w = 0;
@@ -625,6 +632,16 @@ class EnhancedPost {
   u32 m_shadow_far_age = 0;
   u32 m_shadow_mid_age = 0;
   u32 m_shadow_cache_frames = 0, m_shadow_cache_far_n = 0, m_shadow_cache_mid_n = 0;
+  // the near map's static part (tuning shadow.near_cache): the levels' geometry without the
+  // wind-blown trees, kept between frames as the far map is; each frame it is copied into the live
+  // near map and only the trees and the characters are drawn over it
+  GLuint m_shadow_near_static_fbo = 0;
+  GLuint m_shadow_near_static_tex = 0;
+  bool m_shadow_near_static_ready = false;
+  float m_light_mvp_near_static[16] = {};
+  u32 m_shadow_near_gen = 0;
+  u32 m_shadow_near_age = 0;
+  u32 m_shadow_cache_near_n = 0;
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes
