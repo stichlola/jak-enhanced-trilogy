@@ -1378,7 +1378,11 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
   window_fb.multisampled = false;
 
   // see if the render FBO is still applicable (Enhanced: and its color format, post.hdr_scene,
-  // switched live from the tuning file)
+  // switched live from the tuning file). Default off, by measurement: with the game's fragment
+  // shaders clamped (Shader.cpp) and post.glow_hdr_gain 0.7, A/B in one run showed no gain at the
+  // Spargus torches at 21h (frame means within 0.5/255), the arena pool equal either way, and a
+  // wider, brighter glow under the Hellcat on sand (against the dark look); gain 1.0 adds a pink
+  // fringe on shots. Kept as an option for future HDR effects; same fps either way.
   static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
   const bool hdr_scene = (float)t_hdr_scene > 0.5f;
   if (settings.save_screenshot || window_resized || !m_fbo_state.render_fbo ||
