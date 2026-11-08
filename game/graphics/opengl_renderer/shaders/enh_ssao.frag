@@ -207,7 +207,7 @@ void main() {
   // (but the terrain's grid, tagged 0.85-0.95, is smooth: its own are the right ones)
   vec4 g = texture(tex_T11, uv);
   float g_tag = length(g.rgb * 2.0 - 1.0);
-  if (g.a > 0.17 && g_tag > 0.3) {
+  if (g.a > 0.17 && g_tag > 0.3 && g_tag < 1.02) {  // (longer: a blended draw's leftover, no normal)
     vec3 gw = normalize(g.rgb * 2.0 - 1.0);
     vec3 gn = normalize(gw * view_to_world);  // world -> view (transpose)
     if (dot(gn, -p) < 0.0) {

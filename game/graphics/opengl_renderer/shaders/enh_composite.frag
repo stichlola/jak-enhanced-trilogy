@@ -218,7 +218,8 @@ uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask
-uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight
+uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
+uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;      // test: off / on in turn every that many seconds (corner mark)
 uniform float puddle_level;     // the puddles' water (0..1): outlasts the wet ground, shrinks to the dips
 uniform vec4 weather2;          // thunderstorm, ground fog, the sun out after the rain, lightning flash
@@ -412,12 +413,20 @@ vec3 view_pos(vec2 uv, float d) {
   return vec3(ndc.x * z / proj.z, ndc.y * z / proj.w, z);
 }
 
+// the normal target, "none" where it holds no normal: a draw that blended into it (the arena's
+// light shaft) left a vector longer than any material's tag (1.0): AO went black under it
+vec4 gbuf(vec2 uv) {
+  vec4 g = texture(tex_T11, uv);
+  return dot(g.rgb * 2.0 - 1.0, g.rgb * 2.0 - 1.0) > 1.04 ? vec4(0.0) : g;
+}
+
 // how much of the sun the shadow map says is blocked at a world point (game units), 0..1
+
 // the surface normal in view space, toward the camera: the level's own normal where it wrote one,
 // else rebuilt from the depth buffer (the neighbor on each axis with the smaller depth jump)
 vec3 surface_normal(vec2 uv, vec3 p) {
   vec3 nn;
-  vec4 g = texture(tex_T11, uv);
+  vec4 g = gbuf(uv);
   if (g.a > 0.17) {
     nn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
   } else {
@@ -676,7 +685,7 @@ vec3 soft_normal(vec2 uv, vec3 n, float z) {
   vec3 sum = n;
   for (int i = 0; i < 6; i++) {
     vec2 q = uv + vogel(i, 6, rot) * r;
-    vec4 g = texture(tex_T11, q);
+    vec4 g = gbuf(q);
     if (g.a > 0.17 && abs(view_z(texture(tex_T3, q).r) - z) < 1.5 * 4096.0) {
       vec3 m = normalize((g.rgb * 2.0 - 1.0) * view_to_world);
       sum += dot(m, n) < -0.2 ? -m : m;
@@ -2367,7 +2376,7 @@ void main() {
   // brightest grass in the noon sun stops short of it). Not over the land: the sand's sunlit patches are as pale; in front of a trunk
   // or a wall the flame took its depth, its shadow and its occlusion)
   // (this pixel's normal and the length its material wrote it at, for everything below: read once)
-  vec4 pix_normal = texture(tex_T11, tex_coord);
+  vec4 pix_normal = gbuf(tex_coord);
   float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
   {
     float ft = pix_tag;
@@ -3275,7 +3284,9 @@ void main() {
       dk *= 1.0 - 0.25 * (1.0 - smoothstep(0.5, 8.0, pd));
     }
     float l = luma(c);
-    float keep = smoothstep(0.4, 0.85, l);
+    // (what shines by itself, by the game's own picture: the occlusion and shadows above took the
+    // arena's light shaft under the threshold, and the night then turned it into a black column)
+    float keep = smoothstep(0.4, 0.85, max(l, tune_night_keep_raw * luma(texture(tex_T0, tex_coord).rgb)));
     vec3 moon = vec3(l) * mix(vec3(0.7, 0.82, 1.1), vec3(1.1, 0.55, 0.45), sky_kind.z);
     vec3 darkened = mix(c, moon, 0.45 * dk) * (1.0 - 0.9 * dk);
     c = mix(darkened, c, keep);
@@ -4772,7 +4783,7 @@ void main() {
     for (int k = 1; k <= 4; k++) {
       vec2 uq = tex_coord - vec2(0.0, texel.y * float(k * k) * 5.0);
       float dq = texture(tex_T3, uq).r;
-      vec4 gq = texture(tex_T11, uq);
+      vec4 gq = gbuf(uq);
       if (dq > 1e-7 && gq.a > 0.17 && (gq.rgb * 2.0 - 1.0).y > 0.7) {
         vec3 dw = view_to_world * (view_pos(uq, dq) - p) / 4096.0;
         if (dw.y < 0.0 && length(dw.xz) < 1.5) {
@@ -5039,7 +5050,9 @@ void main() {
   }
   if (tune_fx_debug > 0.5) {
     c = tune_fx_debug < 1.5 ? fx_d * 4.0 : tune_fx_debug < 2.5 ? vec3(fx_w) :
-        tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : vec3(fx_day, 0.5, 0.0);
+        tune_fx_debug < 3.5 ? texture(tex_T24, uv).rgb : tune_fx_debug < 4.5 ? vec3(fx_day, 0.5, 0.0) :
+        tune_fx_debug < 5.5 ? texture(tex_T0, tex_coord).rgb : tune_fx_debug < 6.5 ? texture(tex_T23, uv).rgb :
+        vec3(z / (40.0 * 4096.0), (pix_tag - 0.9) * 5.0, pix_normal.a);
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)

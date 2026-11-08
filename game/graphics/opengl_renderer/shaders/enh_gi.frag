@@ -49,7 +49,7 @@ void main() {
   vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
   vec3 n = normalize(cross(dx, dy));
   vec4 g = texture(tex_T11, uv);
-  if (g.a > 0.17) {
+  if (g.a > 0.17 && dot(g.rgb * 2.0 - 1.0, g.rgb * 2.0 - 1.0) < 1.04) {
     n = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
   }
   if (dot(n, -p) < 0.0) {
