@@ -1949,6 +1949,42 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
   glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
   glUniform1i(glGetUniformLocation(id, "shadow_on"), m_shadow_ready);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  {
+    // the nearest lights in the air (volume_lights_on): world -> this frame's view space
+    static const EnhancedTune t_air("volume.light_air", 0.06f);
+    static const EnhancedTune t_gain("volume.light_gain", 1.f);
+    static const EnhancedTune t_halo_r("volume.light_halo_m", 8.f);  // a halo's reach (m), at most
+    static const EnhancedTune t_max_r("volume.light_max_m", 60.f);  // lights reaching farther (the sky's): none
+    constexpr int kVol = 8;
+    float vpos[kVol * 4] = {}, vcol[kVol * 4] = {};
+    int nv = 0;
+    const auto& sl = g_enhanced_smoke_lights;
+    if (volume_lights_on() && m_settings.lights) {
+      for (int i = 0; i < sl.count && nv < kVol; i++) {
+        float v[3] = {0.f, 0.f, 0.f};
+        for (int col = 0; col < 3; col++) {
+          for (int row = 0; row < 3; row++) {
+            v[col] += (sl.pos[i][row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        // (only those within 40 m of the camera, plus their reach)
+        const float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        const float reach = 40.f * 4096.f + sl.pos[i][3];
+        // (a halo hugs its lamp: the slums' street lamps reach 27-30 m, as halos they washed a whole wall pale)
+        if (d2 > reach * reach || sl.pos[i][3] > t_max_r * 4096.f) {
+          continue;
+        }
+        std::memcpy(vpos + nv * 4, v, sizeof(float) * 3);
+        vpos[nv * 4 + 3] = std::min(sl.pos[i][3], (float)t_halo_r * 4096.f);
+        std::memcpy(vcol + nv * 4, sl.color[i], sizeof(float) * 3);
+        nv++;
+      }
+    }
+    glUniform1i(glGetUniformLocation(id, "vl_count"), nv);
+    glUniform4fv(glGetUniformLocation(id, "vl_pos"), kVol, vpos);
+    glUniform4fv(glGetUniformLocation(id, "vl_color"), kVol, vcol);
+    glUniform2f(glGetUniformLocation(id, "vl_air"), (float)t_air, (float)t_gain);
+  }
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
   glBindVertexArray(0);

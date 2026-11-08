@@ -14,6 +14,7 @@ uniform sampler2D tex_T7;  // indirect light (SSGI)
 uniform sampler2D tex_T8;  // volumetric mist, half resolution (rgb scattered, a transmittance)
 uniform int volume;
 uniform float volume_fade;  // (1; down to 0 as the auto quality sets it aside)
+uniform float vol_lights_only;  // 1: the volume is only the lamps' light in the air (no mist)
 uniform sampler2DShadow tex_T9;  // sun shadow map
 uniform float shadow_strength;   // 0 = no shadow map this frame
 uniform mat4 light_mvp;          // world (game units) -> shadow map
@@ -4159,7 +4160,8 @@ void main() {
     vec4 v = sum / wsum;
     // under rain the mist is grey, whatever the area's fog tint
     v.rgb = mix(v.rgb, vec3(luma(v.rgb)) * vec3(0.82, 0.94, 1.15), weather.x * 0.6);
-    c = c * mix(1.0, v.a, volume_fade) + v.rgb * volume_fade * (1.0 - 0.85 * night_dark.x);
+    c = c * mix(1.0, v.a, volume_fade) +
+        v.rgb * volume_fade * (vol_lights_only > 0.5 ? 1.0 : 1.0 - 0.85 * night_dark.x);
   }
 
   // fireflies (a green-gold glow that swells and dies every few seconds) or seeds and pollen (pale

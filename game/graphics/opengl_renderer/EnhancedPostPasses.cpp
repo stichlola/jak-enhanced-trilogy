@@ -356,7 +356,11 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
     // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
-    if (m_settings.volume && m_fade_volume > 0.f && m_ssao_ready && m_fog > 0.01f) {
+    // (also for the lamps' and fires' light in the air, with no mist: volume.local_lights)
+    // (the lights alone cost far less than the mist: kept to the auto quality's second level)
+    if (m_settings.volume && m_ssao_ready &&
+        ((m_fade_volume > 0.f && m_fog > 0.01f) ||
+         (m_fade_gi > 0.f && m_fog <= 0.01f && volume_lights_on()))) {
       ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
     if (m_settings.gi && m_fade_gi > 0.f && m_ssao_ready) {
@@ -743,7 +747,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               m_shadow_ready ? m_settings.shadow_strength * g_enhanced_sun.shadow * (1.f - 0.7f * m_night) : 0.f);
   glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
   glUniform1i(glGetUniformLocation(id, "volume"), m_vol_ready);
-  glUniform1f(glGetUniformLocation(id, "volume_fade"), m_fade_volume);
+  // (the volume holds only the lights' glow in the air, no mist: not dimmed by the night)
+  glUniform1f(glGetUniformLocation(id, "vol_lights_only"), m_vol_ready && m_fog <= 0.01f ? 1.f : 0.f);
+  glUniform1f(glGetUniformLocation(id, "volume_fade"),
+              m_vol_ready && m_fog <= 0.01f ? m_fade_gi : m_fade_volume);
   glUniform2f(glGetUniformLocation(id, "vol_texel"), m_vol_w ? 1.f / m_vol_w : 0.f,
               m_vol_h ? 1.f / m_vol_h : 0.f);
   glUniform1f(glGetUniformLocation(id, "gi_strength"),

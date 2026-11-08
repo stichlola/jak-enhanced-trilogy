@@ -216,6 +216,15 @@ inline World g_world;
 // game's own fog is untouched.
 constexpr bool kFogOff = true;
 
+// the lamps' and fires' light in the air (volume local lights M1): the volume pass scatters the
+// nearest lights (g_enhanced_smoke_lights, last frame's, in world space) in a thin air of its own,
+// with no mist and no fog. volume.local_lights 1: on (off until proven), volume.light_air: the air's
+// density (/m), volume.light_gain: its brightness
+inline bool volume_lights_on() {
+  static const EnhancedTune t_on("volume.local_lights", 0.f);
+  return t_on > 0.5f && g_enhanced_smoke_lights.count > 0;
+}
+
 // the weather presets of the menu (the order is kept: saved settings and test scripts use the
 // index). Values as in Settings::weather_mix; "Changing" has none (the zones decide)
 struct WeatherPreset {
