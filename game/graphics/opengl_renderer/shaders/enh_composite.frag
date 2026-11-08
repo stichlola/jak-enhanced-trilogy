@@ -307,6 +307,7 @@ uniform float tune_fog_max = 1.0;  // and never more than this (1: no cap)
 uniform float tune_night_hue = 0.8;  // night: the dim land's hue toward the game's moonlit one (0: off)
 uniform float tune_night_hue_lo = 0.3;
 uniform float tune_night_hue_hi = 0.6;
+uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G3: Jak pink and pasted on the moonlit desert; 0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
@@ -5538,13 +5539,14 @@ void main() {
   // adaptation) and the shade steps before the night darkening left the moonlit desert grey-lilac
   // (22h box 72,69,93, vanilla 51,69,90; lantern off 50,46,61: mauve). The hue only, the
   // brightness kept; the bright core of a lamp's pool and the flames keep theirs
-  if (tune_night_hue > 0.0 && clouds.w > 0.0 && z > 0.0 && !(pix_tag > 0.3 && pix_tag < 0.55)) {
+  float night_hue_k = (pix_tag > 0.3 && pix_tag < 0.55) ? tune_night_hue_chr : 1.0;
+  if (tune_night_hue > 0.0 && clouds.w > 0.0 && z > 0.0 && night_hue_k > 0.0) {
     vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
     float lg = luma(game_c);
     if (lg > 0.01) {
       float lc = luma(c);
       vec3 gh = game_c * (lc / lg);
-      float w = tune_night_hue * clouds.w * (1.0 - smoothstep(tune_night_hue_lo, tune_night_hue_hi, lc)) * (1.0 - flame_keep);
+      float w = tune_night_hue * night_hue_k * clouds.w * (1.0 - smoothstep(tune_night_hue_lo, tune_night_hue_hi, lc)) * (1.0 - flame_keep);
       c = mix(c, max(gh, 0.0), w);
     }
   }
