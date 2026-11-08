@@ -199,6 +199,7 @@ uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sun
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
 uniform float tune_shoulder_knee = 0.85;  // the whole picture's shoulder (>= 1: off, a hard clip)
 uniform float tune_shoulder_white = 1.0;  // over 1 by this much: toward white (60%)
+uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specular occlusion; 0: off)
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
@@ -3341,6 +3342,9 @@ void main() {
       // (rust reflects nothing: no trace)
       vec3 refl = mat == 1 && mfine == 1 ? c : trace_reflection(p, r, z, hit);
       float fade = (1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z)) * reflect_amount;
+      // specular occlusion (Lagarde): crevices and undersides kept a sky-bright reflection, plastic in
+      // the shaded corners; the AO takes it away, more where the gloss is rough
+      fade *= mix(1.0, clamp(pow(facing + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0), tune_spec_occ);
       // the sun's highlight, where the sun reaches
       float sunlit = 0.0;
       if (sun_dir.w > 0.0 && dot(nn, sun_dir.xyz) > 0.0) {
@@ -3432,6 +3436,8 @@ void main() {
     refl = mix(refl, c, 0.25 * (1.0 - puddle));
     float amount = wet * (0.2 + 0.4 * puddle) * clamp(f * 1.3 + 0.12 * puddle + 0.03, 0.0, 1.0) *
                    mix(wet_gloss, 1.0, puddle);
+    // (specular occlusion, as on the glossy materials: no sky in a wet crevice)
+    amount *= mix(1.0, clamp(pow(facing + ao, exp2(-16.0 * 0.1 - 1.0)) - 1.0 + ao, 0.0, 1.0), tune_spec_occ);
     c = mix(c, refl, amount);
     // splashes: drops hitting the ground, each a bright crown spreading for a tenth of a second
     if (weather.x > 0.0 && z < 15.0 * 4096.0) {
