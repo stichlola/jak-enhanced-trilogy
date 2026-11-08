@@ -218,7 +218,10 @@ uniform float tune_sky_enclosed_keep = 1.0;  // under a roof the windows' sky as
 uniform float tune_sky_enclosed_gain = 1.1;
 uniform float tune_smoke_floor = 1.0;  // under a roof: blended smoke's added light back, up to the game's colour (0: off)
 uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (over-long normal) as the game drew them
-uniform float tune_night_win = 1.0;        // lit window panes at night: their light (0 = off)
+uniform float tune_lawn = 1.0;             // lawns' macro variation and moss at their occluded feet (0 = off)
+uniform float tune_lawn_var = 0.12;        // its light and dark
+uniform float tune_lawn_ao = 1.2;          // the moss-dark dirt where the occlusion is
+uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
 uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
 uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
@@ -4763,6 +4766,27 @@ void main() {
   // way to grey, so a strong cast (the desert's yellow afternoons) doesn't tint everything
   if (clouds.w < 0.99) {
     c *= mix(vec3(1.0), white_balance, 0.35 * (1.0 - clouds.w));
+  }
+
+  // lawns (plain level ground, facing up, green in the game's colors: the forest's floor): one flat
+  // evenly lit carpet. A slow light and dark and an olive to deep-green drift over tens of meters,
+  // and moss-dark dirt where the occlusion is (the feet of rocks, trunks and grass tufts)
+  // (test: tune_lawn >= 10 shows the lawn's weight)
+  // (the forest's floor reads in the rock band, 0.75: kept to green pixels, mossy rock gets it too)
+  if (tune_lawn > 0.0 && z > 0.0 && wsurf == 0.0 && pix_normal.a > 0.83 &&
+      (pix_tag > 0.955 || (pix_tag > 0.7 && pix_tag < 0.8)) && dot(surf_n, up_view) > 0.7) {
+    vec3 raw = texture(tex_T0, tex_coord).rgb;
+    // (by the green over the red: at dusk the game's own light turns the forest's lawn teal)
+    float green = smoothstep(0.015, 0.05, raw.g - raw.r) * (1.0 - smoothstep(0.04, 0.12, raw.b - raw.g)) * min(tune_lawn, 1.0);
+    if (green > 0.0) {
+      vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
+      float v = gnoise(wp.xz / 23.0 + 4.7) * 0.65 + gnoise(wp.xz / 7.0 + 1.9) * 0.35;
+      float h = gnoise(wp.xz / 41.0 + 9.3);
+      vec3 tint = mix(vec3(0.92, 1.0, 1.06), vec3(1.1, 1.02, 0.82), smoothstep(-0.5, 0.5, h));
+      vec3 lc = c * (1.0 + tune_lawn_var * v) * tint;
+      lc = mix(lc, lc * vec3(0.72, 0.66, 0.5), clamp((1.0 - ao) * tune_lawn_ao, 0.0, 0.6));
+      c = tune_lawn > 9.0 ? vec3(green * 0.1) : mix(c, lc, green);
+    }
   }
 
   // rock and cliffs (normals written 0.75 long: tfrag3.frag): the game's textures are a blur up
