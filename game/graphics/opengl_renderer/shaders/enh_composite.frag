@@ -5039,6 +5039,11 @@ void main() {
   // vignette
   vec2 v = tex_coord - 0.5;
   c *= 1.0 - vignette * smoothstep(0.25, 0.85, dot(v, v) * 2.2);
+  // (a NaN or infinity from any term above clamps to a lone white or black pixel, and the TAA keeps
+  // it: the game's own color there instead)
+  if (any(isnan(c)) || any(isinf(c))) {
+    c = texture(tex_T0, tex_coord).rgb;
+  }
 
   color = vec4(clamp(c, 0.0, 1.0) * color_mult.rgb * color_mult.a, 1.0) + color_add;
 }
