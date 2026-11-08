@@ -151,6 +151,31 @@ int EnhancedSpriteFx::classify(SharedRenderState* render_state,
   return result;
 }
 
+bool g_enhanced_fx_blend_mark = false;
+
+void EnhancedSpriteFx::mark_blended(SharedRenderState* render_state, u32 tbp, u64 gl_texture) {
+  if (!g_enhanced_fx_blend_mark) {
+    return;
+  }
+  auto it = m_flames.find(gl_texture);
+  if (it == m_flames.end()) {
+    std::string name = render_state->texture_pool->get_debug_texture_name_from_tbp(tbp);
+    const auto slash = name.rfind('/');
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    // (as classify's flames, and anything named like one)
+    const bool flame = name.find("flame") != std::string::npos ||
+                       name.find("explo") != std::string::npos ||
+                       name.find("fire") != std::string::npos;
+    it = m_flames.emplace(gl_texture, flame).first;
+  }
+  if (!it->second) {
+    // color as the game blends it; the frame's alpha (1 before the sprites) times 1 - coverage
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE_MINUS_SRC_ALPHA);
+  }
+}
+
 void EnhancedSpriteFx::copy_depth(SharedRenderState* render_state) {
   const int w = render_state->render_fb_w, h = render_state->render_fb_h;
   glActiveTexture(GL_TEXTURE0 + kDepthUnit);

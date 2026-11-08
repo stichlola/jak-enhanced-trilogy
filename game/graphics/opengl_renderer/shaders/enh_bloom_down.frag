@@ -20,6 +20,9 @@ uniform float tune_fx_area1 = 0.7;
 uniform float tune_fx_wash0 = 0.03;
 uniform float tune_fx_wash1 = 0.08;
 uniform float tune_fx_wash_lod = 1.5;
+uniform float fx_mark;  // 1: tex_T2's alpha is 1 - the blended dust's coverage
+uniform float tune_fx_dust0 = 0.03;  // (as in enh_composite)
+uniform float tune_fx_dust1 = 0.25;
 
 in vec2 tex_coord;
 out vec4 color;
@@ -72,7 +75,9 @@ void main() {
       float lw2 = max(lw, dot(wider, vec3(0.2126, 0.7152, 0.0722)));
       float compact = (1.0 - smoothstep(tune_fx_area0, tune_fx_area1, lw / max(lf, 0.02))) *
                       (1.0 - smoothstep(tune_fx_wash0, tune_fx_wash1, lw2));
-      sum += fx * smoothstep(0.02, 0.08, fm) * compact * fx_bloom * tune_fx_bloom_gain;
+      // (not where blended dust and smoke drew: their coverage, in the copy's alpha; enh_composite)
+      float dust = fx_mark > 0.5 ? smoothstep(tune_fx_dust0, tune_fx_dust1, 1.0 - texture(tex_T2, uv).a) : 0.0;
+      sum += fx * smoothstep(0.02, 0.08, fm) * compact * (1.0 - dust) * fx_bloom * tune_fx_bloom_gain;
     }
   }
   color = vec4(sum, 1.0);

@@ -407,6 +407,7 @@ class EnhancedPost {
   int m_fx_h = 0;
   u64 m_fx_frame[2] = {0, 0};
   u64 m_fx_count = 0;  // begin_frame calls: a copy from this frame has m_fx_count + 1
+  bool m_fx_marked = false;  // the copy after the sprites has the blended dust's mark in its alpha
   // both copies are from this frame
   bool fx_ready() const {
     return m_fx_fbo[0] && m_fx_frame[0] == m_fx_count + 1 && m_fx_frame[1] == m_fx_count + 1;
@@ -582,6 +583,13 @@ class EnhancedPost {
   float m_shadow_near_span_m = 600.f;
   float m_shadow_dir[3] = {0.f, 0.f, 0.f};  // the light's direction the maps use (in steps)
   float m_shadow_far_span_m = 6000.f;
+  // the middle map (tuning shadow.mid_on): 2048 over +-320 m, between the near and the far one,
+  // drawn on the frames the far map skips
+  GLuint m_shadow_mid_fbo = 0;
+  GLuint m_shadow_mid_tex = 0;
+  bool m_shadow_mid_ready = false;
+  float m_light_mvp_mid[16] = {};
+  float m_shadow_mid_span_m = 2000.f;
 
   // ray-traced reflections: each level's hierarchy (built at load, see EnhancedRayTrace.h) in its
   // own buffers, copied into one set of buffers for the levels in use whenever that set changes

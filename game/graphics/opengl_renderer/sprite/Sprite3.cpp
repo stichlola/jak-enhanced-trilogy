@@ -656,6 +656,9 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
                              mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST,
                              mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_SRC_DST ||
                                  mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_FIX_DST);
+    if (mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) {
+      m_enhanced_fx.mark_blended(render_state, tbp, *tex);
+    }
 
     prof.add_draw_call();
     prof.add_tri(2 * (bucket->ids.size() / 5));

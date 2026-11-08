@@ -18,6 +18,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedParticles.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
@@ -384,6 +385,11 @@ EnhancedPost::~EnhancedPost() {
     glDeleteTextures(1, &m_shadow_far_tex);
     m_shadow_far_fbo = m_shadow_far_tex = 0;
   }
+  if (m_shadow_mid_fbo) {
+    glDeleteFramebuffers(1, &m_shadow_mid_fbo);
+    glDeleteTextures(1, &m_shadow_mid_tex);
+    m_shadow_mid_fbo = m_shadow_mid_tex = 0;
+  }
   if (m_shadow_fbo) {
     glDeleteFramebuffers(1, &m_shadow_fbo);
     glDeleteTextures(1, &m_shadow_tex);
@@ -630,7 +636,9 @@ void EnhancedPost::capture_far_ocean(GLuint render_fbo, int w, int h) {
 // the Enhanced sky when that was found by local contrast instead
 void EnhancedPost::capture_sky(GLuint render_fbo, int w, int h) {
   m_sky_frame = 0;
-  if (!m_settings.enabled || m_night >= 0.999f) {  // (by night the game's own sky stays)
+  // (by night too: the game's own sky stays then, but the composite smooths its painted cloud cards
+  // away, and with them the lights drawn over the sky: Haven's tower beacon and searchlights)
+  if (!m_settings.enabled) {
     return;
   }
   if (w != m_sky_w || h != m_sky_h) {
@@ -679,6 +687,10 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
     return e && e[0] == '0';
   }();
   static const EnhancedTune t_off("fx.off", 0.f);
+  g_enhanced_fx_blend_mark = false;
+  if (which == 0) {
+    m_fx_marked = false;
+  }
   // (nor at full night: the composite leaves the effects in the grade then, the copies unused)
   if (!m_settings.enabled || env_off || t_off > 0.5f || m_night >= 0.999f || which < 0 || which > 1) {
     return;
@@ -727,6 +739,29 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   glBindTexture(GL_TEXTURE_2D, m_fx_tex[which]);
   glGenerateMipmap(GL_TEXTURE_2D);
   glBindTexture(GL_TEXTURE_2D, old_tex);
+  // before the sprites: the frame's alpha to 1, so blended dust and smoke can take their coverage out
+  // of it (EnhancedSpriteFx::mark_blended): added light never lowers it, and the composite keeps
+  // what was dust out of the light effects (a grey puff glowed as an orange orb by day).
+  // (tuning.json "fx": {"blend_mark": 0}: off)
+  static const EnhancedTune t_mark("fx.blend_mark", 1.f);
+  g_enhanced_fx_blend_mark = which == 0 && t_mark > 0.5f;
+  if (g_enhanced_fx_blend_mark) {
+    GLboolean mask[4];
+    glGetBooleani_v(GL_COLOR_WRITEMASK, 0, mask);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
+    glColorMaski(0, GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
+    const float one[4] = {0.f, 0.f, 0.f, 1.f};
+    glClearBufferfv(GL_COLOR, 0, one);
+    glColorMaski(0, mask[0], mask[1], mask[2], mask[3]);
+    if (scissor) {
+      glEnable(GL_SCISSOR_TEST);
+    }
+  }
+  if (which == 0) {
+    m_fx_marked = g_enhanced_fx_blend_mark;
+  }
   glActiveTexture(act);
   glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);

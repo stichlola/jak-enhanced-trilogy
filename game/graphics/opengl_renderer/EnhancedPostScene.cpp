@@ -504,7 +504,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.color[0] = tint[0] * k;
       c.color[1] = tint[1] * k;
       c.color[2] = tint[2] * k;
-      c.color[3] = 0.f;
+      // (2: a flash, lit in the composite past the lamps' soft ceiling; the charging flicker a lamp)
+      c.color[3] = b.kind == 2 ? 0.f : 2.f;
       c.score = 1e6f;
       candidates.push_back(c);
     }
@@ -1411,6 +1412,52 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    {
+      // light tiles (clustered lights, step 1): the screen in 32x18 tiles, per tile a mask of the
+      // lights whose sphere's projection may touch it, so the composite's main light loop runs only
+      // those. Conservative: the hull of the projected corners of each sphere's box; a sphere
+      // reaching the camera plane covers every tile. lights.tiles 0: off (every pixel, every light).
+      // The composite declares the uniforms only with ENH_LIGHT_TILES defined (uniform budget): without
+      // it these calls find location -1 and do nothing
+      static const EnhancedTune t_tiles("lights.tiles", 0.f);
+      constexpr int kTx = 32, kTy = 18;
+      uint32_t tiles[kTx * kTy];
+      const bool tiles_on = t_tiles > 0.5f;
+      if (tiles_on) {
+        std::fill(std::begin(tiles), std::end(tiles), 0u);
+        const float fx = m_last_proj[2], fy = m_last_proj[3];
+        for (int i = 0; i < n; i++) {
+          const float* lp = pos + i * 4;
+          const float r = lp[3];
+          int x0 = 0, x1 = kTx - 1, y0 = 0, y1 = kTy - 1;
+          if (lp[2] - r > 0.1f * kMeter) {
+            float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
+            for (int k = 0; k < 8; k++) {
+              const float x = lp[0] + ((k & 1) ? r : -r);
+              const float y = lp[1] + ((k & 2) ? r : -r);
+              const float z = lp[2] + ((k & 4) ? r : -r);
+              const float u = 0.5f * fx * x / z + 0.5f, v = 0.5f * fy * y / z + 0.5f;
+              u0 = std::min(u0, u);
+              u1 = std::max(u1, u);
+              v0 = std::min(v0, v);
+              v1 = std::max(v1, v);
+            }
+            // (half a tile of margin: the TAA's jitter, rounding)
+            x0 = std::max((int)std::floor(u0 * kTx - 0.5f), 0);
+            x1 = std::min((int)std::floor(u1 * kTx + 0.5f), kTx - 1);
+            y0 = std::max((int)std::floor(v0 * kTy - 0.5f), 0);
+            y1 = std::min((int)std::floor(v1 * kTy + 0.5f), kTy - 1);
+          }
+          for (int ty = y0; ty <= y1; ty++) {
+            for (int tx = x0; tx <= x1; tx++) {
+              tiles[ty * kTx + tx] |= 1u << i;
+            }
+          }
+        }
+        glUniform4uiv(glGetUniformLocation(id, "light_tiles"), kTx * kTy / 4, tiles);
+      }
+      glUniform1f(glGetUniformLocation(id, "light_tiles_on"), tiles_on ? 1.f : 0.f);
+    }
     glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);

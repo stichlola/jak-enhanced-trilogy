@@ -9,6 +9,8 @@ uniform sampler2D tex_T11;   // the geometry's world normals, their length the m
 uniform mat3 view_to_world;
 uniform vec4 proj;         // a, b, fx, fy
 uniform vec2 texel;
+uniform float tune_ao_up0 = 0.5;   // ground this much facing up takes the geometry's normal...
+uniform float tune_ao_up1 = 0.7;   // ...all of it from here (the depth's normal makes dark rows)
 uniform float radius;        // game units
 uniform float intensity;
 uniform float max_distance;  // game units
@@ -197,16 +199,26 @@ void main() {
     dy = pfu - pfd;
   }
   vec3 n = normalize(cross(dx, dy));
+  if (dot(n, -p) < 0.0) {
+    n = -n;  // face the camera, whatever the handedness of the game's view space
+  }
   // (from the depth, not the geometry's smoothed normals: on low-poly walls and crates those lean
   // out of the real face, so the flat surface around counts as blocking: dark flickering streaks)
   // (but the terrain's grid, tagged 0.85-0.95, is smooth: its own are the right ones)
   vec4 g = texture(tex_T11, uv);
   float g_tag = length(g.rgb * 2.0 - 1.0);
-  if (g.a > 0.17 && g_tag > 0.82 && g_tag < 0.96) {
-    n = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
-  }
-  if (dot(n, -p) < 0.0) {
-    n = -n;  // face the camera, whatever the handedness of the game's view space
+  if (g.a > 0.17 && g_tag > 0.3 && g_tag < 1.02) {  // (longer: a blended draw's leftover, no normal)
+    vec3 gw = normalize(g.rgb * 2.0 - 1.0);
+    vec3 gn = normalize(gw * view_to_world);  // world -> view (transpose)
+    if (dot(gn, -p) < 0.0) {
+      gn = -gn;
+    }
+    // the terrain always, and any ground facing up: the depth's normal goes far off on level ground
+    // in rows at the same screen heights in every level (straight dark lines across the ground);
+    // a crate's smoothed edge leans out of "up" and keeps the depth's
+    // (from 0.5: gently sloped sand at 0.7-0.85 kept a dark row at y ~198 of 360 in the desert)
+    float w = (g_tag > 0.82 && g_tag < 0.96) ? 1.0 : smoothstep(tune_ao_up0, tune_ao_up1, abs(gw.y));
+    n = normalize(mix(n, gn, w));
   }
 
   // screen-space radius of the world radius at this depth (uv units)

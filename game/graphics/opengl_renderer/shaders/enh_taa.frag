@@ -16,6 +16,7 @@ uniform vec3 to_prev_offset;
 uniform vec2 prev_f;       // previous fx, fy
 uniform vec2 keep;         // history weight: still, fast
 uniform int has_history;
+uniform float tune_taa_off = 0.0;  // (test: this frame only, no history)
 
 in vec2 tex_coord;
 out vec4 color;
@@ -55,7 +56,7 @@ vec3 history_at(vec2 uv) {
 void main() {
   vec2 uv = tex_coord;
   vec3 cur = texture(tex_T0, uv).rgb;
-  if (has_history == 0) {
+  if (has_history == 0 || tune_taa_off > 0.5) {
     color = vec4(cur, 1.0);
     return;
   }
