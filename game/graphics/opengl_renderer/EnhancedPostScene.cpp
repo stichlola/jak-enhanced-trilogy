@@ -21,17 +21,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     snd::ambience::set_targets(silent);
     return;
   }
-  if (w != m_scene_w || h != m_scene_h) {
+  // (the scene's copy in half floats too while the game's frame is (post.hdr_scene, OpenGLRenderer's
+  // make_fbo): the light past 1 reaches the post)
+  static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
+  static bool scene_hdr = false;
+  const bool hdr_scene = (float)t_hdr_scene > 0.5f;
+  if (w != m_scene_w || h != m_scene_h || hdr_scene != scene_hdr) {
     if (m_scene_fbo) {
       glDeleteFramebuffers(1, &m_scene_fbo);
       glDeleteTextures(1, &m_scene_tex);
     }
     m_scene_w = w;
     m_scene_h = h;
+    scene_hdr = hdr_scene;
     glGenFramebuffers(1, &m_scene_fbo);
     glGenTextures(1, &m_scene_tex);
     glBindTexture(GL_TEXTURE_2D, m_scene_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, hdr_scene ? GL_RGBA16F : GL_RGBA8, w, h, 0, GL_RGBA,
+                 hdr_scene ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);

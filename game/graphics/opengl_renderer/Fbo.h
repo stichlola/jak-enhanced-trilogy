@@ -17,6 +17,7 @@ struct Fbo {
   int multisample_count = 0;  // Should be 1 if multisampled is disabled
 
   bool is_window = false;
+  bool hdr = false;  // Enhanced: RGBA16F color (post.hdr_scene) instead of RGBA8
   int width = 640;
   int height = 480;
 
