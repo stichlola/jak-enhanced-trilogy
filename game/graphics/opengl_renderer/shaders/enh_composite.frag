@@ -183,6 +183,7 @@ uniform float fx_day;
 uniform float tune_fx_gain = 2.2;    // the effects' light by day, over the scene graded without them
 uniform float tune_fx_bright = 0.8;  // more over bright ground (by the scene's brightness under them)
 uniform float tune_fx_sat = 1.0;  // their color (>1: more saturated)
+uniform float tune_gold_fill = 0.75;  // late afternoon: sand/rock never under this share of the game's color (0: off)
 uniform float tune_fx_dark = 0.2;    // the gain's share over dark ground (1: as over lit ground)
 uniform float tune_fx_dark0 = 0.04;  // the scene's luma under the effect: dark up to here...
 uniform float tune_fx_dark1 = 0.22;  // ...lit from here
@@ -4872,6 +4873,7 @@ void main() {
       c += vec3(0.24, 0.12, 0.035) * pow(toward, 5.0) * golden * far;
     }
     c *= 1.0 - 0.4 * gk * (1.0 - smoothstep(0.2, 0.55, lg));
+
   }
   // by day the same on rock: the game bakes the mountains evenly dark, so the sun's own direction
   // lights them, the faces turned away in a cooler shade (fading out as the late afternoon's takes
@@ -5121,6 +5123,15 @@ void main() {
     }
   }
 
+  // the low sun's sky fill: the ground turned from it is still lit by the whole bright sky and the
+  // sunlit dunes around. The rocky ground's low-light darkening (x0.5), the relight, the golden
+  // stop-down and the deepening of dark parts stacked up to x0.4 of the game's color, and a near
+  // slope went black-brown with a hard edge: 0.35 of the flat sand, where the game has it 1.15.
+  // Never darker than this share of the game's own color (sand, rocky ground, rock), warm
+  if (tune_gold_fill > 0.0 && golden > 0.0 && z > 0.0 && pix_tag > 0.55 && pix_tag < 0.95) {
+    vec3 fill = texture(tex_T0, tex_coord).rgb * vec3(1.0, 0.9, 0.8) * tune_gold_fill;
+    c = mix(c, max(c, fill), golden);
+  }
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
   // are) and the near whites rolled off (above the sand, whose grain they flattened), so that nothing burns (not the flames, the game's own)
   {
