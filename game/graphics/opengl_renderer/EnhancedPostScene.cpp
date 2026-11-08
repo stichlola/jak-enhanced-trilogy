@@ -171,6 +171,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform2f(glGetUniformLocation(rid, "keep"), m_settings.taa_history,
                 m_settings.taa_history_fast);
     glUniform1i(glGetUniformLocation(rid, "has_history"), m_taa_history && reproject);
+    glUniform1f(glGetUniformLocation(rid, "time_s"), (float)m_time);
     ENH_TIMED("enh-taa", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
     prof.add_draw_call();
     m_taa_cur = 1 - cur;

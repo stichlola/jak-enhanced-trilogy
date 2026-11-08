@@ -267,6 +267,7 @@ uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
+uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_fx_debug = 0.0;// 1: what the effects added (x4), 2: the effects' weight, 3/5/6: T24/T0/T23
 uniform float tune_fx_ab = 0.0;
 uniform float tune_warm_shadow = 0.0;  // a warm grade's cool push in the shadows (1: the full split, dusk navy)
@@ -5495,4 +5496,12 @@ void main() {
   }
 
   color = vec4(clamp(c, 0.0, 1.0) * color_mult.rgb * color_mult.a, 1.0) + color_add;
+  // dither to the 8-bit target: a triangular +-1 step of interleaved gradient noise, turned every
+  // frame (the TAA then averages it into finer steps): no bands in the sky and the dark shade
+  if (tune_dither > 0.0) {
+    vec2 fp = gl_FragCoord.xy + 5.588238 * mod(floor(haze.w * 60.0), 64.0);
+    float n1 = fract(52.9829189 * fract(dot(fp, vec2(0.06711056, 0.00583715))));
+    float n2 = fract(52.9829189 * fract(dot(fp + vec2(47.0, 17.0), vec2(0.06711056, 0.00583715))));
+    color.rgb += (n1 + n2 - 1.0) * tune_dither / 255.0;
+  }
 }

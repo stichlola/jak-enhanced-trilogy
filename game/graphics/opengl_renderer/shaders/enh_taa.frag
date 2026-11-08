@@ -17,6 +17,8 @@ uniform vec2 prev_f;       // previous fx, fy
 uniform vec2 keep;         // history weight: still, fast
 uniform int has_history;
 uniform float tune_taa_off = 0.0;  // (test: this frame only, no history)
+uniform float tune_dither = 1.0;   // dither the output to the 8-bit target (in steps; 0: off)
+uniform float time_s;              // (turns the dither every frame)
 
 in vec2 tex_coord;
 out vec4 color;
@@ -53,11 +55,24 @@ vec3 history_at(vec2 uv) {
   return max(r / wsum, vec3(0.0));
 }
 
+// the history is RGBA16F, blitted into the 8-bit frame: a triangular +-1 step of interleaved
+// gradient noise turned every frame, or the smooth average bands again in the sky and the shade
+// (zero mean: what the history keeps of it averages out)
+vec3 dither(vec3 c) {
+  if (tune_dither <= 0.0) {
+    return c;
+  }
+  vec2 fp = gl_FragCoord.xy + 5.588238 * mod(floor(time_s * 60.0), 64.0);
+  float n1 = fract(52.9829189 * fract(dot(fp, vec2(0.06711056, 0.00583715))));
+  float n2 = fract(52.9829189 * fract(dot(fp + vec2(47.0, 17.0), vec2(0.06711056, 0.00583715))));
+  return c + (n1 + n2 - 1.0) * tune_dither / 255.0;
+}
+
 void main() {
   vec2 uv = tex_coord;
   vec3 cur = texture(tex_T0, uv).rgb;
   if (has_history == 0 || tune_taa_off > 0.5) {
-    color = vec4(cur, 1.0);
+    color = vec4(dither(cur), 1.0);
     return;
   }
 
@@ -89,7 +104,7 @@ void main() {
   }
   vec2 prev_uv = 0.5 * vec2(prev_f.x * pp.x, prev_f.y * pp.y) / pp.z + 0.5;
   if (pp.z <= 0.0 || any(lessThan(prev_uv, vec2(0.0))) || any(greaterThan(prev_uv, vec2(1.0)))) {
-    color = vec4(cur, 1.0);
+    color = vec4(dither(cur), 1.0);
     return;
   }
 
@@ -115,5 +130,5 @@ void main() {
   float wc = (1.0 - weight) / (1.0 + max(cy.x, 0.0));
   float wh = weight / (1.0 + max(hist.x, 0.0));
   vec3 c = (cy * wc + hist * wh) / max(wc + wh, 1e-5);
-  color = vec4(from_ycocg(c), 1.0);
+  color = vec4(dither(from_ycocg(c)), 1.0);
 }
