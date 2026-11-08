@@ -183,6 +183,9 @@ uniform float fx_day;
 uniform float tune_fx_gain = 2.2;    // the effects' light by day, over the scene graded without them
 uniform float tune_fx_bright = 0.8;  // more over bright ground (by the scene's brightness under them)
 uniform float tune_fx_sat = 1.0;  // their color (>1: more saturated)
+uniform float tune_fx_dark = 0.2;    // the gain's share over dark ground (1: as over lit ground)
+uniform float tune_fx_dark0 = 0.04;  // the scene's luma under the effect: dark up to here...
+uniform float tune_fx_dark1 = 0.22;  // ...lit from here
 uniform float tune_fx_knee = 0.78;   // the shoulder their sum rolls off from, hue kept
 uniform float tune_fx_min = 0.02;    // what counts as an effect: the faint changes are smoke, dither
 uniform float tune_fx_area_frac = 6.0;  // the surroundings an effect must stand out from: 1/x screen
@@ -5145,7 +5148,10 @@ void main() {
   // adapted to the glare): a gain by day, more over bright ground, their color back, and the sum
   // rolled off at the top with its hue kept
   if (fx_w > 0.0) {
-    float g = 1.0 + (tune_fx_gain - 1.0) * (1.0 + tune_fx_bright * smoothstep(0.25, 0.75, fx_under)) * fx_day;
+    // (over dark ground (a shaded alley at dawn) an effect never vanished: the full gain there grew
+    // an enemy's small purple shot into a saturated magenta blob with bloom, 9 -> ~300 px)
+    float g_dark = mix(tune_fx_dark, 1.0, smoothstep(tune_fx_dark0, tune_fx_dark1, fx_under));
+    float g = 1.0 + (tune_fx_gain - 1.0) * g_dark * (1.0 + tune_fx_bright * smoothstep(0.25, 0.75, fx_under)) * fx_day;
     vec3 fa = fx_d * g;
     fa = max(mix(vec3(luma(fa)), fa, mix(1.0, tune_fx_sat, fx_day)), 0.0);
     vec3 t = c + fa * fx_w;
