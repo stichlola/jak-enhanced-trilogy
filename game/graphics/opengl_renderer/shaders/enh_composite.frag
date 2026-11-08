@@ -274,6 +274,8 @@ uniform float tune_cloud_in_shade = 0.3;  // cloud shadows inside the sun's shad
 uniform float tune_dusk_floor = 0.7;  // the low sun's shade: never under this share of the game's color (0: off)
 uniform float tune_dusk_floor_end = 1.0;  // that floor after the grade, in the game's hue (0: before the grade, old)
 uniform float tune_dusk_floor_soft = 0.3;  // how far under the floor before the game's hue takes over fully
+uniform float tune_fog_floor_m = 2.0;  // the low fog no denser than this far under the camera (0: off)
+uniform float tune_fog_max = 1.0;  // and never more than this (1: no cap)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
@@ -1245,7 +1247,16 @@ float ground_fog(vec3 ray_view, float dist, float amount) {
   float base = exp(-2.0 / H);  // the density at the camera, which is ~2 m over the ground
   float dy = wd.y;
   float path = abs(dy) < 1e-3 ? dist : H / dy * (1.0 - exp(-dy * dist / H));
-  return 1.0 - exp(-0.035 * amount * base * max(path, 0.0));
+  // (never denser than at the ground, tune_fog_floor_m under the camera: looking down from a dock
+  // ~15 m over the sea the density grew exp(15/7) ~ 8x and 300 m of harbour went one opaque milky
+  // slab, hard-edged at the far wall that rises out of it)
+  if (tune_fog_floor_m > 0.0 && dy < -1e-3) {
+    float tc = tune_fog_floor_m / -dy;
+    if (dist > tc) {
+      path = H / dy * (1.0 - exp(-dy * tc / H)) + (dist - tc) * exp(tune_fog_floor_m / H);
+    }
+  }
+  return min(1.0 - exp(-0.035 * amount * base * max(path, 0.0)), tune_fog_max);
 }
 
 // lightning, far out in the sky: a jagged channel from the clouds down to the horizon at the
