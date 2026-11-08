@@ -52,10 +52,20 @@ void EnhancedPost::free_ssao() {
     glDeleteTextures(1, &m_depth_tex);
     glDeleteFramebuffers(2, m_ao_fbo);
     glDeleteTextures(2, m_ao_tex);
+    glDeleteFramebuffers(2, m_rt_hist_fbo);
+    glDeleteTextures(2, m_rt_hist_tex);
   }
+  m_rt_hist_fbo[0] = m_rt_hist_fbo[1] = m_rt_hist_tex[0] = m_rt_hist_tex[1] = 0;
+  m_rt_hist_valid = false;
   m_depth_fbo = m_depth_tex = 0;
   m_ao_fbo[0] = m_ao_fbo[1] = m_ao_tex[0] = m_ao_tex[1] = 0;
   m_ssao_w = m_ssao_h = 0;
+}
+
+// the traced occlusion: the setting, or tuning.json "post.rt_ao" (0/1) over it in a running game
+bool EnhancedPost::rt_ao_on() const {
+  static const EnhancedTune t_rt_ao("post.rt_ao", -1.f);
+  return t_rt_ao >= 0.f ? t_rt_ao > 0.5f : m_settings.rt_ao;
 }
 
 void EnhancedPost::do_ssao(GLuint src_fbo,
@@ -132,6 +142,24 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[i]);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ao_tex[i], 0);
     }
+    glGenFramebuffers(2, m_rt_hist_fbo);
+    glGenTextures(2, m_rt_hist_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_rt_hist_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, (w + 1) / 2, (h + 1) / 2, 0, GL_RG, GL_HALF_FLOAT,
+                   nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_rt_hist_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ao_tex[0], 0);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_rt_hist_tex[i],
+                             0);
+      const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+      glDrawBuffers(2, bufs);
+    }
+    m_rt_hist_valid = false;
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
@@ -238,7 +266,12 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     GLuint query = 0;
   };
   static AoProbe ao_probe;
-  static const bool ao_cycle = std::getenv("JAK_ENHANCED_AO_CYCLE") != nullptr;
+  // (JAK_ENHANCED_AO_CYCLE=2: the traced occlusion's checkerboard on, off (all pixels a frame), none)
+  static const int ao_cycle_kind = [] {
+    const char* env = std::getenv("JAK_ENHANCED_AO_CYCLE");
+    return env ? std::max(1, std::atoi(env)) : 0;
+  }();
+  static const bool ao_cycle = ao_cycle_kind > 0;
   int ao_phase = -1;
   if (ao_cycle && !ao_probe.done) {
     const double now =
@@ -255,7 +288,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       }
     } else if (t >= 18.0) {
       ao_probe.done = true;
-      const char* names[3] = {"ordered", "unordered", "off"};
+      const char* names[3] = {"ordered", ao_cycle_kind == 2 ? "every-pixel" : "unordered", "off"};
       for (int i = 0; i < 3; i++) {
         lg::info("[enhanced] ao cost: {:6.2f} ms rt {} ({} levels)",
                  ao_probe.count[i] ? ao_probe.sum[i] / ao_probe.count[i] : 0.0, names[i],
@@ -264,9 +297,38 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     }
   }
   const int ao_mode = ao_phase >= 3 ? ao_phase - 3 : ao_phase;
-  const bool rt_ao = m_settings.rt_ao && m_rt_ready && ao_mode != 2;
+  const bool rt_ao = rt_ao_on() && m_rt_ready && ao_mode != 2;
+  // (tuning.json "post.rt_ao_temporal": 1 ray a pixel a frame, turned each frame, accumulated in a
+  // reprojected history; 0: the old 6 rays a pixel every frame, no history)
+  static const EnhancedTune t_rt_temporal("post.rt_ao_temporal", 1.f);
+  static const EnhancedTune t_rt_rays("post.rt_ao_rays", 1.f);
+  const bool rt_temporal = rt_ao && t_rt_temporal > 0.5f;
   glUniform1i(glGetUniformLocation(id, "rt_levels"), rt_ao ? m_rt_count : 0);
-  glUniform1i(glGetUniformLocation(id, "rt_unordered"), ao_mode == 1 ? 1 : 0);
+  glUniform1i(glGetUniformLocation(id, "rt_unordered"), ao_mode == 1 && ao_cycle_kind != 2);
+  glUniform1i(glGetUniformLocation(id, "rt_every_pixel"), ao_mode == 1 && ao_cycle_kind == 2);
+  glUniform1i(glGetUniformLocation(id, "rt_rays"),
+              rt_temporal ? std::max(1, (int)t_rt_rays) : 6);
+  glUniform1i(glGetUniformLocation(id, "rt_temporal"), rt_temporal ? 1 : 0);
+  glUniform1f(glGetUniformLocation(id, "rt_frame"), (float)(m_frame % 4096));
+  if (rt_temporal) {
+    bool cut = !m_prev_camera.valid;
+    float moved = 0.f;
+    for (int c = 0; c < 3; c++) {
+      const float d = cam.trans[c] - m_prev_camera.trans[c];
+      moved += d * d;
+    }
+    cut = cut || std::sqrt(moved) > 8.f * kMeter;  // a cut or a teleport isn't motion
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, m_rt_hist_tex[1 - m_rt_hist_cur]);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+    glUniform1i(glGetUniformLocation(id, "rt_history"), m_rt_hist_valid && !cut ? 1 : 0);
+    glUniformMatrix3fv(glGetUniformLocation(id, "prev_view_to_world"), 1, GL_TRUE,
+                       &m_prev_camera.rot[0][0]);
+    glUniform3f(glGetUniformLocation(id, "prev_cam_pos"), m_prev_camera.trans[0],
+                m_prev_camera.trans[1], m_prev_camera.trans[2]);
+    glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+  }
   if (rt_ao) {
     for (int i = 0; i < 2; i++) {
       glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
@@ -279,7 +341,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   if (m_settings.ssao_debug && (debug_counter % 300) == 1) {
     lg::info("[enhanced] rt ao {} ready {} levels {}", m_settings.rt_ao, m_rt_ready, m_rt_count);
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
+  glBindFramebuffer(GL_FRAMEBUFFER, rt_temporal ? m_rt_hist_fbo[m_rt_hist_cur] : m_ao_fbo[0]);
   if (ao_phase >= 0 && ao_phase < 3) {
     glBeginQuery(GL_TIME_ELAPSED, ao_probe.query);
   }
@@ -292,6 +354,10 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     ao_probe.count[ao_phase]++;
   }
   prof.add_draw_call();
+  if (rt_temporal) {
+    m_rt_hist_cur = 1 - m_rt_hist_cur;
+  }
+  m_rt_hist_valid = rt_temporal;
 
   // depth-aware blur, horizontal then vertical; the result ends up back in m_ao_tex[0]
   auto& blur = render_state->shaders[ShaderId::ENH_SSAO_BLUR];
@@ -558,7 +624,7 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
   }
   // the hierarchies are taken from the loader whatever the settings (the roof over Jak is traced on
   // the CPU); on the GPU only for the ray-traced reflections and occlusion
-  const bool on_gpu = m_settings.ray_traced > 0 || m_settings.rt_ao;
+  const bool on_gpu = m_settings.ray_traced > 0 || rt_ao_on();
   auto levels = render_state->loader->get_in_use_levels();
   std::vector<u64> in_use;
   for (auto* lev : levels) {
@@ -635,6 +701,7 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
   }
   if (!on_gpu || in_use.empty()) {
     m_rt_count = 0;
+    m_rt_in_use.clear();  // (switched back on: the combined buffers built again, not count 0)
     return;
   }
   if (in_use != m_rt_in_use) {

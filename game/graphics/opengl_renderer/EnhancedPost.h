@@ -200,7 +200,9 @@ class EnhancedPost {
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
     int ray_traced = 0;  // off by default for now: still has artifacts
     // ambient occlusion traced through the levels' geometry (short rays from every pixel)
-    bool rt_ao = false;  // off for now: too slow
+    // off until proven under roofs and arches. Cost now (post.rt_ao_temporal, 1 ray a pixel a frame
+    // accumulated): +0.06 ms at 640x360 (~0.5 ms at 1080p), the old 6 rays +0.26 ms
+    bool rt_ao = false;
     float rt_ao_length = 3.0f;     // meters
     float rt_ao_strength = 1.0f;
     float rt_ao_distance = 80.f;   // meters from the camera
@@ -420,6 +422,13 @@ class EnhancedPost {
   bool m_albedo_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
+  // the traced occlusion accumulated over frames (post.rt_ao_temporal): RG16F at the occlusion's
+  // size, r the occlusion, g the view distance (m); written in turn, each fbo with m_ao_tex[0]
+  GLuint m_rt_hist_fbo[2] = {0, 0};
+  GLuint m_rt_hist_tex[2] = {0, 0};
+  int m_rt_hist_cur = 0;
+  bool m_rt_hist_valid = false;
+  bool rt_ao_on() const;
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
