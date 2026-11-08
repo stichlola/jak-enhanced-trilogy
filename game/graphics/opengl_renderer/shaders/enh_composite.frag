@@ -3514,11 +3514,13 @@ void main() {
     // tint (violet to magenta only: the windows' and fires' warm spill stays), and on characters (in front of the cloud, not lit by it) a part of it)
     float sp_top = max(spill.r, max(spill.g, spill.b));
     float sp_chroma = sp_top > 1e-4 ? (sp_top - min(spill.r, min(spill.g, spill.b))) / sp_top : 0.0;
+    // (only a violet spill is cut on characters: a fire's or a window's warm side stays on them)
+    float sp_violet = spill.g < min(spill.r, spill.b) ? smoothstep(0.1, 0.35, sp_chroma) : 0.0;
     if (tune_spill_sat < 1.0 && sp_chroma > tune_spill_sat && spill.g < min(spill.r, spill.b)) {
       spill = mix(vec3(luma(spill)), spill, tune_spill_sat / sp_chroma);
     }
     if (pix_tag > 0.3 && pix_tag < 0.55) {
-      spill *= tune_spill_chr;
+      spill *= mix(1.0, tune_spill_chr, sp_violet);
     }
     c += albedo * min(spill, vec3(0.5)) * 1.3 * light_spill * night_dark.x * (1.0 - self_lit);
   }
@@ -4116,6 +4118,11 @@ void main() {
     sand *= 1.0 + pow(max(dot(ray, sky_sun.xyz), 0.0), 4.0) * 0.6 * daylight;
     float dist = z > 0.0 ? length(p) / 4096.0 : 3000.0;
     float cover = dust_cover(ray, dist, dust, pixel_angle() / 6.2832, z > 0.0);
+    // (on a character close by the near streamers' sand over his darker colors read as the dunes
+    // showing through him: Jak at 10 m at desert-start 18h washed out; tune_dust_chr 0: as before)
+    if (pix_tag > 0.3 && pix_tag < 0.55) {
+      cover *= 1.0 - tune_dust_chr * (1.0 - smoothstep(20.0, 60.0, dist));
+    }
     c = mix(c, sand * (1.0 - 0.8 * night_dark.x), cover * 0.94);
     dust_veil = tune_haze_layer > 0.5 ? cover * 0.94 : 0.0;
   }
