@@ -267,7 +267,9 @@ uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_night_pale = 1.0;       // night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
-uniform float tune_night_pale_knee = 0.025; // ...above this luma (after the night darkening)
+uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final picture)
+uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
+uniform float tune_night_pale_cap = 0.55;   // ...never under this x its luma (-45% at most)
 uniform float tune_haze_layer = 1.0;  // the desert haze as layers over the ground (0 off, 2 right half only)
 uniform float tune_dither = 1.0;      // dither the output (in 8-bit steps; 0: off)
 uniform float tune_chr_floor = 0.5;   // characters at a low sun: never darker than this x the game's color (0: off)
@@ -317,6 +319,7 @@ in vec2 tex_coord;
 flat in float flare_vis;     // (enh_composite.vert: once a frame)
 flat in vec3 white_balance;
 out vec4 color;
+float pale_w = 0.0;  // the night's pale ground: how much it's pressed down at the end
 
 // x squared (pow() of a negative base is undefined in GLSL: NaN on some drivers)
 float sq(float x) {
@@ -3478,11 +3481,8 @@ void main() {
     if (tune_night_pale > 0.0 && z > 0.0 && wsurf == 0.0 && (tune_night_pale < 1.5 || tex_coord.x > 0.5)) {
       float upf = smoothstep(0.55, 0.8, abs(world_dir(surf_n).y));
       float pool = smoothstep(0.03, 0.15, luma(texture(tex_T1, tex_coord).rgb));
-      float lc = luma(c);
-      float knee = tune_night_pale_knee;
-      float target = lc > knee ? knee + (lc - knee) * 0.35 : lc;
-      float w = upf * (1.0 - pool) * smoothstep(0.3, 0.8, dk) * min(tune_night_pale, 1.0);
-      c *= mix(1.0, max(target / max(lc, 1e-4), 0.6), w);
+      float w = upf * (1.0 - pool) * smoothstep(0.1, 0.45, dk) * min(tune_night_pale, 1.0);
+      pale_w = w;
     }
     float seen = 0.0;
     for (int j = 0; j < 4; j++) {
@@ -5498,6 +5498,15 @@ void main() {
   }
   if (tune_fx_ab > 0.0 && tex_coord.x > 1.0 - 8.0 * texel.x && tex_coord.y < 8.0 * texel.y) {
     c = fx_ab_off ? vec3(0.0) : vec3(1.0);
+  }
+
+  // the night's pale ground (marked in the night block), pressed down here, on the final values: in
+  // the night block even -90% came back as -5% (the eyes' adaptation and the lights after it)
+  if (pale_w > 0.0) {
+    float lc = luma(c);
+    float knee = tune_night_pale_knee;
+    float target = lc > knee ? knee + (lc - knee) * tune_night_pale_slope : lc;
+    c *= mix(1.0, max(target / max(lc, 1e-4), tune_night_pale_cap), pale_w);
   }
 
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
