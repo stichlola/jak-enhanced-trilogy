@@ -374,8 +374,9 @@ uniform float tune_night_hue = 0.8;  // night: the dim land's hue toward the gam
 uniform float tune_night_hue_lo = 0.3;
 uniform float tune_night_hue_hi = 0.6;
 uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G3: Jak pink and pasted on the moonlit desert; 0: off)
-uniform float tune_backlight = 0.0;      // backlit grass and leaves toward the sun: the light through them (0: off, >= 10 shows its weight)
+uniform float tune_backlight = 1.0;      // backlit grass and leaves (shrubs, TIE trees) toward the sun: the light through them (0: off, >= 10 shows its weight)
 uniform float tune_backlight_cos = 0.55; // from how close to the sun's direction (cosine)
+uniform float tune_backlight_split = 0.0; // test: 1 = only on the right half of the screen (A/B in one frame)
 uniform float tune_bolt_scene = 1.0;    // lightning lights the scene: a short cold light from the bolt's side of the sky (0: off)
 uniform float tune_rain_chars = 1.0;    // characters wet in the rain: darker, a cold sheen on their edges (0: off)
 uniform float tune_chr_gold_rim = 0.7; // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
@@ -3024,6 +3025,11 @@ void composite_unused() {
     facade_fw = fwidth(facade_uv);
   }
   if (facade) {
+    pix_tag = 1.0;
+  }
+  // (a TIE tree's leaves, tfrag3.frag: plain, 0.675 long; to everything but the backlight plain scenery)
+  bool tie_leaf = pix_tag > 0.665 && pix_tag < 0.69 && pix_normal.a > 0.83;
+  if (tie_leaf) {
     pix_tag = 1.0;
   }
   {
@@ -6249,7 +6255,8 @@ void composite_unused() {
   // through the blades, in their own color deepened (light through a leaf comes out greener) and
   // warmed by the sun; the faces turned from the sun take most. Not in the sun's shade, not under
   // an overcast sky, not at night
-  if (tune_backlight > 0.0 && sky_sun.w > 0.0 && z > 0.0 && pix_tag > 0.955 && pix_tag < 0.983) {
+  if (tune_backlight > 0.0 && sky_sun.w > 0.0 && z > 0.0 && ((pix_tag > 0.955 && pix_tag < 0.983) || tie_leaf) &&
+      (tune_backlight_split < 0.5 || tex_coord.x > 0.5)) {
     float toward = smoothstep(tune_backlight_cos, 1.0, dot(normalize(p), sky_sun.xyz));
     float thru = 1.0 - 0.6 * clamp(dot(surf_n, sky_sun.xyz), 0.0, 1.0);
     float over_b = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
