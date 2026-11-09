@@ -919,8 +919,7 @@
   (let ((ra *enhanced-sig-plain-arms*))
     (cond
       ((not (and (-> ra ok) (< k 80))) 0.0)
-      ((= (-> ra arm k) 1) (fmax rest-w *enhanced-sig-calm-weight*))
-      ((= (-> ra arm k) 2) *enhanced-sig-calm-weight*)
+      ((= (-> ra arm k) 1) rest-w)
       (else 0.0)
       )
     )
@@ -1026,10 +1025,6 @@
                        (enhanced-sig-slerp-local! local local inv rest-w)
                        )
                      )
-                   ;; walking: both toward the plain idle's
-                   (when (< 0.0 *enhanced-sig-calm-weight*)
-                     (enhanced-sig-slerp-local! local local (-> ra local k) *enhanced-sig-calm-weight*)
-                     )
                    )
                  )
                (matrix*! bone local (-> nodes data p bone transform))
@@ -1131,10 +1126,10 @@
   )
 
 ;; His skirt panels, belt bags and water bottle hang from his thighs (skirtLA/RA on Lthigh/Rthigh) and
-;; the skirt flaps from his hips. In Jak's pose (his run, with the legs' IK) they took Jak's whole leg swing
-;; plus his own walk's cloth motion out of step: measured ~100 deg off their bind hang at a run (his own
-;; walk ~35). By pose-blend x this, they hang from his hips as in his bind pose instead (their chains'
-;; joints toward their bind turns by the same), the thighs keeping the rest of the swing.
+;; the skirt flaps from his hips. In Jak's pose (his run, with the legs' IK) the panels' lower joints kept
+;; his own walk's cloth swing (played up to rate 2, out of step with Jak's legs) on top of the leg swing.
+;; By pose-blend x this, those lower joints go toward their bind turns (the panel straight along the
+;; thigh); each chain's top still follows its thigh, so the legs stay inside the panels.
 (define *enhanced-sig-skirt-damp* 0.8)
 (defconstant SIG_HIPS 17)
 (defconstant SIG_SKIRT_FIRST 63)  ;; skirtLA; from it on: skirts, bags, bottle, flaps (to 75)
@@ -1162,15 +1157,8 @@
             (when (and (> p 0) (< p k))
               (cond
                 ((or (= p SIG_HIPS) (= p 18) (= p 22))
-                 ;; a chain's top: its bind turn against the hips, carried by the hips now
-                 (matrix-inverse-of-rot-trans! inv (-> self bind-world SIG_HIPS))
-                 (matrix*! bl (-> self bind-world k) inv)
-                 (matrix-4x4-inverse! inv (-> nodes data SIG_HIPS bone transform))
-                 (matrix*! local (-> st before k) inv)
-                 (enhanced-sig-slerp-local! local local bl w)
-                 (matrix*! (-> nodes data k bone transform) local (-> nodes data SIG_HIPS bone transform))
-                 ;; (it stays where it was: only its turn changes)
-                 (vector-copy! (-> nodes data k bone transform trans) (-> st before k trans))
+                 ;; a chain's top follows its thigh (or hips) as it is: held back toward the hips, the
+                 ;; swinging knees came through the panels
                  (set! (-> st moved k) 1)
                  )
                 ((nonzero? (-> st moved p))
@@ -1189,6 +1177,43 @@
           )
         )
       )
+    )
+  (none)
+  )
+
+;; Walking unarmed his museum walk swings each arm up to his shoulders (and Jak's walk/run far out): each
+;; upper arm (and what hangs from it) turned part way toward hanging down at his side, by the shortest
+;; turn of its direction. (Mixing the joints' local turns toward his plain idle's instead sheared the
+;; bones by row lerp, and by slerp crossed his arms in front of him: the two poses' turns are far apart.)
+(defbehavior enhanced-sig-calm-arms enhanced-skin ((w float))
+  "Both upper arms by w toward hanging at his sides (his gun on his back stays where it is)."
+  (let* ((nodes (-> self node-list))
+         (right (vector-! (new 'stack-no-clear 'vector) (-> nodes data SIG_RSHOULDER bone transform trans)
+                          (-> nodes data SIG_LSHOULDER bone transform trans)))
+         (gun (matrix-copy! (new 'stack-no-clear 'matrix) (-> nodes data SIG_GUN bone transform)))
+         (blast (matrix-copy! (new 'stack-no-clear 'matrix) (-> nodes data SIG_BLAST bone transform)))
+         (from (new 'stack-no-clear 'vector))
+         (to (new 'stack-no-clear 'vector))
+         (q (new 'stack-no-clear 'quaternion))
+         )
+    (set! (-> right w) 0.0)
+    (vector-flatten! right right *up-vector*)
+    (vector-normalize! right 1.0)
+    (dotimes (side 2)
+      (let ((sh (if (zero? side) SIG_LSHOULDER SIG_RSHOULDER)))
+        (vector-! from (-> nodes data (+ sh 1) bone transform trans) (-> nodes data sh bone transform trans))
+        (set! (-> from w) 0.0)
+        (vector-normalize! from 1.0)
+        ;; down, a little out to his side
+        (set-vector! to 0.0 -1.0 0.0 0.0)
+        (vector+float*! to to right (if (zero? side) -0.15 0.15))
+        (vector-normalize! to 1.0)
+        (quaternion-from-two-vectors-partial! q from to w)
+        (enhanced-sig-turn-tree! sh q (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data sh bone transform trans)))
+        )
+      )
+    (matrix-copy! (-> nodes data SIG_GUN bone transform) gun)
+    (matrix-copy! (-> nodes data SIG_BLAST bone transform) blast)
     )
   (none)
   )
@@ -1271,8 +1296,11 @@
                (out-w (* (-> st out-blend) att))
                (two-w (* (fmin *enhanced-sig-two-weight* (-> st out-blend)) att))
                )
-          (if (or (< 0.0 out-w) (< 0.0 (-> st rest-weight)) (< 0.0 *enhanced-sig-calm-weight*))
+          (if (or (< 0.0 out-w) (< 0.0 (-> st rest-weight)))
               (enhanced-sig-hold-pose out-w (-> st rest-weight))
+              )
+          (if (< 0.0 *enhanced-sig-calm-weight*)
+              (enhanced-sig-calm-arms *enhanced-sig-calm-weight*)
               )
           (if (< 0.0 two-w)
               (enhanced-sig-two-hand! two-w dir)

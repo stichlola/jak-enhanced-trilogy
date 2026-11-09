@@ -111,6 +111,7 @@
 ;; Sig's Peacemaker (enhanced-sig.gc): his init, his arms and the gun from his back to his hand
 (define-extern enhanced-sig-gun-init (function none :behavior enhanced-skin))
 (define-extern enhanced-sig-gun-post (function none :behavior enhanced-skin))
+(define-extern enhanced-sig-attacking? (function target object))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -524,6 +525,10 @@
          ;; his bones to its own: his pose taken against his root, put on its root
          (fix (new 'stack-no-clear 'matrix))
          (jpos (new 'stack-no-clear 'vector))
+         ;; Sig's arms (11-16) keep his own walk's: Jak's arms put through his bind pose crossed both
+         ;; hands in front of his chest (measured in Jak's pose, standing and walking: each hand on the
+         ;; other side of his shoulders, above his chest). Only Jak's attacks give him Jak's arms.
+         (own-arms? (and (string= (-> ch name) "sig") (not (enhanced-sig-attacking? jak))))
          )
     ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
     ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
@@ -550,7 +555,7 @@
                   (else -1)
                   )
                 )
-             (j (if (< k (-> jmap length)) (-> jmap k) -1))
+             (j (if (and (< k (-> jmap length)) (not (and own-arms? (>= k 11) (< k 17)))) (-> jmap k) -1))
              )
         (when (and (> k 0) (>= p 0) (< p n) (!= p k))
           ;; her own local transform: saved[k] = local * saved[p]
