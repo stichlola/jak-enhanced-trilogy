@@ -539,12 +539,17 @@ void EnhancedPost::draw_menu() {
       ImGui::TreePop();
     }
   }
-  if (menu_section("City", ImGuiTreeNodeFlags_DefaultOpen)) {
+  // (Jak 1 and 2: only what works there; the city's population, the Hellcat, the characters, the
+  // balance and the teleports are Jak 3's)
+  const bool jak3 = g_game_version == GameVersion::Jak3;
+  if (menu_section(jak3 ? "City" : "Game", ImGuiTreeNodeFlags_DefaultOpen)) {
     // passers-by, traffic, guards and Metal Heads (the game scales its wanted counts, see
     // enhanced-population-count); the game reads the same variable at boot
-    ImGui::SetNextItemWidth(200);
-    if (ImGui::Combo("Population", &m_population, "Low\0Normal\0High\0Extreme\0")) {
-      g_enhanced_menu.ask(6, std::to_string(m_population));
+    if (jak3) {
+      ImGui::SetNextItemWidth(200);
+      if (ImGui::Combo("Population", &m_population, "Low\0Normal\0High\0Extreme\0")) {
+        g_enhanced_menu.ask(6, std::to_string(m_population));
+      }
     }
     ImGui::SetNextItemWidth(200);
     int fov = g_enhanced_menu.fov;
@@ -562,7 +567,7 @@ void EnhancedPost::draw_menu() {
       g_enhanced_menu.minimap_size = map_size;
     }
     ImGui::EndDisabled();
-    if (g_game_version == GameVersion::Jak3) {
+    if (jak3) {
       // (off: none parked, and one left out goes once Jak is out of it; enhanced-hellcat-update)
       bool hellcat = g_enhanced_menu.desert_hellcat;
       if (menu_toggle("Hellcat in the desert", &hellcat)) {
@@ -597,10 +602,10 @@ void EnhancedPost::draw_menu() {
             "more marauders roam the desert at night (Jak 3)");
       }
       bool balance = g_enhanced_balance;
-      if (menu_toggle("Enhanced balance (Jak 3)", &balance)) {
+      if (jak3 && menu_toggle("Enhanced balance (Jak 3)", &balance)) {
         g_enhanced_balance = balance;
       }
-      if (ImGui::IsItemHovered()) {
+      if (jak3 && ImGui::IsItemHovered()) {
         ImGui::SetTooltip(
             "Guns for range, Dark Jak for close combat and crowds, Light Jak for defense:\n"
             "the Beam Reflexor bounces fewer times, the Needle Lazer, Arc Wielder and Gyro Burster\n"
@@ -762,7 +767,7 @@ void EnhancedPost::draw_menu() {
       enhanced_level_leave();
     }
   }
-  if (menu_section("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
+  if (jak3 && menu_section("Teleport", ImGuiTreeNodeFlags_DefaultOpen)) {
     int shown = 0;
     for (const auto& p : enhanced_places()) {
       if (shown++ % 2) {
