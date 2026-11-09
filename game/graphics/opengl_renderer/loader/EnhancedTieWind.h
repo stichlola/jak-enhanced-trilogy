@@ -18,4 +18,8 @@
  */
 void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name);
 
+// whether a texture is leaves to the wind (a cutout with a plant's name): the wind ties' leaves
+// flutter (tie_wind.vert)
+bool enhanced_tie_wind_is_leaf(const tfrag3::Texture& tex);
+
 constexpr float kEnhTieSwayMaxM = 12.f;

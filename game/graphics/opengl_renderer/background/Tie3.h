@@ -122,6 +122,7 @@ class Tie3 : public BucketRenderer {
     std::vector<std::array<math::Vector4f, 4>> wind_matrix_cache;
     GLuint wind_vertex_index_buffer;
     std::vector<u32> wind_vertex_index_offsets;
+    std::vector<u8> wind_leaf;  // Enhanced: per wind draw, 1 = leaves (they flutter)
     bool has_proto_visibility = false;
     TieProtoVisibility proto_visibility;
 

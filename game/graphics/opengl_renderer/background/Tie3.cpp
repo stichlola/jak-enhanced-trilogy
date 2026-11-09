@@ -11,6 +11,7 @@
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTieWind.h"
 
 #include "third-party/imgui/imgui.h"
 
@@ -191,9 +192,16 @@ void Tie3::load_from_fr3_data(const LevelData* loader_data) {
         lod_tree[l_tree].wind_vertex_index_buffer =
             loader_data->tie_data[l_geo][l_tree].wind_indices;
         u32 off = 0;
+        auto& leaf = lod_tree[l_tree].wind_leaf;
+        leaf.clear();
         for (auto& draw : tree.instanced_wind_draws) {
           lod_tree[l_tree].wind_vertex_index_offsets.push_back(off);
           off += draw.vertex_index_stream.size();
+          // Enhanced: whose leaves flutter (EnhancedTieWind)
+          leaf.push_back(draw.tree_tex_id >= 0 && draw.tree_tex_id < (int)lev_data->textures.size() &&
+                                 enhanced_tie_wind_is_leaf(lev_data->textures[draw.tree_tex_id])
+                             ? 1
+                             : 0);
         }
       }
 
@@ -1029,6 +1037,9 @@ void Tie3::render_tree_wind(int idx,
 
   int last_texture = -1;
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tree.wind_vertex_index_buffer);
+  const GLuint wind_prog = render_state->shaders[shader_id].id();
+  const GLint flutter_loc = glGetUniformLocation(wind_prog, "enh_tie_flutter");
+  glUniform1f(glGetUniformLocation(wind_prog, "enh_tie_time"), enh_t);
 
   for (size_t draw_idx = 0; draw_idx < tree.wind_draws->size(); draw_idx++) {
     const auto& draw = tree.wind_draws->operator[](draw_idx);
@@ -1043,6 +1054,10 @@ void Tie3::render_tree_wind(int idx,
     }
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, shader_id);
     enhanced_set_material(render_state, shader_id, m_materials, draw.tree_tex_id, draw.mode);
+    const bool leaf_draw = enh_k > 0.f && draw_idx < tree.wind_leaf.size() && tree.wind_leaf[draw_idx];
+    if (!leaf_draw) {
+      glUniform4f(flutter_loc, 0.f, 0.f, 0.f, 0.f);
+    }
 
     int off = 0;
     for (auto& grp : draw.instance_groups) {
@@ -1053,6 +1068,12 @@ void Tie3::render_tree_wind(int idx,
 
       glUniformMatrix4fv(glGetUniformLocation(render_state->shaders[shader_id].id(), "camera"), 1,
                          GL_FALSE, tree.wind_matrix_cache.at(grp.instance_idx)[0].data());
+      // Enhanced: the leaves flutter, 3.5 cm, phased by where the tree stands (tie_wind.vert)
+      if (leaf_draw) {
+        const auto& at = tree.instance_info->at(grp.instance_idx).matrix[3];
+        glUniform4f(flutter_loc, at.x() / 4096.f, at.y() / 4096.f, at.z() / 4096.f,
+                    0.035f * 4096.f * enh_k);
+      }
 
       prof.add_draw_call();
       prof.add_tri(grp.num);

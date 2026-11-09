@@ -62,6 +62,10 @@ u64 cell_key(int x, int z) {
 
 }  // namespace
 
+bool enhanced_tie_wind_is_leaf(const tfrag3::Texture& tex) {
+  return texture_kind(tex) == kLeaf;
+}
+
 void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
   static const bool log_names = std::getenv("JAK_ENHANCED_TIE_WIND_LOG") != nullptr;
   std::vector<u8> kinds(level.textures.size(), kNone);
