@@ -242,10 +242,10 @@ uniform float tune_lawn_foot = 1.0;        // ...and at the plants' feet (grass 
 uniform float tune_lawn_foot_r = 1.0;      // ...reaching this many meters out from the plants' splatted feet
 uniform float tune_lawn_foot_k = 0.6;      // ...this much at most
 uniform float tune_lawn_foot_split = 0.0;  // (test: 1 = only on the right half of the screen)
-uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
+uniform float tune_night_win = 0.0;       // lit window panes at night: their light (0 = off)
 uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
 uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
-uniform float tune_night_facade = 1.0;       // far buildings' low-res walls at night: lit windows' light (0 = off, >= 10 shows the tag)
+uniform float tune_night_facade = 0.0;       // far buildings' low-res walls at night: lit windows' light (0 = off, >= 10 shows the tag)
 uniform float tune_night_facade_share = 0.22; // how many of their windows are lit
 uniform float tune_night_facade_floor = 3.5;  // a storey's height, m (a bay 0.85x as wide)
 uniform float tune_night_facade_near = 70.0;  // in a lit city, plain and metal walls get them from here (to 1.5x), m
