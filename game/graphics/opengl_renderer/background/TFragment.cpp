@@ -4,6 +4,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
 
@@ -76,6 +77,19 @@ TFragment::~TFragment() {
 void TFragment::render(DmaFollower& dma,
                        SharedRenderState* render_state,
                        ScopedProfilerNode& prof) {
+  // Enhanced: the ground-class grass fields held back, drawn after the level's blended tfrag
+  struct LateGrass {
+    bool on;
+    SharedRenderState* rs;
+    ScopedProfilerNode& p;
+    ~LateGrass() {
+      if (on) {
+        enhanced_flush_ground_grass(rs, p);
+      }
+    }
+  } late_grass{std::find(m_tree_kinds.begin(), m_tree_kinds.end(), tfrag3::TFragmentTreeKind::TRANS) !=
+                   m_tree_kinds.end(),
+               render_state, prof};
   if (!m_enabled) {
     while (dma.current_tag_offset() != render_state->next_bucket) {
       dma.read_and_advance();

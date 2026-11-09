@@ -1,15 +1,28 @@
 #include "Tie3.h"
 
+#include <chrono>
+
 #include "common/global_profiler/GlobalProfiler.h"
 #include "common/log/log.h"
 #include "common/util/Assert.h"
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTieWind.h"
 
 #include "third-party/imgui/imgui.h"
+
+namespace {
+// Enhanced: the clock of the trees' wind (the static ones in tfrag3.vert, the game's wind ties here)
+float enh_tie_wind_seconds() {
+  using clock = std::chrono::steady_clock;
+  static const auto start = clock::now();
+  return std::chrono::duration<float>(clock::now() - start).count();
+}
+}  // namespace
 
 Tie3::Tie3(const std::string& name,
            int my_id,
@@ -179,9 +192,16 @@ void Tie3::load_from_fr3_data(const LevelData* loader_data) {
         lod_tree[l_tree].wind_vertex_index_buffer =
             loader_data->tie_data[l_geo][l_tree].wind_indices;
         u32 off = 0;
+        auto& leaf = lod_tree[l_tree].wind_leaf;
+        leaf.clear();
         for (auto& draw : tree.instanced_wind_draws) {
           lod_tree[l_tree].wind_vertex_index_offsets.push_back(off);
           off += draw.vertex_index_stream.size();
+          // Enhanced: whose leaves flutter (EnhancedTieWind)
+          leaf.push_back(draw.tree_tex_id >= 0 && draw.tree_tex_id < (int)lev_data->textures.size() &&
+                                 enhanced_tie_wind_is_leaf(lev_data->textures[draw.tree_tex_id])
+                             ? 1
+                             : 0);
         }
       }
 
@@ -560,6 +580,18 @@ void Tie3::draw_matching_draws_for_tree(int idx,
   if (use_envmap) {
     // if we use envmap, use the envmap-style math for the base draw to avoid rounding issue.
     init_etie_cam_uniforms(m_etie_base_uniforms, m_common_data.settings.camera);
+  } else {
+    // Enhanced: the static trees' wind (EnhancedTieWind.h; the shader's tune_tie_wind turns it on),
+    // with the shrubs' gust field
+    static GLuint program = 0;
+    static GLint loc = -1;
+    const GLuint id = render_state->shaders[ShaderId::TFRAG3].id();
+    if (id != program) {
+      program = id;
+      loc = glGetUniformLocation(id, "enh_tie_wind");
+    }
+    glUniform4f(loc, enh_tie_wind_seconds(),
+                g_enhanced_wind.enabled && !m_hide_wind ? g_enhanced_wind.now() : 0.f, 0.f, 0.f);
   }
 
   glBindVertexArray(tree.vao);
@@ -824,7 +856,8 @@ void do_wind_math(u16 wind_idx,
                   float* wind_vector_data,
                   const Tie3::WindWork& wind_work,
                   float stiffness,
-                  std::array<math::Vector4f, 4>& mat) {
+                  std::array<math::Vector4f, 4>& mat,
+                  float gain = 1.f) {
   float* my_vector = wind_vector_data + (4 * wind_idx);
   const auto& work_vector = wind_work.wind_array[(wind_work.wind_time + wind_idx) & 63];
   constexpr float cx = 0.5;
@@ -885,8 +918,9 @@ void do_wind_math(u16 wind_idx,
   // vmulax.yw acc, vf0, vf0
   // vmulay.xz acc, vf27, vf10
   // vmadd.xyzw vf10, vf1, vf10
-  mat[0].x() += vf27.x() * mat[0].y();
-  mat[0].z() += vf27.z() * mat[0].y();
+  // Enhanced: the bend drawn times tie.wind_gain (the spring above keeps the game's state)
+  mat[0].x() += vf27.x() * gain * mat[0].y();
+  mat[0].z() += vf27.z() * gain * mat[0].y();
 
   // qmfc2.i s2, vf27
   if (!wind_work.paused) {
@@ -899,15 +933,15 @@ void do_wind_math(u16 wind_idx,
   // vmulax.yw acc, vf0, vf0
   // vmulay.xz acc, vf27, vf11
   // vmadd.xyzw vf11, vf1, vf11
-  mat[1].x() += vf27.x() * mat[1].y();
-  mat[1].z() += vf27.z() * mat[1].y();
+  mat[1].x() += vf27.x() * gain * mat[1].y();
+  mat[1].z() += vf27.z() * gain * mat[1].y();
 
   // ppacw s2, r0, s2
   // vmulax.yw acc, vf0, vf0
   // vmulay.xz acc, vf27, vf12
   // vmadd.xyzw vf12, vf1, vf12
-  mat[2].x() += vf27.x() * mat[2].y();
-  mat[2].z() += vf27.z() * mat[2].y();
+  mat[2].x() += vf27.x() * gain * mat[2].y();
+  mat[2].z() += vf27.z() * gain * mat[2].y();
 
   //
   // if not paused
@@ -927,6 +961,12 @@ void Tie3::render_tree_wind(int idx,
 
   // note: this isn't the most efficient because we might compute wind matrices for invisible
   // instances. TODO: add vis ids to the instance info to avoid this
+  // Enhanced: how far the game's wind trees bend (1 = the game's)
+  static const EnhancedTune k_wind_gain("tie.wind_gain", 1.f);
+  // and our own sway on them, with the static trees' (tune_tie_wind, the shader's switch)
+  static const EnhancedTune k_tie_wind("shaders.tune_tie_wind", 1.f);
+  const float enh_k = k_tie_wind < 10.f && g_enhanced_wind.enabled ? k_tie_wind * g_enhanced_wind.now() : 0.f;
+  const float enh_t = enh_tie_wind_seconds();
   memset(tree.wind_matrix_cache.data(), 0, sizeof(float) * 16 * tree.wind_matrix_cache.size());
   auto& cam_bad = settings.camera.camera;
   std::array<math::Vector4f, 4> cam;
@@ -942,7 +982,20 @@ void Tie3::render_tree_wind(int idx,
 
     ASSERT(info.wind_idx * 4 <= m_wind_vectors.size());
     do_wind_math(info.wind_idx, m_wind_vectors.data(), m_wind_data,
-                 info.stiffness * m_wind_multiplier, mat);
+                 info.stiffness * m_wind_multiplier, mat, k_wind_gain);
+    if (enh_k > 0.f) {
+      // Enhanced: the game's wind barely reaches these (Jak 3 forest: nothing moves, even at gain
+      // 20): they lean in the static trees' gusts (tfrag3.vert), a shear from the instance's foot,
+      // 3 cm per meter of height
+      const float wx = mat[3].x() / 4096.f, wz = mat[3].z() / 4096.f;
+      const float g = std::sin(enh_t * 1.3f + wx * 0.11f + wz * 0.07f) * 0.6f +
+                      std::sin(enh_t * 2.1f + wx * 0.05f - wz * 0.13f) * 0.4f;
+      const float sh = enh_k * (g * 0.7f + 0.3f) * 0.03f;
+      for (int i = 0; i < 3; i++) {
+        mat[i].x() += 0.8f * sh * mat[i].y();
+        mat[i].z() += 0.6f * sh * mat[i].y();
+      }
+    }
 
     // vmulax.xyzw acc, vf20, vf10
     // vmadday.xyzw acc, vf21, vf10
@@ -984,6 +1037,9 @@ void Tie3::render_tree_wind(int idx,
 
   int last_texture = -1;
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, tree.wind_vertex_index_buffer);
+  const GLuint wind_prog = render_state->shaders[shader_id].id();
+  const GLint flutter_loc = glGetUniformLocation(wind_prog, "enh_tie_flutter");
+  glUniform1f(glGetUniformLocation(wind_prog, "enh_tie_time"), enh_t);
 
   for (size_t draw_idx = 0; draw_idx < tree.wind_draws->size(); draw_idx++) {
     const auto& draw = tree.wind_draws->operator[](draw_idx);
@@ -998,6 +1054,10 @@ void Tie3::render_tree_wind(int idx,
     }
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, shader_id);
     enhanced_set_material(render_state, shader_id, m_materials, draw.tree_tex_id, draw.mode);
+    const bool leaf_draw = enh_k > 0.f && draw_idx < tree.wind_leaf.size() && tree.wind_leaf[draw_idx];
+    if (!leaf_draw) {
+      glUniform4f(flutter_loc, 0.f, 0.f, 0.f, 0.f);
+    }
 
     int off = 0;
     for (auto& grp : draw.instance_groups) {
@@ -1008,6 +1068,12 @@ void Tie3::render_tree_wind(int idx,
 
       glUniformMatrix4fv(glGetUniformLocation(render_state->shaders[shader_id].id(), "camera"), 1,
                          GL_FALSE, tree.wind_matrix_cache.at(grp.instance_idx)[0].data());
+      // Enhanced: the leaves flutter, 3.5 cm, phased by where the tree stands (tie_wind.vert)
+      if (leaf_draw) {
+        const auto& at = tree.instance_info->at(grp.instance_idx).matrix[3];
+        glUniform4f(flutter_loc, at.x() / 4096.f, at.y() / 4096.f, at.z() / 4096.f,
+                    0.035f * 4096.f * enh_k);
+      }
 
       prof.add_draw_call();
       prof.add_tri(grp.num);

@@ -19,6 +19,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/pipelines/opengl.h"
@@ -43,6 +44,8 @@ constexpr float kThinKeep = 0.5f;  // the share of impostors left at kImpReach (
 constexpr int kImpGrid = 12;  // impostor atlas: views per side (tools/blender/grass_variants.py)
 constexpr float kFarReach = 1.f + kFarLods;  // so they reach this many times the detailed distance
 constexpr int kImp = kFarLods + 1;  // the version that's the impostor
+constexpr int kCoarse = kImp + 1;   // the coarse version (Mesh::coarse) of a tilted copy, far out
+constexpr float kCoarseShare = 0.15f;  // its triangles: this share of the last far version's
 constexpr float kPlacedReach = 400.f;  // m: how far the objects placed by hand are drawn
 constexpr float kPlacedSize = 4.f;  // m: placed objects wider than this keep each version for longer
 
@@ -72,6 +75,9 @@ struct Mesh {
   u64 tex_key = 0;   // the texture's content (models sharing it share one GL texture)
   bool cutout = false;  // its texture has holes (blades, leaves): swayed by the wind, pushed aside
   int far_lod = -1;      // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
+  // a much simpler version made here from its last far version (make_coarse): for the tilted copies
+  // past where an upright one is a picture (theirs would show the part the ground hides)
+  int coarse = -1;
   // its impostor (<file>_imp.png): pictures of it from kImpGrid^2 directions, drawn past them all
   int imp_w = 0, imp_h = 0;
   std::vector<u8> imp_rgba, imp_nrm;  // the pictures, their normals (<file>_nrm.png, may be missing)
@@ -150,7 +156,7 @@ struct Library {
   std::unordered_map<u64, GLuint> textures;  // by the texture's content
   GLuint instance_vbo = 0;
   // the copies drawn, per batch, per version (the model, its far versions, its impostor)
-  std::vector<std::array<std::vector<GpuInstance>, kFarLods + 2>> copies;
+  std::vector<std::array<std::vector<GpuInstance>, kCoarse + 1>> copies;
   GLuint imp_vao = 0, imp_vbo = 0;  // the impostors' quad
   Crush crush;
 };
@@ -361,6 +367,48 @@ std::vector<Mesh> load_far_versions(const std::string& file) {
   return out;
 }
 
+// a much simpler version of a far version, kCoarseShare of its triangles (same vertices and
+// texture: the GL texture is shared by tex_key, so the source is made first)
+Mesh make_coarse(const Mesh& src) {
+  Mesh c;
+  c.file = src.file + " (coarse)";
+  const size_t target = std::max<size_t>(
+      (size_t)(src.indices.size() / 3 * kCoarseShare) * 3, std::min<size_t>(src.indices.size(), 60 * 3));
+  std::vector<u32> out(src.indices.size());
+  float err = 0.f;
+  size_t n = meshopt_simplify(out.data(), src.indices.data(), src.indices.size(), &src.verts[0].x,
+                              src.verts.size(), sizeof(Mesh::Vertex), target, 0.1f,
+                              meshopt_SimplifyPrune, &err);
+  if (n > target * 2 || n < 3) {
+    n = meshopt_simplifySloppy(out.data(), src.indices.data(), src.indices.size(), &src.verts[0].x,
+                               src.verts.size(), sizeof(Mesh::Vertex), target, 1.f, &err);
+  }
+  if (n < 3) {
+    return c;
+  }
+  out.resize(n);
+  // (only the vertices it still uses)
+  std::vector<u32> remap(src.verts.size(), ~0u);
+  c.indices.reserve(out.size());
+  for (u32 i : out) {
+    if (remap[i] == ~0u) {
+      remap[i] = (u32)c.verts.size();
+      c.verts.push_back(src.verts[i]);
+    }
+    c.indices.push_back(remap[i]);
+  }
+  c.tex_w = src.tex_w;
+  c.tex_h = src.tex_h;
+  c.lo = src.lo;
+  c.hi = src.hi;
+  c.avg = src.avg;
+  c.foot_y = src.foot_y;
+  c.tex_key = src.tex_key;
+  c.cutout = src.cutout;
+  c.ok = true;
+  return c;
+}
+
 // scenery.json, once (the loader thread holds the library's lock)
 void load_config(Library& lib) {
   if (lib.loaded_config) {
@@ -398,6 +446,16 @@ void load_config(Library& lib) {
               lib.meshes[prev].far_lod = (int)lib.meshes.size();
               prev = (int)lib.meshes.size();
               lib.meshes.push_back(std::move(lod));
+            }
+            // (a stone's: blades and leaves are cutouts, a coarse one would lose them)
+            if (!lib.meshes[prev].cutout && !lib.meshes[prev].indices.empty()) {
+              auto c = make_coarse(lib.meshes[prev]);
+              if (c.ok) {
+                lib.meshes[it->second].coarse = (int)lib.meshes.size();
+                lg::info("[enhanced] scenery: {}: coarse version {} triangles (from {})", file,
+                         c.indices.size() / 3, lib.meshes[prev].indices.size() / 3);
+                lib.meshes.push_back(std::move(c));
+              }
             }
           }
         }
@@ -1321,7 +1379,11 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
                   const TfragRenderSettings& settings,
                   SharedRenderState* render_state,
                   ScopedProfilerNode& prof) {
-  if (!scenery || g_enhanced_scenery_dist <= 0.f) {
+  // (test: scenery.test_dist overrides the menu's detailed distance, 0 = none drawn, for A/B costs
+  // in one run)
+  static const EnhancedTune k_test_dist("scenery.test_dist", -1.f);
+  const float dist = k_test_dist >= 0.f ? (float)k_test_dist : g_enhanced_scenery_dist;
+  if (!scenery || dist <= 0.f) {
     return;
   }
   auto& lib = library();
@@ -1333,8 +1395,13 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
   // each version reaches one detailed distance further (the impostor: to kImpReach); a copy near
   // the end of its version's reach swaps to the next over the last part of it (both drawn,
   // complementary pixels: shrub.frag's enh_xfade)
-  const float step = g_enhanced_scenery_dist * g_enhanced_scenery_scale * kMeter;
+  const float step = dist * g_enhanced_scenery_scale * kMeter;
   const float swap = step * 0.2f;
+  static const EnhancedTune k_lod_size("scenery.lod_size", 2.f);  // m (0: every copy at step)
+  static const EnhancedTune k_lod_min("scenery.lod_min", 0.3f);
+  static const EnhancedTune k_tilt_reach("scenery.tilt_reach", kTiltedReach);  // m
+  static const EnhancedTune k_tilt_size("scenery.tilt_size", 0.f);
+  static const EnhancedTune k_coarse("scenery.coarse", 1.f);
   const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
   const float thin_from = std::max(far_end * 0.5f, (kFarLods + 1.5f) * step);
   const auto& cam = settings.camera.trans;
@@ -1346,6 +1413,7 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
   // the copies to draw: per batch, per version (the far versions, then the impostor last)
   lib.copies.resize(data.batches.size());
   bool any = false;
+  size_t tilt_held = 0, coarse_held = 0;
   for (size_t bi = 0; bi < data.batches.size(); bi++) {
     const auto& b = data.batches[bi];
     const auto& mesh = lib.meshes[b.mesh];
@@ -1371,25 +1439,62 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
       // a tilted copy stays a far version while it's more than a few pixels: its picture, a flat quad,
       // shows the part the ground hides on the model, and seen from below its own horizon there's
       // no picture at all
+      // (small copies swap sooner: a version's reach scales with the copy's size, down to
+      // scenery.lod_min of it below scenery.lod_size m of radius; a 0.65 m pebble heap of 3000
+      // triangles was a few pixels at 60 m)
+      float st = step, sw = swap, size = 1.f;
+      if (k_lod_size > 0.f) {
+        size = std::clamp(s.w() / (k_lod_size * kMeter), std::min((float)k_lod_min, 1.f), 1.f);
+        st = step * size;
+        sw = st * 0.2f;
+      }
+      // (scenery.tilt_size 1: a tilted copy's reach scales with its size as well)
+      const float tilt_end = k_tilt_reach * kMeter * (k_tilt_size > 0.f ? size : 1.f);
       int last_here = last;
-      if (last == kImp && d < kTiltedReach * kMeter) {
+      bool coarse = false;
+      if (last == kImp && d < tilt_end) {
         const auto& up = inst.col[1];
         const float up2 = up[0] * up[0] + up[1] * up[1] + up[2] * up[2];
         const float seen_y = (up[0] * (cam.x() - inst.col[3][0]) + up[1] * (cam.y() - inst.col[3][1]) +
                               up[2] * (cam.z() - inst.col[3][2])) / std::max(up2, 1e-6f);
         if (up[1] * up[1] < 0.989f * up2 || seen_y < (mesh.lo.y() + mesh.hi.y()) * 0.5f) {
-          last_here = kFarLods;
+          // (scenery.coarse 1: past its far version's reach a stone's coarse version, not that
+          // far version out to the tilted reach: 1190 copies of 1000 triangles each landing at the
+          // desert's east cliffs)
+          coarse = k_coarse > 0.f && mesh.coarse >= 0;
+          if (!coarse) {
+            last_here = kFarLods;
+          }
         }
       }
-      int k = std::min((int)(d / step), last_here);
-      float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
+      // the slot a version goes to: a tilted copy's picture is its coarse version
+      auto slot = [&](int v) { return coarse && v == kImp ? kCoarse : v; };
+      int k = std::min((int)(d / st), last_here);
+      if (last_here != last && d >= kImp * st) {
+        tilt_held++;  // (a tilted copy kept a far version where it'd be a picture)
+      }
+      float into = d - (k + 1) * st + sw;  // how far into the swap to the next version
+      const float coarse_band = tilt_end * 0.1f;
       if (k < last_here && into > 0.f) {
-        float f = std::min(into / swap, 1.f);
+        float f = std::min(into / sw, 1.f);
         inst.col[1][3] = f;
         inst.col[2][3] = -1.f;
-        out[k].push_back(inst);
+        out[slot(k)].push_back(inst);
         inst.col[2][3] = 1.f;
-        out[k + 1].push_back(inst);
+        out[slot(k + 1)].push_back(inst);
+      } else if (coarse && k == kImp) {
+        // (its coarse version, then over the end of the tilted reach to its picture)
+        coarse_held++;
+        float into_imp = d - (tilt_end - coarse_band);
+        if (into_imp > 0.f) {
+          inst.col[1][3] = std::min(into_imp / coarse_band, 1.f);
+          inst.col[2][3] = -1.f;
+          out[kCoarse].push_back(inst);
+          inst.col[2][3] = 1.f;
+          out[kImp].push_back(inst);
+        } else {
+          out[kCoarse].push_back(inst);
+        }
       } else if (k == kImp && d > thin_from) {
         // far out fewer copies (the ones a stable hash ranks last go first, fading out over a
         // band): a few pixels each, most of them are just cost there
@@ -1409,6 +1514,64 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
       any = true;
     }
   }
+  {
+    // (test: scenery.test_skip, a mask of versions not drawn (1 the models, 2 their far versions,
+    // 4 the impostors, 8 the coarse versions); scenery.test_log 1: the copies and triangles drawn
+    // per version, every 5 s)
+    static const EnhancedTune k_skip("scenery.test_skip", 0.f);
+    static const EnhancedTune k_log("scenery.test_log", 0.f);
+    const int skip = (int)k_skip;
+    // (every 5 s, each tree drawn in that frame)
+    static float log_at = -10.f;
+    bool log_now = false;
+    if (k_log > 0.f) {
+      if (now - log_at > 5.f) {
+        log_at = now;
+      }
+      log_now = now - log_at < 0.004f;
+    }
+    size_t n[kCoarse + 1] = {}, tris[kCoarse + 1] = {};
+    for (size_t bi = 0; bi < data.batches.size(); bi++) {
+      int m = data.batches[bi].mesh;  // (each version's mesh: the last far version stands in)
+      const int cm = m >= 0 ? lib.meshes[m].coarse : -1;
+      for (int k = 0; k <= kCoarse; k++) {
+        auto& o = lib.copies[bi][k];
+        if (log_now) {
+          n[k] += o.size();
+          if (k <= kFarLods && m >= 0) {
+            tris[k] += o.size() * lib.meshes[m].indices.size() / 3;
+          } else if (k == kCoarse && cm >= 0) {
+            tris[k] += o.size() * lib.meshes[cm].indices.size() / 3;
+          }
+        }
+        if (skip & (1 << k)) {
+          o.clear();
+        }
+        if (k < kFarLods && m >= 0 && lib.meshes[m].far_lod >= 0) {
+          m = lib.meshes[m].far_lod;
+        }
+      }
+    }
+    if (log_now) {
+      lg::info(
+          "[enhanced] scenery draw: {} batches, copies {} / {} / {} / coarse {}, triangles {}k / {}k / "
+          "coarse {}k, tilted held {} / coarse {}",
+          data.batches.size(), n[0], n[1], n[2], n[kCoarse], tris[0] / 1000, tris[1] / 1000,
+          tris[kCoarse] / 1000, tilt_held, coarse_held);
+      if (k_log > 1.f) {
+        for (size_t bi = 0; bi < data.batches.size(); bi++) {
+          const auto& b = data.batches[bi];
+          const auto& mesh = lib.meshes[b.mesh];
+          const int f = mesh.far_lod;
+          lg::info("[enhanced] scenery batch {}: {} tris {} / {}, radius {:.2f} m, copies {} / {} / {}",
+                   bi, mesh.file, mesh.indices.size() / 3,
+                   f >= 0 ? lib.meshes[f].indices.size() / 3 : 0,
+                   b.spheres.empty() ? 0.f : b.spheres[0].w() / kMeter, lib.copies[bi][0].size(),
+                   lib.copies[bi][1].size(), lib.copies[bi][2].size());
+        }
+      }
+    }
+  }
   if (!any) {
     return;
   }
@@ -1421,18 +1584,26 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
     auto& mesh = lib.meshes[b.mesh];
     const auto& out = lib.copies[bi];
     // the model and its far versions (the last one stands in for any missing)
-    std::array<Mesh*, kFarLods + 1> lods;
+    // (and the coarse version, in its slot; none in the impostor's)
+    std::array<Mesh*, kCoarse + 1> lods{};
     lods[0] = &mesh;
     bool some = !out[0].empty();
     for (int k = 1; k <= kFarLods; k++) {
       lods[k] = lods[k - 1]->far_lod >= 0 ? &lib.meshes[lods[k - 1]->far_lod] : lods[k - 1];
       some = some || !out[k].empty();
     }
+    if (mesh.coarse >= 0 && !out[kCoarse].empty()) {
+      lods[kCoarse] = &lib.meshes[mesh.coarse];
+      some = true;
+      if (!lods[kFarLods]->vao) {
+        make_gl(*lods[kFarLods], lib);  // (first: the coarse version shares its texture)
+      }
+    }
     if (!some) {
       continue;
     }
-    for (int k = 0; k <= kFarLods; k++) {
-      if (!out[k].empty() && !lods[k]->vao) {
+    for (int k = 0; k <= kCoarse; k++) {
+      if (lods[k] && !out[k].empty() && !lods[k]->vao) {
         make_gl(*lods[k], lib);
       }
     }
@@ -1478,12 +1649,12 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
 
     glDisable(GL_PRIMITIVE_RESTART);
     glActiveTexture(GL_TEXTURE0);
-    for (int k = 0; k <= kFarLods; k++) {
-      const auto& m = *lods[k];
+    for (int k = 0; k <= kCoarse; k++) {
       const auto& copies = out[k];
-      if (copies.empty()) {
+      if (!lods[k] || copies.empty()) {
         continue;
       }
+      const auto& m = *lods[k];
       glBindVertexArray(m.vao);
       glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
       glBufferData(GL_ARRAY_BUFFER, copies.size() * sizeof(GpuInstance), copies.data(),

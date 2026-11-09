@@ -38,6 +38,20 @@ uniform vec4 enh_crush;         // its corner (world x, z), its size (game units
 uniform vec4 enh_style;         // the painted grass's look: its height, its blades' width, the wind's bend (times the usual)
 uniform vec3 enh_grass_color;   // its green
 uniform vec3 enh_grass_dry;     // its drier tips
+uniform float tune_grass_ground_sat = 1.2;  // (tuning: the floor color's saturation for the blades)
+uniform vec4 enh_grass_ground;  // ground-class fields: a tint over the floor's color (rgb), w: how much the blades take each spot's color (the field's b, packed)
+uniform float enh_screen;            // ground-class fields: the frame so far copied (1: blades take the floor's color as drawn under their foot)
+uniform sampler2D enh_scene_color;   // its color, mipmapped
+uniform sampler2D enh_scene_depth;   // its depth
+uniform sampler2D enh_scene_normal;  // its normals (their length: the post's material tag)
+uniform float tune_grass_scr_gain = 1.4;  // (tuning: the blades' tips over the floor's color: their mean as bright as the floor, 0.95-1.0)
+uniform float tune_grass_scr_lod = 2.5;   // (tuning: how blurred the floor's color is taken, mip level)
+uniform float tune_grass_scr_far = 0.8;   // (tuning: the tips' gain at 60 m and more, times scr_gain: seen from the side they cover the feet)
+uniform float tune_grass_scr_tol = 1.0;   // (tuning: meters along the view the foot's floor may be off)
+uniform float tune_grass_scr_foot = 0.45;  // (tuning: the blades' feet, darker in the grass around)
+uniform float tune_grass_scr_sat = 0.85;  // (tuning: the floor color's saturation in the blades, 1: as drawn; the post reddens orange blades)
+uniform float tune_grass_ground_up = 0.0; // (tuning: the blades' normals toward the floor's, 1: lit as the floor)
+uniform float tune_grass_scr_dbg = 0.0;  // (tuning: 1 green = floor seen, red = hidden; 2 the floor's color alone)
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -84,6 +98,16 @@ void hide() {
   enh_pos = vec3(0.0);
   enh_lod_kind = 0;
   enh_xfade = vec2(0.0);
+}
+
+vec4 to_clip(vec3 world) {
+  vec3 vert = world - cam_trans.xyz;
+  vec4 p = -pc_camera[3];
+  p -= pc_camera[0] * vert.x;
+  p -= pc_camera[1] * vert.y;
+  p -= pc_camera[2] * vert.z;
+  p.y *= SCISSOR_ADJUST * HEIGHT_SCALE;
+  return p;
 }
 
 void main() {
@@ -204,7 +228,19 @@ void main() {
   // (toned down from the painted green toward a natural, slightly warm one: it read as highlighter)
   vec3 green = mix(vec3(dot(enh_grass_color, vec3(0.3, 0.59, 0.11))), enh_grass_color, 0.6) * vec3(1.05, 0.88, 0.8);
   vec3 dry = mix(vec3(dot(enh_grass_dry, vec3(0.3, 0.59, 0.11))), enh_grass_dry, 0.7) * vec3(1.0, 0.92, 0.85);
-  vec3 tipc = mix(green, dry, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * 0.6 * t);
+  if (enh_grass_ground.w > 0.0) {
+    // (the floor's own color under the blade, as drawn: the blades come out its tone)
+    ivec2 sz = textureSize(tex_T3, 0);
+    ivec2 ti = clamp(ivec2(floor((xz - enh_field.xy) / enh_field.z * vec2(sz))), ivec2(0), sz - 1);
+    float pk = texelFetch(tex_T3, ti, 0).b;
+    if (pk > 0.5) {
+      uint u = uint(pk + 0.5);
+      vec3 c = vec3(float(u & 255u), float((u >> 8u) & 255u), float((u >> 16u) & 255u)) / 127.5;
+      c = max(mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, tune_grass_ground_sat), 0.0) * enh_grass_ground.rgb;
+      green = mix(green, c, enh_grass_ground.w);
+      dry = mix(dry, min(c * 1.25 + 0.04, vec3(2.0)), enh_grass_ground.w);
+    }
+  }  vec3 tipc = mix(green, dry, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * 0.6 * t);
   tipc *= mix(0.75, 1.2, rnd(bs, 9u));
   vec3 albedo = mix(tipc * 0.35, tipc, pow(t, 0.6));
   vec4 tod = texelFetch(tex_T10, enh_tod, 0);
@@ -213,9 +249,65 @@ void main() {
   float base = max(dot(enh_base_rgb, vec3(0.2126, 0.7152, 0.0722)), 0.05);
   fragment_color = vec4(albedo * 2.2 * vec3(base) * tod.rgb * 4.0, 0.5);
 
+  float ground_seen = 0.0, ground_tag = 0.0;
+  if (enh_screen > 0.0) {
+    // the floor as drawn under the blade's foot (the frame before the grass): where it's in view
+    // and not hidden behind something nearer (its depth within a meter or so of the foot's along
+    // the view), the blade takes its color
+    vec3 foot = vec3(xz.x, y, xz.y);
+    vec3 dir = normalize(foot - cam) * tune_grass_scr_tol * m;
+    vec4 c0 = to_clip(foot);
+    vec4 cn = to_clip(foot - dir), cf = to_clip(foot + dir);
+    float seen = 0.0;
+    vec3 floor_c = vec3(0.0);
+    float floor_tag = 0.0;
+    if (c0.w > 0.0 && cn.w > 0.0) {
+      vec2 suv = c0.xy / c0.w * 0.5 + 0.5;
+      // (a foot just off the screen's edge (the near blades at its bottom): the floor at the edge)
+      vec2 inside = clamp(suv, vec2(0.002), vec2(0.998));
+      float off = length(suv - inside);
+      if (off < 0.12) {
+        float ds = texture(enh_scene_depth, inside).r;
+        float dn = cn.z / cn.w * 0.5 + 0.5, df = cf.z / cf.w * 0.5 + 0.5;
+        float lo = min(dn, df), hi = max(dn, df);
+        float pad = (hi - lo) * 0.25;
+        seen = off > 0.0 ? 1.0 - smoothstep(0.06, 0.12, off)
+                         : smoothstep(lo - pad, lo, ds) * (1.0 - smoothstep(hi, hi + pad, ds));
+        suv = inside;
+        floor_c = textureLod(enh_scene_color, suv, tune_grass_scr_lod).rgb;
+        floor_tag = length(texture(enh_scene_normal, suv).rgb * 2.0 - 1.0);
+      }
+    }
+    ground_seen = seen;
+    ground_tag = floor_tag;
+    if (seen > 0.0) {
+      // (shrub.frag tones foliage down, 0.62 of its saturation and 0.92 of it: undone here, so the
+      // blades come out the floor's own tone)
+      float l = dot(floor_c, vec3(0.3, 0.59, 0.11));
+      vec3 pre = max(vec3(l) + (floor_c - vec3(l)) * tune_grass_scr_sat / 0.62, vec3(0.0)) / 0.92;
+      // (seen from the side farther away, the tips cover the darker feet: less gain there)
+      float gain = tune_grass_scr_gain * mix(1.0, tune_grass_scr_far, smoothstep(15.0 * m, 60.0 * m, d));
+      vec3 tip = pre * gain * mix(0.8, 1.15, rnd(bs, 9u)) *
+                 mix(1.0, 1.12, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * t);
+      vec3 sc = mix(tip * tune_grass_scr_foot, tip, pow(t, 0.6));
+      fragment_color.rgb = mix(fragment_color.rgb, sc, seen * min(enh_screen, 1.0));
+    }
+    // (lit by the post like the floor they stand on: their normals toward the floor's)
+    vec3 fn = normalize(vec3(-(yx - y) / e, 1.0, -(yz - y) / e));
+    n = normalize(mix(n, fn, tune_grass_ground_up));
+    if (tune_grass_scr_dbg > 1.5) {
+      fragment_color.rgb = floor_c;
+    } else if (tune_grass_scr_dbg > 0.5) {
+      fragment_color.rgb = vec3(1.0 - seen, seen, 0.0) * 0.5;
+    }
+  }
+
   tex_coord = vec3(0.5, 0.5, 1.0);
   enh_normal = n;
   enh_pos = vert;
   enh_lod_kind = 0;
   enh_xfade = vec2(0.0);
+  if (ground_seen > 0.5) {
+    enh_xfade = vec2(ground_tag, 0.0);  // (shrub.frag: the floor's material tag for these blades)
+  }
 }

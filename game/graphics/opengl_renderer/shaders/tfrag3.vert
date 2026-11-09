@@ -2,7 +2,7 @@
 
 layout (location = 0) in vec3 position_in;
 layout (location = 1) in vec3 tex_coord_in;
-layout (location = 2) in int time_of_day_index;
+layout (location = 2) in ivec2 tod_sway;  // the time of day index; Enhanced: .y the TIE foliage's sway
 layout (location = 3) in vec4 normal_in;  // Enhanced
 
 uniform vec4 hvdf_offset;
@@ -14,6 +14,11 @@ uniform float fog_min;
 uniform float fog_max;
 uniform sampler1D tex_T10; // note, sampled in the vertex shader on purpose.
 uniform int decal;
+// Enhanced: the static TIE trees in the wind (EnhancedTieWind.h): x = seconds, y = the wind now
+// (EnhancedWind::now, 0 = still). The weight is in the vertices, so tfrag (all 0) never moves
+uniform vec4 enh_tie_wind;
+// 0 = still (as the game), 1 = sway; >= 10 paints the weights (blue leaves, green trunks, by height)
+uniform float tune_tie_wind = 1.0;
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -38,8 +43,29 @@ void main() {
   // the itof0 is done in the preprocessing step.  now we have floats.
 
 
+  // Enhanced: the trees lean from the foot, more the higher up (the shrubs' gust field), the leaves
+  // flutter on top
+  vec3 world = position_in;
+  int sway = tod_sway.y;
+  float sway_h = float(sway & 0x7fff) * (12.0 / 32767.0);  // meters above the plant's foot
+  if (sway != 0 && tune_tie_wind > 0.0 && tune_tie_wind < 10.0) {
+    float t = enh_tie_wind.x;
+    vec2 wp = position_in.xz / 4096.0;
+    float gust = sin(t * 1.3 + wp.x * 0.11 + wp.y * 0.07) * 0.6 +
+                 sin(t * 2.1 + wp.x * 0.05 - wp.y * 0.13) * 0.4;
+    // m: 3 cm per meter of height, as the game's wind ties (Tie3::render_tree_wind) lean
+    float bend = 0.03 * sway_h;
+    float k = tune_tie_wind * enh_tie_wind.y * 4096.0;
+    world.xz += vec2(0.8, 0.6) * (gust * 0.7 + 0.3) * bend * k;
+    if ((sway & 0x8000) != 0) {
+      float f = min(sway_h * 0.5, 1.0) * 0.035 * k;  // up to 3.5 cm
+      world += vec3(sin(t * 6.1 + wp.x * 1.7 + wp.y * 1.3), sin(t * 7.3 + wp.x * 1.1 - wp.y * 1.9) * 0.6,
+                    sin(t * 5.3 - wp.x * 1.4 + wp.y * 1.6)) * f;
+    }
+  }
+
   // Step 3, the camera transform
-  vec3 vert = position_in - cam_trans.xyz;
+  vec3 vert = world - cam_trans.xyz;
   vec4 transformed = -pc_camera[3];
   transformed.w = 0;
   transformed -= pc_camera[0] * vert.x;
@@ -54,7 +80,7 @@ void main() {
   gl_Position = transformed;
 
   // time of day lookup
-  fragment_color = texelFetch(tex_T10, time_of_day_index, 0);
+  fragment_color = texelFetch(tex_T10, tod_sway.x, 0);
   // color adjustment
   fragment_color *= 2;
   fragment_color.a *= 2;
@@ -63,7 +89,12 @@ void main() {
     // tfrag/tie always use TCC=RGB, so even with decal, alpha comes from fragment.
     fragment_color.xyz = vec3(1.0, 1.0, 1.0);
   }
-  
+  if (tune_tie_wind >= 10.0) {
+    float hw = 0.15 + 0.85 * sway_h / 12.0;
+    fragment_color.xyz = sway == 0 ? fragment_color.xyz * 0.3
+                                   : ((sway & 0x8000) != 0 ? vec3(0.0, 0.0, 2.0 * hw) : vec3(0.0, hw, 0.0));
+  }
+
   tex_coord = tex_coord_in;
   enh_normal = normal_in.xyz;
   enh_pos = vert;

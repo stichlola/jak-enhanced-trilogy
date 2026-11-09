@@ -75,6 +75,7 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/loader/EnhancedTerrain.cpp
         graphics/opengl_renderer/loader/EnhancedSmoothMerc.cpp
         graphics/opengl_renderer/loader/EnhancedVegetation.cpp
+        graphics/opengl_renderer/loader/EnhancedTieWind.cpp
         graphics/opengl_renderer/loader/LoaderStages.cpp
         graphics/opengl_renderer/ocean/CommonOceanRenderer.cpp
         graphics/opengl_renderer/ocean/OceanEnvmap.cpp

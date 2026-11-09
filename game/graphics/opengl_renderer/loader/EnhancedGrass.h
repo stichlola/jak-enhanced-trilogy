@@ -59,6 +59,18 @@ bool enhanced_grass_has_zones();
 
 // called by the loader on its thread (enhanced_add_vegetation): bakes the zones the level covers
 void enhanced_prepare_grass(tfrag3::Level& level, const std::string& name, const GrassFloor& floor);
+// the level's highest floor at (x, z) (game units): its height, whether its texture is grassy, and
+// then its color as drawn over the day (rgb: the texture's mean times its vertex colors, 1 = as is)
+// (grassy: 0 none .. 1 full; less where a dirt layer blended over the floor shows)
+using GrassGround = std::function<bool(float x, float z, float* y, float* grassy, float* rgb)>;
+// called by the loader after enhanced_prepare_grass: dense grass by ground class, on the level's own
+// grassy floors (by their textures) within bounds (x0, z0, x1, z1, game units): a field for each
+// 64 m square with enough of it, drawn by the shrub tree nearest it, while grass.ground > 0 (its
+// density then)
+void enhanced_grass_ground_fields(tfrag3::Level& level,
+                                  const std::string& name,
+                                  const float bounds[4],
+                                  const GrassGround& ground);
 // and keeps the level's floor (the last few levels'), for the fields painted anywhere: the zones made
 // by the editor's brush are baked (again) from these
 void enhanced_grass_keep_floor(const std::string& level, GrassFloorNear floor);
@@ -68,6 +80,9 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
                          const TfragRenderSettings& settings,
                          SharedRenderState* render_state,
                          ScopedProfilerNode& prof);
+// the ground-class fields held back by enhanced_draw_grass (grass.ground_late), drawn after the
+// level's blended tfrag (called by the TRANS tfrag renderer, at its end)
+void enhanced_flush_ground_grass(SharedRenderState* render_state, ScopedProfilerNode& prof);
 
 // painted in the in-game editor: the lush strokes and the edge ones (x, z, the brush's radius, m),
 // how far it thins away past the lush where no edge is near (m). The painted zones are baked again
