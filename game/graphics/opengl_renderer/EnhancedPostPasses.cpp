@@ -541,6 +541,13 @@ void EnhancedPost::prepare(GLuint scene_tex,
     ENH_TIMED("enh-chr-occ", do_chr_occlusion(render_state, prof));
   }
   enh_cpu_split("chr-occ");
+  // the lamps' shadow maps (lights.shadow_maps; their list from last frame's composite)
+  if (m_settings.shadow_map && m_settings.lights && g_enhanced_camera.valid) {
+    ENH_TIMED("enh-lamp-shadows", do_lamp_shadows(render_state, prof));
+  } else {
+    m_lamp_ready = false;
+  }
+  enh_cpu_split("lamp-shadows");
   // the levels' ray tracing hierarchies (occlusion, reflections)
   ENH_TIMED("enh-rt-update", update_rt(render_state));
   enh_cpu_split("rt-update");

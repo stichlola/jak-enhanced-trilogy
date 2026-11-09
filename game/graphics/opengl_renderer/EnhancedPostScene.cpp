@@ -2327,6 +2327,52 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
+    {
+      // lamps' shadow maps (lights.shadow_maps): the lights that cast shadows (the first 8, lamps:
+      // not one Jak carries nor a flash) back in the world for next frame's pass; this frame's ready
+      // maps matched to the lights by place
+      m_lamp_want.clear();
+      float slot_light[EnhancedPost::kLampSlots];
+      float slot_pos[EnhancedPost::kLampSlots * 4] = {};
+      for (auto& s : slot_light) {
+        s = -1.f;
+      }
+      for (int i = 0; i < std::min(n, 8); i++) {
+        if (!(color[i * 4 + 3] < 0.5f)) {
+          continue;
+        }
+        LampWant lw;
+        for (int row = 0; row < 3; row++) {
+          lw.pos[row] = cam.trans[row];
+          for (int col = 0; col < 3; col++) {
+            lw.pos[row] += cam.rot[row][col] * pos[i * 4 + col];
+          }
+        }
+        lw.radius = pos[i * 4 + 3];
+        m_lamp_want.push_back(lw);
+        for (int s = 0; m_lamp_ready && s < EnhancedPost::kLampSlots; s++) {
+          const auto& sl = m_lamp_slots[s];
+          const float dx = sl.pos[0] - lw.pos[0], dy = sl.pos[1] - lw.pos[1],
+                      dz = sl.pos[2] - lw.pos[2];
+          if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame && slot_light[s] < 0.f &&
+              dx * dx + dy * dy + dz * dz < (0.3f * kMeter) * (0.3f * kMeter)) {
+            slot_light[s] = (float)i;
+            std::memcpy(slot_pos + s * 4, sl.pos, sizeof(float) * 3);
+            slot_pos[s * 4 + 3] = sl.far_u;
+            break;
+          }
+        }
+      }
+      static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
+      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_light"), 1, slot_light);
+      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_pos"), EnhancedPost::kLampSlots, slot_pos);
+      glUniform2f(glGetUniformLocation(id, "lamp_shadow_params"),
+                  std::max((float)t_near, 0.05f) * kMeter, 2.f / std::max(m_lamp_res, 1));
+      glActiveTexture(GL_TEXTURE0 + 35);
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, m_lamp_tex);
+      glActiveTexture(GL_TEXTURE0);
+      glUniform1i(glGetUniformLocation(id, "tex_T35"), 35);
+    }
     ENH_CPU_SPLIT("tile-masks");
     {
       // the beacons, the brightest and nearest first, shown as the night falls

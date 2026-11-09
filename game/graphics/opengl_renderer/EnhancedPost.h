@@ -673,10 +673,41 @@ class EnhancedPost {
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
   void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
-  // (mvp: the sun map's m_light_mvp when null)
+  // (mvp: the sun map's m_light_mvp when null; only: just these draws (indices into the casters'
+  // draws); upload false: the bones are already in the buffer this frame)
   void draw_shadow_casters(SharedRenderState* render_state,
                            ScopedProfilerNode& prof,
-                           const float* mvp = nullptr);
+                           const float* mvp = nullptr,
+                           const std::vector<u32>* only = nullptr,
+                           bool upload = true);
+  // lamps' shadow maps (tuning lights.shadow_maps: how many, 0 = off, the screen-space march as
+  // before): the strongest lamps around get a cube map each, slots of one cube map array. Their
+  // static part (the levels' geometry, as the sun map draws it) is drawn once, a few faces a frame,
+  // and kept while the lamp stays wanted; each frame a copy of it gets the characters near the lamp.
+  void do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  static constexpr int kLampSlots = 4;
+  struct LampSlot {
+    float pos[3] = {0.f, 0.f, 0.f};  // world, game units
+    float far_u = 0.f;               // game units
+    int faces = 0;                   // static faces drawn (6: ready)
+    u32 seen = 0;                    // last frame it was wanted
+    u32 gen = 0;                     // the casters' levels it was drawn with
+    bool used = false;
+    bool live_valid = false;  // the live map holds a copy of the static part
+    u8 dirty = 0;             // faces of the live map with characters drawn in
+  };
+  LampSlot m_lamp_slots[kLampSlots];
+  struct LampWant {
+    float pos[3];
+    float radius;
+  };
+  std::vector<std::pair<std::array<float, 3>, u32>> m_lamp_still;  // frames each stayed put
+  std::vector<LampWant> m_lamp_want;  // last frame's shadow-casting lamps, strongest first (world)
+  GLuint m_lamp_static_tex = 0, m_lamp_tex = 0, m_lamp_fbo = 0;
+  int m_lamp_res = 0;
+  u32 m_lamp_frame = 0;
+  bool m_lamp_ready = false;  // the live array holds this frame's maps
+  double m_lamp_log_time = 0.0;
   // the characters around Jak seen from below (their lowest point per column, a small depth map):
   // their ground occlusion in the composite, by day and night (tuning shadow.chr_occ_m: half side)
   void do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof);

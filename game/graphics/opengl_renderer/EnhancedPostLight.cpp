@@ -1197,7 +1197,10 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   sun_world(sun);
   const float len = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
   const auto& cam = g_enhanced_camera;
-  if (!g_enhanced_sun.valid || len < 1e-6f || sun[1] / len < 0.05f || !cam.valid) {
+  const bool sun_up = g_enhanced_sun.valid && len >= 1e-6f && sun[1] / len >= 0.05f;
+  // (the lamps' shadow maps draw the same casters, by night too: their list is kept up below)
+  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 0.f);
+  if (!cam.valid || (!sun_up && (float)t_lamp_maps < 0.5f)) {
     return;  // no sun, or below the horizon
   }
 
@@ -1564,6 +1567,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     } else {
       ++it;
     }
+  }
+  if (!sun_up) {
+    return;
   }
 
   // the light's frame: f from the sun down, right and up across; a square of 2 * range around a
@@ -1944,10 +1950,12 @@ void EnhancedPost::add_wind_shadow_draws(const LevelData* lev,
 // into the shadow map. Their bones put them in camera space: back to the world with the camera.
 void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
                                        ScopedProfilerNode& prof,
-                                       const float* mvp) {
+                                       const float* mvp,
+                                       const std::vector<u32>* only,
+                                       bool upload) {
   auto& cs = g_enhanced_casters;
   cs.capture = false;  // later merc draws (HUD) don't cast
-  if (cs.draws.empty()) {
+  if (cs.draws.empty() || (only && only->empty())) {
     return;
   }
   // a bound range always spans 128 bones: room past the last one
@@ -1956,14 +1964,17 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   if (!m_caster_bones) {
     glGenBuffers(1, &m_caster_bones);
     glGenVertexArrays(1, &m_caster_vao);
+    upload = true;
   }
-  glBindBuffer(GL_UNIFORM_BUFFER, m_caster_bones);
-  if (size > m_caster_bones_size) {
-    m_caster_bones_size = size * 3 / 2;
-    glBufferData(GL_UNIFORM_BUFFER, m_caster_bones_size, nullptr, GL_DYNAMIC_DRAW);
+  if (upload || size > m_caster_bones_size) {
+    glBindBuffer(GL_UNIFORM_BUFFER, m_caster_bones);
+    if (size > m_caster_bones_size) {
+      m_caster_bones_size = size * 3 / 2;
+      glBufferData(GL_UNIFORM_BUFFER, m_caster_bones_size, nullptr, GL_DYNAMIC_DRAW);
+    }
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
   }
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
   auto& shader = render_state->shaders[ShaderId::ENH_SHADOW_MERC];
   shader.activate();
@@ -1981,7 +1992,9 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   glEnableVertexAttribArray(3);
   glEnableVertexAttribArray(5);
   GLuint last_vertices = 0;
-  for (const auto& d : cs.draws) {
+  const size_t n_draws = only ? only->size() : cs.draws.size();
+  for (size_t k = 0; k < n_draws; k++) {
+    const auto& d = cs.draws[only ? (*only)[k] : k];
     if (d.vertices != last_vertices) {
       glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
       constexpr GLsizei kStride = sizeof(tfrag3::MercVertex);
@@ -2007,6 +2020,401 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
     prof.add_draw_call();
   }
   glBindVertexArray(0);
+}
+
+// Lamps' shadow maps (lights.shadow_maps n, 0 = off): see EnhancedPost.h. The faces follow GL's cube
+// map convention, so the composite looks them up with the direction from the lamp, in world space.
+void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  m_lamp_ready = false;
+  static const EnhancedTune t_maps("lights.shadow_maps", 0.f);
+  static const EnhancedTune t_res("lights.shadow_map_res", 512.f);
+  static const EnhancedTune t_faces("lights.shadow_faces_per_frame", 2.f);
+  static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
+  static const EnhancedTune t_far("lights.shadow_far_x", 2.0f);
+  static const EnhancedTune t_chars("lights.shadow_chars", 1.f);
+  static const EnhancedTune t_log("lights.shadow_log", 0.f);
+  const int want_n = std::clamp((int)(float)t_maps, 0, kLampSlots);
+  const auto& cam = g_enhanced_camera;
+  if (want_n == 0 || !cam.valid || g_enhanced_menu.blank_world || m_lamp_want.empty()) {
+    return;
+  }
+  const int res = std::clamp((int)(float)t_res, 128, 2048);
+  if (res != m_lamp_res) {
+    for (int k = 0; k < 2; k++) {
+      GLuint* t = k ? &m_lamp_tex : &m_lamp_static_tex;
+      if (*t) {
+        glDeleteTextures(1, t);
+      }
+      glGenTextures(1, t);
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, *t);
+      glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT32F, res, res, 6 * kLampSlots, 0,
+                   GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, k ? GL_LINEAR : GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, k ? GL_LINEAR : GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+      if (k) {
+        glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE,
+                        GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+      }
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, 0);
+    if (!m_lamp_fbo) {
+      glGenFramebuffers(1, &m_lamp_fbo);
+    }
+    m_lamp_res = res;
+    for (auto& s : m_lamp_slots) {
+      s = LampSlot();
+    }
+  }
+  m_lamp_frame++;
+  const float near_u = std::max((float)t_near, 0.05f) * kMeter;
+
+  auto dist2 = [](const float* a, const float* b) {
+    const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
+    return x * x + y * y + z * z;
+  };
+  // only lamps that stay put (lights.shadow_still_frames in the same place, 2 cm): a light that
+  // follows Jak or a moving glow would redraw its static faces every frame and never be ready
+  static const EnhancedTune t_still("lights.shadow_still_frames", 30.f);
+  {
+    std::vector<std::pair<std::array<float, 3>, u32>> still;
+    const float still2 = (0.02f * kMeter) * (0.02f * kMeter);
+    for (const auto& w : m_lamp_want) {
+      u32 cnt = 1;
+      for (const auto& [p, c] : m_lamp_still) {
+        if (dist2(p.data(), w.pos) < still2) {
+          cnt = c + 1;
+          break;
+        }
+      }
+      still.push_back({{w.pos[0], w.pos[1], w.pos[2]}, cnt});
+    }
+    m_lamp_still.swap(still);
+  }
+  std::vector<LampWant> wanted;
+  for (size_t i = 0; i < m_lamp_want.size(); i++) {
+    if (m_lamp_still[i].second >= (u32)std::max((float)t_still, 1.f)) {
+      wanted.push_back(m_lamp_want[i]);
+    }
+  }
+  // (a little hysteresis: among the strongest few more than there are maps, the lamps whose map is
+  // drawn already go first; the order shifts as the camera turns, and the slots thrashed, two static
+  // faces redrawn every frame at the port)
+  {
+    const size_t top = std::min(wanted.size(), (size_t)want_n + 2);
+    auto has_map = [&](const LampWant& w) {
+      for (const auto& sl : m_lamp_slots) {
+        if (sl.used && sl.faces >= 6 &&
+            dist2(sl.pos, w.pos) < (0.3f * kMeter) * (0.3f * kMeter)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    std::stable_partition(wanted.begin(), wanted.begin() + top, has_map);
+  }
+  // a slot for each of the strongest lamps: the one already holding it (same place), else the one
+  // left unused longest
+  const int n_want = std::min(want_n, (int)wanted.size());
+  int assign[kLampSlots];
+  bool taken[kLampSlots] = {};
+  const float match2 = (0.3f * kMeter) * (0.3f * kMeter);
+  for (int i = 0; i < n_want; i++) {
+    assign[i] = -1;
+    for (int s = 0; s < kLampSlots; s++) {
+      if (!taken[s] && m_lamp_slots[s].used &&
+          dist2(m_lamp_slots[s].pos, wanted[i].pos) < match2) {
+        assign[i] = s;
+        taken[s] = true;
+        break;
+      }
+    }
+  }
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] >= 0) {
+      continue;
+    }
+    int best = -1;
+    for (int s = 0; s < kLampSlots; s++) {
+      if (!taken[s] && (best < 0 || !m_lamp_slots[s].used ||
+                        (m_lamp_slots[best].used && m_lamp_slots[s].seen < m_lamp_slots[best].seen))) {
+        best = s;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+    auto& sl = m_lamp_slots[best];
+    sl = LampSlot();
+    memcpy(sl.pos, wanted[i].pos, sizeof(sl.pos));
+    sl.far_u = std::max(wanted[i].radius * std::max((float)t_far, 1.f), near_u * 4.f);
+    sl.used = true;
+    sl.gen = m_shadow_draws_gen;
+    assign[i] = best;
+    taken[best] = true;
+  }
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] >= 0) {
+      auto& sl = m_lamp_slots[assign[i]];
+      sl.seen = m_lamp_frame;
+      if (sl.gen != m_shadow_draws_gen) {
+        sl.gen = m_shadow_draws_gen;  // the levels changed: drawn again
+        sl.faces = 0;
+      }
+    }
+  }
+
+  // the six faces: GL's cube map directions and up vectors, a 90 degree perspective each
+  static const float kDir[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                                   {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  static const float kUp[6][3] = {{0, -1, 0}, {0, -1, 0}, {0, 0, 1},
+                                  {0, 0, -1}, {0, -1, 0}, {0, -1, 0}};
+  auto face_basis = [&](int face, float* s, float* u) {
+    const float* f = kDir[face];
+    const float* up = kUp[face];
+    s[0] = f[1] * up[2] - f[2] * up[1];
+    s[1] = f[2] * up[0] - f[0] * up[2];
+    s[2] = f[0] * up[1] - f[1] * up[0];
+    u[0] = s[1] * f[2] - s[2] * f[1];
+    u[1] = s[2] * f[0] - s[0] * f[2];
+    u[2] = s[0] * f[1] - s[1] * f[0];
+  };
+  auto face_mvp = [&](const LampSlot& sl, int face, float* m) {
+    float s[3], u[3];
+    face_basis(face, s, u);
+    const float* f = kDir[face];
+    const float* L = sl.pos;
+    const float n = near_u, fa = sl.far_u;
+    const float A = -(fa + n) / (fa - n), B = -2.f * fa * n / (fa - n);
+    const float v2[4] = {-f[0], -f[1], -f[2], f[0] * L[0] + f[1] * L[1] + f[2] * L[2]};
+    m[0] = s[0], m[1] = s[1], m[2] = s[2], m[3] = -(s[0] * L[0] + s[1] * L[1] + s[2] * L[2]);
+    m[4] = u[0], m[5] = u[1], m[6] = u[2], m[7] = -(u[0] * L[0] + u[1] * L[1] + u[2] * L[2]);
+    for (int c = 0; c < 4; c++) {
+      m[8 + c] = A * v2[c] + (c == 3 ? B : 0.f);
+      m[12 + c] = -v2[c];
+    }
+  };
+
+  GLfloat old_clear_depth = 0.f;
+  GLint old_depth_func = GL_GEQUAL;
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+  glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glClearDepth(1.0);
+  glEnable(GL_POLYGON_OFFSET_FILL);
+  glPolygonOffset(1.5f, 3.f);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_lamp_fbo);
+  glDrawBuffer(GL_NONE);
+  glReadBuffer(GL_NONE);
+  glViewport(0, 0, res, res);
+
+  // the static part: a few faces a frame, the strongest lamp's first
+  int budget = std::max(1, (int)(float)t_faces);
+  int static_faces = 0;
+  for (int i = 0; i < n_want && budget > 0; i++) {
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces >= 6) {
+      continue;
+    }
+    auto& shader = render_state->shaders[ShaderId::ENH_SHADOW];
+    shader.activate();
+    const auto id = shader.id();
+    const GLint u_cut = glGetUniformLocation(id, "enh_cut");
+    const GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
+    const GLint u_mvp = glGetUniformLocation(id, "light_mvp");
+    glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(m_shadow_vao);
+    glEnableVertexAttribArray(0);
+    auto& sl = m_lamp_slots[assign[i]];
+    sl.live_valid = false;
+    while (sl.faces < 6 && budget > 0) {
+      glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_lamp_static_tex, 0,
+                                assign[i] * 6 + sl.faces);
+      glClear(GL_DEPTH_BUFFER_BIT);
+      float mvp[16];
+      face_mvp(sl, sl.faces, mvp);
+      glUniformMatrix4fv(u_mvp, 1, GL_TRUE, mvp);
+      for (auto& [lid, draws] : m_shadow_draws) {
+        for (auto& d : draws) {
+          // (as the near sun map: the small shrubs, not the big plants' second strips)
+          if ((d.wind && !m_settings.shadow_casters) || (d.shrub && d.big)) {
+            continue;
+          }
+          glUniform1i(u_cut, d.cut);
+          glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+          if (d.own_vertices || d.wind) {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                                  (void*)(3 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+          } else if (d.shrub) {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex),
+                                  (void*)0);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex),
+                                  (void*)(3 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+          } else {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                  (void*)0);
+            if (d.tex) {
+              glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                    (void*)offsetof(tfrag3::PreloadedVertex, s));
+              glEnableVertexAttribArray(1);
+            } else {
+              glDisableVertexAttribArray(1);
+            }
+          }
+          glUniform1f(u_alpha, !d.tex ? -1.f : d.alpha >= 0.f ? d.alpha : (float)kShadowAlphaRef);
+          if (d.tex) {
+            glBindTexture(GL_TEXTURE_2D, d.tex);
+          }
+          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+          glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, (void*)(d.first * sizeof(u32)));
+          prof.add_draw_call();
+        }
+      }
+      sl.faces++;
+      budget--;
+      static_faces++;
+    }
+    glDisableVertexAttribArray(1);
+    glBindVertexArray(0);
+  }
+
+  // the characters' places this frame (world), by their first bone: the mean of their bones'
+  // translations (camera space, back to the world with the camera), the garbage spare slots left out
+  const auto& cs = g_enhanced_casters;
+  const bool chars = (float)t_chars > 0.5f && m_settings.shadow_casters && !cs.draws.empty();
+  std::vector<std::pair<u32, std::array<float, 3>>> places;
+  if (chars) {
+    for (const auto& in : cs.instances) {
+      double acc[3] = {0, 0, 0};
+      int cnt = 0;
+      for (u32 b = 0; b < in.bone_count; b++) {
+        const size_t at = ((size_t)in.first_bone + b * 8) * 4 + 12;
+        if (at + 3 > cs.bones.size()) {
+          break;
+        }
+        const float* t = &cs.bones[at];
+        if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]) ||
+            t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > (2000.f * kMeter) * (2000.f * kMeter)) {
+          continue;
+        }
+        for (int r = 0; r < 3; r++) {
+          acc[r] += cam.rot[r][0] * t[0] + cam.rot[r][1] * t[1] + cam.rot[r][2] * t[2];
+        }
+        cnt++;
+      }
+      if (cnt) {
+        places.push_back({in.first_bone,
+                          {cam.trans[0] + (float)(acc[0] / cnt), cam.trans[1] + (float)(acc[1] / cnt),
+                           cam.trans[2] + (float)(acc[2] / cnt)}});
+      }
+    }
+  }
+
+  // the live maps: a copy of the static part, then the characters near the lamp in the faces they
+  // reach (a 2.5 m sphere around their middle against each face's pyramid)
+  int live = 0, char_draws = 0, copied = 0;
+  const decltype(places) no_places;
+  bool uploaded = false;
+  std::vector<u32> only;
+  const float rad = 2.5f * kMeter;
+  // (characters further than this from the lamp left out: their shadow is long and faint there,
+  // and the big Spargus lamps reach ~45 m: every NPC of the street, 700 draws)
+  static const EnhancedTune t_chars_m("lights.shadow_chars_m", 12.f);
+  const float chars_m = std::max((float)t_chars_m, 1.f) * kMeter;
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces < 6) {
+      continue;
+    }
+    const int s_i = assign[i];
+    auto& sl = m_lamp_slots[s_i];
+    // (the live map holds the static part plus last frame's characters: a face is copied again only
+    // where characters were or are drawn, the whole map once after its static part changed)
+    auto copy_faces = [&](int first, int count) {
+      glCopyImageSubData(m_lamp_static_tex, GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, s_i * 6 + first,
+                         m_lamp_tex, GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, s_i * 6 + first, res, res,
+                         count);
+      copied += count;
+    };
+    if (!sl.live_valid) {
+      copy_faces(0, 6);
+      sl.live_valid = true;
+      sl.dirty = 0;
+    }
+    live++;
+    for (int face = 0; face < 6; face++) {
+      float s[3], u[3];
+      face_basis(face, s, u);
+      const float* f = kDir[face];
+      only.clear();
+      for (const auto& [fb, c] : chars ? places : no_places) {
+        const float d[3] = {c[0] - sl.pos[0], c[1] - sl.pos[1], c[2] - sl.pos[2]};
+        const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        const float fz = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+        const float fx = d[0] * s[0] + d[1] * s[1] + d[2] * s[2];
+        const float fy = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+        if (dl - rad > std::min(sl.far_u, chars_m) || fz < -rad || std::abs(fx) > fz + rad * 1.4143f ||
+            std::abs(fy) > fz + rad * 1.4143f) {
+          continue;
+        }
+        for (u32 k = 0; k < cs.draws.size(); k++) {
+          if (cs.draws[k].first_bone == fb) {
+            only.push_back(k);
+          }
+        }
+      }
+      const u8 bit = (u8)(1u << face);
+      if (only.empty()) {
+        if (sl.dirty & bit) {
+          copy_faces(face, 1);
+          sl.dirty &= (u8)~bit;
+        }
+        continue;
+      }
+      copy_faces(face, 1);
+      sl.dirty |= bit;
+      glBindFramebuffer(GL_FRAMEBUFFER, m_lamp_fbo);
+      glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_lamp_tex, 0, s_i * 6 + face);
+      glViewport(0, 0, res, res);
+      float mvp[16];
+      face_mvp(sl, face, mvp);
+      draw_shadow_casters(render_state, prof, mvp, &only, !uploaded);
+      uploaded = true;
+      char_draws += (int)only.size();
+    }
+  }
+  glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 0, 0, 0);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glDisable(GL_PRIMITIVE_RESTART);
+  glClearDepth(old_clear_depth);
+  glDepthFunc(old_depth_func);
+  m_lamp_ready = live > 0;
+  if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
+    lg::info("[enhanced] lamp shadows: {} wanted, {} live, {} static faces this frame, {} character "
+             "draws, {} faces copied; slots {}",
+             n_want, live, static_faces, char_draws, copied, [&]() {
+               std::string o;
+               for (int s = 0; s < kLampSlots; s++) {
+                 const auto& sl = m_lamp_slots[s];
+                 o += fmt::format("[{} {:.1f},{:.1f},{:.1f} far {:.1f} m faces {}] ", sl.used ? "on" : "--",
+                                  sl.pos[0] / kMeter, sl.pos[1] / kMeter, sl.pos[2] / kMeter,
+                                  sl.far_u / kMeter, sl.faces);
+               }
+               return o;
+             }());
+  }
 }
 
 // TAA motion vectors: the characters of this frame (EnhancedCasters) skinned twice, with this frame's
