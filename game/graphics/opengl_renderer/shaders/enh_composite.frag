@@ -163,6 +163,7 @@ uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the ref
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
 uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, the old march tries (0: the miss keeps the sky sample: pale patches by a quay)
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
+uniform float tune_ground_fine = 1.8;  // the rocky ground's near grain (stone, gravel) strength (1: desert-start's slab a blurry plane)
 uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
@@ -5467,6 +5468,7 @@ void composite_unused() {
           gtint = mix(vec3(1.0), clamp(chroma, vec3(0.6), vec3(1.5)), 0.8 * close);
         }
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
+        fine *= tune_ground_fine;
         // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
         float low_light = min(golden * 2.0, 1.0);
         c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + mix(1.1, 2.2, noon) * fine), 0.25);
