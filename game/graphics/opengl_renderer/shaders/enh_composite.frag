@@ -6276,7 +6276,9 @@ void composite_unused() {
   // backlit grass and leaves (shrub.frag's foliage, 0.97 long): looking toward the sun, its light
   // through the blades, in their own color deepened (light through a leaf comes out greener) and
   // warmed by the sun; the faces turned from the sun take most. Not in the sun's shade, not under
-  // an overcast sky, not at night
+  // an overcast sky, not at night. (Not: Spargus' palm fronds, which carry no flutter flag (weight
+  // view at 7h: neither lit nor held back); characters' skin, which has no tag of its own apart from
+  // the clothes and fur: the golden rim above is their backlight)
   if (tune_backlight > 0.0 && sky_sun.w > 0.0 && z > 0.0 && ((pix_tag > 0.955 && pix_tag < 0.983) || tie_leaf) &&
       (tune_backlight_split < 0.5 || tex_coord.x > 0.5)) {
     float toward = smoothstep(tune_backlight_cos, 1.0, dot(normalize(p), sky_sun.xyz));
