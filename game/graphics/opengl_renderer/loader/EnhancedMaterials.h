@@ -35,7 +35,8 @@ enum EnhancedMaterial : u8 {
   kTile = 10,
   kWindow = 11,  // glossy, 0.99 long: a window pane (the composite lights some of them at night)
   kLamp = 12,    // plain, 0.2 long: a lamp, a lit sign (the composite lights them at night)
-  kEnhMaterialCount = 13
+  kFacade = 13,  // plain, 0.1 long: a far building's low-res wall (the composite lights windows on it at night)
+  kEnhMaterialCount = 14
 };
 constexpr u8 kEnhMaterialMask = 0x0f;
 constexpr u8 kEnhMatHoles = 0x10;  // the texture has see-through texels (the level's list only)
@@ -101,6 +102,13 @@ inline u8 enhanced_material(std::string name) {
   // ("environment" holds "iron": the sky's and sea's environment maps aren't metal)
   for (size_t at; (at = name.find("environment")) != std::string::npos;) {
     name.replace(at, 11, "env");
+  }
+  // far buildings' low-res walls (Haven's skyline across the harbour, the slums from afar): their
+  // windows are a few painted texels, a flat dark silhouette at night. Not the Metal Head city's
+  // (mhcity), the fortress, roofs, ground or the glowing towers
+  if (has({"city-lowres-ctygen-build", "city-lowres-ctygen-side", "city-lowres-ctygen-stripe",
+           "city-lowres-ind-wall", "city-lowres-newslums-stripe", "ctyslumc-wall-low", "lowres-ctyslum-wall"})) {
+    return kFacade;
   }
   // lamps and lit signs (Haven's city-bluelight, ctyslumc-light-blue, citywide-stadium-lightbank, the
   // Hip Hog's hiphog-exterior-*-on neons): their picture is the light. Not a lamp's post or pole, a
@@ -335,8 +343,24 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     int count[kEnhMaterialCount] = {};
     // (JAK_ENHANCED_MATERIAL_NAMES=1: each texture's name and material in the log)
     static const bool names = std::getenv("JAK_ENHANCED_MATERIAL_NAMES") != nullptr;
+    // (Haven's far city (ctywide, the skyline across the harbour, Jak 3): its plain walls and panels
+    // are far buildings' too (citywide-wall-*, fac-lo-*-panel): no windows of their own to light)
+    const bool wide = lev->level->level_name.rfind("ctywide", 0) == 0;
     for (const auto& tex : lev->level->textures) {
       u8 mat = enhanced_material(tex.debug_name);
+      if (wide && (mat == kWall || mat == kPlain)) {
+        std::string n = tex.debug_name;
+        std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return std::tolower(c); });
+        bool skip = false;
+        for (const char* w : {"roof", "crate", "pillar", "step", "black", "palace", "palshaft", "background",
+                              "can-", "exhaust", "ox-met", "fort", "frame", "grill", "door", "top-", "base",
+                              "support", "consite", "strp", "dirtywood", "awning", "bill", "mhcity", "tile"}) {
+          skip = skip || n.find(w) != std::string::npos;
+        }
+        if (!skip) {
+          mat = kFacade;
+        }
+      }
       count[mat]++;
       if (names) {
         lg::info("[enhanced] material {} {}: {}", lev->level->level_name, tex.debug_name, mat);
@@ -365,10 +389,10 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     // sand's ripples and grade)
     lg::info(
         "[enhanced] materials {}: {} rock, {} rocky ground, {} sand, {} metal, {} rusty, {} painted, "
-        "{} glossy, {} window, {} lamp, {} tile, {} wall, {} wood, {} plain",
+        "{} glossy, {} window, {} lamp, {} facade, {} tile, {} wall, {} wood, {} plain",
         lev->level->level_name, count[kRock], count[kGround], count[kSand], count[kMetal],
-        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kWindow], count[kLamp], count[kTile], count[kWall],
-        count[kWood], count[kPlain]);
+        count[kRustyMetal], count[kPaintedMetal], count[kGlossy], count[kWindow], count[kLamp], count[kFacade],
+        count[kTile], count[kWall], count[kWood], count[kPlain]);
   }
   return m;
 }
@@ -394,7 +418,7 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   u8 m = materials && tex >= 0 && tex < (int)materials->size() ? (*materials)[tex] : kPlain;
   u8 kind = m & kEnhMaterialMask;
   // (lamps: Jak 3 only until tried in the others)
-  if (kind == kLamp && render_state->version != GameVersion::Jak3) {
+  if ((kind == kLamp || kind == kFacade) && render_state->version != GameVersion::Jak3) {
     kind = kPlain;
   }
   glUniform1i(cached_loc[slot], kind);

@@ -1253,6 +1253,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               cloud_time ? (float)std::atof(cloud_time) : (float)std::fmod(m_time, 10000.0), m_night);
   const float on = m_ssao_ready ? 1.f : 0.f;
   glUniform1f(glGetUniformLocation(id, "city_glow"), m_city ? m_night * on : 0.f);
+  glUniform1f(glGetUniformLocation(id, "city_windows"), m_haven_windows ? m_night * on : 0.f);
   glUniform1f(glGetUniformLocation(id, "pale_ground"), m_pale_ground ? 1.f : 0.f);
   glUniform4f(glGetUniformLocation(id, "weather"), m_rain * on, m_dust * on,
               (float)std::fmod(m_time, 1000.0), m_wet * on);

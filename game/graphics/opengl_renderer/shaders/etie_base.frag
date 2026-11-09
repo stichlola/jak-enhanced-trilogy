@@ -20,7 +20,7 @@ uniform int gfx_hack_no_tex;
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
-uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand, 4 rock, 5 rocky ground, 6 wall, 7 wood, 8 rusty metal, 9 painted metal, 10 tile, 11 window, 12 lamp (see EnhancedMaterials.h)
+uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand, 4 rock, 5 rocky ground, 6 wall, 7 wood, 8 rusty metal, 9 painted metal, 10 tile, 11 window, 12 lamp, 13 facade (see EnhancedMaterials.h)
 
 vec4 enh_pack_normal(vec3 n) {
   vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
@@ -53,6 +53,10 @@ vec4 enh_pack_normal(vec3 n) {
   // (lamps, 12: plain, 0.2 long, under every other tag; the composite lights them at night)
   if (enh_material == 12) {
     tag_len = 0.2;
+  }
+  // (far buildings' low-res walls, 13: plain, 0.1 long; the composite lights windows on them at night)
+  if (enh_material == 13) {
+    tag_len = 0.1;
   }
   return vec4(n * tag_len * 0.5 + 0.5, a);
 }

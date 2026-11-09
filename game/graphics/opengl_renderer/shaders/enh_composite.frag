@@ -182,6 +182,7 @@ uniform int beacon_count;       // far glows drawn as points of light: view spac
 uniform vec4 beacon_pos[64];
 uniform vec4 beacon_color[64];  // rgb, strength
 uniform float city_glow;        // a lit city at night (0..1): its glow on the low sky and the haze
+uniform float city_windows;     // Haven at night (0..1): its far walls take made-up lit windows
 uniform float pale_ground;      // 1 in Haven's slums (pale flagstones): the night's pale-ground press
 uniform vec4 weather;           // rain, dust (0..1), time (s), wet ground (0..1)
 uniform float lens_drops;       // raindrops on the lens in a downpour (0 = off)
@@ -233,6 +234,10 @@ uniform float tune_lawn_ao = 1.2;          // the moss-dark dirt where the occlu
 uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
 uniform float tune_night_win_share = 0.4;  // how many of the panes' cells are lit
 uniform float tune_night_win_cell = 2.5;   // a lit cell's size, m (its height 1.25x)
+uniform float tune_night_facade = 1.0;       // far buildings' low-res walls at night: lit windows' light (0 = off, >= 10 shows the tag)
+uniform float tune_night_facade_share = 0.22; // how many of their windows are lit
+uniform float tune_night_facade_floor = 3.5;  // a storey's height, m (a bay 0.85x as wide)
+uniform float tune_night_facade_near = 70.0;  // in a lit city, plain and metal walls get them from here (to 1.5x), m
 uniform float tune_night_lamp = 1.0;       // lamps and lit signs at night: their picture as light (0 = off, >= 10 shows the tags)
 uniform float tune_night_lamp_gain = 1.6;  // how bright, over their texture's color
 uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
@@ -413,6 +418,17 @@ float sq(float x) {
 
 float luma(vec3 c) {
   return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// the share of [x - w/2, x + w/2] that falls in [lo, hi) of each unit cell (a pulse train box-filtered
+// over a pixel's footprint w: no sparkle where a cell is a pixel or less)
+float pulse_cover(float x, float w, float lo, float hi) {
+  w = max(w, 1e-4);
+  float a = x - 0.5 * w;
+  float b = x + 0.5 * w;
+  float ia = floor(a) * (hi - lo) + clamp(fract(a) - lo, 0.0, hi - lo);
+  float ib = floor(b) * (hi - lo) + clamp(fract(b) - lo, 0.0, hi - lo);
+  return clamp((ib - ia) / w, 0.0, 1.0);
 }
 
 // gradient noise, for water that doesn't repeat
@@ -2990,6 +3006,22 @@ void composite_unused() {
   // (this pixel's normal and the length its material wrote it at, for everything below: read once)
   vec4 pix_normal = gbuf(tex_coord);
   float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
+  // (far buildings' low-res walls, EnhancedMaterials.h's kFacade: plain, 0.1 long. To everything
+  // else plain scenery, as before the tag; their wall's plane in world metres (along it, up) and
+  // its footprint here, in uniform control flow, for the night's windows)
+  bool facade = pix_tag > 0.05 && pix_tag < 0.12 && pix_normal.a > 0.83;
+  vec2 facade_uv = vec2(0.0);
+  vec2 facade_fw = vec2(1e3);
+  if (tune_night_facade > 0.0) {
+    vec3 fn = pix_normal.rgb * 2.0 - 1.0;
+    vec2 nh = fn.xz / max(length(fn.xz), 1e-4);
+    vec3 fwp = (view_to_world * p + cam_pos) / 4096.0;
+    facade_uv = vec2(dot(fwp.xz, vec2(-nh.y, nh.x)), fwp.y);
+    facade_fw = fwidth(facade_uv);
+  }
+  if (facade) {
+    pix_tag = 1.0;
+  }
   {
     float ft = pix_tag;
     // (nor over grass and bushes, shrub.frag's 0.97: noon burns the grass's pale tips as white)
@@ -6355,6 +6387,43 @@ void composite_unused() {
     float la = max(alb.r, max(alb.g, alb.b));
     vec3 lc = alb * tune_night_lamp_gain * smoothstep(0.15, 0.5, la) * min(tune_night_lamp, 1.0);
     c = mix(c, max(c, min(lc, vec3(1.0))), smoothstep(0.3, 0.8, clouds.w));
+  }
+  // far buildings' low-res walls (EnhancedMaterials.h's kFacade): their windows are a few painted
+  // texels, and the city across the harbour went a flat dark silhouette at night. A grid of windows
+  // on the wall's plane (storeys tune_night_facade_floor m), one in tune_night_facade_share of them
+  // lit warm, each room its own strength, above the bloom's knee so they read as points of light and
+  // the water's reflections take them; box-filtered over the pixel (where a window is under a pixel,
+  // its share of it). Up-facing roofs and the dark between them stay as they were
+  // (and in Haven any plain or metal wall past tune_night_facade_near: the
+  // far quay across Haven's harbour is the port's own metal walls, near ones keep their texture)
+  float facade_k = facade ? 1.0 : 0.0;
+  if (!facade && city_windows > 0.0 && pix_tag > 0.985 && pix_normal.a > 0.5) {
+    facade_k = smoothstep(tune_night_facade_near, tune_night_facade_near * 1.5, length(p) / 4096.0);
+  }
+  if (tune_night_facade > 9.0 && z > 0.0 && facade_k > 0.0) {
+    c = facade ? vec3(1.0, 0.5, 0.0) : vec3(0.3, 1.0, 0.0) * facade_k;  // (test: the tag orange, the far walls green)
+  }
+  if (tune_night_facade > 0.0 && tune_night_facade < 9.0 && clouds.w > 0.0 && z > 0.0 && facade_k > 0.0) {
+    vec3 fn = normalize(pix_normal.rgb * 2.0 - 1.0);
+    float side = 1.0 - smoothstep(0.35, 0.6, abs(fn.y));
+    vec2 sp = vec2(0.85, 1.0) * tune_night_facade_floor;
+    vec2 cu = facade_uv / sp;
+    vec2 fw = min(facade_fw / sp, vec2(8.0));
+    float cover = pulse_cover(cu.x, fw.x, 0.22, 0.78) * pulse_cover(cu.y, fw.y, 0.3, 0.78);
+    if (side > 0.0 && cover > 0.0) {
+      // (the room: its cell, and the wall it's on (the plane's offset), so neighbouring walls differ)
+      vec2 nh = fn.xz / max(length(fn.xz), 1e-4);
+      vec3 wp = (view_to_world * p + cam_pos) / 4096.0;
+      vec3 cell = vec3(floor(cu), floor(dot(wp.xz, nh) * 0.5));
+      float h1 = fract(sin(dot(cell, vec3(127.1, 311.7, 74.7))) * 43758.5453);
+      float h2 = fract(sin(dot(cell, vec3(269.5, 183.3, 246.1))) * 43758.5453);
+      // (a footprint over half a cell or more: the rooms' mean instead of one room's)
+      float far = smoothstep(0.35, 0.9, max(fw.x, fw.y));
+      float lit = mix(step(h1, tune_night_facade_share) * mix(0.55, 1.0, fract(h2 * 7.3)),
+                      tune_night_facade_share * 0.78, far);
+      vec3 wc = mix(vec3(1.0, 0.62, 0.3), vec3(1.0, 0.85, 0.6), mix(h2, 0.5, far)) * tune_night_facade;
+      c = mix(c, max(c, wc), lit * cover * side * facade_k * smoothstep(0.3, 0.8, clouds.w));
+    }
   }
   // under a roof the sky through the windows as the game drew it, and what it drew over it with no
   // depth (the palace's honeycomb lattice): the bloom of the bright panes on themselves (+40%), the
