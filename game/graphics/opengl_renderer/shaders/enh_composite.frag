@@ -291,6 +291,7 @@ uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front)
+uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_night_pale = 0.0;       // (off: slums 22h 19% darker than main, nights must not get darker; 1 = Haven's slums only, pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
@@ -359,6 +360,7 @@ uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G
 uniform float tune_chr_gold_rim = 0.7;  // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
+uniform float tune_ground_cav = 1.0;   // the rocky ground's hollows darker and tops lighter by the sky's light, shade too (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
@@ -5390,6 +5392,15 @@ void composite_unused() {
           vec3 tint = relief > 1.0 ? mix(vec3(1.0), vec3(1.1, 0.98, 0.84), min(relief - 1.0, 1.0))
                                    : mix(vec3(1.0), vec3(0.92, 0.96, 1.08), min(1.0 - relief, 1.0) * 2.0);
           c *= mix(vec3(1.0), relief * tint, rk);
+          // (and the sky's light: the hollows between the stones darker, the tops lighter, in the
+          // shade too, where the sun's relief is gone and the slab went flat)
+          if (tune_ground_cav > 0.0) {
+            const float ce = 0.3;
+            float hn = (ground_height(wp.xz + vec2(ce, 0.0), glod, plod) + ground_height(wp.xz - vec2(ce, 0.0), glod, plod) +
+                        ground_height(wp.xz + vec2(0.0, ce), glod, plod) + ground_height(wp.xz - vec2(0.0, ce), glod, plod)) * 0.25;
+            float cav = clamp((h0 - hn) * 9.0, -0.3, 0.3);
+            c *= 1.0 + cav * close * tune_ground_cav * mix(1.0, 0.4, sun_lit * clamp(base * 4.0, 0.0, 1.0));
+          }
         }
         // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
         float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));
@@ -6247,6 +6258,9 @@ void composite_unused() {
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
+  }
+  if (tune_raw_view > 0.0 && (tune_raw_view < 1.5 || tex_coord.x > 0.5)) {
+    c = texture(tex_T0, tex_coord).rgb;  // (test: the game's own picture, for an A/B with vanilla in one run)
   }
   if (abs(tune_water_dbg - 7.0) < 0.5) {
     // (test: red where the far-sea depth copy equals the scene (the reflection march skips those as
