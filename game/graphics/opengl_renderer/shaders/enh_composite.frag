@@ -376,6 +376,8 @@ uniform float tune_night_hue_hi = 0.6;
 uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G3: Jak pink and pasted on the moonlit desert; 0: off)
 uniform float tune_backlight = 0.0;      // backlit grass and leaves toward the sun: the light through them (0: off, >= 10 shows its weight)
 uniform float tune_backlight_cos = 0.55; // from how close to the sun's direction (cosine)
+uniform float tune_bolt_scene = 1.0;    // lightning lights the scene: a short cold light from the bolt's side of the sky (0: off)
+uniform float tune_rain_chars = 1.0;    // characters wet in the rain: darker, a cold sheen on their edges (0: off)
 uniform float tune_chr_gold_rim = 0.7; // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
@@ -4390,6 +4392,20 @@ void composite_unused() {
     }
   }
 
+  // lightning lights the scene: a short cold light from the bolt's side of the sky (high, as the
+  // flash comes from the clouds over it) and a little from the whole sky, on what is open to the sky
+  // (sky map) and by the surface's own color, so a night street flashes white-blue for an instant
+  // (it was only a faint lift after the grade). Sheet lightning: the sky's share only
+  if (tune_bolt_scene > 0.0 && z > 0.0 && wsurf == 0.0 && (weather2.w > 0.0 || sheet > 0.0)) {
+    vec3 wn = view_to_world * surf_n;
+    vec3 bdir = normalize(vec3(sin(bolt.x), 0.9, cos(bolt.x)));
+    float sky_up = 0.5 + 0.5 * wn.y;
+    float facing = max(dot(wn, bdir), 0.0);
+    float lit = weather2.w * (0.3 * sky_up + 0.7 * facing) + sheet * 0.35 * sky_up;
+    lit *= rain_open * tune_bolt_scene;
+    c += (albedo * mix(1.0, 1.5, night_dark.x) + 0.02) * vec3(0.75, 0.82, 1.0) * lit * ao * 0.9;
+  }
+
   // indirect light: what the surroundings send, tinted by this surface's own color
   if (gi_strength > 0.0 && wsurf == 0.0) {
     vec3 gi = texture(tex_T7, tex_coord).rgb;
@@ -5928,16 +5944,28 @@ void composite_unused() {
   }
   // Jak out of the water: dark and shining for some seconds, as he dries (the pixels around him,
   // characters' tag)
-  if (jak_fx.w > 0.0 && z > 0.0 && wsurf == 0.0) {
+  // (and every character out in the rain, as soaked as the ground: weather.w, under the open sky;
+  // the sheen in the sky's own color so a night stays dark, and the lightning glints on them)
+  float rain_chars = tune_rain_chars * weather.w * rain_open;
+  if ((jak_fx.w > 0.0 || rain_chars > 0.0) && z > 0.0 && wsurf == 0.0) {
     float ctag = pix_tag;
     float jd = length(p - jak_fx.xyz) / 4096.0;
-    if (ctag > 0.4 && ctag < 0.56 && jd < 2.5) {
+    if (ctag > 0.4 && ctag < 0.56) {
       float wetk = jak_fx.w * (1.0 - smoothstep(1.8, 2.5, jd));
       vec3 vd = normalize(p);
       float glint = pow(max(dot(reflect(vd, surf_n), sun_dir.xyz), 0.0), 30.0) * sun_dir.w * (1.0 - clouds.w);
       float sheen = pow(1.0 - clamp(dot(surf_n, -vd), 0.0, 1.0), 4.0);
       c *= 1.0 - 0.18 * wetk;
       c += wetk * (sun_color() * glint * 0.6 + vec3(0.6, 0.7, 0.8) * sheen * 0.12);
+      if (rain_chars > 0.0) {
+        float rk = min(rain_chars, 1.0) * (1.0 - wetk);
+        vec3 wn = view_to_world * surf_n;
+        float bglint = pow(max(dot(view_to_world * reflect(vd, surf_n), normalize(vec3(sin(bolt.x), 0.9, cos(bolt.x)))), 0.0), 12.0);
+        c = mix(c, c * c * 1.6, 0.35 * rk);
+        c *= 1.0 - 0.14 * rk;
+        c += rk * ((fog_color * 0.3 + 0.015) * sheen * (0.4 + 0.6 * max(wn.y, 0.0)) +
+                   vec3(0.75, 0.82, 1.0) * bglint * weather2.w * tune_bolt_scene * 0.5);
+      }
     }
   }
   // characters lit from behind by the sun: a thin bright rim along their outline, so they stand out
