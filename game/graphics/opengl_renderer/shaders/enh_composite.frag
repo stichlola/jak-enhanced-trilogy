@@ -161,6 +161,7 @@ uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
+uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, the old march tries (0: the miss keeps the sky sample: pale patches by a quay)
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
@@ -3283,7 +3284,8 @@ void composite_unused() {
     float mirror_k = smoothstep(25.0 * 4096.0, 50.0 * 4096.0, z) * step(80.5, tune_water_ssr_far);
     vec3 rs = normalize(mix(r, reflect(vdir, up_view), mirror_k));
     bool hiz = hiz_levels > 0 && !(abs(tune_hiz_dbg - 1.0) < 0.5 && tex_coord.x < 0.5);
-    if (hiz && z < tune_hiz_range_m * 4096.0) {
+    bool hiz_ran = hiz && z < tune_hiz_range_m * 4096.0;
+    if (hiz_ran) {
       // (post.hiz: a tile at a time through the depth pyramid, 5x the old march's reach)
       vec2 huv;
       if (hiz_trace(p, r, z, tune_hiz_len_m * 4096.0,
@@ -3293,7 +3295,11 @@ void composite_unused() {
                   (1.0 - smoothstep(0.75 * tune_hiz_range_m * 4096.0, tune_hiz_range_m * 4096.0, z));
         ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
       }
-    } else if (z < ssr_far) {
+    }
+    // (where the Hi-Z trace found nothing, the old march still looks: Haven port 18h, the near water
+    // behind the dock reflected ragged pale patches of sky where the quay's houses stand; the march
+    // (the calm mirror ray, further out) finds them)
+    if (z < ssr_far && (!hiz_ran || (ssr_hit == 0.0 && tune_water_hiz_fallback > 0.5))) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
       // start each pixel's march a little further along (the TAA averages the steps away: no
       // staircase where the reflection meets what it reflects)
