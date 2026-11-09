@@ -163,7 +163,8 @@ uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the ref
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
 uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, the old march tries (0: the miss keeps the sky sample: pale patches by a quay)
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
-uniform float tune_water_oasis = 1.0;  // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
+uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
+uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
@@ -3229,6 +3230,15 @@ void composite_unused() {
       body_col *= wk * mix(vec3(1.0), wtint, 0.4 * tune_water_hour * (1.0 - wday));
     }
     vec3 body = night_dim(body_col * shade);
+    // (at night no darker than a share of the game's own water there: a canal between walls in
+    // Haven's slums 22h was night-dimmed to black, its walls reflected dark too, a black hole beside
+    // the lit pavement, ~0.26x vanilla's luma where the open harbour keeps 0.77x)
+    // (clouds.w, the night: night_dark is only the dark-nights option's share, ~0 in Haven)
+    float wnight = clouds.w;
+    if (tune_water_night_floor > 0.0 && wnight > 0.0) {
+      vec3 game_w = texture(tex_T0, uv).rgb;
+      body = max(body, game_w * (tune_water_night_floor * wnight));
+    }
     // (a pond's edge: its sandy bed seen through a few cm of murky water, not the sea's light
     // turquoise: that drew a pale line along the shore, there only once the near water is drawn)
     if (pond_here) {
