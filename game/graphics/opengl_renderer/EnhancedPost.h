@@ -705,8 +705,7 @@ class EnhancedPost {
   };
   std::vector<MotionModel> m_mv_prev;
   GLuint m_mv_bones[2] = {0, 0};
-  size_t m_mv_bones_size[2] = {0, 0};
-  int m_mv_cur = 0;
+  size_t m_mv_bones_size[2] = {0, 0};  // [0] this frame's bones, [1] last frame's
   bool m_mv_prev_ok = false;
   GLuint m_mv_fbo = 0;
   GLuint m_mv_tex = 0;
@@ -714,6 +713,10 @@ class EnhancedPost {
   int m_mv_h = 0;
   int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
   int m_mv_models = 0;
+  int m_mv_still = 0;    // ...of them still in the world (the camera's reprojection is theirs)
+  int m_mv_draws = 0;    // draw calls made for the moving ones
+  double m_mv_cpu[3] = {0, 0, 0};  // ms summed: matching, bones' upload, draws (the log's)
+  std::vector<float> m_mv_prev_bones;  // last frame's cs.bones (the still test)
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;

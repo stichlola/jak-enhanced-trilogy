@@ -568,17 +568,27 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     static const EnhancedTune t_motion("taa.motion", 1.f);
     static const EnhancedTune t_taa_dbg("taa.dbg", 0.f);
     bool motion = false;
+    static double motion_cpu_ms = 0.0;
     if ((float)t_motion > 0.5f) {
+      const auto mv0 = std::chrono::steady_clock::now();
       ENH_TIMED("enh-motion",
                 motion = do_motion(render_state, prof, w, h, to_prev, offset, reproject));
+      motion_cpu_ms +=
+          std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - mv0).count();
     } else {
       m_mv_prev_ok = false;
     }
     {
       static int frames = 0;
       if ((float)t_motion > 0.5f && ++frames >= 300) {
+        lg::info("[enhanced] taa motion: {} of {} models found again, {} still, {} draws, "
+                 "{} KB of bones, cpu {:.3f} ms (match {:.3f}, upload {:.3f}, draws {:.3f})",
+                 m_mv_matched, m_mv_models, m_mv_still, m_mv_draws,
+                 g_enhanced_casters.bones.size() * 4 / 1024, motion_cpu_ms / frames,
+                 m_mv_cpu[0] / frames, m_mv_cpu[1] / frames, m_mv_cpu[2] / frames);
         frames = 0;
-        lg::info("[enhanced] taa motion: {} of {} models found again", m_mv_matched, m_mv_models);
+        motion_cpu_ms = 0.0;
+        m_mv_cpu[0] = m_mv_cpu[1] = m_mv_cpu[2] = 0.0;
       }
     }
     const int cur = m_taa_cur;

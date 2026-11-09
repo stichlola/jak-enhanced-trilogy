@@ -1971,8 +1971,25 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
                              const float offset[3],
                              bool reproject) {
   auto& cs = g_enhanced_casters;
+  using mv_clock = std::chrono::steady_clock;
+  auto mv_t = mv_clock::now();
+  auto mv_lap = [&](int i) {
+    const auto t = mv_clock::now();
+    m_mv_cpu[i] += std::chrono::duration<double, std::milli>(t - mv_t).count();
+    mv_t = t;
+  };
   m_mv_matched = 0;
+  m_mv_still = 0;
+  m_mv_draws = 0;
   m_mv_models = (int)cs.instances.size();
+  // (the models that have draws: a sorted list, not a scan of every draw per model)
+  std::vector<u32> drawn_bones;
+  drawn_bones.reserve(cs.draws.size());
+  for (const auto& d : cs.draws) {
+    drawn_bones.push_back(d.first_bone);
+  }
+  std::sort(drawn_bones.begin(), drawn_bones.end());
+  drawn_bones.erase(std::unique(drawn_bones.begin(), drawn_bones.end()), drawn_bones.end());
   // this frame's models and their places (the mean of their bones' translations, view space)
   std::vector<MotionModel> now;
   now.reserve(cs.instances.size());
@@ -2002,13 +2019,8 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
       m.center[k] /= n;
     }
     // (only models with draws here: a second copy of the Hellcat drew nothing)
-    bool drawn = false;
-    for (const auto& d : cs.draws) {
-      if (d.first_bone == in.first_bone) {
-        drawn = true;
-        break;
-      }
-    }
+    const bool drawn =
+        std::binary_search(drawn_bones.begin(), drawn_bones.end(), in.first_bone);
     if (n == 0 || !drawn) {
       m.hash = 0;  // matches nothing
     }
@@ -2018,9 +2030,69 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   // last frame's bones of each model found again (-1: none)
   constexpr float kMatch = 3.f * kMeter;  // 180 m/s: anything faster is a different one
   std::unordered_map<u32, u32> prev_of;  // first bone now -> first bone last frame
+  std::unordered_map<u32, u32> count_of;  // first bone now -> its bones
+  // A model found again whose own motion on screen is under taa.motion_still_px (every bone,
+  // the camera's move taken out; 0 = draw them all) needs no draws: the TAA's camera
+  // reprojection is already its motion, within that. A bone's rotation counts as the move of a
+  // point 2 m from it. (Spargus 18h: the 284 draws were ~0.35 ms of the post's CPU.)
+  static const EnhancedTune t_still("taa.motion_still_px", 0.03f);
+  const float still_px = (float)t_still;
+  const float fpix = std::max(0.5f * std::abs(m_last_proj[2]) * w, 0.5f * std::abs(m_last_proj[3]) * h);
+  constexpr float kMoved = 1e9f;  // (a bone that can't be compared)
+  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  const float px_cap = (float)t_log > 0.5f ? kMoved : still_px;
+  auto moved_px = [&](u32 now_first, u32 prev_first, u32 bone_count) {
+    const auto& pb = m_mv_prev_bones;
+    float most = 0.f;
+    for (u32 b = 0; b < bone_count; b++) {
+      const size_t fn = (size_t)(now_first + 8 * b) * 4;
+      const size_t fp = (size_t)(prev_first + 8 * b) * 4;
+      // (past the end of the list: spare slots no draw reads; props have 101 "bones" for one)
+      if (fn + 16 > cs.bones.size() || fp + 16 > pb.size()) {
+        break;
+      }
+      const float* tn = &cs.bones[fn + 12];
+      // (spare bone slots with garbage, as the centers skip them: kilometers away, or columns
+      // that no model's scale would give)
+      bool spare = !std::isfinite(tn[0]) || !std::isfinite(tn[1]) || !std::isfinite(tn[2]) ||
+                   std::abs(tn[0]) + std::abs(tn[1]) + std::abs(tn[2]) > 3000.f * kMeter;
+      for (int k = 0; k < 12 && !spare; k++) {
+        spare = !(std::abs(cs.bones[fn + k]) < 1000.f);
+      }
+      if (spare) {
+        continue;
+      }
+      float moved = 0.f;  // game units
+      for (int col = 0; col < 4; col++) {
+        const float* vn = &cs.bones[fn + 4 * col];
+        const float* vp = &pb[fp + 4 * col];
+        float d = 0.f;
+        for (int c = 0; c < 3; c++) {
+          float p = col == 3 ? offset[c] : 0.f;
+          for (int k = 0; k < 3; k++) {
+            p += to_prev[k][c] * vn[k];
+          }
+          const float diff = std::abs(p - vp[c]);
+          if (!std::isfinite(diff)) {
+            return kMoved;  // (last frame's slot held garbage)
+          }
+          d = std::max(d, diff);
+        }
+        moved = std::max(moved, col == 3 ? d : d * 2.f * kMeter);
+      }
+      const float z = std::max(std::abs(tn[2]), 1.f * kMeter);
+      most = std::max(most, moved * fpix / z);
+      if (most > px_cap) {
+        break;  // (moving: the rest only matters to the log)
+      }
+    }
+    return most;
+  };
+  std::vector<float> px_of(now.size(), -1.f);  // (the log's)
   if (reproject && m_mv_prev_ok) {
     std::vector<bool> taken(m_mv_prev.size(), false);
-    for (const auto& m : now) {
+    for (size_t mi = 0; mi < now.size(); mi++) {
+      const auto& m = now[mi];
       if (!m.hash) {
         continue;
       }
@@ -2048,14 +2120,20 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
         }
       }
       if (bi >= 0) {
-        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
         taken[bi] = true;
+        px_of[mi] = moved_px(m.first_bone, m_mv_prev[bi].first_bone, m.bone_count);
+        if (still_px > 0.f && px_of[mi] <= still_px) {
+          m_mv_still++;
+          continue;
+        }
+        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
+        count_of[m.first_bone] = m.bone_count;
       }
     }
   }
-  m_mv_matched = (int)prev_of.size();
-  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws)
-  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  m_mv_matched = (int)prev_of.size() + m_mv_still;
+  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws, its own
+  // motion on screen)
   static int log_frames = 0;
   if ((float)t_log > 0.5f && ++log_frames >= 120) {
     log_frames = 0;
@@ -2065,31 +2143,59 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
       for (const auto& d : cs.draws) {
         draws += d.first_bone == in.first_bone;
       }
-      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} at {:.1f} {:.1f} {:.1f} m", in.name,
-               in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, now[i].center[0] / kMeter,
+      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} moved {:.3f} px at {:.1f} {:.1f} {:.1f} m",
+               in.name, in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, px_of[i],
+               now[i].center[0] / kMeter,
                now[i].center[1] / kMeter, now[i].center[2] / kMeter);
     }
   }
 
-  // this frame's bones into this frame's buffer (last frame's stay in the other)
+  // the bones go up only when something moves, and only the moving models': this frame's packed
+  // into buffer 0, last frame's (kept on the CPU) into buffer 1, each a fresh store (orphaned: no
+  // wait on the draws still reading the old one)
   constexpr size_t kBoneBlock = 128 * 8 * 4;  // floats: a bound range always spans 128 bones
-  const int cur = m_mv_cur;
-  if (!m_mv_bones[0]) {
-    glGenBuffers(2, m_mv_bones);
+  std::unordered_map<u32, std::pair<u32, u32>> packed;  // first bone now -> both places (vec4s)
+  mv_lap(0);
+  if (!prev_of.empty()) {
+    if (!m_mv_bones[0]) {
+      glGenBuffers(2, m_mv_bones);
+    }
+    const u32 align = std::max<u32>(1, cs.alignment);
+    static std::vector<float> pack[2];
+    pack[0].clear();
+    pack[1].clear();
+    const std::vector<float>* src[2] = {&cs.bones, &m_mv_prev_bones};
+    for (const auto& [now_first, prev_first] : prev_of) {
+      const size_t n = (size_t)std::min<u32>(count_of[now_first], 128) * 8;  // vec4s
+      const u32 from[2] = {now_first, prev_first};
+      u32 at[2];
+      for (int i = 0; i < 2; i++) {
+        auto& p = pack[i];
+        const size_t v = (p.size() / 4 + align - 1) / align * align;
+        at[i] = (u32)v;
+        p.resize(v * 4, 0.f);
+        const size_t b0 = std::min(src[i]->size(), (size_t)from[i] * 4);
+        const size_t b1 = std::min(src[i]->size(), b0 + n * 4);
+        p.insert(p.end(), src[i]->begin() + b0, src[i]->begin() + b1);
+        p.resize((v + n) * 4, 0.f);
+      }
+      packed[now_first] = {at[0], at[1]};
+    }
+    for (int i = 0; i < 2; i++) {
+      pack[i].resize(pack[i].size() + kBoneBlock, 0.f);
+      const size_t size = pack[i].size() * sizeof(float);
+      glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[i]);
+      if (size > m_mv_bones_size[i]) {
+        m_mv_bones_size[i] = size * 3 / 2;
+      }
+      glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[i], nullptr, GL_STREAM_DRAW);
+      glBufferSubData(GL_UNIFORM_BUFFER, 0, size, pack[i].data());
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
   }
-  const size_t size = (cs.bones.size() + kBoneBlock) * sizeof(float);
-  glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[cur]);
-  if (size > m_mv_bones_size[cur]) {
-    m_mv_bones_size[cur] = size * 3 / 2;
-    glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[cur], nullptr, GL_DYNAMIC_DRAW);
-  }
-  if (!cs.bones.empty()) {
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
-  }
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  m_mv_prev_bones.assign(cs.bones.begin(), cs.bones.end());
   m_mv_prev = std::move(now);
   m_mv_prev_ok = true;
-  m_mv_cur = 1 - cur;
 
   if (w != m_mv_w || h != m_mv_h) {
     if (m_mv_fbo) {
@@ -2110,6 +2216,7 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_mv_tex, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
   }
+  mv_lap(1);
   if (prev_of.empty()) {
     return false;  // nothing moves on its own: the TAA skips the target
   }
@@ -2129,16 +2236,25 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   auto& shader = render_state->shaders[ShaderId::ENH_MOTION];
   shader.activate();
   const auto id = shader.id();
-  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
-  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
-  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
-              m_last_proj[3]);
-  glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+  // (the block bindings and locations once per program: set each frame they cost the draws'
+  // stage more than the draws)
+  static GLuint bound_prog = 0;
+  static GLint loc_proj = -1, loc_prev_f = -1, loc_tol = -1;
+  if (bound_prog != id) {
+    bound_prog = id;
+    glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
+    glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
+    loc_proj = glGetUniformLocation(id, "proj");
+    loc_prev_f = glGetUniformLocation(id, "prev_f");
+    loc_tol = glGetUniformLocation(id, "depth_tol");
+    glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
+  }
+  glUniform4f(loc_proj, m_last_proj[0], m_last_proj[1], m_last_proj[2], m_last_proj[3]);
+  glUniform2f(loc_prev_f, m_prev_camera.fx, m_prev_fy);
   static const EnhancedTune t_tol("taa.motion_depth_tol", 0.03f);
-  glUniform1f(glGetUniformLocation(id, "depth_tol"), (float)t_tol);
+  glUniform1f(loc_tol, (float)t_tol);
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
-  glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
   glActiveTexture(GL_TEXTURE0);
   if (!m_caster_vao) {
     glGenVertexArrays(1, &m_caster_vao);
@@ -2150,10 +2266,43 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   glEnable(GL_PRIMITIVE_RESTART);
   glPrimitiveRestartIndex(UINT32_MAX);
   GLuint last_vertices = 0;
+  // (a model's draws in a row on the same buffers go as one multi-draw: taa.motion_batch 0 = one
+  // call each)
+  static const EnhancedTune t_batch("taa.motion_batch", 1.f);
+  const bool batch = (float)t_batch > 0.5f;
+  std::vector<GLsizei> counts;
+  std::vector<const void*> firsts;
+  GLenum batch_mode = GL_TRIANGLES;
+  auto flush = [&]() {
+    if (counts.empty()) {
+      return;
+    }
+    glMultiDrawElements(batch_mode, counts.data(), GL_UNSIGNED_INT, firsts.data(),
+                        (GLsizei)counts.size());
+    m_mv_draws++;
+    prof.add_draw_call();
+    counts.clear();
+    firsts.clear();
+  };
+  const EnhancedCasters::Draw* last = nullptr;
+  GLuint last_indices = 0;
+  u32 last_bone = UINT32_MAX;
   for (const auto& d : cs.draws) {
-    auto it = prev_of.find(d.first_bone);
-    if (it == prev_of.end()) {
+    if (!prev_of.count(d.first_bone)) {
       continue;
+    }
+    if (batch) {
+      const GLenum mode = d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      if (last && last->vertices == d.vertices && last->indices == d.indices &&
+          last->first_bone == d.first_bone && batch_mode == mode) {
+        counts.push_back((GLsizei)d.index_count);
+        firsts.push_back((const void*)(sizeof(u32) * (size_t)d.first_index));
+        last = &d;
+        continue;
+      }
+      flush();
+      batch_mode = mode;
+      last = &d;
     }
     if (d.vertices != last_vertices) {
       glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
@@ -2166,17 +2315,32 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
                              (void*)offsetof(tfrag3::MercVertex, mats[0]));
       last_vertices = d.vertices;
     }
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
-    glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[cur], d.first_bone * 4 * sizeof(float),
-                      kBoneBlock * sizeof(float));
-    glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1 - cur], it->second * 4 * sizeof(float),
-                      kBoneBlock * sizeof(float));
+    if (d.indices != last_indices) {
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+      last_indices = d.indices;
+    }
+    if (d.first_bone != last_bone) {
+      const auto& at = packed[d.first_bone];
+      glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[0], at.first * 4 * sizeof(float),
+                        kBoneBlock * sizeof(float));
+      glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1], at.second * 4 * sizeof(float),
+                        kBoneBlock * sizeof(float));
+      last_bone = d.first_bone;
+    }
+    if (batch) {
+      counts.push_back((GLsizei)d.index_count);
+      firsts.push_back((const void*)(sizeof(u32) * (size_t)d.first_index));
+      continue;
+    }
     glDrawElements(d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES, d.index_count, GL_UNSIGNED_INT,
                    (void*)(sizeof(u32) * d.first_index));
+    m_mv_draws++;
     prof.add_draw_call();
   }
+  flush();
   glDisable(GL_PRIMITIVE_RESTART);
   glBindVertexArray(0);
+  mv_lap(2);
   return true;
 }
 
