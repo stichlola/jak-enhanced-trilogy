@@ -360,6 +360,7 @@ uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G
 uniform float tune_chr_gold_rim = 0.7;  // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
+uniform float tune_ground_cav = 1.0;   // the rocky ground's hollows darker and tops lighter by the sky's light, shade too (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
@@ -5391,6 +5392,15 @@ void composite_unused() {
           vec3 tint = relief > 1.0 ? mix(vec3(1.0), vec3(1.1, 0.98, 0.84), min(relief - 1.0, 1.0))
                                    : mix(vec3(1.0), vec3(0.92, 0.96, 1.08), min(1.0 - relief, 1.0) * 2.0);
           c *= mix(vec3(1.0), relief * tint, rk);
+          // (and the sky's light: the hollows between the stones darker, the tops lighter, in the
+          // shade too, where the sun's relief is gone and the slab went flat)
+          if (tune_ground_cav > 0.0) {
+            const float ce = 0.3;
+            float hn = (ground_height(wp.xz + vec2(ce, 0.0), glod, plod) + ground_height(wp.xz - vec2(ce, 0.0), glod, plod) +
+                        ground_height(wp.xz + vec2(0.0, ce), glod, plod) + ground_height(wp.xz - vec2(0.0, ce), glod, plod)) * 0.25;
+            float cav = clamp((h0 - hn) * 9.0, -0.3, 0.3);
+            c *= 1.0 + cav * close * tune_ground_cav * mix(1.0, 0.4, sun_lit * clamp(base * 4.0, 0.0, 1.0));
+          }
         }
         // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
         float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));
