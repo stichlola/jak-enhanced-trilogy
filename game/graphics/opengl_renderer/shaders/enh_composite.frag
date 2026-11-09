@@ -554,6 +554,50 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
   return light_blocked_by(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
 }
 
+// lamps' shadow maps (lights.shadow_maps): a cube map per slot, its faces as GL's cube maps want
+// them, depth from a 90 degree perspective with the lamp's near and far planes
+uniform samplerCubeArrayShadow tex_T35;
+uniform vec4 lamp_shadow_pos[8];   // world (game units), far plane (game units)
+uniform vec4 lamp_shadow_slot[2];  // the slot of the first 8 lights' maps, -1: none
+uniform vec2 lamp_shadow_params;  // near plane (game units), 2 / the faces' size
+uniform float tune_lamp_map_bias = 1.5;  // pushed off the surface along its normal (texels there)
+uniform float tune_lamp_map_soft = 1.5;  // penumbra: 4 taps this many texels around (0: one tap)
+uniform float tune_lamp_map_dbg = 0.0;   // test: > 0 adds the map's shadow red, the march's green (times this)
+uniform float tune_lamp_map_dbg_slot = -1.0;  // test: only this slot's (-1: all)
+int lamp_map_slot(int i) {
+  return i < 8 ? int(lamp_shadow_slot[i >> 2][i & 3]) : -1;
+}
+float lamp_map_tap(int s, vec3 d) {
+  float zf = max(abs(d.x), max(abs(d.y), abs(d.z)));
+  float n = lamp_shadow_params.x, f = lamp_shadow_pos[s].w;
+  if (zf <= n || zf >= f) {
+    return 1.0;
+  }
+  float ref = 0.5 * ((f + n) / (f - n) - 2.0 * f * n / ((f - n) * zf)) + 0.5;
+  return texture(tex_T35, vec4(d, float(s)), ref);
+}
+// 1 lit, 0 in the lamp's shadow (wp, wn: the pixel's world place and normal)
+float lamp_map_lit(int s, vec3 wp, vec3 wn, float jitter) {
+  vec3 d = wp - lamp_shadow_pos[s].xyz;
+  float texel = max(abs(d.x), max(abs(d.y), abs(d.z))) * lamp_shadow_params.y;
+  d += wn * texel * tune_lamp_map_bias;
+  if (tune_lamp_map_soft <= 0.0) {
+    return lamp_map_tap(s, d);
+  }
+  vec3 dn = normalize(d);
+  vec3 t1 = normalize(cross(dn, abs(dn.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+  vec3 t2 = cross(dn, t1);
+  float r = texel * tune_lamp_map_soft;
+  float a = jitter * 6.2831853;
+  float sum = 0.0;
+  for (int k = 0; k < 4; k++) {
+    float ang = a + float(k) * 1.5707963;
+    float rk = (k == 0 || k == 2) ? r : 0.5 * r;
+    sum += lamp_map_tap(s, d + (t1 * cos(ang) + t2 * sin(ang)) * rk);
+  }
+  return sum * 0.25;
+}
+
 // a contact shadow toward the light: only what's close in depth to the ray counts (a thin thing
 // standing in front of it isn't its shadow), softer the farther along the ray it's met
 float pixel_angle();
@@ -4247,7 +4291,18 @@ void composite_unused() {
         // (not a light Jak carries: alpha 1, his own shadow from it is a blur across the screen)
         // (not in full daylight: a torch's shadow doesn't show under the sun)
         if (light_shadow > 0.0 && i < 8 && k * k * lit > 0.02 && lamp && !full_day) {
-          lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter) * lamp_jak_keep;
+          // (its shadow map when it has one: the real shapes, Jak's own too)
+          int ls = lamp_map_slot(i);
+          if (ls >= 0) {
+            float msh = 1.0 - lamp_map_lit(ls, view_to_world * from + cam_pos, view_to_world * nn, jitter);
+            if (tune_lamp_map_dbg > 0.0 && (tune_lamp_map_dbg_slot < 0.0 || float(ls) == tune_lamp_map_dbg_slot)) {
+              // (test: red the map's shadow, green the screen-space march's, yellow both)
+              added += vec3(msh, light_blocked(from, light_pos[i].xyz, jitter), 0.0) * k * k * tune_lamp_map_dbg;
+            }
+            lit *= 1.0 - light_shadow * msh;
+          } else {
+            lit *= 1.0 - light_shadow * light_blocked(from, light_pos[i].xyz, jitter) * lamp_jak_keep;
+          }
         }
         added += light_color[i].rgb * (k * k) * lit * 1.35;
         if (flash) {

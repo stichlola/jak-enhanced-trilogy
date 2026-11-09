@@ -712,6 +712,36 @@ bool MercLoaderStage::run(Timer& /*timer*/, LoaderInput& data) {
     return false;
   } else {
     m_done = true;
+    {
+      // the bones each model's vertices really use (Merc2 uploads only those)
+      const auto& md = data.lev_data->level->merc_data;
+      auto& used = data.lev_data->merc_used_bones;
+      used.clear();
+      used.reserve(md.models.size());
+      for (const auto& model : md.models) {
+        u32 top = 0;
+        auto see = [&](const tfrag3::MercVertex& v) {
+          for (int k = 0; k < 3; k++) {
+            top = std::max<u32>(top, v.mats[k]);
+          }
+        };
+        for (const auto& eff : model.effects) {
+          for (const auto& d : eff.all_draws) {
+            const size_t end = std::min<size_t>(md.indices.size(), (size_t)d.first_index + d.index_count);
+            for (size_t ii = d.first_index; ii < end; ii++) {
+              const u32 vi = md.indices[ii];
+              if (vi < md.vertices.size()) {
+                see(md.vertices[vi]);
+              }
+            }
+          }
+          for (const auto& v : eff.mod.vertices) {
+            see(v);
+          }
+        }
+        used.push_back(std::min<u32>(top, model.max_bones) + 1);
+      }
+    }
     for (auto& model : data.lev_data->level->merc_data.models) {
       data.lev_data->merc_model_lookup[model.name] = &model;
       (*data.mercs)[model.name].push_back({&model, data.lev_data->load_id, data.lev_data});

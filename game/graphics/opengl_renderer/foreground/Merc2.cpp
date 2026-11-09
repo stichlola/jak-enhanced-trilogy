@@ -8,6 +8,7 @@
 
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EnhancedTextures.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/background/background_common.h"
@@ -441,6 +442,16 @@ void Merc2::handle_pc_model(const DmaTransfer& setup,
 
   // models use many bones. First check if we need to flush:
   int bone_count = model->max_bones + 1;
+  // Enhanced (tuning merc.used_bones, default 1): only the bones the model's vertices use (the
+  // loader counted them). Tripo props replaced with no skeleton say 101; their spare slots also held
+  // last model's matrices, which made the TAA motion pass see them "move".
+  static const EnhancedTune t_used_bones("merc.used_bones", 1.f);
+  if ((float)t_used_bones > 0.5f && lev && lev->level) {
+    const size_t mi = (size_t)(model - lev->level->merc_data.models.data());
+    if (mi < lev->merc_used_bones.size()) {
+      bone_count = std::min<int>(bone_count, (int)lev->merc_used_bones[mi]);
+    }
+  }
   if (m_next_free_bone_vector + m_opengl_buffer_alignment + bone_count * 8 >
       MAX_SHADER_BONE_VECTORS) {
     fmt::print("MERC2 out of bones, consider increasing MAX_SHADER_BONE_VECTORS\n");

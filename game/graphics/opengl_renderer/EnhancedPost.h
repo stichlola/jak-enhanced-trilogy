@@ -673,10 +673,45 @@ class EnhancedPost {
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
   void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
-  // (mvp: the sun map's m_light_mvp when null)
+  // (mvp: the sun map's m_light_mvp when null; only: just these draws (indices into the casters'
+  // draws); upload false: the bones are already in the buffer this frame)
   void draw_shadow_casters(SharedRenderState* render_state,
                            ScopedProfilerNode& prof,
-                           const float* mvp = nullptr);
+                           const float* mvp = nullptr,
+                           const std::vector<u32>* only = nullptr,
+                           bool upload = true);
+  // lamps' shadow maps (tuning lights.shadow_maps: how many, 0 = off, the screen-space march as
+  // before): the strongest lamps around get a cube map each, slots of one cube map array. Their
+  // static part (the levels' geometry, as the sun map draws it) is drawn once, a few faces a frame,
+  // and kept while the lamp stays wanted; each frame a copy of it gets the characters near the lamp.
+  void do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  static constexpr int kLampSlots = 8;  // (the arrays hold lights.shadow_maps of them)
+  struct LampSlot {
+    float pos[3] = {0.f, 0.f, 0.f};  // world, game units
+    float far_u = 0.f;               // game units
+    float radius_u = 0.f;            // the light's reach, game units
+    int faces = 0;                   // static faces drawn (6: ready)
+    u32 seen = 0;                    // last frame it was wanted
+    u32 gen = 0;                     // the casters' levels it was drawn with
+    bool used = false;
+    bool live_valid = false;  // the live map holds a copy of the static part
+    u8 dirty = 0;             // faces of the live map with characters drawn in
+  };
+  LampSlot m_lamp_slots[kLampSlots];
+  struct LampWant {
+    float pos[3];
+    float radius;
+  };
+  std::vector<std::pair<std::array<float, 3>, u32>> m_lamp_still;  // frames each stayed put
+  std::vector<LampWant> m_lamp_want;  // last frame's shadow-casting lamps, strongest first (world)
+  GLuint m_lamp_static_tex = 0, m_lamp_tex = 0, m_lamp_fbo = 0;
+  int m_lamp_res = 0;
+  int m_lamp_alloc = 0;  // slots the arrays hold
+  float m_lamp_near_u = 0.f;  // the near plane the kept faces were drawn with
+  u32 m_lamp_frame = 0;
+  u32 m_lamp_static_total = 0, m_lamp_assigns = 0;  // static faces drawn, slots given (log)
+  bool m_lamp_ready = false;  // the live array holds this frame's maps
+  double m_lamp_log_time = 0.0;
   // the characters around Jak seen from below (their lowest point per column, a small depth map):
   // their ground occlusion in the composite, by day and night (tuning shadow.chr_occ_m: half side)
   void do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof);
@@ -705,15 +740,20 @@ class EnhancedPost {
   };
   std::vector<MotionModel> m_mv_prev;
   GLuint m_mv_bones[2] = {0, 0};
-  size_t m_mv_bones_size[2] = {0, 0};
-  int m_mv_cur = 0;
+  size_t m_mv_bones_size[2] = {0, 0};  // [0] this frame's bones, [1] last frame's
   bool m_mv_prev_ok = false;
   GLuint m_mv_fbo = 0;
   GLuint m_mv_tex = 0;
+  bool m_mv_stamped = false;  // the target is RGBA16F with the frame's stamp (taa.motion_stamp)
+  float m_mv_stamp = -1.f;     // this frame's, 1..1024; -1 when off
   int m_mv_w = 0;
   int m_mv_h = 0;
   int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
   int m_mv_models = 0;
+  int m_mv_still = 0;    // ...of them still in the world (the camera's reprojection is theirs)
+  int m_mv_draws = 0;    // draw calls made for the moving ones
+  double m_mv_cpu[6] = {0, 0, 0, 0, 0, 0};  // ms summed: matching, bones' upload, bind, clear, program, draws (the log's)
+  std::vector<float> m_mv_prev_bones;  // last frame's cs.bones (the still test)
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;
@@ -923,6 +963,11 @@ class EnhancedPost {
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
   bool m_adapt_half[2] = {false, false};  // that buffer holds half floats (an RGBA16F scene)
+  // (post.exposure_blit: the 48 pixels blitted to an 8x6 target, then one read, not 48 reads)
+  GLuint m_adapt_fbo = 0, m_adapt_tex = 0;
+  bool m_adapt_tex_half = false;
+  GLuint m_adapt_scene_tex = 0;  // the scene texture whose format was last queried
+  bool m_adapt_scene_half = false;
   float m_adapt = 1.f;
   float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
   float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak

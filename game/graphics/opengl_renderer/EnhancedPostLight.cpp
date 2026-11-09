@@ -859,6 +859,14 @@ void EnhancedPost::read_exposure(int w, int h) {
       }
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
       const float mean = std::exp(sum / kN);
+      {
+        static const EnhancedTune t_cpu_profile("debug.cpu_profile", 0.f);
+        static int frames = 0;
+        if ((float)t_cpu_profile > 0.5f && ++frames >= 300) {
+          frames = 0;
+          lg::info("[enhanced] exposure: mean {:.4f}, eye {:.4f}", mean, m_adapt);
+        }
+      }
       const float want = m_settings.eye_adapt > 0.f
                              ? std::pow(std::clamp(0.36f / mean, 0.8f, 1.6f), m_settings.eye_adapt * 0.6f)
                              : 1.f;
@@ -874,17 +882,61 @@ void EnhancedPost::read_exposure(int w, int h) {
     m_adapt_pending[prev] = false;
   }
   glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
-  GLint comp = GL_UNSIGNED_NORMALIZED;
-  glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
-  const bool half = comp == GL_FLOAT;
+  // (the format query once per scene texture: it is recreated on a resize or a format switch)
+  if (m_adapt_scene_tex != m_scene_tex) {
+    GLint comp = GL_UNSIGNED_NORMALIZED;
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                          GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
+    m_adapt_scene_half = comp == GL_FLOAT;
+    m_adapt_scene_tex = m_scene_tex;
+  }
+  const bool half = m_adapt_scene_half;
   m_adapt_half[m_adapt_cur] = half;
-  glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
-  int i = 0;
-  for (int y = 0; y < 6; y++) {
-    for (int x = 0; x < 8; x++) {
-      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
-                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
+  // (tuning "post": {"exposure_blit": 0}: the 48 one-pixel reads as before. 48 reads cost 0.23 ms
+  // of render-thread CPU a frame (Spargus 18h); one nearest blit to 8x6 picks the same pixels,
+  // (2x + 1) w / 16 and (2y + 1) h / 12, and one read takes them all)
+  static const EnhancedTune t_blit("post.exposure_blit", 1.f);
+  if ((float)t_blit > 0.5f) {
+    if (!m_adapt_fbo || m_adapt_tex_half != half) {
+      if (!m_adapt_fbo) {
+        glGenFramebuffers(1, &m_adapt_fbo);
+        glGenTextures(1, &m_adapt_tex);
+      }
+      glBindTexture(GL_TEXTURE_2D, m_adapt_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, half ? GL_RGBA16F : GL_RGBA8, 8, 6, 0, GL_RGBA,
+                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_adapt_fbo);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_adapt_tex, 0);
+      m_adapt_tex_half = half;
+    }
+    GLint draw_fbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+    const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) {
+      glDisable(GL_SCISSOR_TEST);
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_adapt_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, 8, 6, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (scissor) {
+      glEnable(GL_SCISSOR_TEST);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_adapt_fbo);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, 8, 6, GL_RGBA, half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fbo);
+  } else {
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
+    int i = 0;
+    for (int y = 0; y < 6; y++) {
+      for (int x = 0; x < 8; x++) {
+        glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
+                     half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
+      }
     }
   }
   glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -1145,7 +1197,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   sun_world(sun);
   const float len = std::sqrt(sun[0] * sun[0] + sun[1] * sun[1] + sun[2] * sun[2]);
   const auto& cam = g_enhanced_camera;
-  if (!g_enhanced_sun.valid || len < 1e-6f || sun[1] / len < 0.05f || !cam.valid) {
+  const bool sun_up = g_enhanced_sun.valid && len >= 1e-6f && sun[1] / len >= 0.05f;
+  // (the lamps' shadow maps draw the same casters, by night too: their list is kept up below)
+  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 8.f);
+  const bool lamp_maps = (float)t_lamp_maps > 0.5f && m_settings.light_shadow > 0.f;
+  if (!cam.valid || (!sun_up && !lamp_maps)) {
     return;  // no sun, or below the horizon
   }
 
@@ -1512,6 +1568,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     } else {
       ++it;
     }
+  }
+  if (!sun_up) {
+    return;
   }
 
   // the light's frame: f from the sun down, right and up across; a square of 2 * range around a
@@ -1892,10 +1951,12 @@ void EnhancedPost::add_wind_shadow_draws(const LevelData* lev,
 // into the shadow map. Their bones put them in camera space: back to the world with the camera.
 void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
                                        ScopedProfilerNode& prof,
-                                       const float* mvp) {
+                                       const float* mvp,
+                                       const std::vector<u32>* only,
+                                       bool upload) {
   auto& cs = g_enhanced_casters;
   cs.capture = false;  // later merc draws (HUD) don't cast
-  if (cs.draws.empty()) {
+  if (cs.draws.empty() || (only && only->empty())) {
     return;
   }
   // a bound range always spans 128 bones: room past the last one
@@ -1904,14 +1965,17 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   if (!m_caster_bones) {
     glGenBuffers(1, &m_caster_bones);
     glGenVertexArrays(1, &m_caster_vao);
+    upload = true;
   }
-  glBindBuffer(GL_UNIFORM_BUFFER, m_caster_bones);
-  if (size > m_caster_bones_size) {
-    m_caster_bones_size = size * 3 / 2;
-    glBufferData(GL_UNIFORM_BUFFER, m_caster_bones_size, nullptr, GL_DYNAMIC_DRAW);
+  if (upload || size > m_caster_bones_size) {
+    glBindBuffer(GL_UNIFORM_BUFFER, m_caster_bones);
+    if (size > m_caster_bones_size) {
+      m_caster_bones_size = size * 3 / 2;
+      glBufferData(GL_UNIFORM_BUFFER, m_caster_bones_size, nullptr, GL_DYNAMIC_DRAW);
+    }
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
   }
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 
   auto& shader = render_state->shaders[ShaderId::ENH_SHADOW_MERC];
   shader.activate();
@@ -1929,7 +1993,9 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   glEnableVertexAttribArray(3);
   glEnableVertexAttribArray(5);
   GLuint last_vertices = 0;
-  for (const auto& d : cs.draws) {
+  const size_t n_draws = only ? only->size() : cs.draws.size();
+  for (size_t k = 0; k < n_draws; k++) {
+    const auto& d = cs.draws[only ? (*only)[k] : k];
     if (d.vertices != last_vertices) {
       glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
       constexpr GLsizei kStride = sizeof(tfrag3::MercVertex);
@@ -1957,6 +2023,484 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   glBindVertexArray(0);
 }
 
+// Lamps' shadow maps (lights.shadow_maps n, 0 = off): see EnhancedPost.h. The faces follow GL's cube
+// map convention, so the composite looks them up with the direction from the lamp, in world space.
+void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  m_lamp_ready = false;
+  static const EnhancedTune t_maps("lights.shadow_maps", 8.f);
+  static const EnhancedTune t_res("lights.shadow_map_res", 512.f);
+  static const EnhancedTune t_faces("lights.shadow_faces_per_frame", 2.f);
+  static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
+  static const EnhancedTune t_far("lights.shadow_far_x", 2.0f);
+  static const EnhancedTune t_chars("lights.shadow_chars", 1.f);
+  static const EnhancedTune t_log("lights.shadow_log", 0.f);
+  const int want_n = std::clamp((int)(float)t_maps, 0, kLampSlots);
+  const auto& cam = g_enhanced_camera;
+  // (the lights' shadows off, Medium and Performance presets: nothing reads the maps)
+  if (want_n == 0 || !cam.valid || g_enhanced_menu.blank_world || m_lamp_want.empty() ||
+      m_settings.light_shadow <= 0.f) {
+    return;
+  }
+  const int res = std::clamp((int)(float)t_res, 128, 2048);
+  // (the arrays hold as many slots as asked for: 512^2 depth, 6 MB a cube, two arrays)
+  if (res != m_lamp_res || want_n != m_lamp_alloc) {
+    for (int k = 0; k < 2; k++) {
+      GLuint* t = k ? &m_lamp_tex : &m_lamp_static_tex;
+      if (*t) {
+        glDeleteTextures(1, t);
+      }
+      glGenTextures(1, t);
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, *t);
+      glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT32F, res, res, 6 * want_n, 0,
+                   GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, k ? GL_LINEAR : GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, k ? GL_LINEAR : GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+      if (k) {
+        glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE,
+                        GL_COMPARE_REF_TO_TEXTURE);
+        glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+      }
+    }
+    glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, 0);
+    if (!m_lamp_fbo) {
+      glGenFramebuffers(1, &m_lamp_fbo);
+    }
+    m_lamp_res = res;
+    m_lamp_alloc = want_n;
+    for (auto& s : m_lamp_slots) {
+      s = LampSlot();
+    }
+  }
+  m_lamp_frame++;
+  const float near_u = std::max((float)t_near, 0.05f) * kMeter;
+  if (near_u != m_lamp_near_u) {
+    // (the kept faces' depth goes with the near plane: drawn again)
+    m_lamp_near_u = near_u;
+    for (auto& s : m_lamp_slots) {
+      s.faces = 0;
+      s.live_valid = false;
+    }
+  }
+
+  auto dist2 = [](const float* a, const float* b) {
+    const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
+    return x * x + y * y + z * z;
+  };
+  // only lamps that stay put (lights.shadow_still_frames in the same place, 2 cm): a light that
+  // follows Jak or a moving glow would redraw its static faces every frame and never be ready
+  static const EnhancedTune t_still("lights.shadow_still_frames", 30.f);
+  // (within lights.shadow_still_m of where it was first seen: the temple braziers' lights jitter by
+  // ~20 cm with the flame every second or so; at 2 cm frame to frame they lost their maps, 7 slots
+  // redrawn in 5 s with the camera still. The map stays at that first place)
+  static const EnhancedTune t_still_m("lights.shadow_still_m", 0.5f);
+  const float still_u = std::clamp((float)t_still_m, 0.02f, 2.f) * kMeter;
+  const float match2 = std::max(still_u, 0.3f * kMeter) * std::max(still_u, 0.3f * kMeter);
+  {
+    std::vector<std::pair<std::array<float, 3>, u32>> still;
+    const float still2 = still_u * still_u;
+    for (const auto& w : m_lamp_want) {
+      std::pair<std::array<float, 3>, u32> e = {{w.pos[0], w.pos[1], w.pos[2]}, 1};
+      for (const auto& [p, c] : m_lamp_still) {
+        if (dist2(p.data(), w.pos) < still2) {
+          e = {p, c + 1};
+          break;
+        }
+      }
+      still.push_back(e);
+    }
+    m_lamp_still.swap(still);
+  }
+  std::vector<LampWant> wanted;
+  for (size_t i = 0; i < m_lamp_want.size(); i++) {
+    if (m_lamp_still[i].second >= (u32)std::max((float)t_still, 1.f)) {
+      // (two lights in one place, a Spargus lamp's two entries: one map, the larger reach; the
+      // composite gives both lights that slot)
+      bool dup = false;
+      for (auto& w : wanted) {
+        if (dist2(w.pos, m_lamp_still[i].first.data()) < match2) {
+          w.radius = std::max(w.radius, m_lamp_want[i].radius);
+          dup = true;
+          break;
+        }
+      }
+      if (dup) {
+        continue;
+      }
+      wanted.push_back(m_lamp_want[i]);
+      memcpy(wanted.back().pos, m_lamp_still[i].first.data(), sizeof(wanted.back().pos));
+    }
+  }
+  // (a little hysteresis: among the strongest few more than there are maps, the lamps whose map is
+  // drawn already go first; the order shifts as the camera turns, and the slots thrashed, two static
+  // faces redrawn every frame at the port)
+  // (lights.shadow_keep_rank k: a lamp that has its map ranks k places higher than it is, so a new
+  // one takes its slot only when clearly stronger; fires flicker and swapped places every few
+  // frames at the temple's braziers, 6 slots redrawn in 5 s with the camera still at +2)
+  {
+    static const EnhancedTune t_keep("lights.shadow_keep_rank", 2.f);
+    const float keep = std::max((float)t_keep, 0.f);
+    auto has_map = [&](const LampWant& w) {
+      for (const auto& sl : m_lamp_slots) {
+        if (sl.used && sl.faces >= 6 &&
+            dist2(sl.pos, w.pos) < match2) {
+          return true;
+        }
+      }
+      return false;
+    };
+    std::vector<std::pair<float, size_t>> rank(wanted.size());
+    for (size_t i = 0; i < wanted.size(); i++) {
+      rank[i] = {(float)i - (has_map(wanted[i]) ? keep + 0.5f : 0.f), i};
+    }
+    std::stable_sort(rank.begin(), rank.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<LampWant> sorted;
+    sorted.reserve(wanted.size());
+    for (const auto& r : rank) {
+      sorted.push_back(wanted[r.second]);
+    }
+    wanted.swap(sorted);
+  }
+  // a slot for each of the strongest lamps: the one already holding it (same place), else the one
+  // left unused longest
+  const int n_want = std::min(want_n, (int)wanted.size());
+  int assign[kLampSlots];
+  bool taken[kLampSlots] = {};
+  for (int i = 0; i < n_want; i++) {
+    assign[i] = -1;
+    for (int s = 0; s < m_lamp_alloc; s++) {
+      if (!taken[s] && m_lamp_slots[s].used &&
+          dist2(m_lamp_slots[s].pos, wanted[i].pos) < match2) {
+        assign[i] = s;
+        taken[s] = true;
+        break;
+      }
+    }
+  }
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] >= 0) {
+      continue;
+    }
+    int best = -1;
+    for (int s = 0; s < m_lamp_alloc; s++) {
+      if (!taken[s] && (best < 0 || !m_lamp_slots[s].used ||
+                        (m_lamp_slots[best].used && m_lamp_slots[s].seen < m_lamp_slots[best].seen))) {
+        best = s;
+      }
+    }
+    if (best < 0) {
+      break;
+    }
+    auto& sl = m_lamp_slots[best];
+    sl = LampSlot();
+    memcpy(sl.pos, wanted[i].pos, sizeof(sl.pos));
+    sl.far_u = std::max(wanted[i].radius * std::max((float)t_far, 1.f), near_u * 4.f);
+    sl.radius_u = wanted[i].radius;
+    sl.used = true;
+    m_lamp_assigns++;
+    if ((float)t_log > 1.5f) {
+      lg::info("[enhanced] lamp slot {} <- {:.1f},{:.1f},{:.1f} r {:.1f} m (rank {} of {})", best,
+               sl.pos[0] / kMeter, sl.pos[1] / kMeter, sl.pos[2] / kMeter, sl.radius_u / kMeter, i,
+               wanted.size());
+    }
+    sl.gen = m_shadow_draws_gen;
+    assign[i] = best;
+    taken[best] = true;
+  }
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] >= 0) {
+      auto& sl = m_lamp_slots[assign[i]];
+      sl.seen = m_lamp_frame;
+      if (sl.gen != m_shadow_draws_gen) {
+        sl.gen = m_shadow_draws_gen;  // the levels changed: drawn again
+        sl.faces = 0;
+      }
+    }
+  }
+
+  // the six faces: GL's cube map directions and up vectors, a 90 degree perspective each
+  static const float kDir[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                                   {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+  static const float kUp[6][3] = {{0, -1, 0}, {0, -1, 0}, {0, 0, 1},
+                                  {0, 0, -1}, {0, -1, 0}, {0, -1, 0}};
+  auto face_basis = [&](int face, float* s, float* u) {
+    const float* f = kDir[face];
+    const float* up = kUp[face];
+    s[0] = f[1] * up[2] - f[2] * up[1];
+    s[1] = f[2] * up[0] - f[0] * up[2];
+    s[2] = f[0] * up[1] - f[1] * up[0];
+    u[0] = s[1] * f[2] - s[2] * f[1];
+    u[1] = s[2] * f[0] - s[0] * f[2];
+    u[2] = s[0] * f[1] - s[1] * f[0];
+  };
+  auto face_mvp = [&](const LampSlot& sl, int face, float* m) {
+    float s[3], u[3];
+    face_basis(face, s, u);
+    const float* f = kDir[face];
+    const float* L = sl.pos;
+    const float n = near_u, fa = sl.far_u;
+    const float A = -(fa + n) / (fa - n), B = -2.f * fa * n / (fa - n);
+    const float v2[4] = {-f[0], -f[1], -f[2], f[0] * L[0] + f[1] * L[1] + f[2] * L[2]};
+    m[0] = s[0], m[1] = s[1], m[2] = s[2], m[3] = -(s[0] * L[0] + s[1] * L[1] + s[2] * L[2]);
+    m[4] = u[0], m[5] = u[1], m[6] = u[2], m[7] = -(u[0] * L[0] + u[1] * L[1] + u[2] * L[2]);
+    for (int c = 0; c < 4; c++) {
+      m[8 + c] = A * v2[c] + (c == 3 ? B : 0.f);
+      m[12 + c] = -v2[c];
+    }
+  };
+
+  GLfloat old_clear_depth = 0.f;
+  GLint old_depth_func = GL_GEQUAL;
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+  glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glClearDepth(1.0);
+  glEnable(GL_POLYGON_OFFSET_FILL);
+  glPolygonOffset(1.5f, 3.f);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_lamp_fbo);
+  glDrawBuffer(GL_NONE);
+  glReadBuffer(GL_NONE);
+  glViewport(0, 0, res, res);
+
+  // the static part: a few faces a frame, the strongest lamp's first
+  int budget = std::max(1, (int)(float)t_faces);
+  int static_faces = 0;
+  for (int i = 0; i < n_want && budget > 0; i++) {
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces >= 6) {
+      continue;
+    }
+    auto& shader = render_state->shaders[ShaderId::ENH_SHADOW];
+    shader.activate();
+    const auto id = shader.id();
+    const GLint u_cut = glGetUniformLocation(id, "enh_cut");
+    const GLint u_alpha = glGetUniformLocation(id, "alpha_ref");
+    const GLint u_mvp = glGetUniformLocation(id, "light_mvp");
+    glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+    glActiveTexture(GL_TEXTURE0);
+    glBindVertexArray(m_shadow_vao);
+    glEnableVertexAttribArray(0);
+    auto& sl = m_lamp_slots[assign[i]];
+    sl.live_valid = false;
+    while (sl.faces < 6 && budget > 0) {
+      glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_lamp_static_tex, 0,
+                                assign[i] * 6 + sl.faces);
+      glClear(GL_DEPTH_BUFFER_BIT);
+      float mvp[16];
+      face_mvp(sl, sl.faces, mvp);
+      glUniformMatrix4fv(u_mvp, 1, GL_TRUE, mvp);
+      for (auto& [lid, draws] : m_shadow_draws) {
+        for (auto& d : draws) {
+          // (as the near sun map: the small shrubs, not the big plants' second strips)
+          if ((d.wind && !m_settings.shadow_casters) || (d.shrub && d.big)) {
+            continue;
+          }
+          glUniform1i(u_cut, d.cut);
+          glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+          if (d.own_vertices || d.wind) {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                                  (void*)(3 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+          } else if (d.shrub) {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex),
+                                  (void*)0);
+            glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::ShrubGpuVertex),
+                                  (void*)(3 * sizeof(float)));
+            glEnableVertexAttribArray(1);
+          } else {
+            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                  (void*)0);
+            if (d.tex) {
+              glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(tfrag3::PreloadedVertex),
+                                    (void*)offsetof(tfrag3::PreloadedVertex, s));
+              glEnableVertexAttribArray(1);
+            } else {
+              glDisableVertexAttribArray(1);
+            }
+          }
+          glUniform1f(u_alpha, !d.tex ? -1.f : d.alpha >= 0.f ? d.alpha : (float)kShadowAlphaRef);
+          if (d.tex) {
+            glBindTexture(GL_TEXTURE_2D, d.tex);
+          }
+          glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+          glDrawElements(d.mode, d.count, GL_UNSIGNED_INT, (void*)(d.first * sizeof(u32)));
+          prof.add_draw_call();
+        }
+      }
+      sl.faces++;
+      budget--;
+      static_faces++;
+    }
+    glDisableVertexAttribArray(1);
+    glBindVertexArray(0);
+  }
+
+  // the characters' places this frame (world), by their first bone: the mean of their bones'
+  // translations (camera space, back to the world with the camera), the garbage spare slots left out
+  const auto& cs = g_enhanced_casters;
+  const bool chars = (float)t_chars > 0.5f && m_settings.shadow_casters && !cs.draws.empty();
+  std::vector<std::pair<u32, std::array<float, 3>>> places;
+  // (each character's draws by its first bone, sorted once: the faces looked them up through all
+  // the draws for each character, ~0.5 M compares a frame at the port with 8 maps)
+  std::vector<std::pair<u32, u32>> by_bone;
+  if (chars) {
+    by_bone.reserve(cs.draws.size());
+    for (u32 k = 0; k < cs.draws.size(); k++) {
+      by_bone.push_back({cs.draws[k].first_bone, k});
+    }
+    std::sort(by_bone.begin(), by_bone.end());
+    for (const auto& in : cs.instances) {
+      double acc[3] = {0, 0, 0};
+      int cnt = 0;
+      for (u32 b = 0; b < in.bone_count; b++) {
+        const size_t at = ((size_t)in.first_bone + b * 8) * 4 + 12;
+        if (at + 3 > cs.bones.size()) {
+          break;
+        }
+        const float* t = &cs.bones[at];
+        if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]) ||
+            t[0] * t[0] + t[1] * t[1] + t[2] * t[2] > (2000.f * kMeter) * (2000.f * kMeter)) {
+          continue;
+        }
+        for (int r = 0; r < 3; r++) {
+          acc[r] += cam.rot[r][0] * t[0] + cam.rot[r][1] * t[1] + cam.rot[r][2] * t[2];
+        }
+        cnt++;
+      }
+      if (cnt) {
+        places.push_back({in.first_bone,
+                          {cam.trans[0] + (float)(acc[0] / cnt), cam.trans[1] + (float)(acc[1] / cnt),
+                           cam.trans[2] + (float)(acc[2] / cnt)}});
+      }
+    }
+  }
+
+  // the live maps: a copy of the static part, then the characters near the lamp in the faces they
+  // reach (a 2.5 m sphere around their middle against each face's pyramid)
+  int live = 0, char_draws = 0, copied = 0;
+  const decltype(places) no_places;
+  bool uploaded = false;
+  std::vector<u32> only;
+  const float rad = 2.5f * kMeter;
+  // (characters further than this from the lamp left out: their shadow is long and faint there,
+  // and the big Spargus lamps reach ~45 m: every NPC of the street, 700 draws)
+  static const EnhancedTune t_chars_m("lights.shadow_chars_m", 12.f);
+  const float chars_m = std::max((float)t_chars_m, 1.f) * kMeter;
+  // (but the characters near the camera, Jak first, anywhere in the lamp's reach: a brazier 25 m
+  // away still throws his long shadow across the temple floor, where the player looks; 0: off)
+  static const EnhancedTune t_chars_cam_m("lights.shadow_chars_cam_m", 15.f);
+  const float cam_m = std::max((float)t_chars_cam_m, 0.f) * kMeter;
+  std::vector<u8> near_cam(places.size(), 0);
+  for (size_t k = 0; k < places.size(); k++) {
+    const auto& c = places[k].second;
+    const float x = c[0] - cam.trans[0], y = c[1] - cam.trans[1], z = c[2] - cam.trans[2];
+    near_cam[k] = x * x + y * y + z * z < cam_m * cam_m;
+  }
+  for (int i = 0; i < n_want; i++) {
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces < 6) {
+      continue;
+    }
+    const int s_i = assign[i];
+    auto& sl = m_lamp_slots[s_i];
+    // (the live map holds the static part plus last frame's characters: a face is copied again only
+    // where characters were or are drawn, the whole map once after its static part changed)
+    auto copy_faces = [&](int first, int count) {
+      glCopyImageSubData(m_lamp_static_tex, GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, s_i * 6 + first,
+                         m_lamp_tex, GL_TEXTURE_CUBE_MAP_ARRAY, 0, 0, 0, s_i * 6 + first, res, res,
+                         count);
+      copied += count;
+    };
+    if (!sl.live_valid) {
+      copy_faces(0, 6);
+      sl.live_valid = true;
+      sl.dirty = 0;
+    }
+    live++;
+    for (int face = 0; face < 6; face++) {
+      float s[3], u[3];
+      face_basis(face, s, u);
+      const float* f = kDir[face];
+      only.clear();
+      const auto& pl = chars ? places : no_places;
+      for (size_t k = 0; k < pl.size(); k++) {
+        const auto& [fb, c] = pl[k];
+        const float d[3] = {c[0] - sl.pos[0], c[1] - sl.pos[1], c[2] - sl.pos[2]};
+        const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        const float fz = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
+        const float fx = d[0] * s[0] + d[1] * s[1] + d[2] * s[2];
+        const float fy = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
+        const float reach =
+            std::min(sl.far_u, near_cam[k] ? std::max(sl.radius_u, chars_m) : chars_m);
+        if (dl - rad > reach || fz < -rad || std::abs(fx) > fz + rad * 1.4143f ||
+            std::abs(fy) > fz + rad * 1.4143f) {
+          continue;
+        }
+        for (auto it = std::lower_bound(by_bone.begin(), by_bone.end(), std::make_pair(fb, 0u));
+             it != by_bone.end() && it->first == fb; ++it) {
+          only.push_back(it->second);
+        }
+      }
+      const u8 bit = (u8)(1u << face);
+      if (only.empty()) {
+        if (sl.dirty & bit) {
+          copy_faces(face, 1);
+          sl.dirty &= (u8)~bit;
+        }
+        continue;
+      }
+      copy_faces(face, 1);
+      sl.dirty |= bit;
+      glBindFramebuffer(GL_FRAMEBUFFER, m_lamp_fbo);
+      glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, m_lamp_tex, 0, s_i * 6 + face);
+      glViewport(0, 0, res, res);
+      float mvp[16];
+      face_mvp(sl, face, mvp);
+      draw_shadow_casters(render_state, prof, mvp, &only, !uploaded);
+      uploaded = true;
+      char_draws += (int)only.size();
+    }
+  }
+  glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, 0, 0, 0);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glDisable(GL_PRIMITIVE_RESTART);
+  glClearDepth(old_clear_depth);
+  glDepthFunc(old_depth_func);
+  m_lamp_ready = live > 0;
+  m_lamp_static_total += static_faces;
+  if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
+    lg::info("[enhanced] lamp shadows: {} wanted ({} lamps, {} still), {} live, {} static faces "
+             "this frame ({} in 300 frames, {} new slots), {} character draws, {} faces copied; "
+             "camera {:.1f},{:.1f},{:.1f}; slots {}",
+             n_want, m_lamp_want.size(), wanted.size(), live, static_faces, m_lamp_static_total,
+             m_lamp_assigns, char_draws, copied, cam.trans[0] / kMeter, cam.trans[1] / kMeter,
+             cam.trans[2] / kMeter,
+             [&]() {
+               std::string o;
+               for (int s = 0; s < m_lamp_alloc; s++) {
+                 const auto& sl = m_lamp_slots[s];
+                 o += fmt::format("[{} {:.1f},{:.1f},{:.1f} far {:.1f} m faces {}] ", sl.used ? "on" : "--",
+                                  sl.pos[0] / kMeter, sl.pos[1] / kMeter, sl.pos[2] / kMeter,
+                                  sl.far_u / kMeter, sl.faces);
+               }
+               return o;
+             }());
+  }
+  if (m_lamp_frame % 300 == 0) {
+    m_lamp_static_total = 0;
+    m_lamp_assigns = 0;
+  }
+}
+
 // TAA motion vectors: the characters of this frame (EnhancedCasters) skinned twice, with this frame's
 // bones and with last frame's bones of the same model (same name, the nearest place last frame once
 // the camera's move is taken out), into an RG16F target: the uv offset to where the pixel was. Only
@@ -1971,8 +2515,25 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
                              const float offset[3],
                              bool reproject) {
   auto& cs = g_enhanced_casters;
+  using mv_clock = std::chrono::steady_clock;
+  auto mv_t = mv_clock::now();
+  auto mv_lap = [&](int i) {
+    const auto t = mv_clock::now();
+    m_mv_cpu[i] += std::chrono::duration<double, std::milli>(t - mv_t).count();
+    mv_t = t;
+  };
   m_mv_matched = 0;
+  m_mv_still = 0;
+  m_mv_draws = 0;
   m_mv_models = (int)cs.instances.size();
+  // (the models that have draws: a sorted list, not a scan of every draw per model)
+  std::vector<u32> drawn_bones;
+  drawn_bones.reserve(cs.draws.size());
+  for (const auto& d : cs.draws) {
+    drawn_bones.push_back(d.first_bone);
+  }
+  std::sort(drawn_bones.begin(), drawn_bones.end());
+  drawn_bones.erase(std::unique(drawn_bones.begin(), drawn_bones.end()), drawn_bones.end());
   // this frame's models and their places (the mean of their bones' translations, view space)
   std::vector<MotionModel> now;
   now.reserve(cs.instances.size());
@@ -2002,13 +2563,8 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
       m.center[k] /= n;
     }
     // (only models with draws here: a second copy of the Hellcat drew nothing)
-    bool drawn = false;
-    for (const auto& d : cs.draws) {
-      if (d.first_bone == in.first_bone) {
-        drawn = true;
-        break;
-      }
-    }
+    const bool drawn =
+        std::binary_search(drawn_bones.begin(), drawn_bones.end(), in.first_bone);
     if (n == 0 || !drawn) {
       m.hash = 0;  // matches nothing
     }
@@ -2018,9 +2574,69 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   // last frame's bones of each model found again (-1: none)
   constexpr float kMatch = 3.f * kMeter;  // 180 m/s: anything faster is a different one
   std::unordered_map<u32, u32> prev_of;  // first bone now -> first bone last frame
+  std::unordered_map<u32, u32> count_of;  // first bone now -> its bones
+  // A model found again whose own motion on screen is under taa.motion_still_px (every bone,
+  // the camera's move taken out; 0 = draw them all) needs no draws: the TAA's camera
+  // reprojection is already its motion, within that. A bone's rotation counts as the move of a
+  // point 2 m from it. (Spargus 18h: the 284 draws were ~0.35 ms of the post's CPU.)
+  static const EnhancedTune t_still("taa.motion_still_px", 0.03f);
+  const float still_px = (float)t_still;
+  const float fpix = std::max(0.5f * std::abs(m_last_proj[2]) * w, 0.5f * std::abs(m_last_proj[3]) * h);
+  constexpr float kMoved = 1e9f;  // (a bone that can't be compared)
+  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  const float px_cap = (float)t_log > 0.5f ? kMoved : still_px;
+  auto moved_px = [&](u32 now_first, u32 prev_first, u32 bone_count) {
+    const auto& pb = m_mv_prev_bones;
+    float most = 0.f;
+    for (u32 b = 0; b < bone_count; b++) {
+      const size_t fn = (size_t)(now_first + 8 * b) * 4;
+      const size_t fp = (size_t)(prev_first + 8 * b) * 4;
+      // (past the end of the list: spare slots no draw reads; props have 101 "bones" for one)
+      if (fn + 16 > cs.bones.size() || fp + 16 > pb.size()) {
+        break;
+      }
+      const float* tn = &cs.bones[fn + 12];
+      // (spare bone slots with garbage, as the centers skip them: kilometers away, or columns
+      // that no model's scale would give)
+      bool spare = !std::isfinite(tn[0]) || !std::isfinite(tn[1]) || !std::isfinite(tn[2]) ||
+                   std::abs(tn[0]) + std::abs(tn[1]) + std::abs(tn[2]) > 3000.f * kMeter;
+      for (int k = 0; k < 12 && !spare; k++) {
+        spare = !(std::abs(cs.bones[fn + k]) < 1000.f);
+      }
+      if (spare) {
+        continue;
+      }
+      float moved = 0.f;  // game units
+      for (int col = 0; col < 4; col++) {
+        const float* vn = &cs.bones[fn + 4 * col];
+        const float* vp = &pb[fp + 4 * col];
+        float d = 0.f;
+        for (int c = 0; c < 3; c++) {
+          float p = col == 3 ? offset[c] : 0.f;
+          for (int k = 0; k < 3; k++) {
+            p += to_prev[k][c] * vn[k];
+          }
+          const float diff = std::abs(p - vp[c]);
+          if (!std::isfinite(diff)) {
+            return kMoved;  // (last frame's slot held garbage)
+          }
+          d = std::max(d, diff);
+        }
+        moved = std::max(moved, col == 3 ? d : d * 2.f * kMeter);
+      }
+      const float z = std::max(std::abs(tn[2]), 1.f * kMeter);
+      most = std::max(most, moved * fpix / z);
+      if (most > px_cap) {
+        break;  // (moving: the rest only matters to the log)
+      }
+    }
+    return most;
+  };
+  std::vector<float> px_of(now.size(), -1.f);  // (the log's)
   if (reproject && m_mv_prev_ok) {
     std::vector<bool> taken(m_mv_prev.size(), false);
-    for (const auto& m : now) {
+    for (size_t mi = 0; mi < now.size(); mi++) {
+      const auto& m = now[mi];
       if (!m.hash) {
         continue;
       }
@@ -2048,14 +2664,20 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
         }
       }
       if (bi >= 0) {
-        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
         taken[bi] = true;
+        px_of[mi] = moved_px(m.first_bone, m_mv_prev[bi].first_bone, m.bone_count);
+        if (still_px > 0.f && px_of[mi] <= still_px) {
+          m_mv_still++;
+          continue;
+        }
+        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
+        count_of[m.first_bone] = m.bone_count;
       }
     }
   }
-  m_mv_matched = (int)prev_of.size();
-  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws)
-  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  m_mv_matched = (int)prev_of.size() + m_mv_still;
+  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws, its own
+  // motion on screen)
   static int log_frames = 0;
   if ((float)t_log > 0.5f && ++log_frames >= 120) {
     log_frames = 0;
@@ -2065,43 +2687,80 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
       for (const auto& d : cs.draws) {
         draws += d.first_bone == in.first_bone;
       }
-      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} at {:.1f} {:.1f} {:.1f} m", in.name,
-               in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, now[i].center[0] / kMeter,
+      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} moved {:.3f} px at {:.1f} {:.1f} {:.1f} m",
+               in.name, in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, px_of[i],
+               now[i].center[0] / kMeter,
                now[i].center[1] / kMeter, now[i].center[2] / kMeter);
     }
   }
 
-  // this frame's bones into this frame's buffer (last frame's stay in the other)
+  // the bones go up only when something moves, and only the moving models': this frame's packed
+  // into buffer 0, last frame's (kept on the CPU) into buffer 1, each a fresh store (orphaned: no
+  // wait on the draws still reading the old one)
   constexpr size_t kBoneBlock = 128 * 8 * 4;  // floats: a bound range always spans 128 bones
-  const int cur = m_mv_cur;
-  if (!m_mv_bones[0]) {
-    glGenBuffers(2, m_mv_bones);
+  std::unordered_map<u32, std::pair<u32, u32>> packed;  // first bone now -> both places (vec4s)
+  mv_lap(0);
+  if (!prev_of.empty()) {
+    if (!m_mv_bones[0]) {
+      glGenBuffers(2, m_mv_bones);
+    }
+    const u32 align = std::max<u32>(1, cs.alignment);
+    static std::vector<float> pack[2];
+    pack[0].clear();
+    pack[1].clear();
+    const std::vector<float>* src[2] = {&cs.bones, &m_mv_prev_bones};
+    for (const auto& [now_first, prev_first] : prev_of) {
+      const size_t n = (size_t)std::min<u32>(count_of[now_first], 128) * 8;  // vec4s
+      const u32 from[2] = {now_first, prev_first};
+      u32 at[2];
+      for (int i = 0; i < 2; i++) {
+        auto& p = pack[i];
+        const size_t v = (p.size() / 4 + align - 1) / align * align;
+        at[i] = (u32)v;
+        p.resize(v * 4, 0.f);
+        const size_t b0 = std::min(src[i]->size(), (size_t)from[i] * 4);
+        const size_t b1 = std::min(src[i]->size(), b0 + n * 4);
+        p.insert(p.end(), src[i]->begin() + b0, src[i]->begin() + b1);
+        p.resize((v + n) * 4, 0.f);
+      }
+      packed[now_first] = {at[0], at[1]};
+    }
+    for (int i = 0; i < 2; i++) {
+      pack[i].resize(pack[i].size() + kBoneBlock, 0.f);
+      const size_t size = pack[i].size() * sizeof(float);
+      glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[i]);
+      if (size > m_mv_bones_size[i]) {
+        m_mv_bones_size[i] = size * 3 / 2;
+      }
+      glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[i], nullptr, GL_STREAM_DRAW);
+      glBufferSubData(GL_UNIFORM_BUFFER, 0, size, pack[i].data());
+    }
+    glBindBuffer(GL_UNIFORM_BUFFER, 0);
   }
-  const size_t size = (cs.bones.size() + kBoneBlock) * sizeof(float);
-  glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[cur]);
-  if (size > m_mv_bones_size[cur]) {
-    m_mv_bones_size[cur] = size * 3 / 2;
-    glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[cur], nullptr, GL_DYNAMIC_DRAW);
-  }
-  if (!cs.bones.empty()) {
-    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
-  }
-  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  m_mv_prev_bones.assign(cs.bones.begin(), cs.bones.end());
   m_mv_prev = std::move(now);
   m_mv_prev_ok = true;
-  m_mv_cur = 1 - cur;
 
-  if (w != m_mv_w || h != m_mv_h) {
+  // (taa.motion_stamp, default on: the target is never cleared. Each frame's vectors carry the
+  // frame's stamp in b and the TAA takes only this frame's; one full clear when the stamp wraps,
+  // every 1024 frames. The clear cost 0.13-0.23 ms of render-thread CPU a frame (Spargus 18h),
+  // whatever the color or a second target in turn; taa.motion_stamp 0: RG16F, cleared each frame)
+  static const EnhancedTune t_stamp("taa.motion_stamp", 1.f);
+  const bool stamped = (float)t_stamp > 0.5f;
+  bool fresh = false;
+  if (w != m_mv_w || h != m_mv_h || stamped != m_mv_stamped) {
     if (m_mv_fbo) {
       glDeleteFramebuffers(1, &m_mv_fbo);
       glDeleteTextures(1, &m_mv_tex);
     }
     m_mv_w = w;
     m_mv_h = h;
+    m_mv_stamped = stamped;
     glGenFramebuffers(1, &m_mv_fbo);
     glGenTextures(1, &m_mv_tex);
     glBindTexture(GL_TEXTURE_2D, m_mv_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, stamped ? GL_RGBA16F : GL_RG16F, w, h, 0,
+                 stamped ? GL_RGBA : GL_RG, GL_HALF_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2109,7 +2768,9 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
     glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_mv_tex, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    fresh = true;
   }
+  mv_lap(1);
   if (prev_of.empty()) {
     return false;  // nothing moves on its own: the TAA skips the target
   }
@@ -2122,23 +2783,43 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   glDisable(GL_CULL_FACE);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glClearColor(64.f, 0.f, 0.f, 0.f);
-  glClear(GL_COLOR_BUFFER_BIT);
-  glClearColor(0.f, 0.f, 0.f, 0.f);
+  mv_lap(2);
+  if (stamped) {
+    m_mv_stamp = (m_mv_stamp >= 1024.f || m_mv_stamp < 1.f) ? 1.f : m_mv_stamp + 1.f;
+  } else {
+    m_mv_stamp = -1.f;
+  }
+  if (!stamped || fresh || m_mv_stamp == 1.f) {
+    glClearColor(64.f, 0.f, 0.f, 0.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(0.f, 0.f, 0.f, 0.f);
+  }
+  mv_lap(3);
 
   auto& shader = render_state->shaders[ShaderId::ENH_MOTION];
   shader.activate();
   const auto id = shader.id();
-  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
-  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
-  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
-              m_last_proj[3]);
-  glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+  // (the block bindings and locations once per program: set each frame they cost the draws'
+  // stage more than the draws)
+  static GLuint bound_prog = 0;
+  static GLint loc_proj = -1, loc_prev_f = -1, loc_tol = -1, loc_stamp = -1;
+  if (bound_prog != id) {
+    bound_prog = id;
+    glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
+    glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
+    loc_proj = glGetUniformLocation(id, "proj");
+    loc_prev_f = glGetUniformLocation(id, "prev_f");
+    loc_tol = glGetUniformLocation(id, "depth_tol");
+    loc_stamp = glGetUniformLocation(id, "stamp");
+    glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
+  }
+  glUniform4f(loc_proj, m_last_proj[0], m_last_proj[1], m_last_proj[2], m_last_proj[3]);
+  glUniform2f(loc_prev_f, m_prev_camera.fx, m_prev_fy);
   static const EnhancedTune t_tol("taa.motion_depth_tol", 0.03f);
-  glUniform1f(glGetUniformLocation(id, "depth_tol"), (float)t_tol);
+  glUniform1f(loc_tol, (float)t_tol);
+  glUniform1f(loc_stamp, std::max(m_mv_stamp, 0.f));
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
-  glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
   glActiveTexture(GL_TEXTURE0);
   if (!m_caster_vao) {
     glGenVertexArrays(1, &m_caster_vao);
@@ -2149,11 +2830,45 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   glEnableVertexAttribArray(5);
   glEnable(GL_PRIMITIVE_RESTART);
   glPrimitiveRestartIndex(UINT32_MAX);
+  mv_lap(4);
   GLuint last_vertices = 0;
+  // (a model's draws in a row on the same buffers go as one multi-draw: taa.motion_batch 0 = one
+  // call each)
+  static const EnhancedTune t_batch("taa.motion_batch", 1.f);
+  const bool batch = (float)t_batch > 0.5f;
+  std::vector<GLsizei> counts;
+  std::vector<const void*> firsts;
+  GLenum batch_mode = GL_TRIANGLES;
+  auto flush = [&]() {
+    if (counts.empty()) {
+      return;
+    }
+    glMultiDrawElements(batch_mode, counts.data(), GL_UNSIGNED_INT, firsts.data(),
+                        (GLsizei)counts.size());
+    m_mv_draws++;
+    prof.add_draw_call();
+    counts.clear();
+    firsts.clear();
+  };
+  const EnhancedCasters::Draw* last = nullptr;
+  GLuint last_indices = 0;
+  u32 last_bone = UINT32_MAX;
   for (const auto& d : cs.draws) {
-    auto it = prev_of.find(d.first_bone);
-    if (it == prev_of.end()) {
+    if (!prev_of.count(d.first_bone)) {
       continue;
+    }
+    if (batch) {
+      const GLenum mode = d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES;
+      if (last && last->vertices == d.vertices && last->indices == d.indices &&
+          last->first_bone == d.first_bone && batch_mode == mode) {
+        counts.push_back((GLsizei)d.index_count);
+        firsts.push_back((const void*)(sizeof(u32) * (size_t)d.first_index));
+        last = &d;
+        continue;
+      }
+      flush();
+      batch_mode = mode;
+      last = &d;
     }
     if (d.vertices != last_vertices) {
       glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
@@ -2166,17 +2881,32 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
                              (void*)offsetof(tfrag3::MercVertex, mats[0]));
       last_vertices = d.vertices;
     }
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
-    glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[cur], d.first_bone * 4 * sizeof(float),
-                      kBoneBlock * sizeof(float));
-    glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1 - cur], it->second * 4 * sizeof(float),
-                      kBoneBlock * sizeof(float));
+    if (d.indices != last_indices) {
+      glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+      last_indices = d.indices;
+    }
+    if (d.first_bone != last_bone) {
+      const auto& at = packed[d.first_bone];
+      glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[0], at.first * 4 * sizeof(float),
+                        kBoneBlock * sizeof(float));
+      glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1], at.second * 4 * sizeof(float),
+                        kBoneBlock * sizeof(float));
+      last_bone = d.first_bone;
+    }
+    if (batch) {
+      counts.push_back((GLsizei)d.index_count);
+      firsts.push_back((const void*)(sizeof(u32) * (size_t)d.first_index));
+      continue;
+    }
     glDrawElements(d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES, d.index_count, GL_UNSIGNED_INT,
                    (void*)(sizeof(u32) * d.first_index));
+    m_mv_draws++;
     prof.add_draw_call();
   }
+  flush();
   glDisable(GL_PRIMITIVE_RESTART);
   glBindVertexArray(0);
+  mv_lap(5);
   return true;
 }
 

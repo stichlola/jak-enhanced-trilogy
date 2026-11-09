@@ -30,6 +30,10 @@ struct LevelData {
   GLuint merc_vertices;
   GLuint merc_indices;
   std::unordered_map<std::string, const tfrag3::MercModel*> merc_model_lookup;
+  // Enhanced: per merc model (same order as level->merc_data.models), the bones its vertices
+  // really use (highest index + 1, at most max_bones + 1). A replacement prop with no skeleton
+  // gets max_bones 100 from merc_replacement; uploading 101 bones a copy was wasted work.
+  std::vector<u32> merc_used_bones;
 
   GLuint hfrag_vertices;
   GLuint hfrag_indices;

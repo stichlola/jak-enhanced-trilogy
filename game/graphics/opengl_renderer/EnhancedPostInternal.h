@@ -34,6 +34,10 @@
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
+// the post's CPU split in steps ("debug": {"cpu_profile": 1}, "[enhanced] post cpu setup" in the
+// log): names the stretch of code that ends here (EnhancedPostScene.cpp)
+void enh_cpu_split(const char* name);
+
 #include "game/graphics/pipelines/opengl.h"
 #include "game/kernel/common/kboot.h"
 #include "game/runtime.h"
