@@ -1957,6 +1957,229 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   glBindVertexArray(0);
 }
 
+// TAA motion vectors: the characters of this frame (EnhancedCasters) skinned twice, with this frame's
+// bones and with last frame's bones of the same model (same name, the nearest place last frame once
+// the camera's move is taken out), into an RG16F target: the uv offset to where the pixel was. Only
+// where the model is the front surface (its depth against the scene's); the rest stays (64, 0) and
+// the TAA reprojects it with the camera, as before. Without them a running Jak or a flying Hellcat
+// took the history of whatever was behind them last frame, clipped to the colors around: smeared.
+bool EnhancedPost::do_motion(SharedRenderState* render_state,
+                             ScopedProfilerNode& prof,
+                             int w,
+                             int h,
+                             const float to_prev[3][3],
+                             const float offset[3],
+                             bool reproject) {
+  auto& cs = g_enhanced_casters;
+  m_mv_matched = 0;
+  m_mv_models = (int)cs.instances.size();
+  // this frame's models and their places (the mean of their bones' translations, view space)
+  std::vector<MotionModel> now;
+  now.reserve(cs.instances.size());
+  for (const auto& in : cs.instances) {
+    MotionModel m;
+    m.hash = in.hash;
+    m.bone_count = in.bone_count;
+    m.first_bone = in.first_bone;
+    int n = 0;
+    for (u32 b = 0; b < in.bone_count; b++) {
+      const size_t f = (size_t)(in.first_bone + 8 * b + 3) * 4;  // the matrix's 4th column
+      if (f + 2 >= cs.bones.size()) {
+        break;
+      }
+      // (a model's spare bone slots can hold garbage: NaN, or kilometers away)
+      const float* t = &cs.bones[f];
+      if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]) ||
+          std::abs(t[0]) + std::abs(t[1]) + std::abs(t[2]) > 3000.f * kMeter) {
+        continue;
+      }
+      for (int k = 0; k < 3; k++) {
+        m.center[k] += t[k];
+      }
+      n++;
+    }
+    for (int k = 0; k < 3 && n; k++) {
+      m.center[k] /= n;
+    }
+    // (only models with draws here: a second copy of the Hellcat drew nothing)
+    bool drawn = false;
+    for (const auto& d : cs.draws) {
+      if (d.first_bone == in.first_bone) {
+        drawn = true;
+        break;
+      }
+    }
+    if (n == 0 || !drawn) {
+      m.hash = 0;  // matches nothing
+    }
+    now.push_back(m);
+  }
+
+  // last frame's bones of each model found again (-1: none)
+  constexpr float kMatch = 3.f * kMeter;  // 180 m/s: anything faster is a different one
+  std::unordered_map<u32, u32> prev_of;  // first bone now -> first bone last frame
+  if (reproject && m_mv_prev_ok) {
+    std::vector<bool> taken(m_mv_prev.size(), false);
+    for (const auto& m : now) {
+      if (!m.hash) {
+        continue;
+      }
+      float pc[3];
+      for (int c = 0; c < 3; c++) {
+        pc[c] = offset[c];
+        for (int k = 0; k < 3; k++) {
+          pc[c] += to_prev[k][c] * m.center[k];
+        }
+      }
+      float best = kMatch * kMatch;
+      int bi = -1;
+      for (size_t i = 0; i < m_mv_prev.size(); i++) {
+        const auto& p = m_mv_prev[i];
+        if (p.hash != m.hash || p.bone_count != m.bone_count || taken[i]) {
+          continue;
+        }
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          d2 += (pc[k] - p.center[k]) * (pc[k] - p.center[k]);
+        }
+        if (d2 < best) {
+          best = d2;
+          bi = (int)i;
+        }
+      }
+      if (bi >= 0) {
+        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
+        taken[bi] = true;
+      }
+    }
+  }
+  m_mv_matched = (int)prev_of.size();
+  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws)
+  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  static int log_frames = 0;
+  if ((float)t_log > 0.5f && ++log_frames >= 120) {
+    log_frames = 0;
+    for (size_t i = 0; i < cs.instances.size(); i++) {
+      const auto& in = cs.instances[i];
+      int draws = 0;
+      for (const auto& d : cs.draws) {
+        draws += d.first_bone == in.first_bone;
+      }
+      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} at {:.1f} {:.1f} {:.1f} m", in.name,
+               in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, now[i].center[0] / kMeter,
+               now[i].center[1] / kMeter, now[i].center[2] / kMeter);
+    }
+  }
+
+  // this frame's bones into this frame's buffer (last frame's stay in the other)
+  constexpr size_t kBoneBlock = 128 * 8 * 4;  // floats: a bound range always spans 128 bones
+  const int cur = m_mv_cur;
+  if (!m_mv_bones[0]) {
+    glGenBuffers(2, m_mv_bones);
+  }
+  const size_t size = (cs.bones.size() + kBoneBlock) * sizeof(float);
+  glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[cur]);
+  if (size > m_mv_bones_size[cur]) {
+    m_mv_bones_size[cur] = size * 3 / 2;
+    glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[cur], nullptr, GL_DYNAMIC_DRAW);
+  }
+  if (!cs.bones.empty()) {
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
+  }
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  m_mv_prev = std::move(now);
+  m_mv_prev_ok = true;
+  m_mv_cur = 1 - cur;
+
+  if (w != m_mv_w || h != m_mv_h) {
+    if (m_mv_fbo) {
+      glDeleteFramebuffers(1, &m_mv_fbo);
+      glDeleteTextures(1, &m_mv_tex);
+    }
+    m_mv_w = w;
+    m_mv_h = h;
+    glGenFramebuffers(1, &m_mv_fbo);
+    glGenTextures(1, &m_mv_tex);
+    glBindTexture(GL_TEXTURE_2D, m_mv_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_mv_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  if (prev_of.empty()) {
+    return false;  // nothing moves on its own: the TAA skips the target
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(64.f, 0.f, 0.f, 0.f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glClearColor(0.f, 0.f, 0.f, 0.f);
+
+  auto& shader = render_state->shaders[ShaderId::ENH_MOTION];
+  shader.activate();
+  const auto id = shader.id();
+  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
+  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+  static const EnhancedTune t_tol("taa.motion_depth_tol", 0.03f);
+  glUniform1f(glGetUniformLocation(id, "depth_tol"), (float)t_tol);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
+  glActiveTexture(GL_TEXTURE0);
+  if (!m_caster_vao) {
+    glGenVertexArrays(1, &m_caster_vao);
+  }
+  glBindVertexArray(m_caster_vao);
+  glEnableVertexAttribArray(0);
+  glEnableVertexAttribArray(2);
+  glEnableVertexAttribArray(5);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  GLuint last_vertices = 0;
+  for (const auto& d : cs.draws) {
+    auto it = prev_of.find(d.first_bone);
+    if (it == prev_of.end()) {
+      continue;
+    }
+    if (d.vertices != last_vertices) {
+      glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+      constexpr GLsizei kStride = sizeof(tfrag3::MercVertex);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, pos));
+      glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, weights[0]));
+      glVertexAttribIPointer(5, 4, GL_UNSIGNED_BYTE, kStride,
+                             (void*)offsetof(tfrag3::MercVertex, mats[0]));
+      last_vertices = d.vertices;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[cur], d.first_bone * 4 * sizeof(float),
+                      kBoneBlock * sizeof(float));
+    glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1 - cur], it->second * 4 * sizeof(float),
+                      kBoneBlock * sizeof(float));
+    glDrawElements(d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES, d.index_count, GL_UNSIGNED_INT,
+                   (void*)(sizeof(u32) * d.first_index));
+    prof.add_draw_call();
+  }
+  glDisable(GL_PRIMITIVE_RESTART);
+  glBindVertexArray(0);
+  return true;
+}
+
 // char-ground-occlusion: under a roof or at night there is no sun shadow, so the characters stood on
 // the floor with no contact darkening. Their lowest point per column around Jak (an orthographic map
 // looking up, 256^2): the composite darkens what lies just below them, softly by the height gap.

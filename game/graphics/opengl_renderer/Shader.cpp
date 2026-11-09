@@ -641,6 +641,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_CLOUDS) = {"enh_clouds", version};
   at(ShaderId::ENH_CLOUD_RAYS) = {"enh_cloud_rays", version};
   at(ShaderId::ENH_SUN_HALF) = {"enh_sun_half", version};
+  at(ShaderId::ENH_MOTION) = {"enh_motion", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
 

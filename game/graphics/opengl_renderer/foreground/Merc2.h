@@ -251,6 +251,15 @@ class Merc2 {
   size_t m_opengl_buffer_alignment = 0;
   void enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones);
   u32 m_enhanced_bone_base = 0;
+  // the models of the pending flush (name hash, first bone vector in it, bone count), for the TAA's
+  // motion vectors (EnhancedCasters::instances)
+  struct EnhancedPendingModel {
+    u64 hash;
+    u32 first_bone;
+    u32 bone_count;
+    const char* name;
+  };
+  std::vector<EnhancedPendingModel> m_enhanced_pending;
 
   void flush_draw_buckets(SharedRenderState* render_state,
                           ScopedProfilerNode& prof,

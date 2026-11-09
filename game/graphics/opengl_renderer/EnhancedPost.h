@@ -111,6 +111,15 @@ struct EnhancedCasters {
   u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
+  // each model drawn (its draws share its first_bone): found again next frame by name and place, its
+  // bones then give the TAA where each of its pixels was (EnhancedPost::do_motion)
+  struct Instance {
+    u64 hash = 0;
+    u32 first_bone = 0;  // in bone vectors, as Draw's
+    u32 bone_count = 0;
+    const char* name = "";  // the model's (the level keeps it while drawn; log only)
+  };
+  std::vector<Instance> instances;
   // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2
   // reuses its own ones within the frame, before the shadow pass replays the draws
   struct ModCopy {
@@ -626,6 +635,32 @@ class EnhancedPost {
   GLuint m_caster_bones = 0;
   size_t m_caster_bones_size = 0;
   GLuint m_caster_vao = 0;
+  // TAA motion vectors (taa.motion): where each character pixel was last frame, from its model's
+  // bones this frame and last (found again by name and place). RG16F, uv offset; (64, 0): none
+  bool do_motion(SharedRenderState* render_state,
+                 ScopedProfilerNode& prof,
+                 int w,
+                 int h,
+                 const float to_prev[3][3],
+                 const float offset[3],
+                 bool reproject);
+  struct MotionModel {
+    u64 hash = 0;
+    u32 bone_count = 0;
+    u32 first_bone = 0;
+    float center[3] = {0, 0, 0};  // its bones' mean place, in its frame's view space
+  };
+  std::vector<MotionModel> m_mv_prev;
+  GLuint m_mv_bones[2] = {0, 0};
+  size_t m_mv_bones_size[2] = {0, 0};
+  int m_mv_cur = 0;
+  bool m_mv_prev_ok = false;
+  GLuint m_mv_fbo = 0;
+  GLuint m_mv_tex = 0;
+  int m_mv_w = 0;
+  int m_mv_h = 0;
+  int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
+  int m_mv_models = 0;
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;

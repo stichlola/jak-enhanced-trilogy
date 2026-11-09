@@ -9,6 +9,9 @@
 uniform sampler2D tex_T0;  // this frame (jittered)
 uniform sampler2D tex_T1;  // history
 uniform sampler2D tex_T3;  // depth
+uniform sampler2D tex_T4;  // the characters' motion vectors (uv offset to last frame; x >= 32: none)
+uniform int has_motion = 0;
+uniform float tune_taa_dbg = 0.0;  // 1: red where motion vectors were used (into the history too: a test view)
 uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;
 uniform mat3 to_prev;      // view -> previous frame's view
@@ -81,13 +84,18 @@ void main() {
   vec3 m1 = vec3(0.0);
   vec3 m2 = vec3(0.0);
   float d = 0.0;
+  vec2 near_o = vec2(0.0);
   for (int y = -1; y <= 1; y++) {
     for (int x = -1; x <= 1; x++) {
       vec2 o = vec2(x, y) * texel;
       vec3 s = to_ycocg(texture(tex_T0, uv + o).rgb);
       m1 += s;
       m2 += s * s;
-      d = max(d, texture(tex_T3, uv + o).r);
+      float dd = texture(tex_T3, uv + o).r;
+      if (dd > d) {
+        d = dd;
+        near_o = o;
+      }
     }
   }
   m1 /= 9.0;
@@ -103,6 +111,17 @@ void main() {
     pp = to_prev * vec3(ndc.x / proj.z, ndc.y / proj.w, 1.0);
   }
   vec2 prev_uv = 0.5 * vec2(prev_f.x * pp.x, prev_f.y * pp.y) / pp.z + 0.5;
+  // a character moving on its own: where its own bones put this point last frame (the nearest
+  // pixel's around, as the depth above: its edge carries its motion)
+  bool moved = false;
+  if (has_motion != 0) {
+    vec2 mv = texture(tex_T4, uv + near_o).rg;
+    if (mv.x < 32.0) {
+      prev_uv = uv + mv;
+      pp.z = 1.0;
+      moved = true;
+    }
+  }
   if (pp.z <= 0.0 || any(lessThan(prev_uv, vec2(0.0))) || any(greaterThan(prev_uv, vec2(1.0)))) {
     color = vec4(dither(cur), 1.0);
     return;
@@ -119,6 +138,11 @@ void main() {
   float k = max(unit.x, max(unit.y, unit.z));
   if (k > 1.0) {
     hist = center + off / k;
+  }
+  if (tune_taa_dbg > 0.5) {
+    float v = moved ? 1.0 : 0.0;
+    color = vec4(mix(cur.ggg * 0.5, vec3(1.0, 0.0, 0.0), v), 1.0);
+    return;
   }
 
   // keep less history when the pixel moves fast (it was resampled more, it blurs)

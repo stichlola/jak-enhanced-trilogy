@@ -217,6 +217,25 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glBindTexture(GL_TEXTURE_2D, 0);
       m_taa_history = false;
     }
+    // the characters' own motion (tuning taa.motion, 0: the camera's reprojection only; taa.dbg 1
+    // shows where it's used). Hellcat taking off at 640x360: crisp instead of smeared, 0.09 ms at
+    // 2560x1600 (Spargus 18h, 60 models)
+    static const EnhancedTune t_motion("taa.motion", 1.f);
+    static const EnhancedTune t_taa_dbg("taa.dbg", 0.f);
+    bool motion = false;
+    if ((float)t_motion > 0.5f) {
+      ENH_TIMED("enh-motion",
+                motion = do_motion(render_state, prof, w, h, to_prev, offset, reproject));
+    } else {
+      m_mv_prev_ok = false;
+    }
+    {
+      static int frames = 0;
+      if ((float)t_motion > 0.5f && ++frames >= 300) {
+        frames = 0;
+        lg::info("[enhanced] taa motion: {} of {} models found again", m_mv_matched, m_mv_models);
+      }
+    }
     const int cur = m_taa_cur;
     glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[cur]);
     glViewport(0, 0, w, h);
@@ -228,6 +247,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     auto& resolve = render_state->shaders[ShaderId::ENH_TAA];
     resolve.activate();
     auto rid = resolve.id();
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, motion ? m_mv_tex : 0);
+    glUniform1i(glGetUniformLocation(rid, "tex_T4"), 4);
+    glUniform1i(glGetUniformLocation(rid, "has_motion"), motion ? 1 : 0);
+    glUniform1f(glGetUniformLocation(rid, "tune_taa_dbg"), (float)t_taa_dbg);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_depth_tex);
     glActiveTexture(GL_TEXTURE1);

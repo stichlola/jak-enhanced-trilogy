@@ -635,6 +635,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
   g_enhanced_casters.draws.clear();
+  g_enhanced_casters.instances.clear();
   g_enhanced_casters.next_mod_copy = 0;
   g_enhanced_casters.capture =
       m_settings.enabled && m_settings.shadow_map && m_settings.shadow_casters;

@@ -124,6 +124,7 @@ enum class ShaderId {
   ENH_CLOUDS = 61,  // Enhanced: enh_composite with only its cloud march (ENH_CLOUD_ONLY)
   ENH_CLOUD_RAYS = 62,  // Enhanced: enh_composite with only the rays through the clouds (ENH_RAYS_ONLY)
   ENH_SUN_HALF = 63,  // Enhanced: enh_composite with only the world's sun shadow looks (ENH_SUN_HALF_ONLY)
+  ENH_MOTION = 64,    // Enhanced: the characters' motion vectors for the TAA
   MAX_SHADERS
 };
 
