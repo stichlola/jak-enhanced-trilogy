@@ -948,6 +948,7 @@ class EnhancedPost {
   double m_headlights_time = -1.0;
   bool m_enclosed = false;  // under a roof (world.json "enclosed", or an indoor zone)
   bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
+  bool m_haven_windows = false;  // Haven (Jak 3): its far walls' made-up lit windows at night
   bool m_pale_ground = false;  // Haven's slums (pale flagstones): the night's pale-ground press
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)

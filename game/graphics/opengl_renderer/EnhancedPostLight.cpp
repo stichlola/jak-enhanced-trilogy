@@ -69,6 +69,8 @@ void EnhancedPost::update_scene() {
            ((m_zone > 0 && m_zone < (int)g_world.zones.size() &&
              g_world.zones[m_zone].name.rfind("haven", 0) == 0) ||
             level.rfind("was", 0) == 0);
+  // (Haven's far buildings take the night's made-up windows; Spargus' round adobe towers went striped)
+  m_haven_windows = g_game_version == GameVersion::Jak3 && m_city && level.rfind("was", 0) != 0;
   // (the night's pale-ground press is for the slums' flagstones only: on every night level it took
   // a third off the desert and the port)
   m_pale_ground = g_game_version == GameVersion::Jak3 && level.rfind("ctyslum", 0) == 0;

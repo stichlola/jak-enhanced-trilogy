@@ -5,6 +5,7 @@ layout (location = 1) out vec4 enh_normal_out;  // Enhanced: world normal, a = 0
 layout (location = 2) out vec4 enh_albedo_out;  // Enhanced: texture color before the baked light, a: that light / 2 (0: none)
 in vec3 enh_normal;
 in vec3 enh_pos;  // world position (relative to the camera where known)
+in float enh_leaf;  // Enhanced: a TIE tree's leaves (tfrag3.vert)
 
 in vec4 fragment_color;
 in vec3 tex_coord;
@@ -20,7 +21,7 @@ uniform int gfx_hack_no_tex;
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
-uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand, 4 rock, 5 rocky ground, 6 wall, 7 wood, 8 rusty metal, 9 painted metal, 10 tile, 11 window, 12 lamp (see EnhancedMaterials.h)
+uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand, 4 rock, 5 rocky ground, 6 wall, 7 wood, 8 rusty metal, 9 painted metal, 10 tile, 11 window, 12 lamp, 13 facade (see EnhancedMaterials.h)
 
 vec4 enh_pack_normal(vec3 n) {
   vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
@@ -53,6 +54,15 @@ vec4 enh_pack_normal(vec3 n) {
   // (lamps, 12: plain, 0.2 long, under every other tag; the composite lights them at night)
   if (enh_material == 12) {
     tag_len = 0.2;
+  }
+  // (far buildings' low-res walls, 13: plain, 0.1 long; the composite lights windows on them at night)
+  if (enh_material == 13) {
+    tag_len = 0.1;
+  }
+  // (a TIE tree's leaves, plain: 0.675 long, a spare length the composite maps back to plain right
+  // after reading it; its backlight lights them through toward the sun, as the shrubs' 0.97)
+  if (enh_leaf > 0.5 && tag_len == 1.0 && a == 1.0) {
+    tag_len = 0.675;
   }
   return vec4(n * tag_len * 0.5 + 0.5, a);
 }

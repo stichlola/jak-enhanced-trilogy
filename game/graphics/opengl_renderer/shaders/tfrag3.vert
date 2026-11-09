@@ -26,6 +26,7 @@ out float fogginess;
 out vec3 enh_normal;
 out vec3 enh_pos;
 flat out int enh_lod_kind;  // Enhanced: 1 = a detailed model stands in near the camera (TIE only)
+out float enh_leaf;  // Enhanced: 1 on a TIE tree's leaves (their flutter flag), for the post's backlight
 
 void main() {
   // old system:
@@ -99,4 +100,5 @@ void main() {
   enh_normal = normal_in.xyz;
   enh_pos = vert;
   enh_lod_kind = normal_in.w > 0.5 ? 1 : 0;
+  enh_leaf = (tod_sway.y & 0x8000) != 0 ? 1.0 : 0.0;
 }
