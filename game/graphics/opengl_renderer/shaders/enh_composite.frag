@@ -163,6 +163,8 @@ uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the ref
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
 uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, the old march tries (0: the miss keeps the sky sample: pale patches by a quay)
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
+uniform float tune_water_oasis = 1.0;  // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
+const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -3062,7 +3064,15 @@ void composite_unused() {
     }
     // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
     // water, not the sea around it, which lies at 9 m)
-    bool pond_here = pond != 0 && abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4;
+    // (an oasis that lies at the sea's own 9 m, desert-ashelin's, is the game's sea plane showing
+    // through a hollow: by height it took the sea's look, a pale shallows line along its shore.
+    // Within a disc around it, a pond too; no sea comes within kilometers)
+    bool oasis_here = false;
+    for (int k = 0; k < 1 && tune_water_oasis > 0.5; k++) {
+      oasis_here = oasis_here || distance(water_world, k_oases[k].xy) < k_oases[k].z;
+    }
+    bool pond_here = pond != 0 &&
+                     (abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4 || oasis_here);
     // (the sea's shallows only half clear: fully clear, they stood out bright and pale against the
     // deeper water around them)
     // (the sea: the bed shows only along the very edge, the last half meter. The game draws the near
