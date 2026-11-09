@@ -11,6 +11,7 @@
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedSmoothMerc.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTieWind.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "common/util/compress.h"
 
@@ -296,6 +297,11 @@ void Loader::loader_thread() {
       {
         auto p = scoped_prof("enhanced-vegetation");
         enhanced_add_vegetation(*result, lev);
+      }
+
+      {
+        auto p = scoped_prof("enhanced-tie-wind");
+        enhanced_tie_wind_weights(*result, lev);
       }
 
       {

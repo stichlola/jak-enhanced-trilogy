@@ -99,6 +99,9 @@ struct PreloadedVertex {
 
   // color table index
   u16 color_index = 0;
+  // Enhanced, not used in == or hash, set at load: the static TIE foliage's sway weight
+  // (EnhancedTieWind.h; 0 = still). Was padding, so the size stays 32.
+  u16 enh_sway = 0;
 
   struct hash {
     std::size_t operator()(const PreloadedVertex& x) const;
