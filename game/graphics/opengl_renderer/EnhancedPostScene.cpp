@@ -2033,10 +2033,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     {
       constexpr int kBlasts = 4;
       float blast_pos[kBlasts * 4] = {};
-      float blast_age[kBlasts] = {};
-      float blast_seed[kBlasts] = {};
+      // (per blast x age, y seed, z ground: one vec4 in the composite, blast_info; as three float[4]
+      // they took 12 of NVIDIA's 1024 constant registers, and the merged composite failed to link)
+      float blast_info[kBlasts * 4] = {};
       float blast_dir[kBlasts * 4] = {};
-      float blast_ground[kBlasts] = {};
       int blast_count = 0;
       // (fx_detail: the newest first, the older ones linger now)
       const bool newest_first = m_settings.fx_detail > 0.f;
@@ -2063,15 +2063,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         blast_dir[blast_count * 4 + 3] = (float)b.kind;
         // (> 0: no ground known)
-        blast_ground[blast_count] = b.ground < 1e11f ? std::min(b.ground - b.pos[1], 0.f) : 1.f;
-        blast_seed[blast_count] = (float)std::fmod(b.start * 7.31, 100.0);
-        blast_age[blast_count++] = (float)(m_time - b.start);
+        blast_info[blast_count * 4 + 2] =
+            b.ground < 1e11f ? std::min(b.ground - b.pos[1], 0.f) : 1.f;
+        blast_info[blast_count * 4 + 1] = (float)std::fmod(b.start * 7.31, 100.0);
+        blast_info[blast_count * 4] = (float)(m_time - b.start);
+        blast_count++;
       }
       glUniform1i(glGetUniformLocation(id, "blast_count"), blast_count);
       glUniform4fv(glGetUniformLocation(id, "blast_pos"), kBlasts, blast_pos);
-      glUniform1fv(glGetUniformLocation(id, "blast_age"), kBlasts, blast_age);
-      glUniform1fv(glGetUniformLocation(id, "blast_seed"), kBlasts, blast_seed);
-      glUniform1fv(glGetUniformLocation(id, "blast_ground"), kBlasts, blast_ground);
+      glUniform4fv(glGetUniformLocation(id, "blast_info"), kBlasts, blast_info);
       glUniform4fv(glGetUniformLocation(id, "blast_dir"), kBlasts, blast_dir);
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
       enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
@@ -2164,7 +2164,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
     glUniform4fv(glGetUniformLocation(id, "fire_pos"), kFires, fire_pos);
-    glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
+    static_assert(kFires == 4, "fire_seed4 is one vec4");
+    glUniform4fv(glGetUniformLocation(id, "fire_seed4"), 1, fire_seed);
     glUniform3f(glGetUniformLocation(id, "fire"), m_settings.fire_haze, m_settings.fire_embers,
                 (float)std::fmod(m_time, 1000.0));
     ENH_CPU_SPLIT("fireflies");

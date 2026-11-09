@@ -47,11 +47,13 @@ uniform float materials;        // metal and glossy surfaces: reflections and hi
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
 uniform int blast_count;        // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
-uniform float blast_age[4];
+// (x age (s), y seed, z the ground under it along up from the blast (<= 0; > 0: not known): one
+// vec4 each, as three float[4] they took 12 of NVIDIA's 1024 constant registers ("C6020"))
+uniform vec4 blast_info[4];
 uniform float blast_strength;
 uniform int fire_count;         // the nearest fires: view space, flame size (game units)
 uniform vec4 fire_pos[4];
-uniform float fire_seed[4];
+uniform vec4 fire_seed4;       // (one seed per fire: a vec4, 1 constant register, not 4)
 uniform vec3 fire;              // hot air strength, embers strength, time (s)
 uniform int mote_count;         // fireflies or seeds drifting around Jak: view space (game units),
 uniform vec4 mote[24];          // w: seed
@@ -415,8 +417,6 @@ uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s),
 uniform float close_up;          // cutscenes: nearer than this (game units) no sun shadow map (0 = off)
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
-uniform float blast_seed[4];
-uniform float blast_ground[4];  // the ground under it, along up from the blast (<= 0; > 0: not known)
 uniform float fx_detail;        // richer explosions, shots and marks (0 = off)
 uniform int decal_count;        // lasting marks: world xyz, radius (game units)
 uniform vec4 decal[28];
@@ -1460,7 +1460,7 @@ vec3 blast_arc(vec3 bp, vec3 dir, float speed, float age, float g, out vec3 vel,
 // the dark chunks an explosion throws: small tumbling bits of rock and metal, hot at first, hidden
 // behind the scene, that bounce once and lie on the ground until the blast's end
 void blast_chunks(int i, float z, inout vec3 c) {
-  float age = blast_age[i];
+  float age = blast_info[i].x;
   vec3 bp = blast_pos[i].xyz;
   if (age > 2.4 || bp.z < 1.0 * 4096.0) {
     return;
@@ -1474,7 +1474,7 @@ void blast_chunks(int i, float z, inout vec3 c) {
     return;
   }
   for (int j = 0; j < 12; j++) {
-    float s = blast_seed[i] * 9.1 + float(j) * 5.3;
+    float s = blast_info[i].y * 9.1 + float(j) * 5.3;
     float h1 = fract(sin(s * 12.9898) * 43758.5453);
     float h2 = fract(sin(s * 78.233) * 43758.5453);
     float h3 = fract(sin(s * 37.719) * 43758.5453);
@@ -1483,7 +1483,7 @@ void blast_chunks(int i, float z, inout vec3 c) {
     vec3 dir = right_view * dw.x + up_view * dw.y + fwd_view * dw.z;
     vec3 vel;
     bool rest;
-    vec3 sp = blast_arc(bp, dir, (5.0 + 11.0 * h4) * sc * 4096.0, age, blast_ground[i], vel, rest);
+    vec3 sp = blast_arc(bp, dir, (5.0 + 11.0 * h4) * sc * 4096.0, age, blast_info[i].z, vel, rest);
     if (sp.z < 0.5 * 4096.0 || (z > 0.0 && sp.z > z + 0.1 * 4096.0)) {
       continue;
     }
@@ -1508,19 +1508,19 @@ void blast_chunks(int i, float z, inout vec3 c) {
 // white to orange to soot. Everything scales with the blast's radius. Premultiplied color, coverage.
 vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
   vec3 bp = blast_pos[i].xyz;
-  float age = blast_age[i];
+  float age = blast_info[i].x;
   float rad = clamp(blast_pos[i].w, 1.5 * 4096.0, 12.0 * 4096.0);
-  float seed = blast_seed[i];
+  float seed = blast_info[i].y;
   vec3 col = vec3(0.0);
   float trans = 1.0;
   float upd = dot(ray, up_view);
-  if (blast_ground[i] <= 0.0 && age < 2.3 && abs(upd) > 0.01) {
+  if (blast_info[i].z <= 0.0 && age < 2.3 && abs(upd) > 0.01) {
     // three sheets one over the other: low and wide, higher and behind it
     float grow = 1.0 - exp(-age * 3.0);
     float ring = rad * (0.35 + 1.9 * grow);
     float fade = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(0.9, 2.3, age));
     for (int k = 0; k < 3; k++) {
-      float t = (dot(bp, up_view) + blast_ground[i] + float(k) * 0.14 * rad + 0.1 * 4096.0) / upd;
+      float t = (dot(bp, up_view) + blast_info[i].z + float(k) * 0.14 * rad + 0.1 * 4096.0) / upd;
       if (t <= 0.0 || t > scene_dist) {
         continue;
       }
@@ -2848,7 +2848,7 @@ void composite_unused() {
   // explosions: a shockwave ring racing out from each one bends the picture for half a second
   for (int i = 0; i < blast_count; i++) {
     vec3 bp = blast_pos[i].xyz;
-    float age = blast_age[i];
+    float age = blast_info[i].x;
     float ring = blast_pos[i].w * (1.0 + 14.0 * age);  // game units
     vec2 cuv = vec2(bp.x * proj.z / bp.z, bp.y * proj.w / bp.z) * 0.5 + 0.5;
     vec2 size = abs(vec2(proj.z, proj.w)) * 0.5 * ring / bp.z;  // the ring's radii in uv
@@ -5070,7 +5070,7 @@ void composite_unused() {
       continue;
     }
     for (int j = 0; j < 24; j++) {
-      float s = fire_seed[i] * 17.0 + float(j) * 7.31;
+      float s = fire_seed4[i] * 17.0 + float(j) * 7.31;
       float h1 = fract(sin(s * 12.9898) * 43758.5453);
       float h2 = fract(sin(s * 78.233) * 43758.5453);
       float h3 = fract(sin(s * 37.719) * 43758.5453);
@@ -5132,7 +5132,7 @@ void composite_unused() {
   // sparks thrown by the explosions: each flies out on its own arc (gravity, a little drag), a
   // short streak along its motion, white-hot to orange as it cools, hidden behind the scene
   for (int i = 0; i < blast_count; i++) {
-    float age = blast_age[i];
+    float age = blast_info[i].x;
     if (blast_sparks <= 0.0 || age > 1.5) {
       continue;
     }
@@ -5151,7 +5151,7 @@ void composite_unused() {
     bool charging = abs(blast_dir[i].w - 2.0) < 0.5;
     bool charged = blast_dir[i].w > 2.5;
     for (int j = 0; j < (charging ? 10 : 40); j++) {
-      float s = blast_seed[i] * 13.7 + float(j) * 3.17;
+      float s = blast_info[i].y * 13.7 + float(j) * 3.17;
       float h1 = fract(sin(s * 12.9898) * 43758.5453);
       float h2 = fract(sin(s * 78.233) * 43758.5453);
       float h3 = fract(sin(s * 37.719) * 43758.5453);
@@ -5190,9 +5190,9 @@ void composite_unused() {
       vec3 sp = bp + dir * speed * drag - up_view * (0.5 * 9.8 * 4096.0 * age * age * 0.7);
       vec3 vel = dir * speed * exp(-age * 2.0) - up_view * (9.8 * 4096.0 * age * 0.7);
       // (an explosion's bounce off the ground, gone at the second landing)
-      if (!gun && fx_detail > 0.0 && blast_ground[i] <= 0.0) {
+      if (!gun && fx_detail > 0.0 && blast_info[i].z <= 0.0) {
         bool rest;
-        sp = blast_arc(bp, dir, speed, age, blast_ground[i], vel, rest);
+        sp = blast_arc(bp, dir, speed, age, blast_info[i].z, vel, rest);
         if (rest) {
           continue;
         }
