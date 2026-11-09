@@ -424,8 +424,9 @@ void Shadow2::draw_buffers(SharedRenderState* render_state,
                            ScopedProfilerNode& prof,
                            const FrameConstants& constants) {
   // (Enhanced: the sun shadow map casts the characters, along the sun; the game's own shadow
-  // would be a second one, the game's way; with a low sun it stays: keep_game)
-  if ((!m_front_index_buffer_used && !m_back_index_buffer_used) ||
+  // would be a second one, the game's way; with a low sun it stays: keep_game; at night never:
+  // hide_game)
+  if ((!m_front_index_buffer_used && !m_back_index_buffer_used) || g_enhanced_casters.hide_game ||
       (g_enhanced_casters.cast && !g_enhanced_casters.keep_game)) {
     return;
   }

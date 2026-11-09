@@ -109,7 +109,11 @@ struct EnhancedCasters {
   // ...but with a low sun the game's own short shadow stays too (the map's is a long band away from
   // the feet, and the character floats): tuning shadow.game_chars_below_deg
   bool keep_game = false;
-  u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
+  // ...never at night (tuning shadow.game_chars_night): the game's shadow there falls along a low
+  // light far from the moon's and stretches into a soft silhouette 1.5-2x the character (Haven port
+  // 22h: the "giant Daxter"), stacked on the moon map's own
+  bool hide_game = false;
+  u32 alignment = 1;   // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
   // each model drawn (its draws share its first_bone): found again next frame by name and place, its

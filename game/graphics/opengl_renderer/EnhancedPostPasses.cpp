@@ -532,6 +532,12 @@ void EnhancedPost::prepare(GLuint scene_tex,
   m_shadow_ready = false;
   g_enhanced_casters.cast = false;
   g_enhanced_casters.keep_game = false;
+  {
+    // (1.1: never hidden, as before)
+    static const EnhancedTune t_game_night("shadow.game_chars_night", 0.5f);
+    g_enhanced_casters.hide_game =
+        m_settings.shadow_map && m_settings.shadow_casters && m_night >= (float)t_game_night;
+  }
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }
