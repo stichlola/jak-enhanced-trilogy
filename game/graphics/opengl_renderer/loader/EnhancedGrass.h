@@ -61,7 +61,8 @@ bool enhanced_grass_has_zones();
 void enhanced_prepare_grass(tfrag3::Level& level, const std::string& name, const GrassFloor& floor);
 // the level's highest floor at (x, z) (game units): its height, whether its texture is grassy, and
 // then its color as drawn over the day (rgb: the texture's mean times its vertex colors, 1 = as is)
-using GrassGround = std::function<bool(float x, float z, float* y, bool* grassy, float* rgb)>;
+// (grassy: 0 none .. 1 full; less where a dirt layer blended over the floor shows)
+using GrassGround = std::function<bool(float x, float z, float* y, float* grassy, float* rgb)>;
 // called by the loader after enhanced_prepare_grass: dense grass by ground class, on the level's own
 // grassy floors (by their textures) within bounds (x0, z0, x1, z1, game units): a field for each
 // 64 m square with enough of it, drawn by the shrub tree nearest it, while grass.ground > 0 (its

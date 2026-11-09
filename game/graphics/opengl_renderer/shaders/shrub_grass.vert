@@ -46,6 +46,7 @@ uniform sampler2D enh_scene_depth;   // its depth
 uniform sampler2D enh_scene_normal;  // its normals (their length: the post's material tag)
 uniform float tune_grass_scr_gain = 1.4;  // (tuning: the blades' tips over the floor's color: their mean as bright as the floor, 0.95-1.0)
 uniform float tune_grass_scr_lod = 2.5;   // (tuning: how blurred the floor's color is taken, mip level)
+uniform float tune_grass_scr_far = 0.8;   // (tuning: the tips' gain at 60 m and more, times scr_gain: seen from the side they cover the feet)
 uniform float tune_grass_scr_tol = 1.0;   // (tuning: meters along the view the foot's floor may be off)
 uniform float tune_grass_scr_foot = 0.45;  // (tuning: the blades' feet, darker in the grass around)
 uniform float tune_grass_scr_sat = 0.85;  // (tuning: the floor color's saturation in the blades, 1: as drawn; the post reddens orange blades)
@@ -284,7 +285,9 @@ void main() {
       // blades come out the floor's own tone)
       float l = dot(floor_c, vec3(0.3, 0.59, 0.11));
       vec3 pre = max(vec3(l) + (floor_c - vec3(l)) * tune_grass_scr_sat / 0.62, vec3(0.0)) / 0.92;
-      vec3 tip = pre * tune_grass_scr_gain * mix(0.8, 1.15, rnd(bs, 9u)) *
+      // (seen from the side farther away, the tips cover the darker feet: less gain there)
+      float gain = tune_grass_scr_gain * mix(1.0, tune_grass_scr_far, smoothstep(15.0 * m, 60.0 * m, d));
+      vec3 tip = pre * gain * mix(0.8, 1.15, rnd(bs, 9u)) *
                  mix(1.0, 1.12, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * t);
       vec3 sc = mix(tip * tune_grass_scr_foot, tip, pow(t, 0.6));
       fragment_color.rgb = mix(fragment_color.rgb, sc, seen * min(enh_screen, 1.0));

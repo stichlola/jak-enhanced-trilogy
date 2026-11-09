@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -14,6 +15,7 @@
 
 #include "game/runtime.h"
 
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 
 int g_enhanced_vegetation = [] {
@@ -115,10 +117,10 @@ class Ground {
                 u32 tex,
                 const tfrag3::PackedTimeOfDay* colors = nullptr) {
     auto pos = [&](u32 i) { return Vec3(verts[i].x, verts[i].y, verts[i].z); };
-    // (a vertex's color over the day: its 8 palettes averaged, rgb packed)
+    // (a vertex's color over the day: its 8 palettes averaged, rgba packed)
     auto vcol = [&](u32 i) {
       u32 out = 0;
-      for (int ch = 0; ch < 3; ch++) {
+      for (int ch = 0; ch < 4; ch++) {
         int s = 0;
         for (int p = 0; p < 8; p++) {
           s += colors->read(verts[i].color_index, p, ch);
@@ -163,7 +165,8 @@ class Ground {
               float* out,
               u32* tex = nullptr,
               bool skip_ties = false,
-              float* vc = nullptr) const {
+              float* vc = nullptr,
+              bool vc_alpha = false) const {
     auto it = m_cells.find(key(cell(x), cell(z)));
     bool found = false;
     float best = 0;
@@ -211,8 +214,8 @@ class Ground {
           *tex = m_tex[id];
         }
         if (vc) {
-          // (its vertex colors there, 0..255)
-          for (int ch = 0; ch < 3; ch++) {
+          // (its vertex colors there, 0..255; vc[3], alpha, only when asked for: vc_alpha)
+          for (int ch = 0; ch < (vc_alpha ? 4 : 3); ch++) {
             vc[ch] = l0 * ((m_vc[id * 3] >> (8 * ch)) & 0xff) + l1 * ((m_vc[id * 3 + 1] >> (8 * ch)) & 0xff) +
                      l2 * ((m_vc[id * 3 + 2] >> (8 * ch)) & 0xff);
           }
@@ -1134,7 +1137,11 @@ void add_to_tree(tfrag3::ShrubTree& tree,
 
 // Dense grass by ground class: which of the level's floor textures are grass (by name, or green on
 // average and not named as something else), then EnhancedGrass's fields on them
-void add_ground_class_grass(tfrag3::Level& level, const std::string& name, Ground& ground) {
+void add_ground_class_grass(tfrag3::Level& level,
+                            const std::string& name,
+                            Ground& ground,
+                            const Ground& water,
+                            const Ground& trans) {
   const auto& textures = level.textures;
   std::vector<double> area(textures.size(), 0.0);
   float b[4] = {1e30f, 1e30f, -1e30f, -1e30f};
@@ -1197,9 +1204,23 @@ void add_ground_class_grass(tfrag3::Level& level, const std::string& name, Groun
              textures[tex].debug_name, area[tex], s[0], s[1], s[2], green ? " green" : "",
              grassy[tex] ? " GRASS" : "");
   }
-  enhanced_grass_ground_fields(level, name, b, [&](float x, float z, float* y, bool* g, float* col) {
+  // the level's blended layers lying on that floor (TRANS tfrag a few cm over it): where a dirt or
+  // litter layer shows (its vertex alpha), the grass thins out and leaves it bare, or the blades
+  // (drawn after it) would hide it: the forest's paths are fora-dirt blended over fora-grass
+  std::vector<u8> decal(textures.size(), 0);
+  std::map<u32, std::array<int, 9>> trans_spots;  // (per texture, alpha in 8 bins of 16, for the log)
+  static const EnhancedTune k_decals("grass.ground_decals", 1.f);
+  static const EnhancedTune k_decal_alpha("grass.ground_decal_alpha", {40.f, 90.f});  // 0..128
+  for (size_t tex = 0; tex < textures.size(); tex++) {
+    std::string nm = textures[tex].debug_name;
+    std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
+    decal[tex] = has(nm, {"leaf", "leaves", "pebble", "stone", "rock", "twig", "debris", "stick",
+                          "litter", "path", "dirt", "mud", "puddle", "root"});
+  }
+  int wet_spots = 0, decal_spots = 0;
+  enhanced_grass_ground_fields(level, name, b, [&](float x, float z, float* y, float* g, float* col) {
     u32 tex = kNoTex;
-    *g = false;
+    *g = 0.f;
     // the highest floor of the level's own tfrag (not the height field; not a tree's canopy or a
     // rock's top, ties)
     auto hfrag = ground.hfrag;
@@ -1207,10 +1228,29 @@ void add_ground_class_grass(tfrag3::Level& level, const std::string& name, Groun
     float vc[3] = {128.f, 128.f, 128.f};
     bool found = ground.height(x, z, 1e9f, 2e9f, 0.f, y, &tex, true, vc);
     if (found && tex < grassy.size() && grassy[tex]) {
-      // (none where anything stands on it lower than 3 m over it: a rock, roots, a ledge)
+      // (none where anything stands on it lower than 3 m over it: a rock, roots, a ledge; none under
+      // the level's water within 20 m over it: a grassy bed under a pond)
       float over;
-      if (!ground.height(x, z, *y + 1.575f * kMeter, 1.425f * kMeter, 1.425f * kMeter, &over)) {
-        *g = true;
+      const bool wet = water.size() > 0 &&
+                       water.height(x, z, *y + 10.f * kMeter, 10.05f * kMeter, 10.f * kMeter, &over);
+      wet_spots += wet;
+      float lush = 1.f;
+      u32 ttex = kNoTex;
+      float tvc[4] = {128.f, 128.f, 128.f, 128.f};
+      if (trans.size() > 0 && trans.height(x, z, *y + 0.2f * kMeter, 0.25f * kMeter,
+                                           0.3f * kMeter, &over, &ttex, false, tvc, true)) {
+        trans_spots[ttex][std::clamp((int)(tvc[3] / 16.f), 0, 8)]++;
+        if (k_decals > 0.f && ttex < decal.size() && decal[ttex]) {
+          const float t =
+              std::clamp((tvc[3] - k_decal_alpha[0]) / std::max(k_decal_alpha[1] - k_decal_alpha[0], 1.f),
+                         0.f, 1.f);
+          lush = 1.f - t * t * (3.f - 2.f * t);
+          decal_spots += lush < 0.5f;
+        }
+      }
+      if (!wet && lush > 0.f &&
+          !ground.height(x, z, *y + 1.575f * kMeter, 1.425f * kMeter, 1.425f * kMeter, &over)) {
+        *g = lush;
         // (the floor as drawn: its texture times its vertex colors, 128 = 1)
         for (int c = 0; c < 3; c++) {
           col[c] = rgb[tex][c] * vc[c] / 128.f;
@@ -1220,6 +1260,21 @@ void add_ground_class_grass(tfrag3::Level& level, const std::string& name, Groun
     ground.hfrag = hfrag;
     return found;
   });
+  if (wet_spots > 0 || decal_spots > 0) {
+    lg::info("[enhanced] grass: {} grassy floor: {} spots under water skipped, {} mostly under a decal",
+             name, wet_spots, decal_spots);
+  }
+  if (std::getenv("JAK_ENHANCED_GRASS_LOG")) {
+    for (const auto& [t, bins] : trans_spots) {
+      std::string hist;
+      for (int v : bins) {
+        hist += " " + std::to_string(v);
+      }
+      lg::info("[enhanced] grass: {} blended layer on grassy floor: {}{}, spots by alpha/16:{}", name,
+               t < textures.size() ? textures[t].debug_name : std::string("?"),
+               t < decal.size() && decal[t] ? " (decal)" : "", hist);
+    }
+  }
 }
 }  // namespace
 
@@ -1282,7 +1337,26 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
     return;
   }
   if (g_game_version == GameVersion::Jak3 && ground.size() > 0) {
-    add_ground_class_grass(level, name, ground);
+    // (the level's water surfaces: no ground-class grass under them)
+    // (and its blended layers, by texture: decals keep their spots bare)
+    Ground water, trans;
+    for (const auto& tree : level.tfrag_trees[0]) {
+      if (tree.kind == tfrag3::TFragmentTreeKind::WATER) {
+        water.add_mesh(tree.unpacked.vertices, tree.unpacked.indices, 0,
+                       tree.unpacked.indices.size(), tree.use_strips, 0);
+      } else if (tree.kind == tfrag3::TFragmentTreeKind::TRANS) {
+        const auto& idx = tree.unpacked.indices;
+        for (size_t d = 0; d < tree.draws.size(); d++) {
+          size_t first = tree.draws[d].unpacked.idx_of_first_idx_in_full_buffer;
+          size_t end = d + 1 < tree.draws.size()
+                           ? tree.draws[d + 1].unpacked.idx_of_first_idx_in_full_buffer
+                           : idx.size();
+          trans.add_mesh(tree.unpacked.vertices, idx, first, end, tree.use_strips,
+                         tree.draws[d].tree_tex_id, &tree.colors);
+        }
+      }
+    }
+    add_ground_class_grass(level, name, ground, water, trans);
   }
   Stats stats;
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {

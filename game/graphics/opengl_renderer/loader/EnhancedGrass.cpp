@@ -932,9 +932,9 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
   for (int k = 0; k < gz; k++) {
     for (int i = 0; i < gx; i++) {
       float y, rgb[3];
-      bool g = false;
+      float g = 0.f;
       if (ground((x0 + (i + 0.5f) * kCell) * kMeter, (z0 + (k + 0.5f) * kCell) * kMeter, &y, &g, rgb) &&
-          g) {
+          g >= 0.5f) {
         grassy[k * gx + i] = 1;
       }
     }
@@ -970,11 +970,11 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
       for (int k = 0; k < field->n; k++) {
         for (int i = 0; i < field->n; i++) {
           float y, rgb[3];
-          bool g = false;
+          float g = 0.f;
           if (ground(field->x0 + i * kStep * kMeter, field->z0 + k * kStep * kMeter, &y, &g, rgb)) {
             field->heights[k * field->n + i] = y;
-            raw[k * field->n + i] = g ? 1.f : 0.f;
-            if (g) {
+            raw[k * field->n + i] = g;
+            if (g > 0.f) {
               for (int c = 0; c < 3; c++) {
                 rgb_sum[c] += rgb[c];
                 floor_rgb[k * field->n + i][c] = rgb[c];
@@ -1483,8 +1483,10 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
   if (tree.enh_grass && !g_enhanced_menu.blank_world) {
     auto f = std::static_pointer_cast<const GrassField>(tree.enh_grass);
     draw_field(f, f->tod, f->base_rgb, tree, settings, render_state, prof);
-    // the ground-class fields (grass.ground: 0 off, else their density, times the zones')
-    static const EnhancedTune k_ground("grass.ground", 0.f);
+    // the ground-class fields (grass.ground: 0 off, else their density, times the zones'). On:
+    // forest only in Jak 3 (no grassy floor texture in Haven, Spargus or the desert); at 640x360
+    // uncapped 176 -> 169 fps, capped 60 either way
+    static const EnhancedTune k_ground("grass.ground", 1.f);
     // (late: after the level's blended tfrag, whose layers over the floor (the forest's pale
     // olive) the blades' color copy has to see; drawn now they'd also hide those layers' patches)
     static const EnhancedTune k_late("grass.ground_late", 1.f);
