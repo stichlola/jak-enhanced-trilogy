@@ -2350,7 +2350,15 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   const auto& cs = g_enhanced_casters;
   const bool chars = (float)t_chars > 0.5f && m_settings.shadow_casters && !cs.draws.empty();
   std::vector<std::pair<u32, std::array<float, 3>>> places;
+  // (each character's draws by its first bone, sorted once: the faces looked them up through all
+  // the draws for each character, ~0.5 M compares a frame at the port with 8 maps)
+  std::vector<std::pair<u32, u32>> by_bone;
   if (chars) {
+    by_bone.reserve(cs.draws.size());
+    for (u32 k = 0; k < cs.draws.size(); k++) {
+      by_bone.push_back({cs.draws[k].first_bone, k});
+    }
+    std::sort(by_bone.begin(), by_bone.end());
     for (const auto& in : cs.instances) {
       double acc[3] = {0, 0, 0};
       int cnt = 0;
@@ -2437,10 +2445,9 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
             std::abs(fy) > fz + rad * 1.4143f) {
           continue;
         }
-        for (u32 k = 0; k < cs.draws.size(); k++) {
-          if (cs.draws[k].first_bone == fb) {
-            only.push_back(k);
-          }
+        for (auto it = std::lower_bound(by_bone.begin(), by_bone.end(), std::make_pair(fb, 0u));
+             it != by_bone.end() && it->first == fb; ++it) {
+          only.push_back(it->second);
         }
       }
       const u8 bit = (u8)(1u << face);
