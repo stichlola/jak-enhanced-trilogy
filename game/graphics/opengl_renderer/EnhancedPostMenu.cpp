@@ -200,7 +200,8 @@ void EnhancedPost::draw_start_menu() {
     }
     x += w + (i < 2 ? 2.f * half : 0.f);
   }
-  // the dividers: the left half in the left game's style, the right half in the right one's
+  // the dividers beside the game picked, in its style (a liana, dark eco, light eco); the other one
+  // stays a plain dark gap
   auto bar = [&](GLuint tex, float bx, float bw) {
     if (tex) {
       dl->AddImage((ImTextureID)(intptr_t)tex, ImVec2(bx, 0.f), ImVec2(bx + bw, size.y),
@@ -210,8 +211,9 @@ void EnhancedPost::draw_start_menu() {
   for (int i = 0; i < 2; i++) {
     const float bx = strip_x[i] + strip_w[i];
     dl->AddRectFilled(ImVec2(bx, 0.f), ImVec2(bx + 2.f * half, size.y), col(0.02f, 0.025f, 0.05f, 1.f));
-    bar(m_start_bar[i], bx - 6.f * unit, half + 12.f * unit);
-    bar(m_start_bar[i + 1], bx + half - 6.f * unit, half + 12.f * unit);
+    if (m_start_pick == i || m_start_pick == i + 1) {
+      bar(m_start_bar[m_start_pick], bx - 6.f * unit, 2.f * half + 12.f * unit);
+    }
   }
   // the game picked: a jagged gold bar just inside each side of its strip
   const float sel_w = 30.f * unit;
