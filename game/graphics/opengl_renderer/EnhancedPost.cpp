@@ -480,10 +480,14 @@ void EnhancedPost::update_auto_quality() {
   // frames: the first seconds after a boot or a load run at 52-55 fps (streaming, first draws)
   // and a pass set aside then stayed aside for good (the desert's mist volume, at 15.5 ms a frame
   // after; the whole noon came out ~8% brighter in one run and not in the next)
-  if (m_frame_ms >= 25.f || m_warm_since <= 0.0) {
+  // (but the post pass alone over 14 ms is the graphics card, whatever the frame rate: the slums
+  // at 2560x1600 sat at 32 fps, post 25 ms, and the level never moved, taken for a load)
+  const bool post_heavy = m_gpu_post_ms > 14.f;
+  if ((m_frame_ms >= 25.f && !post_heavy) || m_warm_since <= 0.0) {
     m_warm_since = now;
   }
-  const bool under = m_frame_ms > 17.2f && m_frame_ms < 25.f && now - m_warm_since > 10.0;
+  const bool under =
+      m_frame_ms > 17.2f && (m_frame_ms < 25.f || post_heavy) && now - m_warm_since > 10.0;
   if (!under) {
     m_slow_since = -1.0;
   } else if (m_slow_since < 0.0) {

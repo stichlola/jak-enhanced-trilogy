@@ -288,11 +288,11 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.25;  // and how bright they get at most
-uniform float tune_beacon_ab = 0.0;     // (test: 1 = the far lamps' points off)
-uniform float tune_beacon_core = 0.45;  // far lamp point: its core's size x the game's glow (1: a big soft yellow disc)
-uniform float tune_beacon_halo = 0.5;   // its halo's reach x (5-11 px; 1 blurred the lamps)
-uniform float tune_beacon_halo_gain = 0.12;  // (was 0.18)
-uniform float tune_beacon_hot = 0.7;    // its middle toward white, a lamp's hot core (0: the glow's hue only)
+const float tune_beacon_ab = 0.0;     // (test: 1 = the far lamps' points off)
+const float tune_beacon_core = 0.45;  // far lamp point: its core's size x the game's glow (1: a big soft yellow disc)
+const float tune_beacon_halo = 0.5;   // its halo's reach x (5-11 px; 1 blurred the lamps)
+const float tune_beacon_halo_gain = 0.12;  // (was 0.18)
+const float tune_beacon_hot = 0.7;    // its middle toward white, a lamp's hot core (0: the glow's hue only)
 uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
