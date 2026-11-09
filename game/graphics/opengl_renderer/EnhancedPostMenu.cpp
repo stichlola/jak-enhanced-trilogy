@@ -47,12 +47,18 @@ void EnhancedPost::draw_start_menu() {
     for (int i = 0; i < 4; i++) {
       load(i == 0 ? std::string("title.png") : fmt::format("name{}.png", i), &m_start_text[i],
            &m_start_text_w[i], &m_start_text_h[i]);
-      load(i < 3 ? fmt::format("bar{}.png", i + 1) : std::string("select.png"), &m_start_bar[i],
-           &unused_w, &unused_h);
     }
+    for (int i = 0; i < 3; i++) {
+      load(fmt::format("bar{}.png", i + 1), &m_start_bar[i], &unused_w, &unused_h);
+    }
+    load("bar1_leaves.png", &m_start_leaves, &unused_w, &unused_h);
     m_start_pick = current;
     for (int i = 0; i < 3; i++) {
       m_start_strip[i] = i == current ? 0.5f : 0.25f;
+    }
+    for (int g = 0; g < 2; g++) {
+      m_start_div_style[g] = -1;
+      m_start_div_anim[g] = 0.f;
     }
   }
 
@@ -200,25 +206,103 @@ void EnhancedPost::draw_start_menu() {
     }
     x += w + (i < 2 ? 2.f * half : 0.f);
   }
-  // the dividers beside the game picked, in its style (a liana, dark eco, light eco); the other one
-  // stays a plain dark gap
-  auto bar = [&](GLuint tex, float bx, float bw) {
-    if (tex) {
-      dl->AddImage((ImTextureID)(intptr_t)tex, ImVec2(bx, 0.f), ImVec2(bx + bw, size.y),
-                   ImVec2(0, 0), ImVec2(1, 1), col(1.f, 1.f, 1.f, 1.f));
-    }
-  };
-  for (int i = 0; i < 2; i++) {
-    const float bx = strip_x[i] + strip_w[i];
+  // the dividers beside the game picked, in its style: Jak 1 a liana that grows down from the top
+  // and pops its leaves open, Jak 2 dark eco and Jak 3 light eco lightning that strikes in, then
+  // crackles (the sheet's frames cycled) and throws sparks. A divider no longer beside the game
+  // picked retracts (the liana) or fades (the eco) before the new one comes; the other gap stays
+  // plain and dark.
+  const double now = ImGui::GetTime();
+  const float dt = io.DeltaTime;
+  constexpr int kEcoFrames = 8;  // start_menu_bars.py: FRAMES
+  auto smooth = [](float t) { return t * t * (3.f - 2.f * t); };
+  for (int g = 0; g < 2; g++) {
+    const float bx = strip_x[g] + strip_w[g];
     dl->AddRectFilled(ImVec2(bx, 0.f), ImVec2(bx + 2.f * half, size.y), col(0.02f, 0.025f, 0.05f, 1.f));
-    if (m_start_pick == i || m_start_pick == i + 1) {
-      bar(m_start_bar[m_start_pick], bx - 6.f * unit, 2.f * half + 12.f * unit);
+    const int target = (m_start_pick == g || m_start_pick == g + 1) ? m_start_pick : -1;
+    int& style = m_start_div_style[g];
+    float& anim = m_start_div_anim[g];
+    if (style < 0) {  // nothing to take away: the new one comes at once
+      style = target;
+      anim = 0.f;
+    }
+    const bool leaving = style != target;
+    const bool liana = style == 0;
+    if (leaving) {
+      anim -= dt / (liana ? 0.35f : 0.2f);
+      if (anim <= 0.f) {
+        anim = 0.f;
+        style = target;
+        continue;
+      }
+    } else {
+      anim = std::min(1.f, anim + dt / (liana ? 0.9f : 0.12f));
+    }
+    if (style < 0 || !m_start_bar[style]) {
+      continue;
+    }
+    const ImTextureID tex = (ImTextureID)(intptr_t)m_start_bar[style];
+    const float x0 = bx - 6.f * unit, bw = 2.f * half + 12.f * unit;
+    if (liana) {
+      // the strands grow down to the height reached (the picture clipped there, not stretched)
+      const float r = smooth(anim);
+      dl->AddImage(tex, ImVec2(x0, 0.f), ImVec2(x0 + bw, r * size.y), ImVec2(0, 0), ImVec2(1, r),
+                   col(1.f, 1.f, 1.f, 1.f));
+      if (!m_start_leaves) {
+        continue;
+      }
+      // the leaves in bands: each pops open (a quick swell, then it settles) once the strands pass
+      constexpr int kBands = 16;
+      for (int b = 0; b < kBands; b++) {
+        const float v0 = (float)b / kBands, v1 = (float)(b + 1) / kBands;
+        const float p = std::clamp((r - v0) * kBands * 0.5f, 0.f, 1.f);
+        if (p <= 0.f) {
+          break;
+        }
+        const float s = p < 1.f ? 0.5f + 0.5f * p + 0.3f * std::sin(p * 3.14159265f) : 1.f;
+        const float cx = x0 + bw * 0.5f, cy = (v0 + v1) * 0.5f * size.y;
+        const float hh = (v1 - v0) * 0.5f * size.y;
+        dl->AddImage((ImTextureID)(intptr_t)m_start_leaves, ImVec2(cx - bw * 0.5f * s, cy - hh * s),
+                     ImVec2(cx + bw * 0.5f * s, cy + hh * s), ImVec2(0, v0), ImVec2(1, v1),
+                     col(1.f, 1.f, 1.f, std::min(1.f, p * 2.f)));
+      }
+    } else {
+      // the eco strikes in from the top with a flash, then crackles: the sheet's frames cycled over
+      // a ghost of the one before, the brightness flickering; sparks drift up the gap
+      const float r = leaving ? 1.f : anim;
+      const float a = leaving ? anim : 1.f;
+      const float flick =
+          0.8f + 0.2f * (float)(std::sin(now * 41.0 + g * 7.0) * std::sin(now * 23.3 + g));
+      const int frame = (int)(now * 13.0 + g * 3) % kEcoFrames;
+      const int prev = (frame + kEcoFrames - 1) % kEcoFrames;
+      const float fw = 1.f / kEcoFrames;
+      dl->AddImage(tex, ImVec2(x0, 0.f), ImVec2(x0 + bw, r * size.y), ImVec2(prev * fw, 0),
+                   ImVec2((prev + 1) * fw, r), col(1.f, 1.f, 1.f, 0.35f * a));
+      dl->AddImage(tex, ImVec2(x0, 0.f), ImVec2(x0 + bw, r * size.y), ImVec2(frame * fw, 0),
+                   ImVec2((frame + 1) * fw, r), col(1.f, 1.f, 1.f, flick * a));
+      const ImVec4 c = style == 1 ? ImVec4(0.8f, 0.5f, 1.f, 1.f) : ImVec4(0.8f, 0.95f, 1.f, 1.f);
+      if (!leaving && anim < 1.f) {
+        const float fl = (1.f - anim) * 0.5f;
+        dl->AddRectFilledMultiColor(ImVec2(x0 - 40.f * unit, 0.f), ImVec2(x0 + bw * 0.5f, size.y),
+                                    col(c.x, c.y, c.z, 0.f), col(c.x, c.y, c.z, fl),
+                                    col(c.x, c.y, c.z, fl), col(c.x, c.y, c.z, 0.f));
+        dl->AddRectFilledMultiColor(ImVec2(x0 + bw * 0.5f, 0.f), ImVec2(x0 + bw + 40.f * unit, size.y),
+                                    col(c.x, c.y, c.z, fl), col(c.x, c.y, c.z, 0.f),
+                                    col(c.x, c.y, c.z, 0.f), col(c.x, c.y, c.z, fl));
+      }
+      for (int k = 0; k < 14; k++) {
+        const float ph = std::fmod(k * 0.618034f + g * 0.37f, 1.f);
+        const float speed = 0.05f + 0.08f * std::fmod(k * 0.414f, 1.f);
+        const float yy = (1.f - (float)std::fmod(now * speed + ph, 1.0)) * size.y;
+        if (yy > r * size.y) {
+          continue;
+        }
+        const float xx = x0 + bw * (0.5f + 0.34f * (float)std::sin(now * 1.7 + k * 2.1));
+        const float tw = 0.5f + 0.5f * (float)std::sin(now * 9.0 + k * 1.3);
+        dl->AddCircleFilled(ImVec2(xx, yy), (1.f + 1.6f * tw) * unit,
+                            col(c.x, c.y, c.z, (0.3f + 0.7f * tw) * a), 8);
+      }
     }
   }
-  // the game picked: a jagged gold bar just inside each side of its strip
-  const float sel_w = 30.f * unit;
-  bar(m_start_bar[3], strip_x[m_start_pick] + 8.f * unit, sel_w);
-  bar(m_start_bar[3], strip_x[m_start_pick] + strip_w[m_start_pick] - sel_w - 8.f * unit, sel_w);
   // the title over a dark fade at the top
   {
     const ImU32 none = col(0.f, 0.f, 0.f, 0.f), dark = col(0.015f, 0.02f, 0.05f, 0.85f);

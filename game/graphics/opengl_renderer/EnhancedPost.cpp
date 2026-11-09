@@ -331,7 +331,8 @@ EnhancedPost::~EnhancedPost() {
   free_levels();
   free_ssao();
   for (auto* t : {&m_start_tex[0], &m_start_tex[1], &m_start_tex[2], &m_start_text[0],
-                  &m_start_text[1], &m_start_text[2], &m_start_text[3]}) {
+                  &m_start_text[1], &m_start_text[2], &m_start_text[3], &m_start_bar[0],
+                  &m_start_bar[1], &m_start_bar[2], &m_start_leaves}) {
     if (*t) {
       glDeleteTextures(1, t);
       *t = 0;

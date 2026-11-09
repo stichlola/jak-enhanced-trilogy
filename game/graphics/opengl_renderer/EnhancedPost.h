@@ -434,7 +434,11 @@ class EnhancedPost {
   GLuint m_start_text[4] = {0, 0, 0, 0};  // the lettering: the title, the three names
   float m_start_text_w[4] = {1, 1, 1, 1};
   float m_start_text_h[4] = {1, 1, 1, 1};
-  GLuint m_start_bar[4] = {0, 0, 0, 0};  // the dividers (start_menu_bars.py), then the gold bar
+  // the dividers (start_menu_bars.py): the liana's strands, the dark and light eco sprite sheets
+  GLuint m_start_bar[3] = {0, 0, 0};
+  GLuint m_start_leaves = 0;  // the liana's leaves, popped open band by band as it grows
+  int m_start_div_style[2] = {-1, -1};  // what each of the two gaps shows now (a game, or -1)
+  float m_start_div_anim[2] = {0.f, 0.f};  // how far it has grown in (0..1)
   float m_start_strip[3] = {0.25f, 0.5f, 0.25f};  // each game's share of the width, eased
   bool m_start_ready[3] = {false, false, false};
   bool m_start_loaded = false;
