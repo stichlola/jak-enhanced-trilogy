@@ -247,8 +247,8 @@ uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun get
 uniform float tune_rock_sat = 0.42;   // desert rock by day: saturation cap (0: off)
 // (M1, off: at 1.5x the templex hall's floor 10 m out moved 52.0 -> 52.4, inside the flicker; the
 // fires' radius is a few meters, the pool needs ~3x, past the light tiles' 1.6x: grow them first)
-uniform float tune_fire_floor = 1.0;       // a fire under a roof lights the floor this much further (x radius, <= 1.5; 1: off)
-uniform float tune_fire_floor_gain = 0.15;  // ...and that floor pool this much stronger (on k, squared after)
+uniform float tune_fire_floor = 3.0;       // a fire under a roof lights the floor this much further (x radius, <= 3; 1: off)
+uniform float tune_fire_floor_gain = 0.3;  // ...and that floor pool this much stronger (on k, squared after)
 uniform float tune_lamp_jak_m = 2.5;  // lamps' shadows let go within this far of Jak's feet (m; 0: off)
 uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
@@ -4215,11 +4215,11 @@ void composite_unused() {
       float r = light_pos[i].w;
       // a fire under a roof (alpha 0.25): the floor in front of it lit further out, a warm pool
       // across the room, not only the wall behind it (templex braziers at noon). The tiles keep
-      // 1.6x the radius, so up to 1.5x here
+      // 1.6x the radius, these fires' grown with tune_fire_floor in C++, so up to 3x here
       float fire_floor = 0.0;
       if (tune_fire_floor > 1.0 && abs(light_color[i].a - 0.25) < 0.1) {
         fire_floor = smoothstep(0.6, 0.9, dot(nn, up_view));
-        r *= mix(1.0, min(tune_fire_floor, 1.5), fire_floor);
+        r *= mix(1.0, min(tune_fire_floor, 3.0), fire_floor);
       }
       if (d < r) {
         float k = 1.0 - (d * d) / (r * r);
