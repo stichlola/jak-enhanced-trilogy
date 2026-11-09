@@ -689,6 +689,7 @@ class EnhancedPost {
   struct LampSlot {
     float pos[3] = {0.f, 0.f, 0.f};  // world, game units
     float far_u = 0.f;               // game units
+    float radius_u = 0.f;            // the light's reach, game units
     int faces = 0;                   // static faces drawn (6: ready)
     u32 seen = 0;                    // last frame it was wanted
     u32 gen = 0;                     // the casters' levels it was drawn with
@@ -706,6 +707,7 @@ class EnhancedPost {
   GLuint m_lamp_static_tex = 0, m_lamp_tex = 0, m_lamp_fbo = 0;
   int m_lamp_res = 0;
   u32 m_lamp_frame = 0;
+  u32 m_lamp_static_total = 0, m_lamp_assigns = 0;  // static faces drawn, slots given (log)
   bool m_lamp_ready = false;  // the live array holds this frame's maps
   double m_lamp_log_time = 0.0;
   // the characters around Jak seen from below (their lowest point per column, a small depth map):

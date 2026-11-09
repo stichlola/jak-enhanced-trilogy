@@ -1199,8 +1199,9 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   const auto& cam = g_enhanced_camera;
   const bool sun_up = g_enhanced_sun.valid && len >= 1e-6f && sun[1] / len >= 0.05f;
   // (the lamps' shadow maps draw the same casters, by night too: their list is kept up below)
-  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 0.f);
-  if (!cam.valid || (!sun_up && (float)t_lamp_maps < 0.5f)) {
+  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 4.f);
+  const bool lamp_maps = (float)t_lamp_maps > 0.5f && m_settings.light_shadow > 0.f;
+  if (!cam.valid || (!sun_up && !lamp_maps)) {
     return;  // no sun, or below the horizon
   }
 
@@ -2026,7 +2027,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
 // map convention, so the composite looks them up with the direction from the lamp, in world space.
 void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof) {
   m_lamp_ready = false;
-  static const EnhancedTune t_maps("lights.shadow_maps", 0.f);
+  static const EnhancedTune t_maps("lights.shadow_maps", 4.f);
   static const EnhancedTune t_res("lights.shadow_map_res", 512.f);
   static const EnhancedTune t_faces("lights.shadow_faces_per_frame", 2.f);
   static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
@@ -2035,7 +2036,9 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   static const EnhancedTune t_log("lights.shadow_log", 0.f);
   const int want_n = std::clamp((int)(float)t_maps, 0, kLampSlots);
   const auto& cam = g_enhanced_camera;
-  if (want_n == 0 || !cam.valid || g_enhanced_menu.blank_world || m_lamp_want.empty()) {
+  // (the lights' shadows off, Medium and Performance presets: nothing reads the maps)
+  if (want_n == 0 || !cam.valid || g_enhanced_menu.blank_world || m_lamp_want.empty() ||
+      m_settings.light_shadow <= 0.f) {
     return;
   }
   const int res = std::clamp((int)(float)t_res, 128, 2048);
@@ -2079,18 +2082,24 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   // only lamps that stay put (lights.shadow_still_frames in the same place, 2 cm): a light that
   // follows Jak or a moving glow would redraw its static faces every frame and never be ready
   static const EnhancedTune t_still("lights.shadow_still_frames", 30.f);
+  // (within lights.shadow_still_m of where it was first seen: the temple braziers' lights jitter by
+  // ~20 cm with the flame every second or so; at 2 cm frame to frame they lost their maps, 7 slots
+  // redrawn in 5 s with the camera still. The map stays at that first place)
+  static const EnhancedTune t_still_m("lights.shadow_still_m", 0.5f);
+  const float still_u = std::clamp((float)t_still_m, 0.02f, 2.f) * kMeter;
+  const float match2 = std::max(still_u, 0.3f * kMeter) * std::max(still_u, 0.3f * kMeter);
   {
     std::vector<std::pair<std::array<float, 3>, u32>> still;
-    const float still2 = (0.02f * kMeter) * (0.02f * kMeter);
+    const float still2 = still_u * still_u;
     for (const auto& w : m_lamp_want) {
-      u32 cnt = 1;
+      std::pair<std::array<float, 3>, u32> e = {{w.pos[0], w.pos[1], w.pos[2]}, 1};
       for (const auto& [p, c] : m_lamp_still) {
         if (dist2(p.data(), w.pos) < still2) {
-          cnt = c + 1;
+          e = {p, c + 1};
           break;
         }
       }
-      still.push_back({{w.pos[0], w.pos[1], w.pos[2]}, cnt});
+      still.push_back(e);
     }
     m_lamp_still.swap(still);
   }
@@ -2098,30 +2107,45 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   for (size_t i = 0; i < m_lamp_want.size(); i++) {
     if (m_lamp_still[i].second >= (u32)std::max((float)t_still, 1.f)) {
       wanted.push_back(m_lamp_want[i]);
+      memcpy(wanted.back().pos, m_lamp_still[i].first.data(), sizeof(wanted.back().pos));
     }
   }
   // (a little hysteresis: among the strongest few more than there are maps, the lamps whose map is
   // drawn already go first; the order shifts as the camera turns, and the slots thrashed, two static
   // faces redrawn every frame at the port)
+  // (lights.shadow_keep_rank k: a lamp that has its map ranks k places higher than it is, so a new
+  // one takes its slot only when clearly stronger; fires flicker and swapped places every few
+  // frames at the temple's braziers, 6 slots redrawn in 5 s with the camera still at +2)
   {
-    const size_t top = std::min(wanted.size(), (size_t)want_n + 2);
+    static const EnhancedTune t_keep("lights.shadow_keep_rank", 2.f);
+    const float keep = std::max((float)t_keep, 0.f);
     auto has_map = [&](const LampWant& w) {
       for (const auto& sl : m_lamp_slots) {
         if (sl.used && sl.faces >= 6 &&
-            dist2(sl.pos, w.pos) < (0.3f * kMeter) * (0.3f * kMeter)) {
+            dist2(sl.pos, w.pos) < match2) {
           return true;
         }
       }
       return false;
     };
-    std::stable_partition(wanted.begin(), wanted.begin() + top, has_map);
+    std::vector<std::pair<float, size_t>> rank(wanted.size());
+    for (size_t i = 0; i < wanted.size(); i++) {
+      rank[i] = {(float)i - (has_map(wanted[i]) ? keep + 0.5f : 0.f), i};
+    }
+    std::stable_sort(rank.begin(), rank.end(),
+                     [](const auto& a, const auto& b) { return a.first < b.first; });
+    std::vector<LampWant> sorted;
+    sorted.reserve(wanted.size());
+    for (const auto& r : rank) {
+      sorted.push_back(wanted[r.second]);
+    }
+    wanted.swap(sorted);
   }
   // a slot for each of the strongest lamps: the one already holding it (same place), else the one
   // left unused longest
   const int n_want = std::min(want_n, (int)wanted.size());
   int assign[kLampSlots];
   bool taken[kLampSlots] = {};
-  const float match2 = (0.3f * kMeter) * (0.3f * kMeter);
   for (int i = 0; i < n_want; i++) {
     assign[i] = -1;
     for (int s = 0; s < kLampSlots; s++) {
@@ -2151,7 +2175,14 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     sl = LampSlot();
     memcpy(sl.pos, wanted[i].pos, sizeof(sl.pos));
     sl.far_u = std::max(wanted[i].radius * std::max((float)t_far, 1.f), near_u * 4.f);
+    sl.radius_u = wanted[i].radius;
     sl.used = true;
+    m_lamp_assigns++;
+    if ((float)t_log > 1.5f) {
+      lg::info("[enhanced] lamp slot {} <- {:.1f},{:.1f},{:.1f} r {:.1f} m (rank {} of {})", best,
+               sl.pos[0] / kMeter, sl.pos[1] / kMeter, sl.pos[2] / kMeter, sl.radius_u / kMeter, i,
+               wanted.size());
+    }
     sl.gen = m_shadow_draws_gen;
     assign[i] = best;
     taken[best] = true;
@@ -2334,6 +2365,16 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   // and the big Spargus lamps reach ~45 m: every NPC of the street, 700 draws)
   static const EnhancedTune t_chars_m("lights.shadow_chars_m", 12.f);
   const float chars_m = std::max((float)t_chars_m, 1.f) * kMeter;
+  // (but the characters near the camera, Jak first, anywhere in the lamp's reach: a brazier 25 m
+  // away still throws his long shadow across the temple floor, where the player looks; 0: off)
+  static const EnhancedTune t_chars_cam_m("lights.shadow_chars_cam_m", 15.f);
+  const float cam_m = std::max((float)t_chars_cam_m, 0.f) * kMeter;
+  std::vector<u8> near_cam(places.size(), 0);
+  for (size_t k = 0; k < places.size(); k++) {
+    const auto& c = places[k].second;
+    const float x = c[0] - cam.trans[0], y = c[1] - cam.trans[1], z = c[2] - cam.trans[2];
+    near_cam[k] = x * x + y * y + z * z < cam_m * cam_m;
+  }
   for (int i = 0; i < n_want; i++) {
     if (assign[i] < 0 || m_lamp_slots[assign[i]].faces < 6) {
       continue;
@@ -2359,13 +2400,17 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
       face_basis(face, s, u);
       const float* f = kDir[face];
       only.clear();
-      for (const auto& [fb, c] : chars ? places : no_places) {
+      const auto& pl = chars ? places : no_places;
+      for (size_t k = 0; k < pl.size(); k++) {
+        const auto& [fb, c] = pl[k];
         const float d[3] = {c[0] - sl.pos[0], c[1] - sl.pos[1], c[2] - sl.pos[2]};
         const float dl = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
         const float fz = d[0] * f[0] + d[1] * f[1] + d[2] * f[2];
         const float fx = d[0] * s[0] + d[1] * s[1] + d[2] * s[2];
         const float fy = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
-        if (dl - rad > std::min(sl.far_u, chars_m) || fz < -rad || std::abs(fx) > fz + rad * 1.4143f ||
+        const float reach =
+            std::min(sl.far_u, near_cam[k] ? std::max(sl.radius_u, chars_m) : chars_m);
+        if (dl - rad > reach || fz < -rad || std::abs(fx) > fz + rad * 1.4143f ||
             std::abs(fy) > fz + rad * 1.4143f) {
           continue;
         }
@@ -2401,10 +2446,14 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   glClearDepth(old_clear_depth);
   glDepthFunc(old_depth_func);
   m_lamp_ready = live > 0;
+  m_lamp_static_total += static_faces;
   if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
-    lg::info("[enhanced] lamp shadows: {} wanted, {} live, {} static faces this frame, {} character "
-             "draws, {} faces copied; slots {}",
-             n_want, live, static_faces, char_draws, copied, [&]() {
+    lg::info("[enhanced] lamp shadows: {} wanted ({} lamps, {} still), {} live, {} static faces "
+             "this frame ({} in 300 frames, {} new slots), {} character draws, {} faces copied; "
+             "slots {}",
+             n_want, m_lamp_want.size(), wanted.size(), live, static_faces, m_lamp_static_total,
+             m_lamp_assigns, char_draws, copied,
+             [&]() {
                std::string o;
                for (int s = 0; s < kLampSlots; s++) {
                  const auto& sl = m_lamp_slots[s];
@@ -2414,6 +2463,10 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
                }
                return o;
              }());
+  }
+  if (m_lamp_frame % 300 == 0) {
+    m_lamp_static_total = 0;
+    m_lamp_assigns = 0;
   }
 }
 

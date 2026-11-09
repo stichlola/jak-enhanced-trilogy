@@ -2332,6 +2332,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // not one Jak carries nor a flash) back in the world for next frame's pass; this frame's ready
       // maps matched to the lights by place
       m_lamp_want.clear();
+      // (a slot is kept at the place its lamp was first seen still: a flame's light jitters around it)
+      static const EnhancedTune t_still_m("lights.shadow_still_m", 0.5f);
+      const float match_u =
+          std::max(std::clamp((float)t_still_m, 0.02f, 2.f), 0.3f) * kMeter;
+      const float match2 = match_u * match_u;
       float slot_light[EnhancedPost::kLampSlots];
       float slot_pos[EnhancedPost::kLampSlots * 4] = {};
       for (auto& s : slot_light) {
@@ -2355,7 +2360,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           const float dx = sl.pos[0] - lw.pos[0], dy = sl.pos[1] - lw.pos[1],
                       dz = sl.pos[2] - lw.pos[2];
           if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame && slot_light[s] < 0.f &&
-              dx * dx + dy * dy + dz * dz < (0.3f * kMeter) * (0.3f * kMeter)) {
+              dx * dx + dy * dy + dz * dz < match2) {
             slot_light[s] = (float)i;
             std::memcpy(slot_pos + s * 4, sl.pos, sizeof(float) * 3);
             slot_pos[s * 4 + 3] = sl.far_u;
