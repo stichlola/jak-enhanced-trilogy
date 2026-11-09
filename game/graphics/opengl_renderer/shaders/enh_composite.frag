@@ -165,6 +165,7 @@ uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, th
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
 uniform float tune_ground_fine = 1.8;  // the rocky ground's near grain (stone, gravel) strength (1: desert-start's slab a blurry plane)
 uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
+uniform float tune_water_moon = 1.0;  // the moon's glitter path on the water at night (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
@@ -3513,6 +3514,16 @@ void composite_unused() {
       wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w;
     }
 
+    // the moon on the water at night: a path of glitter under it, broken up by the waves (as bright
+    // as the moon's lit part and the clear sky allow; copper in an eclipse; not where a wall hides it)
+    if (tune_water_moon > 0.0 && clouds.w > 0.01 && sky_sun.w > 0.0) {
+      float mr = max(dot(r, sky_sun.xyz), 0.0);
+      float mclear = (1.0 - clamp((clouds.y - 0.6) * 2.0, 0.0, 1.0)) * (1.0 - min(weather.x + weather.y, 1.0));
+      float mg = pow(mr, 700.0) * 2.0 + pow(mr, 90.0) * 0.12 + pow(mr, 24.0) * 0.015;
+      vec3 mcol = mix(vec3(0.72, 0.8, 1.0), vec3(0.8, 0.3, 0.16), sky_kind.z);
+      wc += mcol * mg * mclear * mix(0.25, 1.0, sky_kind.y) * clouds.w * smoothstep(0.0, 0.08, sky_sun.w) *
+            (1.0 - 0.9 * ssr_hit) * tune_water_moon;
+    }
     // the drops' splashes, lit like the rain
     if (rain_hits > 0.0) {
       wc = mix(wc, wc * 1.3 + vec3(0.16, 0.17, 0.19) + fog_color * 0.4, min(rain_hits, 1.0) * 0.8);
