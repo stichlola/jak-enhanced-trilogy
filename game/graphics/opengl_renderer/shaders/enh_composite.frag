@@ -291,6 +291,7 @@ uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front)
+uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_night_pale = 0.0;       // (off: slums 22h 19% darker than main, nights must not get darker; 1 = Haven's slums only, pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
@@ -6247,6 +6248,9 @@ void composite_unused() {
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
+  }
+  if (tune_raw_view > 0.0 && (tune_raw_view < 1.5 || tex_coord.x > 0.5)) {
+    c = texture(tex_T0, tex_coord).rgb;  // (test: the game's own picture, for an A/B with vanilla in one run)
   }
   if (abs(tune_water_dbg - 7.0) < 0.5) {
     // (test: red where the far-sea depth copy equals the scene (the reflection march skips those as
