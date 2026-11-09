@@ -167,6 +167,7 @@ uniform float tune_ground_fine = 1.8;  // the rocky ground's near grain (stone, 
 uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
 uniform float tune_water_moon = 1.0;  // the moon's glitter path on the water at night (0: off)
 uniform float tune_water_glint_soft = 1.0;  // the sun's tight glint on water broken into glitter, rolled off (0: one solid spot)
+uniform float tune_water_moon_soft = 1.0;  // the same for the moon's tight glint (0: one solid spot)
 uniform float tune_water_lamp_map = 1.0;  // a lamp's column on the water only where its shadow map lets its light reach (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
@@ -3539,7 +3540,15 @@ void composite_unused() {
     if (tune_water_moon > 0.0 && clouds.w > 0.01 && sky_sun.w > 0.0) {
       float mr = max(dot(r, sky_sun.xyz), 0.0);
       float mclear = (1.0 - clamp((clouds.y - 0.6) * 2.0, 0.0, 1.0)) * (1.0 - min(weather.x + weather.y, 1.0));
-      float mg = pow(mr, 700.0) * 2.0 + pow(mr, 90.0) * 0.12 + pow(mr, 24.0) * 0.015;
+      float mt = pow(mr, 700.0) * 2.0;
+      // (broken into glitter and rolled off like the sun's: overhead off Spargus at 22h the moon's
+      // tight lobe was one solid white oval an eighth of the screen wide; vanilla has none)
+      if (tune_water_moon_soft > 0.0) {
+        float mglit = 1.6 * smoothstep(0.1, 0.45, gnoise(world * 2.5 + vec2(t * 0.8, -t * 0.6))) *
+                      smoothstep(-0.2, 0.3, gnoise(world * 6.0 - vec2(t * 1.1, t * 0.7)));
+        mt = mix(mt, mt * mglit / (1.0 + mt * mglit), tune_water_moon_soft);
+      }
+      float mg = mt + pow(mr, 90.0) * 0.12 + pow(mr, 24.0) * 0.015;
       vec3 mcol = mix(vec3(0.72, 0.8, 1.0), vec3(0.8, 0.3, 0.16), sky_kind.z);
       wc += mcol * mg * mclear * mix(0.25, 1.0, sky_kind.y) * clouds.w * smoothstep(0.0, 0.08, sky_sun.w) *
             (1.0 - 0.9 * ssr_hit) * tune_water_moon;
