@@ -66,35 +66,35 @@ function Get-Disc([string]$path) {
 [xml]$xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Jak Enhanced Trilogy Setup" Width="1080" Height="720" WindowStyle="None" AllowsTransparency="True"
+        Title="Jak Enhanced Trilogy Setup" Width="880" Height="620" WindowStyle="None" AllowsTransparency="True"
         Background="Transparent" ResizeMode="CanMinimize" WindowStartupLocation="CenterScreen" AllowDrop="True"
-        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" Foreground="#F2F3F5" UseLayoutRounding="True"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" Foreground="#F4ECD8" UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
   <Window.Resources>
     <Style x:Key="Primary" TargetType="Button">
-      <Setter Property="Foreground" Value="White"/><Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Foreground" Value="#1E1204"/><Setter Property="FontWeight" Value="Bold"/>
       <Setter Property="FontSize" Value="14"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-        <Border x:Name="b" CornerRadius="10" Background="#3D5AFE" Padding="24,11">
+        <Border x:Name="b" CornerRadius="10" Background="#F2A230" BorderBrush="#FFD27A" BorderThickness="0,1,0,0" Padding="24,11">
           <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#5571FF"/></Trigger>
-          <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Background" Value="#3049D6"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#FFC14D"/></Trigger>
+          <Trigger Property="IsPressed" Value="True"><Setter TargetName="b" Property="Background" Value="#D9821C"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.4"/></Trigger>
         </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Ghost" TargetType="Button">
-      <Setter Property="Foreground" Value="#E6E7EB"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#EDE4CF"/><Setter Property="FontSize" Value="13"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-        <Border x:Name="b" CornerRadius="8" Background="#24262C" BorderBrush="#32343C" BorderThickness="1" Padding="16,8">
+        <Border x:Name="b" CornerRadius="8" Background="#183036" BorderBrush="#2A4A4F" BorderThickness="1" Padding="16,8">
           <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
         <ControlTemplate.Triggers>
-          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#2E3038"/></Trigger>
+          <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#21414A"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter TargetName="b" Property="Opacity" Value="0.4"/></Trigger>
         </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Glyph" TargetType="Button">
-      <Setter Property="Foreground" Value="#8B8F9C"/><Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
+      <Setter Property="Foreground" Value="#8AA3A2"/><Setter Property="FontFamily" Value="Segoe MDL2 Assets"/>
       <Setter Property="FontSize" Value="10"/><Setter Property="Width" Value="34"/><Setter Property="Height" Value="30"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
         <Border x:Name="b" CornerRadius="6" Background="Transparent">
@@ -105,7 +105,7 @@ function Get-Disc([string]$path) {
         </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Link" TargetType="Button">
-      <Setter Property="Foreground" Value="#8C9EFF"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#5FD3F5"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
         <TextBlock x:Name="t" Text="{TemplateBinding Content}"/>
         <ControlTemplate.Triggers>
@@ -113,17 +113,17 @@ function Get-Disc([string]$path) {
         </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style TargetType="CheckBox">
-      <Setter Property="Foreground" Value="#E6E7EB"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Foreground" Value="#EDE4CF"/><Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
         <Grid Background="Transparent"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
-          <Border x:Name="box" Width="18" Height="18" CornerRadius="5" BorderThickness="1.5" BorderBrush="#4A4D57"
-                  Background="#1D1F24" VerticalAlignment="Center">
+          <Border x:Name="box" Width="18" Height="18" CornerRadius="5" BorderThickness="1.5" BorderBrush="#3A5A5E"
+                  Background="#0F2026" VerticalAlignment="Center">
             <Path x:Name="tick" Data="M3.5,9 L7.5,13 L14.5,5" Stroke="White" StrokeThickness="2" Visibility="Collapsed"
                   StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Margin="-1.5,-1.5,0,0"/></Border>
           <ContentPresenter Grid.Column="1" Margin="10,0,0,0" VerticalAlignment="Center"/></Grid>
         <ControlTemplate.Triggers>
           <Trigger Property="IsChecked" Value="True"><Setter TargetName="tick" Property="Visibility" Value="Visible"/>
-            <Setter TargetName="box" Property="Background" Value="#3D5AFE"/><Setter TargetName="box" Property="BorderBrush" Value="#3D5AFE"/></Trigger>
+            <Setter TargetName="box" Property="Background" Value="#F2A230"/><Setter TargetName="box" Property="BorderBrush" Value="#F2A230"/></Trigger>
           <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4"/></Trigger>
         </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
     </Style>
@@ -131,57 +131,54 @@ function Get-Disc([string]$path) {
       <Setter Property="Width" Value="10"/>
       <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ScrollBar">
         <Track x:Name="PART_Track" IsDirectionReversed="True"><Track.Thumb><Thumb><Thumb.Template><ControlTemplate>
-          <Border CornerRadius="3" Background="#3A3D46" Width="6" Margin="0,4"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track>
+          <Border CornerRadius="3" Background="#2E4E52" Width="6" Margin="0,4"/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb></Track>
       </ControlTemplate></Setter.Value></Setter>
     </Style>
     <Style x:Key="Label" TargetType="TextBlock">
-      <Setter Property="Foreground" Value="#7E8290"/><Setter Property="FontSize" Value="11"/>
+      <Setter Property="Foreground" Value="#D9A84A"/><Setter Property="FontSize" Value="11"/>
       <Setter Property="FontWeight" Value="SemiBold"/><Setter Property="Margin" Value="0,0,0,8"/>
     </Style>
     <Style x:Key="Panel" TargetType="Border">
-      <Setter Property="Background" Value="#1C1E23"/><Setter Property="BorderBrush" Value="#272930"/>
+      <Setter Property="Background" Value="#10232A"/><Setter Property="BorderBrush" Value="#1F3A40"/>
       <Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="10"/>
     </Style>
   </Window.Resources>
 
   <Grid x:Name="Root">
-    <Grid.Clip><RectangleGeometry Rect="0,0,1080,720" RadiusX="16" RadiusY="16"/></Grid.Clip>
-    <!-- the background: a made-up dusk landscape, vector only -->
-    <Viewbox Stretch="UniformToFill">
-      <Canvas Width="1600" Height="1067">
-        <Rectangle Width="1600" Height="1067">
-          <Rectangle.Fill><LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
-            <GradientStop Color="#0B1026" Offset="0"/><GradientStop Color="#1E2452" Offset="0.32"/>
-            <GradientStop Color="#5B3F72" Offset="0.52"/><GradientStop Color="#C9746A" Offset="0.64"/>
-            <GradientStop Color="#F2B077" Offset="0.70"/><GradientStop Color="#2A2238" Offset="0.71"/>
-            <GradientStop Color="#120F1C" Offset="1"/></LinearGradientBrush></Rectangle.Fill></Rectangle>
-        <Ellipse Canvas.Left="900" Canvas.Top="480" Width="600" Height="460" Opacity="0.75">
-          <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#FFE3A8" Offset="0"/><GradientStop Color="#FFC07A" Offset="0.12"/>
-            <GradientStop Color="#00F29A6A" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
-        <Path Fill="#6E4F78" Opacity="0.85" Data="M0,700 L120,640 L210,668 L330,590 L430,640 L540,600 L640,655 L760,585 L880,640 L1010,610 L1120,660 L1250,600 L1380,650 L1480,620 L1600,660 L1600,1067 L0,1067 Z"/>
-        <Path Fill="#3E3157" Data="M0,760 L90,720 L200,742 L300,690 L420,735 L520,700 L640,748 L780,705 L900,742 L1040,712 L1160,752 L1290,716 L1420,750 L1600,720 L1600,1067 L0,1067 Z"/>
-        <Path Fill="#221C33" Data="M0,830 C200,790 380,800 560,820 C760,842 900,790 1100,800 C1280,810 1420,840 1600,815 L1600,1067 L0,1067 Z"/>
-        <Path Fill="#15111F" Data="M0,920 C260,880 520,905 780,925 C1040,945 1300,890 1600,905 L1600,1067 L0,1067 Z"/>
-        <Ellipse Canvas.Left="210" Canvas.Top="150" Width="3" Height="3" Fill="#CCFFFFFF"/>
-        <Ellipse Canvas.Left="520" Canvas.Top="90" Width="2" Height="2" Fill="#99FFFFFF"/>
-        <Ellipse Canvas.Left="760" Canvas.Top="210" Width="2" Height="2" Fill="#88FFFFFF"/>
-        <Ellipse Canvas.Left="1130" Canvas.Top="120" Width="3" Height="3" Fill="#AAFFFFFF"/>
-        <Ellipse Canvas.Left="1390" Canvas.Top="260" Width="2" Height="2" Fill="#77FFFFFF"/>
-        <Ellipse Canvas.Left="340" Canvas.Top="320" Width="2" Height="2" Fill="#66FFFFFF"/>
-      </Canvas>
-    </Viewbox>
+    <Grid.Clip><RectangleGeometry Rect="0,0,880,620" RadiusX="16" RadiusY="16"/></Grid.Clip>
 
     <!-- the card -->
-    <Border x:Name="Card" Width="880" Height="620" CornerRadius="16" Background="#F216171B" BorderBrush="#2C2E36" BorderThickness="1">
-      <Border.Effect><DropShadowEffect BlurRadius="48" ShadowDepth="10" Opacity="0.55" Color="Black"/></Border.Effect>
+    <!-- an adventure look: deep sea-green stone, gold trim, glowing eco orbs (all drawn here, no art) -->
+    <Border x:Name="Card" CornerRadius="16" BorderThickness="1.5">
+      <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="0.4,1">
+        <GradientStop Color="#13282E" Offset="0"/><GradientStop Color="#0C181C" Offset="0.55"/><GradientStop Color="#0A1214" Offset="1"/></LinearGradientBrush></Border.Background>
+      <Border.BorderBrush><LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#E9B44C" Offset="0"/><GradientStop Color="#6E4A1A" Offset="0.5"/><GradientStop Color="#C98A2E" Offset="1"/></LinearGradientBrush></Border.BorderBrush>
+      <Grid>
+        <!-- glow in the corners and a carved band under the header -->
+        <Ellipse Width="520" Height="420" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-220,-200,0" IsHitTestVisible="False">
+          <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#333EC8F2" Offset="0"/><GradientStop Color="#003EC8F2" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+        <Ellipse Width="560" Height="380" HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-240,0,0,-220" IsHitTestVisible="False">
+          <Ellipse.Fill><RadialGradientBrush><GradientStop Color="#33F2A230" Offset="0"/><GradientStop Color="#00F2A230" Offset="1"/></RadialGradientBrush></Ellipse.Fill></Ellipse>
+        <Border Height="2" VerticalAlignment="Top" Margin="22,64,22,0" IsHitTestVisible="False">
+          <Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+            <GradientStop Color="#00E9B44C" Offset="0"/><GradientStop Color="#99E9B44C" Offset="0.5"/><GradientStop Color="#00E9B44C" Offset="1"/></LinearGradientBrush></Border.Background></Border>
       <Grid>
         <Grid.RowDefinitions><RowDefinition Height="64"/><RowDefinition/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
         <Grid x:Name="Head" Background="Transparent" Margin="22,0,14,0">
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Left">
             <Image x:Name="AppIcon" Width="26" Height="26" RenderOptions.BitmapScalingMode="HighQuality"/>
-            <TextBlock Text="Jak Enhanced" FontWeight="Bold" FontSize="15" Margin="10,0,0,1" VerticalAlignment="Center"/>
+            <TextBlock Text="Jak Enhanced" FontWeight="Black" FontSize="16" Margin="10,0,0,1" VerticalAlignment="Center" Foreground="#F2C35B"/>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,1,0,0">
+              <Ellipse Width="9" Height="9" Margin="0,0,4,0"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.35,0.3"><GradientStop Color="#E8FBFF" Offset="0"/><GradientStop Color="#3EC8F2" Offset="0.6"/><GradientStop Color="#1676A8" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+                <Ellipse.Effect><DropShadowEffect Color="#3EC8F2" BlurRadius="10" ShadowDepth="0" Opacity="0.9"/></Ellipse.Effect></Ellipse>
+              <Ellipse Width="9" Height="9" Margin="0,0,4,0"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.35,0.3"><GradientStop Color="#F2FFE0" Offset="0"/><GradientStop Color="#7BD94A" Offset="0.6"/><GradientStop Color="#3C8A1E" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+                <Ellipse.Effect><DropShadowEffect Color="#7BD94A" BlurRadius="10" ShadowDepth="0" Opacity="0.9"/></Ellipse.Effect></Ellipse>
+              <Ellipse Width="9" Height="9"><Ellipse.Fill><RadialGradientBrush GradientOrigin="0.35,0.3"><GradientStop Color="#FFF6D8" Offset="0"/><GradientStop Color="#F2C230" Offset="0.6"/><GradientStop Color="#B07A10" Offset="1"/></RadialGradientBrush></Ellipse.Fill>
+                <Ellipse.Effect><DropShadowEffect Color="#F2C230" BlurRadius="10" ShadowDepth="0" Opacity="0.9"/></Ellipse.Effect></Ellipse>
+            </StackPanel>
           </StackPanel>
-          <Border CornerRadius="18" Background="#1F2127" BorderBrush="#2A2C33" BorderThickness="1" Padding="4"
+          <Border CornerRadius="18" Background="#0F2328" BorderBrush="#1C3238" BorderThickness="1" Padding="4"
                   HorizontalAlignment="Center" VerticalAlignment="Center">
             <StackPanel x:Name="Steps" Orientation="Horizontal"/></Border>
           <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
@@ -194,27 +191,27 @@ function Get-Disc([string]$path) {
           <!-- 0: the discs -->
           <DockPanel x:Name="Page0">
             <StackPanel DockPanel.Dock="Top">
-              <TextBlock x:Name="DiscTitle" FontSize="30" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-              <TextBlock x:Name="DiscSub" Foreground="#9A9EAB" FontSize="14" Margin="0,6,0,0"/>
+              <TextBlock x:Name="DiscTitle" FontSize="32" FontWeight="Black" FontFamily="Segoe UI Black, Segoe UI" Foreground="#F6EBCB"/>
+              <TextBlock x:Name="DiscSub" Foreground="#9DB3B1" FontSize="14" Margin="0,6,0,0"/>
               <TextBlock x:Name="FoundLabel" Style="{StaticResource Label}" Margin="0,28,0,8"/>
             </StackPanel>
             <StackPanel DockPanel.Dock="Bottom">
               <StackPanel Orientation="Horizontal" Margin="2,10,0,0">
                 <Button x:Name="BrowseBtn" Style="{StaticResource Link}"/>
-                <TextBlock Text="  ·  " Foreground="#5E6270"/>
-                <TextBlock x:Name="DropHint" Foreground="#7E8290"/>
+                <TextBlock Text="  ·  " Foreground="#4E6E70"/>
+                <TextBlock x:Name="DropHint" Foreground="#7D9897"/>
               </StackPanel>
               <TextBlock x:Name="Note0" Foreground="#FF7A7A" TextWrapping="Wrap" Margin="2,8,0,0" Visibility="Collapsed"/>
               <Grid Margin="0,16,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
-                <Border Width="18" Height="18" CornerRadius="9" BorderBrush="#6A6E7B" BorderThickness="1.3" VerticalAlignment="Top" Margin="0,1,10,0">
-                  <TextBlock Text="i" FontSize="11" FontWeight="Bold" Foreground="#9A9EAB" HorizontalAlignment="Center" Margin="0,-1,0,0"/></Border>
-                <TextBlock x:Name="DiscInfo" Grid.Column="1" Foreground="#8B8F9C" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
+                <Border Width="18" Height="18" CornerRadius="9" BorderBrush="#5C7C7E" BorderThickness="1.3" VerticalAlignment="Top" Margin="0,1,10,0">
+                  <TextBlock Text="i" FontSize="11" FontWeight="Bold" Foreground="#9DB3B1" HorizontalAlignment="Center" Margin="0,-1,0,0"/></Border>
+                <TextBlock x:Name="DiscInfo" Grid.Column="1" Foreground="#8AA3A2" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
               </Grid>
             </StackPanel>
             <Border Style="{StaticResource Panel}">
               <Grid>
                 <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="DiscList"/></ScrollViewer>
-                <TextBlock x:Name="DiscHint" Foreground="#7E8290" HorizontalAlignment="Center" VerticalAlignment="Center"
+                <TextBlock x:Name="DiscHint" Foreground="#7D9897" HorizontalAlignment="Center" VerticalAlignment="Center"
                            TextAlignment="Center" TextWrapping="Wrap" Margin="30,0"/>
               </Grid>
             </Border>
@@ -222,19 +219,19 @@ function Get-Disc([string]$path) {
 
           <!-- 1: where, the HD textures, the shortcuts -->
           <StackPanel x:Name="Page1" Visibility="Collapsed">
-            <TextBlock x:Name="OptTitle" FontSize="30" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-            <TextBlock x:Name="OptSub" Foreground="#9A9EAB" FontSize="14" Margin="0,6,0,0"/>
+            <TextBlock x:Name="OptTitle" FontSize="32" FontWeight="Black" FontFamily="Segoe UI Black, Segoe UI" Foreground="#F6EBCB"/>
+            <TextBlock x:Name="OptSub" Foreground="#9DB3B1" FontSize="14" Margin="0,6,0,0"/>
             <TextBlock x:Name="DirLabel" Style="{StaticResource Label}" Margin="0,26,0,8"/>
             <Border Style="{StaticResource Panel}" Padding="14,4,5,4">
               <Grid><Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                <TextBox x:Name="DirBox" Background="Transparent" BorderThickness="0" Foreground="#E6E7EB" CaretBrush="White"
+                <TextBox x:Name="DirBox" Background="Transparent" BorderThickness="0" Foreground="#EDE4CF" CaretBrush="White"
                          FontFamily="Cascadia Mono, Consolas" FontSize="13" VerticalAlignment="Center"/>
                 <Button x:Name="ChangeBtn" Grid.Column="1" Style="{StaticResource Ghost}"/>
               </Grid>
             </Border>
-            <TextBlock x:Name="SizeNote" Foreground="#7E8290" FontSize="12" Margin="2,8,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="SizeNote" Foreground="#7D9897" FontSize="12" Margin="2,8,0,0" TextWrapping="Wrap"/>
             <TextBlock x:Name="HdLabel" Style="{StaticResource Label}" Margin="0,22,0,6"/>
-            <TextBlock x:Name="HdSub" Foreground="#9A9EAB" FontSize="12" Margin="0,0,0,10" TextWrapping="Wrap"/>
+            <TextBlock x:Name="HdSub" Foreground="#9DB3B1" FontSize="12" Margin="0,0,0,10" TextWrapping="Wrap"/>
             <Border Style="{StaticResource Panel}" Padding="16,4"><WrapPanel x:Name="HdList"/></Border>
             <WrapPanel Margin="2,16,0,0">
               <CheckBox x:Name="DesktopChk" IsChecked="True" Margin="0,0,28,0"/>
@@ -242,40 +239,40 @@ function Get-Disc([string]$path) {
             </WrapPanel>
             <TextBlock x:Name="Note1" Foreground="#FF7A7A" TextWrapping="Wrap" Margin="2,10,0,0" Visibility="Collapsed"/>
             <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
-              <Border Width="18" Height="18" CornerRadius="9" BorderBrush="#6A6E7B" BorderThickness="1.3" VerticalAlignment="Top" Margin="0,1,10,0">
-                <TextBlock Text="i" FontSize="11" FontWeight="Bold" Foreground="#9A9EAB" HorizontalAlignment="Center" Margin="0,-1,0,0"/></Border>
-              <TextBlock x:Name="HdInfo" Grid.Column="1" Foreground="#8B8F9C" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
+              <Border Width="18" Height="18" CornerRadius="9" BorderBrush="#5C7C7E" BorderThickness="1.3" VerticalAlignment="Top" Margin="0,1,10,0">
+                <TextBlock Text="i" FontSize="11" FontWeight="Bold" Foreground="#9DB3B1" HorizontalAlignment="Center" Margin="0,-1,0,0"/></Border>
+              <TextBlock x:Name="HdInfo" Grid.Column="1" Foreground="#8AA3A2" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
             </Grid>
           </StackPanel>
 
           <!-- 2: the build -->
           <StackPanel x:Name="Page2" Visibility="Collapsed">
-            <TextBlock x:Name="WorkTitle" FontSize="30" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-            <TextBlock x:Name="WorkSub" Foreground="#9A9EAB" FontSize="14" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="WorkTitle" FontSize="32" FontWeight="Black" FontFamily="Segoe UI Black, Segoe UI" Foreground="#F6EBCB"/>
+            <TextBlock x:Name="WorkSub" Foreground="#9DB3B1" FontSize="14" Margin="0,6,0,0" TextWrapping="Wrap"/>
             <TextBlock x:Name="StepsLabel" Style="{StaticResource Label}" Margin="0,26,0,8"/>
             <Border Style="{StaticResource Panel}" Padding="18,6"><StackPanel x:Name="WorkList"/></Border>
             <TextBlock x:Name="NowText" FontSize="14" FontWeight="SemiBold" Margin="0,18,0,10" TextTrimming="CharacterEllipsis"/>
-            <Border x:Name="BarBack" Height="6" CornerRadius="3" Background="#2A2C33" ClipToBounds="True">
-              <Border x:Name="BarFill" HorizontalAlignment="Left" Width="0" CornerRadius="3" Background="#3D5AFE"/></Border>
-            <TextBlock x:Name="DetailText" Foreground="#7E8290" FontFamily="Cascadia Mono, Consolas" FontSize="11.5"
+            <Border x:Name="BarBack" Height="6" CornerRadius="3" Background="#1C3238" ClipToBounds="True">
+              <Border x:Name="BarFill" HorizontalAlignment="Left" Width="0" CornerRadius="3" Background="#F2A230"/></Border>
+            <TextBlock x:Name="DetailText" Foreground="#7D9897" FontFamily="Cascadia Mono, Consolas" FontSize="11.5"
                        Margin="0,10,0,0" TextTrimming="CharacterEllipsis"/>
           </StackPanel>
 
           <!-- 3: play -->
           <StackPanel x:Name="Page3" Visibility="Collapsed">
-            <TextBlock x:Name="DoneTitle" FontSize="30" FontWeight="Bold" FontFamily="Segoe UI Variable Display, Segoe UI"/>
-            <TextBlock x:Name="DoneSub" Foreground="#9A9EAB" FontSize="14" Margin="0,6,0,0" TextWrapping="Wrap"/>
+            <TextBlock x:Name="DoneTitle" FontSize="32" FontWeight="Black" FontFamily="Segoe UI Black, Segoe UI" Foreground="#F6EBCB"/>
+            <TextBlock x:Name="DoneSub" Foreground="#9DB3B1" FontSize="14" Margin="0,6,0,0" TextWrapping="Wrap"/>
             <StackPanel x:Name="FailBox" Visibility="Collapsed" Margin="0,22,0,0">
               <Border Background="#2A1A1D" BorderBrush="#4A262B" BorderThickness="1" CornerRadius="10" Padding="16,12">
                 <StackPanel><StackPanel x:Name="FailList"/>
                   <Button x:Name="LogBtn" Style="{StaticResource Link}" Margin="0,8,0,0" HorizontalAlignment="Left"/></StackPanel></Border>
             </StackPanel>
             <TextBlock x:Name="DonateLabel" Style="{StaticResource Label}" Margin="0,30,0,8"/>
-            <TextBlock x:Name="FreeText" Foreground="#9A9EAB" FontSize="13" TextWrapping="Wrap" LineHeight="20"/>
+            <TextBlock x:Name="FreeText" Foreground="#9DB3B1" FontSize="13" TextWrapping="Wrap" LineHeight="20"/>
             <WrapPanel x:Name="DonateRow" Margin="0,16,0,0"/>
             <Grid Margin="0,14,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/></Grid.ColumnDefinitions>
               <Image x:Name="LockIcon" Width="12" Height="12" VerticalAlignment="Top" Margin="2,3,10,0"/>
-              <TextBlock x:Name="TrustText" Grid.Column="1" Foreground="#7E8290" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
+              <TextBlock x:Name="TrustText" Grid.Column="1" Foreground="#7D9897" FontSize="12" TextWrapping="Wrap" LineHeight="18"/>
             </Grid>
           </StackPanel>
         </Grid>
@@ -284,16 +281,17 @@ function Get-Disc([string]$path) {
         <Grid Grid.Row="2" Margin="56,18,56,30">
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel x:Name="DiskBox" VerticalAlignment="Center">
-            <Border Width="240" Height="4" CornerRadius="2" Background="#2A2C33" HorizontalAlignment="Left">
-              <Border x:Name="DiskFill" HorizontalAlignment="Left" Width="0" CornerRadius="2" Background="#34C77B"/></Border>
-            <TextBlock x:Name="DiskText" Foreground="#9A9EAB" FontSize="12" Margin="0,8,0,0"/>
+            <Border Width="240" Height="4" CornerRadius="2" Background="#1C3238" HorizontalAlignment="Left">
+              <Border x:Name="DiskFill" HorizontalAlignment="Left" Width="0" CornerRadius="2" Background="#7BD94A"/></Border>
+            <TextBlock x:Name="DiskText" Foreground="#9DB3B1" FontSize="12" Margin="0,8,0,0"/>
           </StackPanel>
-          <TextBlock x:Name="TimeText" Grid.Column="1" Foreground="#7E8290" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          <TextBlock x:Name="TimeText" Grid.Column="1" Foreground="#7D9897" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"/>
           <StackPanel Grid.Column="2" Orientation="Horizontal">
             <Button x:Name="BackBtn" Style="{StaticResource Ghost}" Margin="0,0,10,0" Padding="18,11"/>
             <Button x:Name="NextBtn" Style="{StaticResource Primary}"/>
           </StackPanel>
         </Grid>
+      </Grid>
       </Grid>
     </Border>
   </Grid>
@@ -306,7 +304,7 @@ $xaml.SelectNodes('//*[@*[local-name()="Name"]]') | ForEach-Object {
 }
 $bc = New-Object Windows.Media.BrushConverter
 function Br([string]$hex) { $bc.ConvertFromString($hex) }
-function New-Text([string]$text, [double]$size = 13, [string]$color = '#F2F3F5', [string]$weight = 'Normal') {
+function New-Text([string]$text, [double]$size = 13, [string]$color = '#F4ECD8', [string]$weight = 'Normal') {
   $t = New-Object Windows.Controls.TextBlock
   $t.Text = $text; $t.FontSize = $size; $t.Foreground = Br $color; $t.FontWeight = $weight
   $t.VerticalAlignment = 'Center'; $t
@@ -342,11 +340,11 @@ $StepNames = @((T 'UiStepDiscs'), (T 'UiStepOptions'), (T 'UiStepBuild'), (T 'Ui
 function Show-Steps([int]$cur) {
   $ui.Steps.Children.Clear()
   for ($i = 0; $i -lt $StepNames.Count; $i++) {
-    if ($i) { $c = New-Text ([char]0xE76C) 9 '#5E6270'; $c.FontFamily = 'Segoe MDL2 Assets'; $c.Margin = '6,0'; [void]$ui.Steps.Children.Add($c) }
+    if ($i) { $c = New-Text ([char]0xE76C) 9 '#4E6E70'; $c.FontFamily = 'Segoe MDL2 Assets'; $c.Margin = '6,0'; [void]$ui.Steps.Children.Add($c) }
     $pill = New-Object Windows.Controls.Border
     $pill.CornerRadius = 14; $pill.Padding = '14,5'
-    $t = New-Text $StepNames[$i] 12.5 $(if ($i -eq $cur) { '#FFFFFF' } elseif ($i -lt $cur) { '#C4C7D0' } else { '#7E8290' }) $(if ($i -eq $cur) { 'SemiBold' } else { 'Normal' })
-    if ($i -eq $cur) { $pill.Background = Br '#3D5AFE' }
+    $t = New-Text $StepNames[$i] 12.5 $(if ($i -eq $cur) { '#1E1204' } elseif ($i -lt $cur) { '#CFDCD8' } else { '#7D9897' }) $(if ($i -eq $cur) { 'Bold' } else { 'Normal' })
+    if ($i -eq $cur) { $pill.Background = Br '#F2A230' }
     $pill.Child = $t
     [void]$ui.Steps.Children.Add($pill)
   }
@@ -370,23 +368,23 @@ function Refresh-Discs {
     [void]$row.Children.Add($d.Check)
     $mid = New-Object Windows.Controls.StackPanel; $mid.VerticalAlignment = 'Center'
     $top = New-Object Windows.Controls.StackPanel; $top.Orientation = 'Horizontal'
-    [void]$top.Children.Add((New-Text $GameName[$d.Info.Game] 14 '#F2F3F5' 'SemiBold'))
-    $tag = New-Object Windows.Controls.Border; $tag.CornerRadius = 4; $tag.Background = Br '#2A2D36'; $tag.Padding = '6,1'; $tag.Margin = '10,0,0,0'
-    $tag.Child = New-Text ('{0}  {1}' -f $d.Info.Region, $d.Info.Serial) 10.5 '#9A9EAB'
+    [void]$top.Children.Add((New-Text $GameName[$d.Info.Game] 14 '#F4ECD8' 'SemiBold'))
+    $tag = New-Object Windows.Controls.Border; $tag.CornerRadius = 4; $tag.Background = Br '#1C3238'; $tag.Padding = '6,1'; $tag.Margin = '10,0,0,0'
+    $tag.Child = New-Text ('{0}  {1}' -f $d.Info.Region, $d.Info.Serial) 10.5 '#9DB3B1'
     [void]$top.Children.Add($tag)
     [void]$mid.Children.Add($top)
-    $p = New-Text $d.Info.Path 11.5 '#7E8290'; $p.FontFamily = 'Cascadia Mono, Consolas'; $p.TextTrimming = 'CharacterEllipsis'; $p.Margin = '0,3,0,0'
+    $p = New-Text $d.Info.Path 11.5 '#7D9897'; $p.FontFamily = 'Cascadia Mono, Consolas'; $p.TextTrimming = 'CharacterEllipsis'; $p.Margin = '0,3,0,0'
     $p.ToolTip = $d.Info.Path
     [void]$mid.Children.Add($p)
     $mid.Margin = '12,0,16,0'
     [Windows.Controls.Grid]::SetColumn($mid, 1); [void]$row.Children.Add($mid)
-    $sz = New-Text (Format-Size $d.Info.Size) 12 '#7E8290'; [Windows.Controls.Grid]::SetColumn($sz, 2); [void]$row.Children.Add($sz)
+    $sz = New-Text (Format-Size $d.Info.Size) 12 '#7D9897'; [Windows.Controls.Grid]::SetColumn($sz, 2); [void]$row.Children.Add($sz)
     $x = New-Object Windows.Controls.Button; $x.Style = $win.Resources['Glyph']; $x.Content = [string][char]0xE711; $x.Margin = '8,0,-8,0'
     $x.Tag = $d; $x.ToolTip = T 'UiRemove'
     $x.Add_Click({ param($s) [void]$discs.Remove($s.Tag); Refresh-Discs; Update-Footer })
     [Windows.Controls.Grid]::SetColumn($x, 3); [void]$row.Children.Add($x)
     if ($i) {
-      $line = New-Object Windows.Controls.Border; $line.Height = 1; $line.Background = Br '#25272D'; $line.Margin = '16,0'
+      $line = New-Object Windows.Controls.Border; $line.Height = 1; $line.Background = Br '#1D3338'; $line.Margin = '16,0'
       [void]$ui.DiscList.Children.Add($line)
     }
     [void]$ui.DiscList.Children.Add($row)
@@ -396,7 +394,8 @@ function Refresh-Discs {
 }
 function Add-Disc($info, [bool]$check) {
   if (-not $info) { return }
-  foreach ($d in $discs) { if ($d.Info.Path -eq $info.Path) { if ($check) { $d.Check.IsChecked = $true }; return } }
+  # the same disc twice (a copy in another folder): one row is enough
+  foreach ($d in $discs) { if ($d.Info.Path -eq $info.Path -or ($d.Info.Game -eq $info.Game -and $d.Info.Serial -eq $info.Serial -and $d.Info.Size -eq $info.Size)) { if ($check) { $d.Check.IsChecked = $true }; return } }
   $cb = New-Object Windows.Controls.CheckBox
   $cb.VerticalAlignment = 'Center'
   $d = [pscustomobject]@{ Info = $info; Check = $cb }
@@ -503,7 +502,7 @@ function Update-Footer {
     $ui.DiskText.Text = F 'UiNeeds' $script:needGB $drive $script:freeGB
     $frac = if ($script:freeGB -gt 0) { [Math]::Min(1, $script:needGB / $script:freeGB) } else { 1 }
     $ui.DiskFill.Width = [Math]::Max(4, 240 * $frac)
-    $ui.DiskFill.Background = Br $(if ($script:needGB -gt $script:freeGB) { '#FF5A5F' } else { '#34C77B' })
+    $ui.DiskFill.Background = Br $(if ($script:needGB -gt $script:freeGB) { '#FF5A5F' } else { '#7BD94A' })
   } else { $ui.DiskText.Text = F 'UiNeedsOnly' $script:needGB; $ui.DiskFill.Width = 0 }
   $ui.TimeText.Text = if ($games.Count) { F 'UiAbout' (Format-Time $min) } else { '' }
   if ($script:page -eq 0) { $ui.NextBtn.IsEnabled = $games.Count -gt 0 }
@@ -516,11 +515,11 @@ function Add-WorkRow([string]$id, [string]$text) {
   foreach ($w in 'Auto', '*', 'Auto') { $cd = New-Object Windows.Controls.ColumnDefinition
     $cd.Width = if ($w -eq '*') { New-Object Windows.GridLength 1, 'Star' } else { [Windows.GridLength]::Auto }; $row.ColumnDefinitions.Add($cd) }
   $icon = New-Object Windows.Controls.Border; $icon.Width = 20; $icon.Height = 20; $icon.CornerRadius = 10; $icon.BorderThickness = 1.5
-  $icon.BorderBrush = Br '#4A4D57'; $icon.Margin = '0,0,14,0'
+  $icon.BorderBrush = Br '#3A5A5E'; $icon.Margin = '0,0,14,0'
   $glyph = New-Text '' 9 '#FFFFFF' 'Bold'; $glyph.FontFamily = 'Segoe MDL2 Assets'; $glyph.HorizontalAlignment = 'Center'; $icon.Child = $glyph
   [void]$row.Children.Add($icon)
-  $t = New-Text $text 13 '#9A9EAB'; [Windows.Controls.Grid]::SetColumn($t, 1); [void]$row.Children.Add($t)
-  $tm = New-Text '' 12 '#7E8290'; [Windows.Controls.Grid]::SetColumn($tm, 2); [void]$row.Children.Add($tm)
+  $t = New-Text $text 13 '#9DB3B1'; [Windows.Controls.Grid]::SetColumn($t, 1); [void]$row.Children.Add($t)
+  $tm = New-Text '' 12 '#7D9897'; [Windows.Controls.Grid]::SetColumn($tm, 2); [void]$row.Children.Add($tm)
   [void]$ui.WorkList.Children.Add($row)
   $work[$id] = @{ Text = $t; Icon = $icon; Glyph = $glyph; Time = $tm; State = 'wait'; Start = $null }
 }
@@ -529,8 +528,8 @@ function Set-Work([string]$id, [string]$state) {
   if ($w.State -eq 'fail') { return }
   $w.State = $state
   switch ($state) {
-    'run' { $w.Start = Get-Date; $w.Icon.BorderBrush = Br '#3D5AFE'; $w.Icon.Background = Br '#203D5AFE'; $w.Text.Foreground = Br '#FFFFFF' }
-    'done' { $w.Icon.BorderBrush = Br '#34C77B'; $w.Icon.Background = Br '#34C77B'; $w.Glyph.Text = [string][char]0xE73E; $w.Text.Foreground = Br '#C4C7D0' }
+    'run' { $w.Start = Get-Date; $w.Icon.BorderBrush = Br '#F2A230'; $w.Icon.Background = Br '#33F2A230'; $w.Text.Foreground = Br '#FFFFFF' }
+    'done' { $w.Icon.BorderBrush = Br '#7BD94A'; $w.Icon.Background = Br '#7BD94A'; $w.Glyph.Text = [string][char]0xE73E; $w.Text.Foreground = Br '#CFDCD8' }
     'fail' { $w.Icon.BorderBrush = Br '#FF5A5F'; $w.Icon.Background = Br '#FF5A5F'; $w.Glyph.Text = [string][char]0xE8BB; $w.Text.Foreground = Br '#FF9A9A' }
   }
 }
@@ -701,6 +700,9 @@ $scanTimer.Add_Tick({
   Refresh-Discs; Update-Footer
 })
 $scanTimer.Start()
+
+# bare bones: the long explanations stay out of the window
+foreach ($e in $ui.DiscInfo.Parent, $ui.HdInfo.Parent, $ui.SizeNote, $ui.DropHint, $ui.DropHint.Parent.Children[1]) { $e.Visibility = 'Collapsed' }
 
 Set-Page 0
 Refresh-Discs
