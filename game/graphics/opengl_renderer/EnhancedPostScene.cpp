@@ -926,7 +926,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                    c.color[0], c.color[1], c.color[2], c.pos[3] / kMeter);
         }
       }
-      c.color[3] = 0.f;
+      // (0.25: a fire under a roof, its light reaches further across the floor, enh_composite's
+      // tune_fire_floor; still lit as a lamp, with shadows)
+      c.color[3] = (warm && m_enclosed) ? 0.25f : 0.f;
       c.score = bright * c.pos[3] / (dist + c.pos[3]);
       // a light is often drawn as two glows at the same spot: keep the one
       bool dup = false;
