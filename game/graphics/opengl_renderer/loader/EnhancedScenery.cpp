@@ -19,6 +19,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedVegetation.h"
 #include "game/graphics/pipelines/opengl.h"
@@ -1321,7 +1322,11 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
                   const TfragRenderSettings& settings,
                   SharedRenderState* render_state,
                   ScopedProfilerNode& prof) {
-  if (!scenery || g_enhanced_scenery_dist <= 0.f) {
+  // (test: scenery.test_dist overrides the menu's detailed distance, 0 = none drawn, for A/B costs
+  // in one run)
+  static const EnhancedTune k_test_dist("scenery.test_dist", -1.f);
+  const float dist = k_test_dist >= 0.f ? (float)k_test_dist : g_enhanced_scenery_dist;
+  if (!scenery || dist <= 0.f) {
     return;
   }
   auto& lib = library();
@@ -1333,8 +1338,10 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
   // each version reaches one detailed distance further (the impostor: to kImpReach); a copy near
   // the end of its version's reach swaps to the next over the last part of it (both drawn,
   // complementary pixels: shrub.frag's enh_xfade)
-  const float step = g_enhanced_scenery_dist * g_enhanced_scenery_scale * kMeter;
+  const float step = dist * g_enhanced_scenery_scale * kMeter;
   const float swap = step * 0.2f;
+  static const EnhancedTune k_lod_size("scenery.lod_size", 2.f);  // m (0: every copy at step)
+  static const EnhancedTune k_lod_min("scenery.lod_min", 0.3f);
   const float far_end = data.impostors ? kImpReach * kMeter : step * kFarReach;
   const float thin_from = std::max(far_end * 0.5f, (kFarLods + 1.5f) * step);
   const auto& cam = settings.camera.trans;
@@ -1381,10 +1388,18 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
           last_here = kFarLods;
         }
       }
-      int k = std::min((int)(d / step), last_here);
-      float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
+      // (small copies swap sooner: a version's reach scales with the copy's size, down to
+      // scenery.lod_min of it below scenery.lod_size m of radius; a 0.65 m pebble heap of 3000
+      // triangles was a few pixels at 60 m)
+      float st = step, sw = swap;
+      if (k_lod_size > 0.f) {
+        st = step * std::clamp(s.w() / (k_lod_size * kMeter), std::min((float)k_lod_min, 1.f), 1.f);
+        sw = st * 0.2f;
+      }
+      int k = std::min((int)(d / st), last_here);
+      float into = d - (k + 1) * st + sw;  // how far into the swap to the next version
       if (k < last_here && into > 0.f) {
-        float f = std::min(into / swap, 1.f);
+        float f = std::min(into / sw, 1.f);
         inst.col[1][3] = f;
         inst.col[2][3] = -1.f;
         out[k].push_back(inst);
@@ -1407,6 +1422,51 @@ void draw_scenery(const std::shared_ptr<void>& scenery,
         out[k].push_back(inst);
       }
       any = true;
+    }
+  }
+  {
+    // (test: scenery.test_skip, a mask of versions not drawn (1 the models, 2 their far versions,
+    // 4 the impostors); scenery.test_log 1: the copies and triangles drawn per version, every 300
+    // draws of a tree)
+    static const EnhancedTune k_skip("scenery.test_skip", 0.f);
+    static const EnhancedTune k_log("scenery.test_log", 0.f);
+    const int skip = (int)k_skip;
+    static int calls = 0;
+    const bool log_now = k_log > 0.f && (++calls % 300) == 0;
+    size_t n[kFarLods + 2] = {}, tris[kFarLods + 2] = {};
+    for (size_t bi = 0; bi < data.batches.size(); bi++) {
+      int m = data.batches[bi].mesh;  // (each version's mesh: the last far version stands in)
+      for (int k = 0; k < kFarLods + 2; k++) {
+        auto& o = lib.copies[bi][k];
+        if (log_now) {
+          n[k] += o.size();
+          if (k <= kFarLods && m >= 0) {
+            tris[k] += o.size() * lib.meshes[m].indices.size() / 3;
+          }
+        }
+        if (skip & (1 << k)) {
+          o.clear();
+        }
+        if (k < kFarLods && m >= 0 && lib.meshes[m].far_lod >= 0) {
+          m = lib.meshes[m].far_lod;
+        }
+      }
+    }
+    if (log_now) {
+      lg::info("[enhanced] scenery draw: {} batches, copies {} / {} / {}, triangles {}k / {}k",
+               data.batches.size(), n[0], n[1], n[2], tris[0] / 1000, tris[1] / 1000);
+      if (k_log > 1.f) {
+        for (size_t bi = 0; bi < data.batches.size(); bi++) {
+          const auto& b = data.batches[bi];
+          const auto& mesh = lib.meshes[b.mesh];
+          const int f = mesh.far_lod;
+          lg::info("[enhanced] scenery batch {}: {} tris {} / {}, radius {:.2f} m, copies {} / {} / {}",
+                   bi, mesh.file, mesh.indices.size() / 3,
+                   f >= 0 ? lib.meshes[f].indices.size() / 3 : 0,
+                   b.spheres.empty() ? 0.f : b.spheres[0].w() / kMeter, lib.copies[bi][0].size(),
+                   lib.copies[bi][1].size(), lib.copies[bi][2].size());
+        }
+      }
     }
   }
   if (!any) {
