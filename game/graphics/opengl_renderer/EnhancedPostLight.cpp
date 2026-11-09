@@ -2431,7 +2431,7 @@ void EnhancedPost::draw_clouds(GLuint id,
   glActiveTexture(GL_TEXTURE0);
   // the low sun's rays through the gaps in the clouds at the clouds' size, by enh_cloud_rays (its
   // own program: in the composite their 20 reads a pixel took 1.4 ms at 2560x1600, desert 16h),
-  // read back bilinearly on unit 30 (cloud_info.w 1). Tuning "clouds.rays_slim" 0: in the composite
+  // read back bilinearly on unit 33 (cloud_info.w 1). Tuning "clouds.rays_slim" 0: in the composite
   static const EnhancedTune t_rays_slim("clouds.rays_slim", 1.f);
   const Shader& rays = render_state->shaders[ShaderId::ENH_CLOUD_RAYS];
   const bool use_rays = (float)t_rays_slim > 0.5f && rays.okay();
@@ -2461,10 +2461,10 @@ void EnhancedPost::draw_clouds(GLuint id,
     ENH_TIMED("enh-cloud-rays", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
     prof.add_draw_call();
     glUseProgram(id);
-    glActiveTexture(GL_TEXTURE30);
+    glActiveTexture(GL_TEXTURE0 + 33);
     glBindTexture(GL_TEXTURE_2D, m_rays_tex);
     glActiveTexture(GL_TEXTURE0);
-    glUniform1i(glGetUniformLocation(id, "tex_T30"), 30);
+    glUniform1i(glGetUniformLocation(id, "tex_T33"), 33);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
@@ -2481,7 +2481,7 @@ void EnhancedPost::draw_sun_half(GLuint id,
                                  SharedRenderState* render_state) {
   // the world's sun shadow looks (the map pushed off the surface, the rough one from 2 m toward the
   // sun, the contact march) at one pixel per 2x2 by enh_sun_half, the composite's file with only them
-  // compiled in; the composite reads them back on unit 31 with the occlusion's texels and depth
+  // compiled in; the composite reads them back on unit 34 with the occlusion's texels and depth
   // weights (sun_half_on 1). Characters keep theirs at full size. At 2560x1600: composite -0.6 ms for
   // a 0.33-0.45 ms pass (desert 16h, Spargus 18h), the picture equal even rendered at 640x360.
   // Tuning "shadow.half" 0: all in the composite, as before
@@ -2521,10 +2521,10 @@ void EnhancedPost::draw_sun_half(GLuint id,
   ENH_TIMED("enh-sun-half", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   prof.add_draw_call();
   glUseProgram(id);
-  glActiveTexture(GL_TEXTURE31);
+  glActiveTexture(GL_TEXTURE0 + 34);
   glBindTexture(GL_TEXTURE_2D, m_sun_half_tex);
   glActiveTexture(GL_TEXTURE0);
-  glUniform1i(glGetUniformLocation(id, "tex_T31"), 31);
+  glUniform1i(glGetUniformLocation(id, "tex_T34"), 34);
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   glViewport(0, 0, w, h);
 }

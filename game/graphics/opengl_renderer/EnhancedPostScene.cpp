@@ -53,6 +53,351 @@ LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"},
     g_lag_end{"end"};
 }  // namespace
 
+// post.hiz: the depth copy's view depths (sky and the sea itself: far) and their mip chain of
+// nearest depths, R32F, at most 10 levels (a 1080p frame's tiles up to 512 pixels). ~0.05 ms.
+void EnhancedPost::build_hiz(GLuint screen_vao,
+                             SharedRenderState* render_state,
+                             ScopedProfilerNode& prof) {
+  const int w = m_ssao_w, h = m_ssao_h;
+  if (w != m_hiz_w || h != m_hiz_h || !m_hiz_tex) {
+    if (m_hiz_tex) {
+      glDeleteTextures(1, &m_hiz_tex);
+      glDeleteFramebuffers(1, &m_hiz_fbo);
+    }
+    m_hiz_w = w;
+    m_hiz_h = h;
+    m_hiz_levels = 1;
+    while (m_hiz_levels < 10 && (w >> m_hiz_levels) > 0 && (h >> m_hiz_levels) > 0) {
+      m_hiz_levels++;
+    }
+    glGenTextures(1, &m_hiz_tex);
+    glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+    // (each level half the one before, rounded down: the shaders take level L as size >> L)
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glTexImage2D(GL_TEXTURE_2D, l, GL_R32F, std::max(1, w >> l), std::max(1, h >> l), 0, GL_RED,
+                   GL_FLOAT, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &m_hiz_fbo);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  const bool sea = m_far_ocean_ready && m_ocean_w == w && m_ocean_h == h;
+  auto& sh = render_state->shaders[ShaderId::ENH_HIZ];
+  sh.activate();
+  const auto id = sh.id();
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(id, "has_sea"), sea ? 1 : 0);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_hiz_fbo);
+  ENH_TIMED("enh-hiz", {
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hiz_tex, l);
+      glViewport(0, 0, std::max(1, w >> l), std::max(1, h >> l));
+      if (l == 0) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sea ? m_ocean_depth[2] : m_black_tex);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+        glUniform1i(glGetUniformLocation(id, "mode"), 0);
+      } else {
+        // (reads only the level before: base = max = l - 1, no feedback with the level drawn)
+        glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, l - 1);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, l - 1);
+        glUniform1i(glGetUniformLocation(id, "mode"), 1);
+        glUniform2i(glGetUniformLocation(id, "src_size"), std::max(1, w >> (l - 1)),
+                    std::max(1, h >> (l - 1)));
+      }
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      prof.add_draw_call();
+    }
+  });
+  glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, m_hiz_levels - 1);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  m_hiz_ready = true;
+}
+
+// post.sky_map (tuning.json, switches in a running game)
+bool EnhancedPost::sky_map_on() const {
+  static const EnhancedTune t_sky_map("post.sky_map", 1.f);
+  return (float)t_sky_map > 0.5f;
+}
+
+// the sky map: kSkyMapSize^2 rays straight down from high over the camera, a band of rows a frame
+// into the back texture; swapped in whole. Traced again when the camera has gone a quarter of the
+// map from its center or the levels change
+void EnhancedPost::build_sky_map(GLuint screen_vao,
+                                 SharedRenderState* render_state,
+                                 ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!sky_map_on() || !m_rt_ready || !cam.valid) {
+    if (!sky_map_on()) {
+      m_sky_valid = false;
+      m_sky_row = -1;
+    }
+    return;
+  }
+  constexpr int N = kSkyMapSize;
+  const float cell = kSkyMapCell * kMeter;
+  const float half = N * cell * 0.5f;
+  if (!m_skymap_tex[0]) {
+    glGenTextures(2, m_skymap_tex);
+    glGenFramebuffers(2, m_skymap_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_skymap_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, N, N, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_skymap_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  if (m_sky_row < 0) {
+    // start a new one? (camera a quarter of the map off the front's center, other levels, none yet)
+    const float cx = m_sky_origin[0] + half, cz = m_sky_origin[1] + half;
+    const bool moved = std::abs(cam.trans[0] - cx) > half * 0.5f ||
+                       std::abs(cam.trans[2] - cz) > half * 0.5f;
+    if (!m_sky_valid || moved || m_sky_levels != m_rt_in_use) {
+      // (the corner on a 16-cell grid: the texels fall on the same world spots each time)
+      const float snap = 16.f * cell;
+      m_sky_back_origin[0] = std::floor((cam.trans[0] - half) / snap) * snap;
+      m_sky_back_origin[1] = std::floor((cam.trans[2] - half) / snap) * snap;
+      m_sky_top = cam.trans[1] + 300.f * kMeter;
+      m_sky_levels = m_rt_in_use;
+      m_sky_row = 0;
+    }
+  }
+  if (m_sky_row < 0) {
+    return;
+  }
+  // (tuning.json "post.sky_map_rows": rows traced a frame)
+  static const EnhancedTune t_rows("post.sky_map_rows", 32.f);
+  const int band = std::clamp((int)(float)t_rows, 1, N);
+  const int back = 1 - m_sky_front;
+  GLint vp[4], sc[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_SCISSOR_BOX, sc);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& sh = render_state->shaders[ShaderId::ENH_SKY_MAP];
+  sh.activate();
+  const auto id = sh.id();
+  for (int i = 0; i < 2; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  glUniform4f(glGetUniformLocation(id, "grid"), m_sky_back_origin[0], m_sky_back_origin[1], cell,
+              m_sky_top);
+  glUniform1f(glGetUniformLocation(id, "span"), 600.f * kMeter);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[back]);
+  const int rows = std::min(band, N - m_sky_row);
+  glViewport(0, 0, N, N);
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(0, m_sky_row, N, rows);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glScissor(sc[0], sc[1], sc[2], sc[3]);
+  if (!had_scissor) {
+    glDisable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_sky_row += rows;
+  if (m_sky_row >= N) {
+    m_sky_front = back;
+    m_sky_origin[0] = m_sky_back_origin[0];
+    m_sky_origin[1] = m_sky_back_origin[1];
+    m_sky_valid = true;
+    m_sky_row = -1;
+    // (tuning.json "post.sky_map_find" 1: logs the roofed floors nearest the camera, to test at;
+    // a floor: the lowest surface, the next one over it 2.2-12 m higher, over all of a 5x5 block)
+    static const EnhancedTune t_find("post.sky_map_find", 0.f);
+    if ((float)t_find > 0.5f) {
+      std::vector<float> px((size_t)N * N * 4);
+      glReadPixels(0, 0, N, N, GL_RGBA, GL_FLOAT, px.data());
+      std::vector<float> floor_y((size_t)N * N, -1e30f), head((size_t)N * N, 0.f);
+      for (int i = 0; i < N * N; i++) {
+        const float* h = &px[(size_t)i * 4];
+        int lo = -1;
+        for (int k = 0; k < 4; k++) {
+          if (h[k] > -1e29f) {
+            lo = k;
+          }
+        }
+        if (lo >= 1) {
+          floor_y[i] = h[lo];
+          head[i] = h[lo - 1] - h[lo];
+        }
+      }
+      struct Spot {
+        float d2, x, y, z, head;
+      };
+      std::vector<Spot> spots;
+      for (int r = 2; r < N - 2; r++) {
+        for (int c = 2; c < N - 2; c++) {
+          bool ok = true;
+          const float f0 = floor_y[r * N + c];
+          for (int dr = -2; dr <= 2 && ok; dr++) {
+            for (int dc = -2; dc <= 2 && ok; dc++) {
+              const int j = (r + dr) * N + c + dc;
+              ok = floor_y[j] > -1e29f && std::abs(floor_y[j] - f0) < 0.3f * kMeter &&
+                   head[j] > 2.2f * kMeter && head[j] < 12.f * kMeter;
+            }
+          }
+          if (ok) {
+            const float x = m_sky_origin[0] + (c + 0.5f) * cell;
+            const float z = m_sky_origin[1] + (r + 0.5f) * cell;
+            const float dx = x - cam.trans[0], dz = z - cam.trans[2];
+            spots.push_back({dx * dx + dz * dz, x, f0, z, head[r * N + c]});
+          }
+        }
+      }
+      std::sort(spots.begin(), spots.end(),
+                [](const Spot& a, const Spot& b) { return a.d2 < b.d2; });
+      lg::info("[enhanced] sky map: {} roofed floor cells", spots.size());
+      int shown = 0;
+      for (size_t i = 0; i < spots.size() && shown < 8; i += std::max<size_t>(1, spots.size() / 8)) {
+        const auto& s = spots[i];
+        lg::info("[enhanced]   roofed floor at {:.1f},{:.1f},{:.1f} m, roof {:.1f} m over it, {:.0f} m off",
+                 s.x / kMeter, s.y / kMeter, s.z / kMeter, s.head / kMeter, std::sqrt(s.d2) / kMeter);
+        shown++;
+      }
+    }
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
+// post.probes (tuning.json, switches in a running game)
+bool EnhancedPost::probes_on() const {
+  static const EnhancedTune t_probes("post.probes", 0.f);
+  return (float)t_probes > 0.5f;
+}
+
+// the light probes: every probe of the grid around the camera traces post.probe_rays rays a frame
+// (a band of the grid in every post.probe_every: 8192 probes) and blends them over what it had;
+// the grid moves by whole cells
+void EnhancedPost::build_probes(GLuint screen_vao,
+                                SharedRenderState* render_state,
+                                ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!probes_on() || !m_rt_ready || !cam.valid || !g_enhanced_tod.valid) {
+    m_probe_valid = false;
+    return;
+  }
+  constexpr int W = kProbeX * kProbeY, H = kProbeZ;
+  const float cell = kProbeCell * kMeter;
+  if (!m_probe_tex[0]) {
+    glGenTextures(2, m_probe_tex);
+    glGenFramebuffers(2, m_probe_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_probe_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_probe_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  // the corner: the camera at the grid's middle across, a quarter up (more of it below: the ground
+  // and the characters on it), in whole cells
+  const int cc[3] = {(int)std::floor(cam.trans[0] / cell) - kProbeX / 2,
+                     (int)std::floor(cam.trans[1] / cell) - kProbeY * 3 / 4,
+                     (int)std::floor(cam.trans[2] / cell) - kProbeZ / 2};
+  const int sh[3] = {cc[0] - m_probe_cell[0], cc[1] - m_probe_cell[1], cc[2] - m_probe_cell[2]};
+  const bool keep = m_probe_valid && std::abs(sh[0]) < kProbeX && std::abs(sh[1]) < kProbeY &&
+                    std::abs(sh[2]) < kProbeZ;
+  static const EnhancedTune t_rays("post.probe_rays", 8.f);
+  static const EnhancedTune t_blend("post.probe_blend", 0.25f);
+  static const EnhancedTune t_every("post.probe_every", 8.f);
+  static const EnhancedTune t_range("post.probe_range_m", 40.f);
+  const int back = 1 - m_probe_front;
+  GLint vp[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& shd = render_state->shaders[ShaderId::ENH_PROBES];
+  shd.activate();
+  const auto id = shd.id();
+  for (int i = 0; i < 3; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glActiveTexture(GL_TEXTURE12);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, m_rt_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_probe_tex[m_probe_front]);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  float tod[8 * 4];
+  for (int p = 0; p < 8; p++) {
+    for (int ch = 0; ch < 4; ch++) {
+      u32 word = (u32)g_enhanced_tod.itimes[p / 2][(p % 2) * 2 + ch / 2];
+      u32 hw = (ch % 2) ? (word >> 16) : word;
+      tod[p * 4 + ch] = (hw & 0xff) / 64.f;
+    }
+  }
+  glUniform4fv(glGetUniformLocation(id, "rt_tod"), 8, tod);
+  glUniform4f(glGetUniformLocation(id, "grid"), cc[0] * cell, cc[1] * cell, cc[2] * cell, cell);
+  glUniform4i(glGetUniformLocation(id, "shift"), sh[0], sh[1], sh[2], keep ? 1 : 0);
+  glUniform3i(glGetUniformLocation(id, "dims"), kProbeX, kProbeY, kProbeZ);
+  m_probe_frame += 1.f;
+  if (m_probe_frame > 4096.f) {
+    m_probe_frame = 0.f;
+  }
+  glUniform1f(glGetUniformLocation(id, "frame"), m_probe_frame);
+  glUniform1f(glGetUniformLocation(id, "blend"), std::clamp((float)t_blend, 0.01f, 1.f));
+  glUniform1f(glGetUniformLocation(id, "tmax"), std::max((float)t_range, 1.f) * kMeter);
+  glUniform1i(glGetUniformLocation(id, "rays"), std::clamp((int)(float)t_rays, 1, 64));
+  glUniform1i(glGetUniformLocation(id, "every"), std::clamp((int)(float)t_every, 1, kProbeZ / 4));
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[back]);
+  glViewport(0, 0, W, H);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  if (had_scissor) {
+    glEnable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_probe_front = back;
+  for (int i = 0; i < 3; i++) {
+    m_probe_cell[i] = cc[i];
+  }
+  m_probe_valid = true;
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,
@@ -283,6 +628,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     scene_tex = resolve_taa(m_scene_tex);
   } else if (!taa) {
     m_taa_history = false;
+  }
+
+  // (post.hiz 1: the water's reflection walks a depth pyramid, 400 m instead of 80 m; 0: the old
+  // per-step march; on by default: same look as the march, +0.06..0.13 ms)
+  static const EnhancedTune t_hiz("post.hiz", 1.f);
+  // (post.hiz_surf 1: puddles, metal and glass reflect through it too, so it's built on every
+  // frame, water or not; on by default: the ctyport docks after rain look the same, the puddles'
+  // rays reach 150 m instead of ~25 m, +0.05 ms where there's no water)
+  static const EnhancedTune t_hiz_surf("post.hiz_surf", 1.f);
+  // (not used by the AO: the shipping one is the Alchemy taps, 0.07-0.18 ms at 640x360, nothing
+  // left for a pyramid to save, and it runs in prepare(), before the pyramid exists; contact
+  // shadows march 0.5 m, a few pixels)
+  m_hiz_ready = false;
+  m_hiz_surf = (float)t_hiz > 0.5f && (float)t_hiz_surf > 0.5f;
+  if ((float)t_hiz > 0.5f && have_scene &&
+      (m_hiz_surf || (m_settings.water_reflections && (m_ocean_ready || m_far_ocean_ready)))) {
+    build_hiz(screen_vao, render_state, prof);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);

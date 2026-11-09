@@ -125,6 +125,9 @@ enum class ShaderId {
   ENH_CLOUD_RAYS = 62,  // Enhanced: enh_composite with only the rays through the clouds (ENH_RAYS_ONLY)
   ENH_SUN_HALF = 63,  // Enhanced: enh_composite with only the world's sun shadow looks (ENH_SUN_HALF_ONLY)
   ENH_MOTION = 64,    // Enhanced: the characters' motion vectors for the TAA
+  ENH_HIZ = 65,     // Enhanced: the depth pyramid (post.hiz)
+  ENH_SKY_MAP = 66, // Enhanced: the open sky straight up, traced (post.sky_map)
+  ENH_PROBES = 67,  // Enhanced: light probes around the camera, traced (post.probes)
   MAX_SHADERS
 };
 

@@ -209,7 +209,12 @@ class EnhancedPost {
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
     int ray_traced = 0;  // off by default for now: still has artifacts
     // ambient occlusion traced through the levels' geometry (short rays from every pixel)
-    bool rt_ao = false;  // off for now: too slow
+    // Off, opt-in. Cost (post.rt_ao_temporal, 1 ray a pixel a frame accumulated): +0.06 ms at
+    // 640x360 in the open wascity-start courtyard, +0.5 ms in the Hip Hog (ceilings and benches
+    // inside the 3 m rays); the old 6 rays +0.26 ms outside. No visible win in either place: the
+    // screen-space AO already gives the same corners, and a roof is farther than 3 m. Occlusion by
+    // what is far (sky visibility under roofs) belongs to probes (tech-rt-probe-gi), not per pixel.
+    bool rt_ao = false;
     float rt_ao_length = 3.0f;     // meters
     float rt_ao_strength = 1.0f;
     float rt_ao_distance = 80.f;   // meters from the camera
@@ -442,10 +447,58 @@ class EnhancedPost {
   int m_gi_hist_cur = 0;
   bool m_gi_hist_valid = false;
   unsigned m_gi_frame = 0;
+  // the traced occlusion accumulated over frames (post.rt_ao_temporal): RG16F at the occlusion's
+  // size, r the occlusion, g the view distance (m); written in turn, each fbo with m_ao_tex[0]
+  GLuint m_rt_hist_fbo[2] = {0, 0};
+  GLuint m_rt_hist_tex[2] = {0, 0};
+  int m_rt_hist_cur = 0;
+  bool m_rt_hist_valid = false;
+  bool rt_ao_on() const;
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
   std::array<float, 4> m_last_proj = {0, 0, 1, 1};
+  // Hi-Z: the nearest view depth per tile, a mip chain over the depth copy (sky and sea = far),
+  // for the water's screen-space reflection (post.hiz)
+  void build_hiz(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_hiz_tex = 0;
+  GLuint m_hiz_fbo = 0;
+  int m_hiz_w = 0;
+  int m_hiz_h = 0;
+  int m_hiz_levels = 0;
+  bool m_hiz_ready = false;
+  bool m_hiz_surf = false;  // post.hiz_surf: puddles, metal, glass on the pyramid too
+  // the sky map (post.sky_map, tech-rt-probe-gi M1): the open sky straight up, traced through the
+  // levels' hierarchies. A grid around the camera, kSkyMapSize cells a side; each texel the heights
+  // of the first four surfaces from the top (RGBA32F, game units, -1e30: none), so a point below a
+  // roof is under cover, and the lowest one over it says how far slanted rain reaches under. Traced into the back texture a band of rows a frame, swapped in when it's complete.
+  // First user: the rain (no wet ground, puddles or splashes under roofs and awnings)
+  static constexpr int kSkyMapSize = 256;
+  static constexpr float kSkyMapCell = 0.5f;  // meters
+  bool sky_map_on() const;
+  void build_sky_map(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_skymap_tex[2] = {0, 0};
+  GLuint m_skymap_fbo[2] = {0, 0};
+  int m_sky_front = 0;           // the texture the composite reads
+  bool m_sky_valid = false;      // the front one is complete
+  int m_sky_row = -1;            // the back one's next band (-1: not tracing)
+  float m_sky_origin[2] = {0, 0};      // the front's corner (world x, z, game units)
+  float m_sky_back_origin[2] = {0, 0};
+  float m_sky_top = 0.f;         // where the back one's rays start (world y)
+  std::vector<u64> m_sky_levels;  // the levels it was traced through
+  // the light probes (post.probes, tech-rt-probe-gi M2): a grid around the camera, each probe the
+  // levels' light coming back to it from all around (one bounce, rgb) and its open sky (a), traced
+  // a few rays a frame and blended over the frames (RGBA16F, kProbeY slices side by side in x)
+  static constexpr int kProbeX = 32, kProbeY = 8, kProbeZ = 32;
+  static constexpr float kProbeCell = 2.f;  // meters
+  bool probes_on() const;
+  void build_probes(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_probe_tex[2] = {0, 0};
+  GLuint m_probe_fbo[2] = {0, 0};
+  int m_probe_front = 0;
+  bool m_probe_valid = false;
+  int m_probe_cell[3] = {0, 0, 0};  // the front grid's corner, in cells
+  float m_probe_frame = 0.f;
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean
@@ -745,7 +798,7 @@ class EnhancedPost {
   GLuint m_rays_tex = 0;
   int m_rays_w = 0;
   int m_rays_h = 0;
-  // the world's sun shadow looks at half size, by enh_sun_half (unit 31, sun_half_on)
+  // the world's sun shadow looks at half size, by enh_sun_half (unit 34, sun_half_on)
   void draw_sun_half(GLuint id, int w, int h, GLuint render_fbo, ScopedProfilerNode& prof,
                      SharedRenderState* render_state);
   GLuint m_sun_half_fbo = 0;
