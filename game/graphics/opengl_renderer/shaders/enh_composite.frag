@@ -385,6 +385,7 @@ uniform float tune_backlight_cos = 0.55; // from how close to the sun's directio
 uniform float tune_backlight_split = 0.0; // test: 1 = only on the right half of the screen (A/B in one frame)
 uniform float tune_bolt_scene = 1.0;    // lightning lights the scene: a short cold light from the bolt's side of the sky (0: off)
 uniform float tune_rain_chars = 1.0;    // characters wet in the rain: darker, a cold sheen on their edges (0: off)
+uniform float tune_wet_deep = 0.6;      // wet level ground deeper in color at the same luma (0: off)
 uniform float tune_chr_gold_rim = 0.7; // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
@@ -3866,6 +3867,13 @@ void composite_unused() {
     wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view));
     wet = weather.w * wet_flat * rain_open;
     c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
+    // (and deeper in color, as soaked sand and stone are: water in the pores scatters less white.
+    // Same luma, only the hue richer: the desert's ground in rain went dark and grey, flat)
+    if (tune_wet_deep > 0.0 && wet > 0.0) {
+      vec3 dc = c * c;
+      dc *= luma(c) / max(luma(dc), 1e-4);
+      c = mix(c, dc, min(tune_wet_deep * wet, 1.0));
+    }
     // what isn't level ground (grass, bushes, rocks, walls): soaked too, darker and deeper in color,
     // with a wet sheen at grazing angles and drops glinting on it up close
     float wet_side = weather.w * (1.0 - wet_flat) * rain_open;
