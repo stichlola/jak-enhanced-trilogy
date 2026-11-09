@@ -288,6 +288,11 @@ uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
 uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.25;  // and how bright they get at most
+uniform float tune_beacon_ab = 0.0;     // (test: 1 = the far lamps' points off)
+uniform float tune_beacon_core = 0.45;  // far lamp point: its core's size x the game's glow (1: a big soft yellow disc)
+uniform float tune_beacon_halo = 0.5;   // its halo's reach x (5-11 px; 1 blurred the lamps)
+uniform float tune_beacon_halo_gain = 0.12;  // (was 0.18)
+uniform float tune_beacon_hot = 0.7;    // its middle toward white, a lamp's hot core (0: the glow's hue only)
 uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
@@ -5406,11 +5411,13 @@ void composite_unused() {
       if (front > bp.z * 0.97 - 2.0 * 4096.0) {
         float dist_m = length(bp) / 4096.0;
         // the glow's own size on screen, at least a couple of pixels
-        float core_px = max(1.6, beacon_pos[i].w * 0.35 * abs(proj.w) * 0.5 / bp.z / texel.y);
+        float core_px = max(1.6, beacon_pos[i].w * 0.35 * tune_beacon_core * abs(proj.w) * 0.5 / bp.z / texel.y);
         float core = exp(-r2 / (core_px * core_px));
-        float halo = exp(-sqrt(r2) / (5.0 + 6.0 * min(night_air, 1.0))) * 0.18;
+        float halo = exp(-sqrt(r2) / ((5.0 + 6.0 * min(night_air, 1.0)) * tune_beacon_halo)) * tune_beacon_halo_gain;
         float fade = exp(-dist_m / 1800.0);
-        c += beacon_color[i].rgb * (core * 1.4 + halo) * beacon_color[i].w * fade;
+        vec3 bcol = mix(beacon_color[i].rgb, vec3(1.0), tune_beacon_hot * core * core);
+        c += (bcol * core * 1.4 + beacon_color[i].rgb * halo) * beacon_color[i].w * fade *
+             (tune_beacon_ab > 0.5 ? 0.0 : 1.0);
       }
     }
   }
