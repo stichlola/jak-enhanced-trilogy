@@ -166,6 +166,7 @@ uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a leve
 uniform float tune_ground_fine = 1.8;  // the rocky ground's near grain (stone, gravel) strength (1: desert-start's slab a blurry plane)
 uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
 uniform float tune_water_moon = 1.0;  // the moon's glitter path on the water at night (0: off)
+uniform float tune_water_glint_soft = 1.0;  // the sun's tight glint on water broken into glitter, rolled off (0: one solid spot)
 uniform float tune_water_lamp_map = 1.0;  // a lamp's column on the water only where its shadow map lets its light reach (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
@@ -3520,6 +3521,16 @@ void composite_unused() {
     if (sun_dir.w > 0.0) {
       float sr = max(dot(r, sun_dir.xyz), 0.0);
       float glint = pow(sr, 900.0) * 7.0 + pow(sr, 80.0) * 0.25;
+      // (the tight highlight broken into glitter and rolled off: looking down at the sea at noon
+      // (Jak swimming off Spargus, the camera overhead) the smooth swell made it one solid white
+      // oval a sixth of the screen wide, with a dark ring around it; vanilla has none)
+      if (tune_water_glint_soft > 0.0) {
+        float tight = pow(sr, 900.0) * 7.0;
+        float glit = 1.6 * smoothstep(0.1, 0.45, gnoise(world * 2.5 + vec2(t * 0.8, -t * 0.6))) *
+                     smoothstep(-0.2, 0.3, gnoise(world * 6.0 - vec2(t * 1.1, t * 0.7)));
+        float soft = tight * glit / (1.0 + tight * glit);
+        glint = mix(tight, soft, tune_water_glint_soft) + pow(sr, 80.0) * 0.25;
+      }
       wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w;
     }
 
