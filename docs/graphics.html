@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jak Enhanced — Grafica</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f7f4ef;
+  --surface: #ffffff;
+  --surface-2: #f0ebe2;
+  --text: #2a2622;
+  --muted: #6d655c;
+  --accent: #b5561b;
+  --accent-2: #7a4bb0;
+  --border: #ddd4c7;
+  --code-bg: #f3eee6;
+  --ok: #2f7a4a;
+  --warn: #9a6a00;
+  --off: #8a8178;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17141a;
+    --surface: #211d25;
+    --surface-2: #2a2530;
+    --text: #ece6df;
+    --muted: #a99f95;
+    --accent: #f0954f;
+    --accent-2: #b993ec;
+    --border: #3a3340;
+    --code-bg: #1c1920;
+    --ok: #6fcf94;
+    --warn: #e6b74f;
+    --off: #8d8490;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17141a; --surface: #211d25; --surface-2: #2a2530; --text: #ece6df; --muted: #a99f95;
+  --accent: #f0954f; --accent-2: #b993ec; --border: #3a3340; --code-bg: #1c1920;
+  --ok: #6fcf94; --warn: #e6b74f; --off: #8d8490;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.62 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  overflow-x: hidden;
+}
+main { max-width: 900px; margin: 0 auto; padding: 24px 16px 80px; }
+h1 { font-size: 2.1rem; line-height: 1.15; margin: 8px 0 6px; }
+h1 span { color: var(--accent); }
+h2 { font-size: 1.45rem; margin: 52px 0 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+h3 { font-size: 1.1rem; margin: 26px 0 6px; color: var(--accent); }
+p, li { overflow-wrap: anywhere; }
+a { color: var(--accent); }
+code, pre { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: .86em; }
+code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+pre {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; overflow-x: auto; line-height: 1.45; font-size: .8rem;
+}
+pre code { background: none; border: 0; padding: 0; }
+.lead { color: var(--muted); font-size: 1.05rem; margin-top: 0; }
+.note {
+  background: var(--surface-2); border-left: 4px solid var(--accent-2);
+  border-radius: 6px; padding: 10px 14px; margin: 16px 0;
+}
+.note.warn { border-left-color: var(--warn); }
+nav.toc {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 18px; margin: 22px 0;
+}
+nav.toc h2 { border: 0; margin: 0 0 6px; padding: 0; font-size: 1.05rem; }
+nav.toc ol { margin: 0; padding-left: 22px; columns: 2 240px; column-gap: 28px; }
+nav.toc li { margin: 2px 0; break-inside: avoid; }
+.tablewrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; margin: 14px 0; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .88rem; min-width: 560px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { background: var(--surface-2); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+.pipe { display: flex; flex-direction: column; gap: 6px; margin: 18px 0; }
+.stage {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 12px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+}
+.stage b { min-width: 170px; }
+.stage small { color: var(--muted); flex: 1 1 260px; }
+.stage.game { border-left: 4px solid var(--off); }
+.stage.post { border-left: 4px solid var(--accent); }
+.stage.out { border-left: 4px solid var(--accent-2); }
+.arrow { text-align: center; color: var(--muted); line-height: .8; font-size: .9rem; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px; }
+.tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 1px 7px; border-radius: 10px; border: 1px solid currentColor; }
+.tag.on { color: var(--ok); }
+.tag.off { color: var(--off); }
+.tag.wip { color: var(--warn); }
+.timeline { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--border); }
+.timeline li { padding: 4px 0 10px 16px; position: relative; }
+.timeline li::before { content: ""; position: absolute; left: -6px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.timeline time { font-weight: 600; color: var(--accent); margin-right: 6px; }
+footer { color: var(--muted); font-size: .85rem; margin-top: 60px; border-top: 1px solid var(--border); padding-top: 14px; }
+@media (max-width: 520px) { h1 { font-size: 1.7rem; } .stage b { min-width: 0; } }
+</style>
+</head>
+<body>
+<main>
+
+<p class="lead" style="margin-bottom:0">OpenGOAL · Jak 3 · renderer OpenGL</p>
+<h1>Jak Enhanced — <span>Grafica</span></h1>
+<p class="lead">Tutti i miglioramenti grafici fatti finora: cosa fa ciascuno, come funziona e cosa è cambiato negli shader. Stato del ramo <code>main</code> al 9 novembre 2026 (<code>00d8df9c7</code>), ricostruito dalla storia git, dagli shader <code>enh_*</code> e dalle note della skill <code>retro-renderer-modern-post</code>.</p>
+
+<nav class="toc" aria-label="Indice">
+<h2>Indice</h2>
+<ol>
+<li><a href="#intro">L'idea</a></li>
+<li><a href="#pipeline">La pipeline del fotogramma</a></li>
+<li><a href="#sole">Sole e ombre</a></li>
+<li><a href="#ao">Occlusione ambientale</a></li>
+<li><a href="#luci">Luci locali</a></li>
+<li><a href="#materiali">Materiali e superfici</a></li>
+<li><a href="#acqua">Acqua e riflessi</a></li>
+<li><a href="#cielo">Cielo, ore e meteo</a></li>
+<li><a href="#effetti">Effetti e bagliori</a></li>
+<li><a href="#personaggi">Personaggi</a></li>
+<li><a href="#vegetazione">Vegetazione e scenografia</a></li>
+<li><a href="#post">Post: TAA, dither, tonemap, grading</a></li>
+<li><a href="#luminosita">Luminosità e preset</a></li>
+<li><a href="#prestazioni">Prestazioni</a></li>
+<li><a href="#test">Metodo di prova</a></li>
+<li><a href="#switch">Tabella degli switch</a></li>
+<li><a href="#timeline">Cronologia</a></li>
+</ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="intro">1. L'idea</h2>
+<p>Jak Enhanced non sostituisce il renderer del gioco: lascia che OpenGOAL disegni la scena PS2 come sempre (livelli <em>tfrag/tie/shrub</em>, personaggi <em>merc</em>, cielo, mare, sprite) e poi la ripassa con una pipeline di post-processing moderna, <strong>una sola volta, sulla scena 3D finita e prima dei bucket dell'HUD</strong>: minimappa e testi restano nitidi e non vengono toccati dal grading.</p>
+<p>Il problema di partenza: i livelli del gioco non hanno normali (la luce è "cotta" nei colori dei vertici) e non c'è un buffer di velocità. Tutto quello che segue nasce dal depth buffer, dalla proiezione che il gioco consegna ogni fotogramma (salvata dove il renderer costruisce la matrice camera, <code>make_new_cam_mat</code>) e da alcuni dati in più che il renderer si procura da solo: normali calcolate al caricamento, una seconda (e ora terza) destinazione colore, mappe d'ombra dal sole disegnate dai buffer del loader.</p>
+<p>Il gioco "parla" al renderer con poche chiamate kernel dal codice GOAL: direzione del sole, livello in cui si trova il giocatore, ora come numero decimale, se gira un filmato, posizione del giocatore, sfere di luce dei livelli, esplosioni, la tempesta di sabbia del gioco, le richieste del menu.</p>
+<div class="note">
+<strong>Due scelte deliberate.</strong> Il look di Jak Enhanced è <strong>più scuro</strong> di proposito (notti scure, ombre profonde: è una scelta di atmosfera, non un difetto) e diversi switch sono tarati per non schiarire l'immagine. La <strong>nebbia di Enhanced è spenta</strong> dal 6 novembre (<code>kFogOff</code>): nebbia a distanza, foschia al suolo e nebbia del mattino restano a zero con qualunque meteo o zona, e il menu nasconde i preset nebbiosi. La nebbia del gioco originale non è toccata.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="pipeline">2. La pipeline del fotogramma</h2>
+<p>Lo schema mostra l'ordine dei passaggi. Grigio = disegno del gioco, arancio = passaggi Enhanced, viola = uscita.</p>
+<div class="pipe" role="list">
+  <div class="stage game" role="listitem"><b>Fotogramma del gioco</b><small>I renderer di OpenGOAL disegnano livelli, personaggi, cielo, mare. Gli shader del mondo sono avvolti per il jitter del TAA (<code>main()</code> rinominato in <code>enh_original_main()</code>).</small></div>
+  <div class="arrow">▼</div>
+  <div class="stage game" role="listitem"><b>MRT: normali + albedo</b><small>Attachment 1 (RGB10_A2): normali calcolate al caricamento, materiale codificato nella lunghezza. Attachment 2 (RGBA8, nuovo, spento): colore della texture prima della luce cotta.</small></div>
+  <div class="arrow">▼</div>
+  <div class="stage game" role="listitem"><b>Copie di profondità e scena</b><small>Depth del mare lontano copiata dopo il suo bucket; cielo del gioco prima dei livelli (<code>capture_sky</code>); scena prima e dopo gli sprite (per ridare forza agli effetti di giorno).</small></div>
+  <div class="arrow">▼</div>
+  <div class="grid2">
+    <div class="stage post" role="listitem"><b>Mappe d'ombra del sole</b><small>Vicina 4096 su ~160 m, media (spenta), lontana 2 × 1,2 km; personaggi e alberi al vento inclusi. Lette a metà dimensione (<code>enh_sun_half</code>).</small></div>
+    <div class="stage post" role="listitem"><b>Cube map delle lampade</b><small>Fino a 8 lampade ferme, 512² per faccia, personaggi inclusi.</small></div>
+    <div class="stage post" role="listitem"><b>SSAO / GTAO / RT AO</b><small>Mezza risoluzione, temporale (metà campioni a fotogramma), upsample pesato sulla profondità; ombre di contatto.</small></div>
+    <div class="stage post" role="listitem"><b>SSGI temporale</b><small>Un rimbalzo di luce indiretta in screen space, metà dei campioni a fotogramma.</small></div>
+    <div class="stage post" role="listitem"><b>Sky map / probe</b><small>Cielo aperto sopra la camera tracciato nel BVH (attivo); probe 32×8×32 (opzionali).</small></div>
+    <div class="stage post" role="listitem"><b>Volume (foschia)</b><small>Ray-march a mezza risoluzione; nuova: luce di lampade e fuochi nell'aria.</small></div>
+    <div class="stage post" role="listitem"><b>God rays / ombre nella foschia</b><small>Mezza risoluzione, 64 passi verso il sole; alpha = ombre delle montagne.</small></div>
+    <div class="stage post" role="listitem"><b>Nuvole e raggi</b><small>A un quarto dei pixel, con programmi snelli propri (<code>enh_clouds</code>, <code>enh_cloud_rays</code>), mescolate nel tempo.</small></div>
+    <div class="stage post" role="listitem"><b>Hi-Z e motion vector</b><small>Piramide di profondità (<code>enh_hiz</code>, 10 livelli) per i riflessi; moto proprio dei personaggi (<code>enh_motion</code>) per il TAA.</small></div>
+    <div class="stage post" role="listitem"><b>Mappa del tasso (VRS)</b><small><code>enh_vrs.comp</code> sceglie 1×1…2×2 per tessere 16×16 prima del composite.</small></div>
+  </div>
+  <div class="arrow">▼</div>
+  <div class="stage post" role="listitem"><b>Composite (<code>enh_composite.frag</code>)</b><small>~5600 righe: ombre, AO, luci dinamiche, materiali, acqua + SSR/RT, cielo, meteo, notte, personaggi, grading per area, esposizione, luminosità, spalla, dither.</small></div>
+  <div class="arrow">▼</div>
+  <div class="stage post" role="listitem"><b>Bloom</b><small>Down/up sample (<code>enh_bloom_down/up</code>); il bright pass include gli effetti compatti di giorno.</small></div>
+  <div class="arrow">▼</div>
+  <div class="stage post" role="listitem"><b>TAA sul composite finito</b><small>Riproiezione con la camera, storia Catmull-Rom, variance clipping in YCoCg, buffer RGBA16F a ping-pong.</small></div>
+  <div class="arrow">▼</div>
+  <div class="stage out" role="listitem"><b>Dither + uscita</b><small>Dither triangolare ±1 passo a 8 bit (nel composite e dopo il TAA), poi HUD del gioco sopra.</small></div>
+</div>
+<p>Ogni effetto è un'impostazione con uno slider ImGui e uno switch d'ambiente <code>JAK_ENHANCED_&lt;X&gt;</code>; le soglie fini sono uniform <code>tune_*</code> del composite, regolabili a caldo dal file <code>tuning.json</code> (vedi <a href="#test">metodo di prova</a>).</p>
+<div class="note">
+<strong>Perché il TAA va in fondo.</strong> All'inizio il TAA risolveva la scena grezza e il composite costruiva AO, ombre, luci e dettaglio della sabbia dalla profondità <em>jitterata</em>: quei bordi si spostavano di una frazione di pixel ogni fotogramma senza che niente li mediasse, e fili d'erba e sassolini tremolavano. Spostato dopo il composite (28 ottobre), lo sfarfallio misurato nel deserto è sceso da 1,40 a 0,30 (2,11 senza TAA); pixel che cambiano di oltre 8 livelli: dal 2,1% allo 0,16%.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="sole">3. Sole e ombre</h2>
+<h3>Mappa d'ombra dai buffer del loader</h3>
+<p>Non serve toccare ogni renderer: il loader ha già sulla GPU la geometria statica con posizioni in coordinate mondo (<code>LevelData::tfrag_vertex_data</code>, <code>tie_data</code>). La si ridisegna solo in profondità dal punto di vista del sole, con un shader minuscolo (<code>enh_shadow.vert/frag</code>). Mappa ortografica attorno a un punto davanti alla camera, <strong>agganciata a texel interi</strong> nello spazio luce (niente bordi che "strisciano"), profondità 32F con confronto hardware (<code>sampler2DShadow</code>), polygon offset, normal offset in lettura, dissolvenza al bordo. Le parti tagliate dai volumi di taglio del gioco vengono scartate anche nel passaggio d'ombra.</p>
+<p>L'ombra si applica solo sulle superfici rivolte al sole (normali ricostruite) e a forza moderata: la luce cotta nei vertici scurisce già ciò che guarda dall'altra parte, e un'ombra piena sopra un'area già in ombra la schiaccerebbe.</p>
+<h3>Cascate</h3>
+<ul>
+<li><strong>Vicina</strong>: 4096 texel su ~160 m.</li>
+<li><strong>Lontana</strong>: 2 × 1,2 km, nata per le rocce e i palazzi del deserto; anche le piante grandi (oltre 4 m, per istanza) proiettano su di essa. Bias in metri lungo la luce (<code>tune_shadow_far_bias_m</code> 0,45).</li>
+<li><strong>Media</strong>: 2048 su ±320 m, dietro <code>shadow.mid_on</code>, <span class="tag off">spenta</span> di default.</li>
+</ul>
+<p>La direzione della luce è quantizzata (<code>shadow.dir_step_deg</code>) per evitare che le ombre "nuotino"; le mappe sono centrate sulla direzione in avanti della camera.</p>
+<h3>Chi proietta, chi no</h3>
+<ul>
+<li><strong>Personaggi</strong>: il renderer skinnato (Merc2) carica un buffer di ossa per flush; le ossa e i draw opachi vengono copiati e ripetuti nel passaggio d'ombra con una copia solo-profondità del suo vertex shader (<code>enh_shadow_merc</code>).</li>
+<li><strong>Alberi al vento</strong>: le matrici ferme delle istanze diventano un buffer per livello; alpha-test delle texture, altrimenti le foglie proiettano quadrati pieni.</li>
+<li><strong>Esclusi</strong>: draw alpha-blended (veli, decal), acqua tie, secondi draw envmap, draw senza scrittura di profondità. Gli alpha-testati restano (in Jak 3 ogni draw ha il test attivo: toglierli toglieva ogni ombra statica).</li>
+</ul>
+<h3>Ombre morbide (PCSS)</h3>
+<p>La stessa texture di profondità è legata a una seconda unità tramite un <em>sampler object</em> senza confronto (<code>tex_T13</code>, "le profondità grezze") per la ricerca dei bloccanti; penombra = distanza dal bloccante × ~0,02, disco di Vogel ruotato per pixel e per fotogramma, mediato dal TAA.</p>
+<h3>Cache delle mappe <span class="tag off">spenta</span></h3>
+<p>Novità dell'8 novembre, dietro switch:</p>
+<ul>
+<li><code>shadow.cache</code>: mappa lontana e media tenute tra i fotogrammi, ciascuna con la propria matrice (mai la matrice nuova su una mappa vecchia); ridisegno quando il quadrato si sposta (a passi di N texel), quando la finestra di profondità scorre oltre il 5%, a un passo della luce, quando un livello carica o scarica i suoi caster, o per età massima. Deserto da fermo: 8-21 ridisegni su 300 fotogrammi invece di 150; bucket ombre 0,35-0,85 → 0,15-0,27 ms.</li>
+<li><code>shadow.near_cache</code>: la parte statica della mappa vicina in una sua mappa, copiata con <code>glBlitFramebuffer</code> in quella viva, poi si disegnano solo alberi e personaggi. Il blit 4096² costa ~0,3 ms da solo, quindi conviene solo dove la parte statica è pesante: foresta 1,66 → 1,05 ms, città 0,51 → 0,45.</li>
+</ul>
+<h3>Ombre del mondo a metà dimensione</h3>
+<p><code>shadow.half</code> (attivo): un programma ricavato dal file del composite con dentro solo le due letture della mappa d'ombra e il march di contatto (<code>enh_sun_half</code>) scrive un pixel ogni 2×2; il composite lo rilegge con i quattro texel e i pesi di profondità dell'occlusione. I personaggi tengono la loro ombra a piena risoluzione. A 2560×1600: composite −0,6 ms per un passaggio da 0,33-0,45 ms, immagine uguale.</p>
+<h3>Ombre del sole nella foschia e ombre delle nuvole</h3>
+<p>Prima delle mappe c'erano ombre del sole in screen space (march verso il sole nel depth buffer): restano come <em>ombre di contatto</em>. Nel passaggio god rays (mezza risoluzione) ~24 campioni verso il punto del sole sullo schermo contano le superfici lontane più vicine del pixel: è l'ombra delle montagne nella foschia del deserto, scritta nell'alpha della texture dei raggi. Le ombre delle nuvole marciano dal punto a terra verso il sole nello stesso campo di nuvole 3D che disegna il cielo, e tolgono solo il sole: <code>tune_cloud_in_shade</code> (0,3) limita la loro forza dentro l'ombra del sole, così non si sommano fino al nero.</p>
+<h3>Il percorso del sole</h3>
+<p>Per area (<code>world.json</code>): <code>sun_max_elev</code>, <code>morning_yaw</code>, <code>golden</code>, <code>day_sky</code>, <code>rock_sun</code>, <code>wall_sun</code>. Le ore scorrono una nell'altra con il sole su un solo percorso; nel deserto a mezzogiorno la luce chiave è alzata a 50/42° (<code>light.midday_elev</code>) perché il bacino di partenza non resti nell'ombra della scogliera.</p>
+
+<!-- ============================================================ -->
+<h2 id="ao">4. Occlusione ambientale</h2>
+<h3>SSAO, poi a mezza risoluzione</h3>
+<p>Il primo passaggio (24 ottobre) era un SSAO dal depth buffer del gioco; dal 25 ottobre usa le normali della geometria dove sono state scritte. Per le prestazioni, occlusione e ombre di contatto girano a mezza risoluzione (blur depth-aware anche lì, normali ancora dalla profondità a piena risoluzione): 1,65 → 0,95 ms. La lettura usa quattro texel pesati per somiglianza di profondità col pixel a piena risoluzione, o l'AO "sbava" oltre i bordi.</p>
+<h3>Multi-bounce colorato</h3>
+<p>Invece di moltiplicare per un grigio, l'AO segue il colore della superficie con il fit di Jimenez (GTAO multi-bounce): le fessure tra pareti chiare restano sabbia o arenaria più profonda, non un grigio-marrone fangoso. Il fit restituisce però anche luce (schiariva l'arena alle 20 di ~5%), quindi se ne tiene solo la tinta alla luminosità dell'AO grigio:</p>
+<pre><code>vec3 ka = 2.0404 * alb - 0.3324;
+vec3 kb = -4.7951 * alb + 0.6417;
+vec3 kc = 2.7552 * alb + 0.6903;
+vec3 ao_mb = max(vec3(ao), ((ao * ka + kb) * ao + kc) * ao);
+ao_mb *= mix(1.0, ao / max(luma(ao_mb), 1e-3), tune_ao_mb_luma);  // solo la tinta
+c *= mix(vec3(ao), ao_mb, tune_ao_multibounce);</code></pre>
+<p>Anche l'<strong>occlusione speculare</strong> (<code>tune_spec_occ</code>) toglie riflessi dove l'AO è forte, su materiali lucidi e terreno bagnato.</p>
+<h3>AO e GI temporali</h3>
+<p><code>ssao.temporal</code> e <code>gi.temporal</code> (attivi): ogni fotogramma calcola metà dei campioni (per l'SSAO metà dei tap Alchemy e larghi, per la GI 6 dei 12 di raccolta) e li media con l'altra metà del fotogramma prima, ritrovata nello stesso punto del mondo (storia propria RG16F / RGBA16F come secondo target, riproiezione controllata sulla distanza, nessuna dopo un taglio di camera). A 2560×1600: SSAO 0,77 → 0,55 ms (Spargus 18h), GI 0,53 → 0,36 ms, occlusione uguale entro 0,9/255.</p>
+<h3>GTAO <span class="tag off">spento</span></h3>
+<p>Dietro <code>tune_ao_gtao</code>: un GTAO (nomenclatura XeGTAO) al posto dei campioni Alchemy vicini. Insidie trovate: l'orizzonte basso è <code>cos(n + π/2)</code> dal lato +offset e <code>cos(n − π/2)</code> dall'altro (scambiati, tutto risultava mezzo occluso); sulla profondità grezza del gioco gli orizzonti vanno aperti di ~7°, altrimenti il terreno radente diventa grigio verso l'orizzonte. A mezza risoluzione non costa nulla di misurabile (0,09 ms in entrambi i casi).</p>
+<h3>AO ray-traced <span class="tag off">spenta</span></h3>
+<p>Dallo stesso BVH dei riflessi ray-traced: 6 raggi di 3 m per pixel, pesati in coseno, nel passaggio SSAO; si prende <code>min(traced, SSAO)</code> perché i personaggi non sono nel BVH. Dall'8 novembre: 1 raggio per pixel per fotogramma, ruotato ogni fotogramma (sequenza R2) e accumulato in una storia RG16F riproiettata (<code>post.rt_ao_temporal</code>): +0,06 ms contro +0,26 ms dei vecchi 6 raggi a 640×360. Resta opzionale: al Hip Hog nessuna differenza visibile rispetto all'AO in screen space, +0,5 ms al chiuso.</p>
+<h3>Sky map e probe GI</h3>
+<ul>
+<li><strong>Sky map</strong> (<code>post.sky_map</code>, <span class="tag on">attiva</span>): il cielo aperto sopra la camera, tracciato nel BVH dei livelli (256×256 celle da 0,5 m, le prime 4 superfici dall'alto, RGBA32F, 32 righe a fotogramma in una texture di riserva scambiata intera; rifatta dopo 32 m o un cambio di livello). Serve a tenere la pioggia fuori da ciò che è coperto (terreno bagnato, pozzanghere, schizzi; la pioggia obliqua entra sotto una copertura in proporzione alla sua altezza × 0,35) e a illuminare coi lampi solo ciò che vede il cielo. Costo 0,00-0,01 ms.</li>
+<li><strong>Probe di luce</strong> (<code>post.probes</code>, <span class="tag off">spente</span>): griglia 32×8×32 a 2 m attorno alla camera, ogni probe traccia 8 raggi (<code>post.probe_rays</code>) nel BVH, una fascia della griglia ogni 8 fotogrammi, mescolate (0,25), spostate a celle intere. Usate sui personaggi: il rim notturno moltiplicato per il cielo aperto dei loro probe (<code>tune_probe_rim</code>). Costo 0,4-1,5 ms.</li>
+<li><strong>Probe shade</strong> (<code>tune_probe_shade</code>, <span class="tag off">spento</span>): sotto un tetto l'ombra prende la tinta del rimbalzo dei probe invece del blu del cielo. Provato troppo debole per essere distribuito (palazzo 12h sotto il rumore tra fotogrammi).</li>
+</ul>
+<h3>Correzioni sulle normali</h3>
+<p>Sul terreno rivolto in alto si usano le normali della geometria (eliminava righe scure fisse sullo schermo); da <code>|n.y|</code> 0,5 anche la sabbia in leggera pendenza. Un draw blended che lascia nella destinazione normali più lunghe di qualunque tag (|n| &gt; 1,02) conta come "nessuna normale": la colonna di luce dell'arena prendeva un AO di 0,07.</p>
+
+<!-- ============================================================ -->
+<h2 id="luci">5. Luci locali</h2>
+<h3>Dai dati dei livelli</h3>
+<p>Il primo tentativo (ogni sprite di bagliore come luce puntiforme) era quasi invisibile. La fonte vera sono le <strong>sfere di luce</strong> dei livelli (<code>light-hash</code> → posizione, raggio, colore, luminosità, indice della palette dell'ora che accende le lampade di notte), che il gioco usava solo per illuminare gli attori. Una funzione GOAL invia quelle entro 80 m dalla camera. Nel composite: normali, caduta <code>(1 − d²/r²)²</code>, luce "wrap" (<code>ndl*0.85+0.15</code>), fino a 32 per fotogramma ordinate per luminosità × r/(dist+r).</p>
+<h3>Fuochi, torce, luci a mano, fari</h3>
+<ul>
+<li><strong>Fuochi</strong>: un bagliore caldo e fermo nello stesso punto per circa un secondo nella maggior parte dei fotogrammi è un fuoco (gli spari arrivano a raffiche e si spostano). In più, gli emettitori di particelle di tipo FIRE entro ~40 m. Hanno sfarfallio, aria calda che tremola sopra la fiamma e braci procedurali.</li>
+<li><strong>Interni</strong>: luci di fuochi e bagliori sotto un tetto a forza notturna anche di giorno (lista <code>"enclosed"</code> in <code>world.json</code>), così le torce dei templi illuminano il pavimento a mezzogiorno. I fuochi sotto un tetto sono marcati per il composite (alpha della luce 0,25) e sui pavimenti dei livelli arrivano fino a 3× il loro raggio (<code>tune_fire_floor</code> 3, guadagno 0,3), con le tessere di luce allargate a 1,07× quella portata perché la pozza non abbia gradini. Sala del Templex: una pozza calda fino al centro della stanza.</li>
+<li><strong>Fiamme</strong>: i bagliori caldi fino a 20 m contano come fuochi; le fiamme alte di un fuoco segnalato (le lingue di 3-4 m degli slum) riprendono l'arancio dal colore, luma tenuta (<code>tune_flame_wide</code>).</li>
+<li><strong>Luci a mano</strong>: <code>lights.json</code> (posizione, raggio, colore, flicker, solo di notte, flag <code>bulb</code>).</li>
+<li><strong>Fari dei veicoli</strong>: coni veri fino a 100 m con ombre in screen space; la lanterna di Jak nel deserto è un bulbo che sale dalla spalla al buio.</li>
+<li><strong>Bagliori</strong>: raggio massimo 20 m (un lampione fa una pozza di luce, non un quadrato illuminato).</li>
+</ul>
+<h3>Ombre delle luci</h3>
+<p>Per pixel, per le luci più forti in portata: 8 passi jitterati verso la luce nel depth buffer (fino a ~3 m, fermandosi prima della luce: le lampade stanno dentro il loro alloggio), bloccato se la profondità è davanti di meno di uno spessore (~1,5 m). Costo ~0,05 ms. Vicino ai piedi di Jak vengono lasciate andare (<code>tune_lamp_jak_m</code> 2,5 m).</p>
+<h3>Mappe d'ombra delle lampade <span class="tag on">attive</span></h3>
+<p>Dal 9 novembre (<code>lights.shadow_maps</code> 8): ogni lampada che proietta ombra (le prime 8 luci, non quelle portate né i lampi, ferme da 30 fotogrammi) riceve una cube map, uno slot di un array di cube map DEPTH32F da 512² per faccia.</p>
+<ul>
+<li><strong>Parte statica</strong>: gli stessi caster della mappa del sole (tfrag, tie, tie al vento, shrub), disegnati una volta per lampada, 2 facce a fotogramma, tenuti finché la lampada resta tra quelle scelte. Near plane 0,5 m (l'alloggio non proietta), far 2 raggi.</li>
+<li><strong>Personaggi</strong>: le facce con un personaggio entro 12 m ricopiano la parte statica e ci ridisegnano i personaggi (replay merc senza ricaricare le ossa); i draw dei personaggi sono cercati per primo osso, ordinati una volta per fotogramma (0,14 ms CPU a ~490 draw).</li>
+<li><strong>Composite</strong>: quelle luci leggono la mappa (4 tap ruotati, normal offset) invece del march in profondità; due voci della stessa lampada condividono una mappa. Le colonne di luce sull'acqua appaiono solo dove la mappa lascia arrivare la luce (<code>tune_water_lamp_map</code>).</li>
+</ul>
+<p>Cortile del tempio 21h: con 8 slot gli archi e i pilastri ombreggiano la luce dei bracieri invece di un velo caldo uniforme. 60 fps ovunque a 640×360, passaggio 0,04-0,25 ms GPU.</p>
+<h3>Somma che non esplode</h3>
+<p>Molte lampade si sommano senza fine: la luce sommata è saturata dolcemente (<code>added /= 1 + 0.35*max</code>) e un risultato colorato oltre 1 sbianca verso il bianco. I lampi di esplosioni e spari hanno un accumulatore loro, sopra quel tetto (<code>tune_flash</code> 2,5). I bagliori viola di uno scontro (una nube di eco oscuro è ~12 bagliori) sono limitati per classe di tinta e resi più pallidi (<code>lights.violet_max</code>, <code>lights.violet_pale</code>).</p>
+<h3>Notte: Purkinje sulle pozze di luce</h3>
+<p>La parte debole della luce sommata (luma sotto ~0,9) perde la tinta verso quella della luna, come fa la luce fioca all'occhio; il nucleo vicino alla fiamma resta caldo (<code>tune_night_lamp_cool</code>). Il terreno del deserto illuminato dalla lanterna passava da salmone (96,65,56) a 66,66,82.</p>
+<h3>Highlight</h3>
+<p>Riflessi Blinn delle luci su pavimenti lucidi asciutti e metallo (<code>tune_dry_glints</code> 0,5; pietra semplice 0,15), con <strong>specular AA</strong>: la rugosità cresce con la dispersione della normale nel pixel (<code>tune_spec_aa</code>), e un highlight non supera 4× la superficie illuminata (<code>tune_spec_clamp</code>).</p>
+<h3>Tile di luci <span class="tag on">attive</span></h3>
+<p>Culling a tessere dello schermo per il ciclo delle 32 luci (<code>lights.tiles</code>), attivo di default dall'8 novembre e usato da ogni ciclo di luci per pixel; anche i fari lontani hanno le loro tessere (<code>beacons.tiles</code>). Prima come 144 <code>uvec4</code> uniform: su NVIDIA superava il limite di registri costanti (<code>C6020</code>) e lo shader restava silenziosamente alla versione vecchia; ora una texture intera 32×18 R32UI (<code>tex_T28</code>, bit <em>i</em> = la luce <em>i</em> può raggiungere la tessera) letta con <code>texelFetch</code>.</p>
+<h3>Finestre, facciate e lampade di notte</h3>
+<ul>
+<li><strong>Vetri delle finestre</strong>: materiale proprio (lucido, lunghezza 0,99); di notte una parte è accesa dall'interno con luce calda, per cella del mondo (<code>tune_night_win</code> 1, 40% delle celle, celle da 2,5 m). Per ora solo le texture che si chiamano <em>window</em>.</li>
+<li><strong>Facciate lontane</strong>: la città oltre il porto di Haven era una sagoma scura piatta alle 22. Non ci sono texture di finestre lì, quindi le finestre sono inventate: una griglia sul piano del muro in spazio mondo (piani da 3,5 m, campate 0,85×), 22% accese, ciascuna stanza col suo tono (<code>tune_night_facade</code>). Fascia della città lontana 26 → 28 di luma: il look scuro resta.</li>
+<li><strong>Lampade e insegne</strong>: materiale proprio (<code>kLamp</code>, lunghezza 0,2; anche per i prop merc), dai nomi (<em>light</em>, <em>lamp</em>, <em>neon</em>, <em>lantern</em>, <em>bulb</em>, <em>-on</em>…, non pali né riflettori); di notte il composite accende la loro immagine (<code>tune_night_lamp</code> 1, guadagno 1,6).</li>
+</ul>
+<h3>Albedo target <span class="tag off">spento</span></h3>
+<p>Un post che ha solo l'immagine illuminata non può re-illuminare bene: le lampade moltiplicano il colore già scurito dalla notte. Terza MRT (RGBA8): colore della texture del livello prima della luce cotta, <code>a</code> = luma della luce cotta / 2, dietro <code>lights.albedo</code>. Ogni shader attivo con il terzo draw buffer deve scrivere la location 2 (0 = niente per personaggi e acqua); gli altri renderer la mascherano con <code>glColorMaski(2, false…)</code>. Costo misurato ~+0,4 ms GPU a 640×360. Nel composite: <code>tune_albedo_gain</code> 0,5, <code>tune_albedo_mix</code> 1.</p>
+<h3>Luci nell'aria <span class="tag off">spente</span></h3>
+<p>La luce di lampade e fuochi diffusa nel volume (<code>volume.local_lights</code>, 8 lampade, 24 passi, mezza risoluzione: 0,09 ms). Ha richiesto un gate suo: il passaggio volumetrico girava solo con nebbia &gt; 0 (spenta di proposito) e il primo livello dell'auto qualità lo toglie. Raggio dell'alone limitato (<code>volume.light_halo_m</code>), le luci grandi come il cielo escluse.</p>
+
+<!-- ============================================================ -->
+<h2 id="materiali">6. Materiali e superfici</h2>
+<h3>Normali vere per livelli che non ne hanno</h3>
+<p>Calcolate <strong>al caricamento</strong> (in <code>TfragTree/TieTree/ShrubTree::unpack</code>, nessuna nuova estrazione): vertici saldati per posizione quantizzata, media pesata per area delle normali di faccia entro ~60°, segni allineati con <code>|dot|</code> perché l'avvolgimento non è coerente. Nel fragment shader la normale di faccia da <code>cross(dFdx(pos), dFdy(pos))</code> corregge gli spigoli: si tiene quella liscia solo entro ~35°. Scritte in un secondo attachment RGB10_A2 solo per i draw opachi che scrivono profondità. Anche i personaggi scrivono la loro (in view space), e le dune <em>hfrag</em> hanno normali lisce.</p>
+<h3>Tag di materiale nella lunghezza della normale</h3>
+<p>L'alpha di RGB10_A2 ha solo 2 bit, quindi il materiale è codificato nella <strong>lunghezza</strong> del vettore (sabbia: <code>n * 0.9</code>, riconosciuta da <code>length(rgb*2-1)</code> in 0,85-0,95); ogni altro lettore normalizza. Classi dai nomi delle texture: sabbia, roccia, legno, muri, metallo arrugginito e verniciato, piastrelle, metallo/vetro lucido. Sui bordi alpha-blended le lunghezze si mescolano: l'effetto sfuma sull'intervallo invece di una soglia netta.</p>
+<h3>Sabbia</h3>
+<p>Increspature procedurali che restano nitide fin dove i pixel le risolvono: l'impronta si misura <strong>attraverso le creste</strong> con <code>fwidth(dot(world_xz, across))</code> calcolato fuori dai branch, quattro dimensioni auto-simili (ogni ottava è una copia scalata della più piccola), pesi rinormalizzati perché il contrasto resti costante mentre le piccole spariscono. Le creste si piegano con la deriva del vento e si interrompono qua e là. In più: grana, impronte e solchi dove il gioco dice che Jak è su terreno morbido, polvere sollevata dai passi.</p>
+<h3>Roccia</h3>
+<ul>
+<li>Dettaglio "come i giochi grandi": ogni dimensione di tile solo nella sua fascia di distanza (1,6 m fino a ~45 m, 7 m fino a ~160 m), oltre solo una variazione macro morbida; un tile da 30 m stampava un motivo ripetuto sulle facce lontane.</li>
+<li>Triplanar in post con <code>textureLod</code> a <code>log2(m_per_pixel * tex_size / tile_m)</code> (niente derivate implicite nei branch), stratificazioni orizzontali piegate dal rumore.</li>
+<li>Terreno roccioso: rilievo da grumi di rumore morbido (mezzo metro e oltre), l'immagine delle crepe solo come crosta leggera (il gradiente delle crepe diventava un tratteggio).</li>
+<li>Saturazione della roccia di giorno limitata a quella di un'arenaria (<code>tune_rock_sat</code> 0,42); la tinta calda di erosione lasciata andare di notte (<code>tune_rock_night</code>).</li>
+<li>Cavità del terreno roccioso più scure e sommità più chiare per la luce del cielo, anche in ombra (<code>tune_ground_cav</code>): la lastra della partenza nel deserto non sembra più piatta (contrasto fine +17%); grana vicina più forte (<code>tune_ground_fine</code> 1,8).</li>
+</ul>
+<h3>Riflesso radente col sole basso</h3>
+<p>Guardando verso un sole sotto ~25°, la pietra e i lastricati dei livelli prendono un riflesso di Fresnel radente più un lobo ruvido, tenuto sotto metà della luminosità propria della superficie (<code>tune_low_sheen</code> 0,5).</p>
+<h3>Prati</h3>
+<ul>
+<li><strong>Variazione macro</strong> sul terreno verde dei livelli: chiaro/scuro lento ±12% e una deriva oliva/verde scuro su 7-41 m, terra scura di muschio dove c'è occlusione (<code>tune_lawn</code> 1, <code>_var</code> 0,12, <code>_ao</code> 1,2).</li>
+<li><strong>Ombra al piede delle piante</strong>: il loader tiene i piedi delle piante piccole dei livelli (fino a 3 m di altezza), un worker li "spruzza" dall'alto in una mappa RG32F 256 × 0,5 m attorno alla camera (rifatta ogni 8 m), e il composite scurisce il prato all'altezza del piede con un anello di 6 tap (<code>tune_lawn_foot</code> 1, raggio 1 m). Sostituisce una sonda in screen space che non trovava nulla. Pixel ai piedi dei ciuffi −17%.</li>
+</ul>
+<h3>Rilievo, parallasse, muri</h3>
+<p>Rilievo dalla pendenza della luminosità della texture che inclina la normale per l'ombreggiatura del sole (vicino); parallasse vicino alla camera su roccia e muri in pietra/mattoni (4-20 m); campionamento anti-tile nello shader di sfondo per i muri la cui texture si ripete davvero (nel post c'è solo l'immagine finita). Metallo e vetro: riflessi e highlight nel composite dai nomi delle texture (le envmap non sono metallo).</p>
+<h3>Pavimenti dopo il grading</h3>
+<p>La "pendenza nera" del deserto all'ora dorata non era l'ombra del sole: quattro moltiplicazioni in fila sulla stessa classe di materiale portavano a 0,3× il colore del gioco. Rimedio: un pavimento relativo al colore del gioco, <code>tune_gold_fill</code> 0,75, ma non dentro un'ombra proiettata (<code>tune_gold_shadow</code>, pesato da <code>1 − shadow * smoothstep(0, 0.1, N.L)</code>). Lo stesso principio vale al tramonto (<code>tune_dusk_floor</code> 0,7) e va applicato <strong>per ultimo</strong>, nella tinta del gioco:</p>
+<pre><code>// fl = colore del gioco, lc/lf = luma attuale / del pavimento
+c = mix(c, fl * max(lc, lf) / lf, w * smoothstep(0.0, 0.3, (lf - lc) / lf));</code></pre>
+<h3>Vetri e colonne di luce</h3>
+<p>Sotto un tetto (lista <code>enclosed</code>) si tiene il cielo del gioco nelle finestre (il nido d'ape del palazzo si bruciava di bianco con bloom e adattamento), e anche i vetri blended con il cielo dipinto sopra (<code>tune_pane_keep</code>), riconosciuti dalla normale "troppo lunga". Le colonne di luce traslucide del gioco (il raggio dell'arena) restano come disegnate: <code>max(c, immagine del gioco − effetti)</code> dove la lunghezza al quadrato della normale supera 1,04 (<code>tune_shaft_keep</code>), con la loro luce anche sul muro accanto (<code>tune_shaft_spill</code>).</p>
+
+<!-- ============================================================ -->
+<h2 id="acqua">7. Acqua e riflessi</h2>
+<p>I renderer del mare non scrivono una superficie utilizzabile: la profondità del mare lontano viene copiata subito dopo il suo bucket, quello vicino scrive la sua superficie (poi la profondità viene ripristinata), e l'acqua si ombreggia nel composite:</p>
+<ul>
+<li>increspature di rumore sfumate per impronta del pixel (niente tile del gioco), un'onda lunga solo nelle normali, calmata in acqua bassa e lontano; un solo colore vicino e lontano;</li>
+<li>Fresnel e <strong>SSR</strong>, con ogni colpo raffinato per ricerca binaria e l'inizio del march sfasato per pixel (niente scalini sotto il TAA); ora attraverso la piramide Hi-Z (sotto);</li>
+<li>acqua bassa: rifrazione del fondale solo dove il campione deviato è ancora sott'acqua, caustiche da due strati di rumore a creste moltiplicati;</li>
+<li>scie, schizzi e dischi sull'acqua restano acqua (<code>max(nostro, gioco)</code> per la schiuma), pioggia sull'acqua (anelli, corone, scintille);</li>
+<li>di notte: colonne Blinn delle lampade (<code>pow(nh, 500)</code>, non limitate al raggio della luce), quelle dei fari lontani nascoste dietro i muri e limitate (<code>tune_beacon_water</code> 0,6 → 0,25);</li>
+<li>il corpo dell'acqua si scurisce con il sole basso, il cielo grigio e la pioggia, tinto dal cielo basso (<code>tune_water_hour</code>, 8 novembre).</li>
+</ul>
+<h3>Piramide Hi-Z e riflessi a 300 m</h3>
+<p><code>enh_hiz</code>: una catena di mip della profondità più vicina (R32F, 10 livelli, cielo e mare messi lontani), costruita ogni fotogramma; il riflesso la percorre una tessera alla volta (<code>post.hiz</code>, attivo, +0,06-0,13 ms). Con <code>post.hiz_surf</code> anche pozzanghere, metallo e vetro: i raggi che si allontanano arrivano a 150 m invece di ~25 m (+0,05 ms). Le ombre di contatto restano sul loro march (raggi di 0,5 m: niente da saltare). L'AO non usa la piramide: costa 0,07-0,18 ms e gira prima che la piramide esista.</p>
+<p>Il riflesso tracciato dell'acqua arriva a 300 m (era 80, <code>tune_water_ssr_far</code>): oltre 25-50 m segue il raggio a specchio della superficie calma (uno specchio planare) e le increspature fanno solo ondeggiare l'immagine trovata. Prima le increspature piegavano i raggi radenti dentro il mare e oltre ~40 m non si trovava niente. Ora il molo lontano e la città di Haven si vedono nell'acqua, senza costo misurabile.</p>
+<h3>Bagliori di sole, luna e lampade</h3>
+<ul>
+<li>Il riflesso stretto del sole e quello della luna sono spezzati in luccichii e smorzati, non più una macchia piena (<code>tune_water_glint_soft</code>, <code>tune_water_moon_soft</code>).</li>
+<li>Il sentiero di luccichii della luna di notte: un lobo del raggio riflesso verso la luna, scalato dalla sua parte illuminata e dal cielo sereno, color rame durante un'eclissi, nascosto dove il riflesso incontra prima un muro (<code>tune_water_moon</code>).</li>
+<li>Colonne delle lampade solo dove la loro mappa d'ombra lascia passare la luce (<code>tune_water_lamp_map</code>).</li>
+</ul>
+<h3>Correzioni dell'acqua</h3>
+<ul>
+<li><strong>Env floor</strong> (<code>tune_water_env_floor</code>): le ultime ~14 righe di mare sotto l'orizzonte erano un colore piatto, perché il riflesso alzava ogni raggio di almeno 0,03 e tutte campionavano lo stesso pixel di cielo; ora il minimo è metà della salita del raggio calmo.</li>
+<li><strong>Fallback Hi-Z</strong> (<code>tune_water_hiz_fallback</code>): dove la traccia Hi-Z manca prova il vecchio march (al porto, chiazze pallide di cielo dove stanno le case del molo).</li>
+<li><strong>Night floor</strong> (<code>tune_water_night_floor</code> 0,5): di notte il corpo dell'acqua non scende sotto metà dell'acqua del gioco; un canale degli slum alle 23 era un buco nero (RGB 2,8,9 contro 7,32,30 del gioco, ora 11,29,29).</li>
+<li>Le oasi del deserto alla quota del mare (9 m) sono stagni (<code>tune_water_oasis</code>); impronta del pixel da una superficie in piano (<code>tune_water_foot</code>); raggi riflessi che cadono sul mare alzati al primo cielo (<code>tune_water_env_lift</code>). Nuove viste di debug <code>tune_water_dbg</code> 6-15.</li>
+</ul>
+<h3>Riflessi ray-traced <span class="tag off">spenti</span></h3>
+<p>Niente RT hardware in OpenGL, ma ci sono gli SSBO: un BVH per livello (SAH a bin, 4 triangoli per foglia) costruito al caricamento, tracciato solo dove l'SSR manca (fuori schermo, occluso). I colpi sono testurizzati (texture array 64×64 per materiale, UV per triangolo, mip dalla distanza) e ombreggiati con la palette oraria della luce cotta; il contributo tracciato sfuma tra 150 e 200 m per non disegnare una linea d'orizzonte. Spenti di default: hanno ancora artefatti. I riflessi passano tutti per <code>night_dim()</code>, altrimenti di notte brillerebbero.</p>
+
+<!-- ============================================================ -->
+<h2 id="cielo">8. Cielo, ore e meteo</h2>
+<h3>Cielo</h3>
+<p>Un cielo diurno proprio per le aree all'aperto (<code>day_sky</code>), nuvole volumetriche a un quarto dei pixel mescolate nel tempo (mai un NaN nella storia: diventava un blocco nero), cumuli scuri con bordi arancio all'ora dorata, raggi attraverso i varchi con il sole basso, lens flare, stelle in due strati e via lattea, il disco della luna con alone, cinque tipi di notte (stellata, poche stelle, luna piena, quasi piena, eclissi rossa), stelle cadenti. Il bagliore del sole tiene un nucleo bianco e perde il quadrato del suo quad. Di notte si tengono le luci che il gioco disegna sul suo cielo (fari della torre di Haven, riflettori): si aggiunge <code>max(scena − copia del cielo, 0)</code> dove la scena è più chiara del cielo.</p>
+<h3>Cielo fisico</h3>
+<p>Tre tappe, tutte solo sulla <strong>tinta</strong> (la luminosità resta quella di Enhanced):</p>
+<ul>
+<li><strong>Colore del sole</strong> (<code>tune_phys_sky</code>, <span class="tag on">attivo</span>): Rayleigh (λ<sup>−4</sup>) più aerosol (Ångström λ<sup>−1,3</sup>) a 680/550/440 nm lungo la massa d'aria di Kasten-Young, rispetto al sole allo zenit; aerosol = 0,04 + 0,08 × foschia dell'area + 0,25 × il cielo denso del tramonto rosso (<code>tune_phys_turb</code>). Con 0,2 × foschia il sole del deserto alle 18 era rosso sangue; con 0,08 resta solo un bagliore arancio più profondo.</li>
+<li><strong>Cupola del cielo</strong> (<code>tune_phys_dome</code>, <span class="tag on">attivo</span>): scattering singolo su uno strato piatto (fasi Rayleigh e Henyey-Greenstein g 0,7), massa d'aria della vista limitata a 10, banda di Chappuis dell'ozono (300 DU, <code>tune_phys_ozone</code>), bilanciamento del bianco sul sole allo zenit; solo con cielo sereno di giorno. Senza ozono il cielo basso delle 8 diventava verde oliva, con l'ozono pesca-lilla. Distanza RGB dalle bande del cielo dell'immagine di riferimento (deserto 16h): 29/37/25 → 10/23/21.</li>
+<li><strong>Tinta dell'ombra</strong> (<code>tune_phys_shade</code>, <span class="tag off">spento</span>): l'ombra perde la quota di sole di ogni canale, sun / (sun + sky), con le tinte della stessa aria al posto del lilla fatto a mano.</li>
+</ul>
+<p>Costo del composite invariato (0,85 contro 0,86 ms). Sul terreno colorato l'ombra vicina del sole tiene la tinta (<code>tune_shade_hue</code> 0,9).</p>
+<h3>Notti scure</h3>
+<p>La notte del gioco è un giorno uniformemente fioco e azzurrino. Enhanced scurisce per zona (deserto il più scuro, città meno) ma tiene i pixel più chiari (finestre, fuochi, insegne), poi le luci dinamiche re-illuminano. Dall'8 novembre la terra fioca prende la tinta lunare del gioco a pari luma (<code>tune_night_hue</code> 0,8, sfumata tra luma 0,3 e 0,6 perché nuclei di lampade e fiamme restino caldi), e un leggero bordo luna/cielo sui personaggi (<code>tune_chr_rim</code>). Un bagliore d'aria all'orizzonte (<code>tune_night_horizon</code>) fa leggere le montagne.</p>
+<p>La "pressione del terreno pallido" di notte (<code>tune_night_pale</code>) era nata per i lastricati degli slum ma scuriva ogni livello notturno. Ora vale 1 = solo negli slum di Haven (un uniform <code>pale_ground</code> dal nome del livello, <code>ctyslum</code>, invece di un test sui pixel), ma è <span class="tag off">spenta</span> di default: gli slum alle 22 risultavano il 19% più scuri di prima, e le notti non devono diventare più scure.</p>
+<h3>Tramonto senza dominanti</h3>
+<p>Un fotogramma che vira al blu notte al tramonto erano tante piccole spinte fredde sommate: la tinta dell'ombra, quella delle nuvole e lo split-tone del grading caldo che per un fotogramma scuro <em>raffredda</em> tutto. Rimedi: il grading caldo lascia stare le ombre (<code>tune_warm_shadow</code> 0), la tinta dell'ombra diventa neutra con il sole basso (<code>tune_dusk_shade</code>), il gate "sole basso" usa l'orologio (un uniform <code>dusk</code>) e non l'altezza del sole dell'area.</p>
+<h3>Meteo</h3>
+<p>Meteo per zona e stagione in <code>world.json</code> (periodi sereni, nuvolosi, rovesci, temporali, tempesta di sabbia, neve), 22 preset nel menu. Pioggia come gocce vere nel mondo (colonne su griglie orizzontali percorse dal raggio di vista), terreno bagnato con riflessi, pozzanghere che durano più della pioggia e si asciugano dai bordi, lampi e lampi diffusi, neve che si posa, aria calda sulla lava. La <strong>tempesta di sabbia</strong> parte dal processo del gioco (intensità e vento passati al renderer) come polvere in spazio mondo: pochi passi jitterati in rumore 3D allungato nel vento. Dall'8 novembre polvere e foschia del deserto sono <strong>strati sopra il terreno</strong> (<code>tune_haze_layer</code>): una volta in volo la polvere non riempie più tutta la discesa; il rialzo totale della foschia sul terreno lontano è limitato a 1,2× la sua luma (<code>tune_far_lift</code> 1,2), ma sfumato all'inizio dell'ora dorata, perché toglieva il bagliore dorato alla catena lontana. Il gate usa l'inizio (<code>1 − smoothstep(0, 0.2, golden)</code>): <code>golden</code> è la curva oraria × il grading dell'area, non un fattore 0..1. Niente tempesta dentro Spargus (<code>weather.town_dust</code>) e meno polvere sui personaggi vicini (<code>tune_dust_chr</code>).</p>
+<h3>Pioggia, temporale e terreno bagnato</h3>
+<ul>
+<li><strong>I lampi illuminano la scena</strong> (<code>tune_bolt_scene</code>): una breve luce fredda dal lato del cielo del fulmine più una quota da tutto il cielo, secondo il colore della superficie, solo su ciò che vede il cielo (sky map). Prima era solo un leggero rialzo dopo il grading.</li>
+<li><strong>Terreno bagnato più profondo</strong> (<code>tune_wet_deep</code> 0,6): sotto la pioggia il terreno si limitava a scurirsi e il deserto diventava grigio e piatto; la sabbia e la pietra bagnate sono più sature (l'acqua nei pori diffonde meno bianco): la parte bagnata va verso <code>c*c</code> riportato alla luma di <code>c</code>. Saturazione del deserto a mezzogiorno con pioggia 29 → 39, luma uguale, nessun costo.</li>
+<li><strong>Personaggi bagnati</strong> (<code>tune_rain_chars</code>): più scuri, con un riflesso freddo sui bordi.</li>
+<li>La pioggia resta fuori da ciò che è coperto, grazie alla sky map (<a href="#ao">sezione 4</a>).</li>
+</ul>
+<p>La foschia bassa ha un tetto: la densità smette di crescere un paio di metri sotto la camera (<code>tune_fog_floor_m</code> 2), altrimenti guardando giù da un molo il mare diventava una lastra lattiginosa.</p>
+
+<!-- ============================================================ -->
+<h2 id="effetti">9. Effetti e bagliori</h2>
+<h3>Effetti visibili di giorno</h3>
+<p>Con il grading e l'esposizione di Enhanced spari, propulsori e bagliori sparivano di giorno. La scena viene copiata prima di <code>TEX_SPRITE</code> e dopo <code>GENERIC_SPRITE_3</code> (copie con mipmap); il composite rimette ciò che gli sprite hanno aggiunto, dopo l'adattamento dell'occhio, con un guadagno e un ginocchio, solo di giorno (<code>fx_day = 1 − night</code>) e solo per sorgenti compatte (test di area e "lavaggio" sui mip). Anche il bright pass del bloom li riceve.</p>
+<ul>
+<li><code>tune_fx_gain</code> 2,2, più su terreno chiaro (<code>tune_fx_bright</code>), meno su terreno scuro (<code>tune_fx_dark</code> 0,2), ginocchio a 0,78 che mantiene la tinta.</li>
+<li>Polvere e fumo blended non devono brillare come sfere: l'alpha del fotogramma viene azzerata a 1 prima dei bucket sprite e gli sprite blended normali la scrivono come 1 − copertura con <code>glBlendFuncSeparate(SRC_ALPHA, ONE_MINUS_SRC_ALPHA, ZERO, ONE_MINUS_SRC_ALPHA)</code>; la luce additiva non la tocca.</li>
+<li>Il bagliore di sole e luna resta fuori da questo guadagno (<code>tune_fx_sky</code>), altrimenti il sole diventava un rombo viola.</li>
+</ul>
+<h3>Bagliori grandi: blend a schermo</h3>
+<p>Un grande bagliore additivo su un pavimento illuminato satura nel fotogramma a 8 bit (la pozza della colonna dell'arena, anche nel gioco originale). I quad grandi (≥ 0,2 dello schermo) si fondono come uno <em>screen</em>, D + S(1−D), un ginocchio morbido che tiene la texture del pavimento; i piccoli restano somma pura. In <code>sprite/GlowRenderer.cpp</code>:</p>
+<pre><code>glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ONE, GL_ONE, GL_ONE);  // quad grandi
+glBlendFunc(GL_ONE, GL_ONE);                                          // quad piccoli</code></pre>
+<p>Pozza da 205 a 173 alle 19, costo nullo.</p>
+<h3>Scena HDR, M1-M4 <span class="tag off">spenta</span></h3>
+<p><code>post.hdr_scene</code> è completo ma resta spento di default, con il verdetto misurato scritto accanto allo switch.</p>
+<ul>
+<li><strong>M1</strong>: fotogramma del gioco, risoluzione MSAA, copia della scena e copie prima/dopo gli effetti in RGBA16F, cambiabile dal file di tuning (gli FBO vengono rifatti). La pozza saturata diventa una caduta liscia con la texture. Nel target float i quad dei bagliori scrivono alpha &gt; 1: il draw usa <code>glBlendFuncSeparate(ONE, ONE, ZERO, ONE)</code> perché chi legge <code>DST_ALPHA</code> veda quello che vedeva a 8 bit.</li>
+<li><strong>M2</strong>: la lettura per l'adattamento dell'occhio di una scena RGBA16F in half float (niente stallo di conversione sulla CPU).</li>
+<li><strong>M3</strong>: i quad grandi dei bagliori si sommano a <code>post.glow_hdr_gain</code> 0,7 nel fotogramma half float: niente velo saturo largo nella pozza dell'arena.</li>
+<li><strong>M4</strong>: gli shader dei frammenti del gioco scrivono il colore limitato a 0..1, come lo salva un fotogramma RGBA8. Il <code>color *= 2</code> degli shader PS2 teneva fino a 2,0 per frammento: la minimappa usciva troppo chiara e i propulsori arancio della Hellcat bianchi. Ora solo le somme additive superano 1.</li>
+</ul>
+<p>Verdetto: nessun guadagno visibile (torce di Spargus alle 21 entro 0,5/255, pozza dell'arena uguale), un bagliore più largo e chiaro sotto la Hellcat sulla sabbia (contro il look scuro), e a guadagno 1,0 una frangia rosa sui colpi; il fotogramma float costava +1,4 ms di renderer a 640×360 alla prima misura. Resta un'opzione per futuri effetti HDR.</p>
+<h3>Lampi delle esplosioni</h3>
+<p>Di notte il lampo di un'esplosione vale metà del guadagno e del tetto (<code>tune_flash_night</code> 0,5: illuminava il terreno scuro quasi di bianco); di giorno una quota (<code>tune_flash_day_late</code> 0,7) viene rimessa dopo la compressione delle alte luci, perché sulla sabbia al sole non restava spazio e un'esplosione a mezzogiorno non illuminava nulla. Il fumo blended al chiuso riprende la luce aggiunta, fino al colore del gioco (<code>tune_smoke_floor</code>).</p>
+<h3>Altri effetti</h3>
+<p>Esplosioni a strati (palla di fuoco, anello di polvere, fumo), scintille che rimbalzano, segni di bruciatura, scie dietro i colpi (<code>enh_trail</code>), fumo e fiamme che evolvono in rumore 3D, fumo morbido illuminato dal sole e dalle luci vicine (<code>lit_smoke</code>), pulviscolo nei coni dei fari, lucciole e pollini.</p>
+
+<!-- ============================================================ -->
+<h2 id="personaggi">10. Personaggi</h2>
+<ul>
+<li><strong>Rim e highlight</strong>, rim del sole controluce, materiali per parte dai nomi delle texture (pelle, capelli, metallo, cuoio, stoffa, pelo, occhi, lenti), rilievo dalla luminosità della texture, occhi vivi (riflesso che segue la luce chiave), suddivisione tipo PN-triangle per i modelli elencati.</li>
+<li><strong>Ombra sui personaggi</strong>: il gioco li illumina sempre pieni. Il composite guarda la mappa d'ombra al pixel con un bias di ~1,6 m lungo la luce (<code>tune_chr_gap_m</code>): contano solo caster così lontani, non il proprio corpo né Daxter. Perdono <code>tune_chr_shade</code> 0,85 del sole, con una tinta neutra a mezzogiorno che va verso il marrone al tramonto (una tinta lilla rendeva Jak verde oliva).</li>
+<li><strong>Pavimento a sole basso</strong>: mai più scuri di 0,5× il colore del gioco (<code>tune_chr_floor</code>); in una pozza di luce del gioco la tengono al tramonto (<code>tune_chr_pool</code>).</li>
+<li><strong>Ombre del gioco</strong>: sotto ~25° di sole resta anche l'ombra corta proiettata del gioco (<code>shadow.game_chars_below_deg</code>), altrimenti Jak sembrava galleggiare; ombra di contatto sotto i piedi (<code>tune_chr_contact</code> 0,55).</li>
+<li><strong>Spill</strong>: la luce che si sparge dai pixel emissivi di notte (bloom × albedo, con un limite) sui personaggi vale 0,4× (<code>tune_spill_chr</code>), e solo lo spill viola viene tagliato su di loro: quello caldo di fuochi e finestre resta.</li>
+<li><strong>Occlusione al suolo</strong> (<code>tune_chr_occ</code> 0,7): i punti più bassi dei personaggi attorno a Jak, visti dal basso in una mappa 256² su ±6 m, scuriscono il pavimento proprio sotto di loro, di giorno e di notte (ammorbidita su 0,45 m attorno alla sagoma, svanisce su 1,2 m di distacco).</li>
+<li><strong>Rim dell'ora dorata</strong> (<code>tune_chr_gold_rim</code> 0,7): un bordo di sole basso sui lati rivolti al sole, più forte in controluce. Di notte la tinta lunare della terra va anche sui personaggi, a metà (<code>tune_night_hue_chr</code> 0,5: Jak sembrava rosa e incollato sul deserto al chiaro di luna).</li>
+<li><strong>Motion vector</strong>: vedi <a href="#post">TAA</a>.</li>
+<li><strong>Stoffa</strong>: i pezzi semitrasparenti (la tunica di Jak) scrivono la loro parte solida in profondità e normali, e sono esclusi dall'AO: prima si vedevano le gambe attraverso.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="vegetazione">11. Vegetazione e scenografia</h2>
+<ul>
+<li>Vento su erba e foglie; l'erba si piega lontano da Jak (entro 1,3 m, dal vertex shader) e da nemici, passanti e veicoli vicini.</li>
+<li>Densità: copie dell'erba e delle piccole piante dei livelli posate attorno, ciuffi sui pavimenti erbosi, rampicanti copiati sui muri; a livelli (moderato / rigoglioso) cambiabili dal menu.</li>
+<li>Scenografia dettagliata: proto elencati in <code>scenery.json</code> ricevono modelli <code>.glb</code> dettagliati vicino alla camera, versioni lontane e impostori (12×12 viste, concentrate vicino all'orizzonte), ombreggiati verso il piede.</li>
+<li>Il cambio di LOD e i dither del bordo lontano restano fermi: spostati ogni fotogramma tremolavano (il TAA non stabilizza l'erba ritagliata).</li>
+</ul>
+<h3>Erba fitta per classe di terreno <span class="tag on">attiva</span></h3>
+<p>Al caricamento le texture di pavimento sono classificate come erba dal nome (<em>grass/moss/lawn/meadow/turf</em>) o dal verde medio; il pavimento tfrag più alto su una griglia di 2 m (niente entro 3 m sopra: niente erba sotto rocce o sporgenze) genera campi di fili d'erba da 64 m. Ogni punto prende il colore del pavimento come disegnato (media della texture × i colori dei vertici tfrag lungo la giornata), letto da <code>shrub_grass.vert</code>. I sentieri di terra restano spogli (letti dall'alpha dello strato di terra blended), niente erba sotto l'acqua, i fili lontani luminosi come il pavimento (<code>tune_grass_scr_far</code> 0,8). In Jak 3 solo la foresta ha un pavimento erboso (circa 65 000 m²). Costo: +0,5 ms GPU senza limite di fps.</p>
+<h3>LOD della scenografia per dimensione</h3>
+<ul>
+<li><code>scenery.lod_size</code> 2: le copie piccole passano prima alla versione lontana e all'immagine (prima tutte a 60 m, poi 120 m). Alla partenza nel deserto c'erano 872 copie dettagliate = 2,6 M triangoli più 1958 versioni lontane = 2,0 M, soprattutto mucchi di sassi.</li>
+<li><code>scenery.coarse</code> 1: le pietre inclinate (la cui immagine mostrerebbe la parte nascosta dal terreno) lontano disegnano una versione grezza invece di tenere la versione lontana (540-1980 triangoli) fino a 250 m.</li>
+</ul>
+<h3>Controluce su arbusti e foglie <span class="tag on">attivo</span></h3>
+<p>Guardando verso il sole, la luce attraverso il fogliame degli arbusti (tag di lunghezza 0,97) nella sua tinta più profonda, scaldata dal sole (<code>tune_backlight</code> 1, dall'angolo con coseno 0,55). Non si usa <code>sun_lit</code> (è N·L, 0 proprio sulle facce illuminate da dietro) ma la mappa d'ombra 0,6 m verso il sole. Vale per arbusti e foglie dei TIE che svolazzano; non per le palme (nessun flag di flutter) né per la pelle.</p>
+<h3>Alberi TIE al vento</h3>
+<p>Gli alberi TIE statici e i tie al vento del gioco ondeggiano nello stesso campo di raffiche degli arbusti (<code>tune_tie_wind</code>), e le loro foglie svolazzano (3,5 cm, fasate per posizione, <code>enh_tie_flutter</code> in <code>tie_wind.vert</code>).</p>
+<h3>Comparsa senza pop-in</h3>
+<p>Un livello disegnato per la prima volta (o dopo una pausa di oltre 2 fotogrammi) entra in dissolvenza in 0,5 s con lo stesso dither 4×4 della fascia di LOD (<code>bg.fade_in</code>, contato in fotogrammi). I personaggi e i prop del livello entrano insieme al loro terreno (<code>fg.fade_in</code>): <code>merc2.frag</code>/<code>emerc.frag</code> scartano con lo stesso dither di Bayer (con operazioni sui bit, senza array). Particelle e bagliori compaiono ancora interi.</p>
+
+<!-- ============================================================ -->
+<h2 id="post">12. Post: TAA, dither, tonemap, grading</h2>
+<h3>TAA senza buffer di velocità</h3>
+<p>Jitter Halton(2,3), 8 campioni, avvolgendo il vertex shader dei soli shader che disegnano il mondo: <code>gl_Position.xy += enh_jitter * gl_Position.w</code>. Resolve (<code>enh_taa.frag</code>): riproiezione con la sola camera (profondità per il mondo, solo rotazione per il cielo), storia letta con Catmull-Rom in 5 tap bilineari, clipping della storia nella scatola del vicinato 3×3 in YCoCg, meno storia sui pixel veloci, reset a un taglio di camera; pesato per luminosità (niente scintillio dei dettagli sottili lontani). Costo ~0,1 ms.</p>
+<pre><code>vec3 lo = m1 - 1.25 * sigma, hi = m1 + 1.25 * sigma;
+vec3 center = 0.5 * (hi + lo), extent = max(0.5 * (hi - lo), vec3(1e-4));
+vec3 off = hist - center;
+float k = max3(abs(off / extent));
+if (k > 1.0) hist = center + off / k;   // la storia torna dentro la scatola</code></pre>
+<h3>Motion vector dei personaggi</h3>
+<p><code>taa.motion</code> (attivo): Merc2 elenca ogni modello del fotogramma (hash del nome, posizione delle ossa nella lista dei caster); <code>do_motion</code> ritrova ciascuno nella lista del fotogramma prima (stesso nome e numero di ossa, la media delle ossa più vicine una volta tolto il movimento della camera, entro 3 m, uno a uno) e lo skinna con le ossa di entrambi i fotogrammi (<code>enh_motion</code>) in un offset uv RG16F dove è la superficie davanti. <code>enh_taa</code> prende l'offset del pixel più vicino invece della riproiezione della camera: la Hellcat al decollo resta nitida invece di sbavare.</p>
+<h3>VRS sul composite <span class="tag on">attivo</span></h3>
+<p><code>post.vrs</code>: <code>GL_NV_shading_rate_image</code> solo attorno al draw del composite. Un compute shader (<code>enh_vrs.comp</code>, tessere 16×16) sceglie il tasso dall'immagine del gioco di questo fotogramma (un salto di luma oltre <code>post.vrs_edge</code> 0,1 = un bordo, il salto medio della tessera oltre <code>post.vrs_tex</code> 0,01 = texture) e dall'immagine finita del fotogramma prima (la storia del TAA, che contiene ombre, occlusione e sabbia del composite): 1×1, 2×1, 1×2 o 2×2. Le GPU senza l'estensione restano a tasso pieno. A 2560×1600 (Spargus 18h): composite 12,97 → 7,46 ms, passaggio del tasso 0,15 ms, da 42 a 55 fps; fotogrammi uguali entro il rumore del TAA. La Hellcat in picchiata a 50 m/s: niente blocchi.</p>
+<h3>Dither in uscita</h3>
+<p>Un passo triangolare ±1 da due campioni di <em>interleaved gradient noise</em>, ruotato ogni fotogramma, alla scrittura a 8 bit del composite e anche dopo il TAA (la sua storia RGBA16F altrimenti fa di nuovo bande). Media zero, quindi il TAA lo media in passi più fini: i pixel di cielo uguali ai vicini passano dal 57 al 44%.</p>
+<pre><code>vec2 fp = gl_FragCoord.xy + 5.588238 * mod(floor(haze.w * 60.0), 64.0);
+float n1 = fract(52.9829189 * fract(dot(fp, vec2(0.06711056, 0.00583715))));
+float n2 = fract(52.9829189 * fract(dot(fp + vec2(47.0, 17.0), vec2(0.06711056, 0.00583715))));
+color.rgb += (n1 + n2 - 1.0) * tune_dither / 255.0;</code></pre>
+<h3>Esposizione e spalla</h3>
+<p>Il terreno chiaro del deserto non si sistema schiacciando le alte luci (una spalla forte appiattisce la sabbia e la lascia comunque sovraesposta): si scurisce il terreno al sole con una moltiplicazione che dipende dall'altezza del sole (il contrasto relativo resta), modulata dalla luminosità perché le rocce scure non diventino nere. La spalla resta per i quasi-bianchi, su tutta l'immagine e <strong>mantenendo la tinta</strong> (<code>tune_shoulder_knee</code> 0,85; oltre 1 verso il bianco, come un nucleo caldo). Adattamento dell'occhio dalla luminosità letta un fotogramma dopo (niente stalli), che non solleva le parti chiare di una stanza buia (<code>tune_adapt_hi</code>). Una guardia NaN/inf sul colore finale.</p>
+<h3>Grading per area</h3>
+<p>Il gioco dice in quale livello è il giocatore e l'ora: grading per area (prefisso del nome di livello) e per giorno/notte come lift, gain, saturazione, contrasto, calore, tutto in <code>world.json</code> con transizioni morbide (~1,5 s). Correzioni recenti: la saturazione del mattino mai oltre 1,1× quella del gioco (<code>tune_morning_sat_cap</code>, lastre di Spargus color lime alle 7), i colori ricolorati verso la sabbia limitati alla saturazione di una sabbia (~0,3), grading del deserto con gain 1,03 e contrasto 0,1 (mezzogiorno non più bruciato).</p>
+
+<!-- ============================================================ -->
+<h2 id="luminosita">13. Luminosità e preset</h2>
+<h3>Preset grafici</h3>
+<div class="tablewrap"><table>
+<tr><th>Preset</th><th>Cosa fa</th></tr>
+<tr><td>Classic</td><td>Passaggio Enhanced spento: l'immagine del gioco.</td></tr>
+<tr><td>Performance</td><td>Medium senza ciò che costa GPU: mappa d'ombra, SSAO, ombre del sole, riflessi sull'acqua, vista lontana, light spill, fumo illuminato, ombre delle nuvole, rilievo, parallasse, anti-tile dei muri, vegetazione extra.</td></tr>
+<tr><td>Medium</td><td>Default del <code>Settings</code> tranne i passaggi più cari: volumetrico, caster extra, SSGI, god rays, DoF, motion blur, ombre delle luci, rifrazione e caustiche dell'acqua, ombre morbide, DoF dei filmati; niente ray tracing.</td></tr>
+<tr><td>Maximum</td><td>Tutti i default del <code>Settings</code> (anche il ray tracing se il default lo prevede).</td></tr>
+</table></div>
+<p>Le scelte sono salvate in <code>enhanced-settings.json</code> accanto alle impostazioni di OpenGOAL, caricate prima degli switch d'ambiente (così le prove restano riproducibili). Un'auto qualità (attiva di default) scende di un gradino solo dopo ~3 s sotto ~58 fps (ma sopra ~40: i caricamenti sono CPU) e risale quando c'è margine; i gradini 4-5 abbassano la risoluzione interna (85%, 72%).</p>
+<h3>Sezione Luminosità (8 novembre)</h3>
+<p>Cinque slider: <strong>Day</strong> (0,5-2), <strong>Dawn / dusk</strong> (0,5-2), <strong>Night</strong> (0,5-3), <strong>Shadow lift</strong> (0-1, "solleva le parti scure, il nero resta nero"), <strong>Night visibility</strong> (0-1, "un leggero riempimento lunare negli scuri").</p>
+<div class="tablewrap"><table>
+<tr><th>Preset</th><th>Day</th><th>Dusk</th><th>Night</th><th>Lift</th><th>Night vis.</th></tr>
+<tr><td>Enhanced original</td><td>1</td><td>1</td><td>1</td><td>0</td><td>0</td></tr>
+<tr><td>Balanced</td><td>1,05</td><td>1,12</td><td>1,3</td><td>0,2</td><td>0,25</td></tr>
+<tr><td>More visible</td><td>1,12</td><td>1,25</td><td>1,7</td><td>0,4</td><td>0,5</td></tr>
+<tr><td>Readable nights</td><td>1</td><td>1,05</td><td>1,5</td><td>0</td><td>0,6</td></tr>
+</table></div>
+<p>Tutto arriva in un solo uniform <code>vec4 brightness</code>: il guadagno pesato dai fattori giorno/crepuscolo/notte <strong>come scarto da 1</strong>, così con gli slider neutri vale esattamente 0 e il blocco viene saltato (default identico al pixel). Il guadagno si attenua sui pixel chiari (cielo e lampade non saturano), poi un "toe" solleva gli scuri tenendo il nero:</p>
+<pre><code>if (brightness != vec4(0.0)) {
+  float bg = 1.0 + brightness.x;
+  c *= bg > 1.0 ? mix(bg, 1.0 + (bg - 1.0) * 0.35, smoothstep(0.5, 1.0, bm)) : bg;
+  float bd = 0.09 / (luma(c) + 0.09); bd *= bd;
+  c *= 1.0 + (brightness.y * 1.6 + brightness.z * 1.4) * bd;
+  c += brightness.z * vec3(0.55, 0.7, 1.0) * 0.018 * bd;   // riempimento freddo di notte
+}</code></pre>
+<p>Misure (deserto 22h, luma media /255): neutro 58, gain 1,3 + lift 0,2 → 76, gain 1,7 + lift 0,4 → 99. A mezzogiorno si muove poco (la sabbia chiara sta sulla spalla).</p>
+
+<!-- ============================================================ -->
+<h2 id="prestazioni">14. Prestazioni</h2>
+<h3>Timer GPU per passaggio</h3>
+<p>Coppie <code>glQueryCounter(GL_TIMESTAMP)</code> per passaggio in un anello di 4 fotogrammi, lette solo quando disponibili (mai attese), una riga <code>[enhanced] passes</code> nel log ogni 5 s; un passaggio cronometrato dentro un altro ne è figlio. Prima si usava <code>glFinish</code> attorno ai passaggi.</p>
+<div class="note warn"><strong>Attenzione ai timer che si fermano presto.</strong> Su GL NVIDIA il timestamp finale dopo un draw a schermo intero viene scritto prima che il lavoro dei frammenti finisca: il composite leggeva 0,77 ms mentre uno "span di coda" dal suo draw alla fine del post leggeva 9,7 ms (totale 11,8). Il tempo CPU fino al composite è 0,6 ms. I vecchi risultati "0,00 ms guadagnati" letti da quel timer (per esempio il culling a tessere delle luci) non valgono.</div>
+<h3>Numeri misurati</h3>
+<div class="tablewrap"><table>
+<tr><th>Cambio</th><th>Effetto</th></tr>
+<tr><td>Composite senza array nello shader</td><td>deserto da 38 a 60 fps alla qualità piena</td></tr>
+<tr><td>Hash senza <code>sin</code> (Dave Hoskins) nel rumore</td><td>−1,3 ms su 8,5 nel composite, nessuna differenza visibile</td></tr>
+<tr><td>AO e ombre di contatto a mezza risoluzione</td><td>1,65 → 0,95 ms</td></tr>
+<tr><td>TAA</td><td>~0,1 ms</td></tr>
+<tr><td>Ombre delle luci in screen space</td><td>~0,05 ms</td></tr>
+<tr><td>Cache mappe lontana/media</td><td>bucket ombre 0,35-0,85 → 0,15-0,27 ms</td></tr>
+<tr><td>Cache mappa vicina</td><td>foresta 1,66 → 1,05 ms; città 0,51 → 0,45 ms</td></tr>
+<tr><td>GTAO a mezza risoluzione</td><td>0,09 ms come prima</td></tr>
+<tr><td>Fotogramma RGBA16F</td><td>+1,4 ms di renderer (3,8-4,2 → 5,2-5,7 ms)</td></tr>
+<tr><td>Albedo target</td><td>~+0,4 ms GPU</td></tr>
+<tr><td>Luci nell'aria</td><td>0,09 ms</td></tr>
+<tr><td>VRS sul composite (2560×1600)</td><td>composite 12,97 → 7,46 ms, 42 → 55 fps</td></tr>
+<tr><td>Nuvole con programma snello</td><td>0,75 → 0,51 ms (2560×1600)</td></tr>
+<tr><td>Raggi nelle nuvole con programma proprio</td><td>composite 13,3 → 12,35 ms, passaggio 0,2 ms</td></tr>
+<tr><td>Rumore gradiente da una texture 1024²</td><td>composite 12,37 → 12,25 ms</td></tr>
+<tr><td>SSAO / GI temporali</td><td>0,77 → 0,55 ms / 0,53 → 0,36 ms</td></tr>
+<tr><td>Ombre del sole a metà dimensione</td><td>composite −0,6 ms per un passaggio da 0,33-0,45 ms</td></tr>
+<tr><td>Motion vector del TAA (CPU)</td><td>0,5 → 0,37 ms a fotogramma</td></tr>
+<tr><td>Ossa Merc2 solo usate (CPU)</td><td>0,15-0,18 → 0,08 ms; 478-500 → 89-119 KB di ossa</td></tr>
+<tr><td>Lettura esposizione e clear del moto (CPU)</td><td>−0,36 ms a fotogramma</td></tr>
+<tr><td>Mappe d'ombra delle lampade</td><td>0,04-0,25 ms GPU, 60 fps a 640×360</td></tr>
+</table></div>
+<h3>Regressione CPU corretta</h3>
+<p>Il tempo CPU del renderer era salito dopo il merge <code>447d9c15f</code>. Con interruttori dentro un'unica esecuzione (<code>"debug": {"cpu_profile": 1}</code>) solo <code>taa.motion</code> muoveva la CPU del post. Rimedi: motion vector più leggeri (0,5 → 0,37 ms), lettura dell'esposizione e clear del moto tagliati (−0,36 ms), e Merc2 che carica solo le ossa usate dai vertici del modello (<code>merc.used_bones</code>). I prop Tripo senza scheletro dichiaravano 100 ossa: ogni copia caricava 101 matrici e gli slot di riserva contenevano le matrici del modello precedente, così il passaggio del moto li vedeva muoversi. Parità con il vecchio <code>main</code> verificata.</p>
+<div class="note warn"><strong>Il limite di 1024 registri costanti di NVIDIA.</strong> Il composite è vicino al limite: i tre rami uniti insieme (ognuno da solo ci stava) lo hanno superato (<code>C6020</code> al link), e gk moriva all'avvio. Per questo gli uniform vanno impacchettati: <code>blast_age</code>, <code>blast_seed</code>, <code>blast_ground</code> da tre <code>float[4]</code> a <code>vec4 blast_info[4]</code>, <code>fire_seed</code> in un <code>vec4</code> (11 registri recuperati, stessi valori); le maschere delle tessere stanno in una texture e non in 144 uniform. <code>JAK_ENHANCED_SHADER_STATS</code> scrive nel log istruzioni e registri dei programmi <code>enh_*</code> letti dal binario del driver.</div>
+<p>Con il vsync i tempi GPU dell'intero fotogramma mentono (la GPU aspetta lo schermo e abbassa il clock): si confrontano i passaggi solo nella modalità profilo o con i timestamp per passaggio. Prima di pensare a culling GPU: tutti i bucket di geometria insieme erano ~4 ms contro 8 di post.</p>
+
+<!-- ============================================================ -->
+<h2 id="test">15. Metodo di prova</h2>
+<ul>
+<li><strong>Hot reload</strong>: gli shader <code>enh_*</code> vengono ricompilati quando il file cambia (il programma si scambia solo se compila; un composite che non compila all'avvio invece è fatale), e i numeri stanno in <code>tuning.json</code> (<code>game/assets/enhanced/tuning.json</code> condiviso, <code>local/tuning.json</code> personale), riletto al salvataggio. Un avvio, poi ~10 s per tentativo.</li>
+<li><strong>A/B in una sola esecuzione</strong>: si riscrive la chiave nel JSON, si aspetta la transizione, si cattura, e si giudicano tutte le varianti su un unico foglio. Molti <code>tune_*</code> hanno un valore 2 = "solo metà destra dello schermo" per un confronto nello stesso fotogramma.</li>
+<li><strong>Stage view</strong>: un uniform <code>tune_stage</code> fotografa il colore dopo ogni blocco principale del composite; la media di un ritaglio per stadio trova il passo colpevole in un'esecuzione.</li>
+<li><strong>Viste di debug</strong>: <code>tune_shadow_dbg</code>, <code>tune_ao_view</code>, <code>tune_water_dbg</code>, <code>tune_fx_debug</code>, <code>tune_albedo_dbg</code>, <code>tune_far_dbg</code>.</li>
+<li><strong>Fissare ciò che si muove</strong>: ora ribloccata ogni 15 s, meteo forzato da uno script (<code>JAK_ENHANCED_WEATHER_SCRIPT</code>, <code>weather.test_spell</code>), tempo delle nuvole fermo, città senza nemici; confrontare sempre anche una coppia con le stesse impostazioni per conoscere il rumore.</li>
+<li><strong>Confronto col gioco originale</strong>: <code>tune_raw_view</code> mostra l'immagine del gioco (2 = metà destra) per un A/B col vanilla nella stessa esecuzione; <code>JAK_ENHANCED_TEST_RES</code> prova risoluzioni alte in una finestra di prova, <code>debug.dump_frame</code> salva il fotogramma a grandezza piena dopo il TAA.</li>
+<li><strong>Prove silenziose</strong>: con <code>JAK_ENHANCED_MUTE=1</code>, o in qualunque istanza di prova ≥ 1, il gioco è muto (il sintetizzatore continua a girare).</li>
+<li><strong>Release gate</strong>: <code>release_gate.ps1</code> (Jak 3) legge righe di log e hook di prova (avvio, camera, livello, prova di corsa con attacchi) prima di una release.</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="switch">16. Tabella degli switch principali</h2>
+<p>Uniform del composite (<code>enh_composite.frag</code>) e chiavi di <code>tuning.json</code>, con il default del ramo <code>main</code>. 0 spegne quasi sempre l'effetto.</p>
+<div class="tablewrap"><table>
+<tr><th>Switch</th><th>Default</th><th>Effetto</th></tr>
+<tr><td><code>tune_fx_gain</code></td><td>2,2</td><td>Luce degli effetti di giorno sopra la scena graduata senza di essi</td></tr>
+<tr><td><code>tune_fx_knee</code></td><td>0,78</td><td>Spalla della loro somma, tinta mantenuta</td></tr>
+<tr><td><code>tune_fx_sky</code></td><td>1</td><td>Bagliori del cielo (sole, luna) fuori dal guadagno</td></tr>
+<tr><td><code>tune_gold_fill</code></td><td>0,75</td><td>Pomeriggio tardo: sabbia/roccia mai sotto questa quota del colore del gioco</td></tr>
+<tr><td><code>tune_dusk_floor</code></td><td>0,7</td><td>Ombra del sole basso mai sotto questa quota, dopo il grading, nella tinta del gioco</td></tr>
+<tr><td><code>tune_shoulder_knee</code></td><td>0,85</td><td>Spalla dell'intera immagine (≥ 1: clip duro)</td></tr>
+<tr><td><code>tune_dither</code></td><td>1</td><td>Dither dell'uscita in passi a 8 bit</td></tr>
+<tr><td><code>tune_ao_multibounce</code></td><td>1</td><td>AO per canale dal colore della superficie</td></tr>
+<tr><td><code>tune_ao_mb_luma</code></td><td>1</td><td>…solo la tinta, alla luminosità dell'AO grigio</td></tr>
+<tr><td><code>tune_ao_gtao</code></td><td>spento</td><td>GTAO al posto dei campioni Alchemy vicini</td></tr>
+<tr><td><code>tune_spec_occ</code></td><td>1</td><td>Occlusione speculare</td></tr>
+<tr><td><code>tune_spec_aa</code></td><td>0,25</td><td>Specular AA (max 0,18 di roughness²)</td></tr>
+<tr><td><code>tune_spec_clamp</code></td><td>4</td><td>Highlight di una lampada mai oltre 4× la superficie illuminata</td></tr>
+<tr><td><code>tune_dry_glints</code></td><td>0,5</td><td>Highlight delle luci su pavimenti lucidi e metallo</td></tr>
+<tr><td><code>tune_flash</code></td><td>2,5</td><td>Lampi di esplosioni e spari oltre il tetto delle lampade</td></tr>
+<tr><td><code>tune_lamp_jak_m</code></td><td>2,5 m</td><td>Ombre delle lampade lasciate andare vicino ai piedi di Jak</td></tr>
+<tr><td><code>tune_night_hue</code></td><td>0,8</td><td>Notte: terra fioca nella tinta lunare del gioco</td></tr>
+<tr><td><code>tune_night_lamp_cool</code></td><td>1</td><td>Parte debole delle pozze di luce verso la tinta lunare</td></tr>
+<tr><td><code>tune_night_keep_raw</code></td><td>1</td><td>La notte risparmia ciò che è chiaro nell'immagine del gioco (da luma 0,6)</td></tr>
+<tr><td><code>tune_night_pale</code></td><td>0</td><td>Pressione del terreno pallido di notte (1 = solo slum di Haven)</td></tr>
+<tr><td><code>tune_far_lift</code></td><td>1,2</td><td>Tetto del rialzo della foschia sul terreno lontano, non all'ora dorata</td></tr>
+<tr><td><code>tune_phys_sky</code> / <code>_dome</code></td><td>1 / 1</td><td>Colore del sole e tinta della cupola dall'aria attraversata</td></tr>
+<tr><td><code>tune_phys_shade</code></td><td>0</td><td>Tinta dell'ombra dalla stessa aria</td></tr>
+<tr><td><code>tune_probe_shade</code></td><td>0</td><td>Ombra al chiuso nella tinta del rimbalzo dei probe</td></tr>
+<tr><td><code>tune_shade_hue</code></td><td>0,9</td><td>L'ombra vicina sul terreno colorato tiene la tinta</td></tr>
+<tr><td><code>tune_water_ssr_far</code></td><td>300 m</td><td>Portata del riflesso tracciato dell'acqua, specchio planare lontano</td></tr>
+<tr><td><code>tune_water_moon</code></td><td>1</td><td>Sentiero di luccichii della luna</td></tr>
+<tr><td><code>tune_water_glint_soft</code> / <code>_moon_soft</code></td><td>1 / 1</td><td>Riflessi stretti di sole e luna spezzati in luccichii</td></tr>
+<tr><td><code>tune_water_lamp_map</code></td><td>1</td><td>Colonne delle lampade solo dove arriva la loro luce</td></tr>
+<tr><td><code>tune_water_env_floor</code></td><td>1</td><td>Mare sotto l'orizzonte non più una fascia piatta</td></tr>
+<tr><td><code>tune_water_hiz_fallback</code></td><td>1</td><td>Dove la traccia Hi-Z manca, il vecchio march</td></tr>
+<tr><td><code>tune_water_night_floor</code></td><td>0,5</td><td>Di notte l'acqua non sotto metà di quella del gioco</td></tr>
+<tr><td><code>tune_night_win</code></td><td>1</td><td>Vetri accesi di notte (40% delle celle da 2,5 m)</td></tr>
+<tr><td><code>tune_night_facade</code></td><td>1</td><td>Finestre accese sulle facciate lontane (22%)</td></tr>
+<tr><td><code>tune_night_lamp</code></td><td>1</td><td>Lampade e insegne accese di notte (guadagno 1,6)</td></tr>
+<tr><td><code>tune_fire_floor</code></td><td>3</td><td>Fuochi sotto un tetto: portata sul pavimento × raggio (gain 0,3)</td></tr>
+<tr><td><code>tune_flash_night</code> / <code>_day_late</code></td><td>0,5 / 0,7</td><td>Lampi delle esplosioni di notte e di giorno</td></tr>
+<tr><td><code>tune_backlight</code></td><td>1</td><td>Controluce su arbusti e foglie</td></tr>
+<tr><td><code>tune_lawn</code> / <code>tune_lawn_foot</code></td><td>1 / 1</td><td>Variazione macro dei prati / ombra al piede delle piante</td></tr>
+<tr><td><code>tune_low_sheen</code></td><td>0,5</td><td>Riflesso radente della pietra col sole basso</td></tr>
+<tr><td><code>tune_ground_cav</code> / <code>_fine</code></td><td>1 / 1,8</td><td>Cavità e grana del terreno roccioso</td></tr>
+<tr><td><code>tune_bolt_scene</code></td><td>1</td><td>I lampi illuminano la scena</td></tr>
+<tr><td><code>tune_wet_deep</code></td><td>0,6</td><td>Terreno bagnato più saturo a pari luma</td></tr>
+<tr><td><code>tune_rain_chars</code></td><td>1</td><td>Personaggi bagnati sotto la pioggia</td></tr>
+<tr><td><code>tune_chr_occ</code></td><td>0,7</td><td>Occlusione del pavimento sotto i personaggi</td></tr>
+<tr><td><code>tune_chr_gold_rim</code></td><td>0,7</td><td>Bordo di sole basso sui personaggi</td></tr>
+<tr><td><code>tune_night_hue_chr</code></td><td>0,5</td><td>Tinta lunare anche sui personaggi</td></tr>
+<tr><td><code>tune_haze_layer</code></td><td>1</td><td>Foschia del deserto come strati sopra il terreno</td></tr>
+<tr><td><code>tune_dust_chr</code></td><td>0,7</td><td>Meno polvere della tempesta sui personaggi vicini</td></tr>
+<tr><td><code>tune_fog_floor_m</code></td><td>2 m</td><td>Foschia bassa non più densa di così sotto la camera</td></tr>
+<tr><td><code>tune_morning_sat_cap</code></td><td>1,1</td><td>Saturazione del mattino al massimo 1,1× quella del gioco</td></tr>
+<tr><td><code>tune_rock_sat</code></td><td>0,42</td><td>Saturazione della roccia del deserto di giorno</td></tr>
+<tr><td><code>tune_warm_shadow</code></td><td>0</td><td>Spinta fredda del grading caldo nelle ombre (1: vecchio, tramonto blu notte)</td></tr>
+<tr><td><code>tune_dusk_shade</code></td><td>1</td><td>Tinta blu dell'ombra lasciata andare col sole all'orizzonte</td></tr>
+<tr><td><code>tune_cloud_in_shade</code></td><td>0,3</td><td>Ombre delle nuvole dentro l'ombra del sole</td></tr>
+<tr><td><code>tune_water_hour</code></td><td>1</td><td>Corpo dell'acqua scurito e tinto col sole basso</td></tr>
+<tr><td><code>tune_beacon_water</code></td><td>0,25</td><td>Massima luminosità delle colonne dei fari lontani sull'acqua</td></tr>
+<tr><td><code>tune_chr_shade</code></td><td>0,85</td><td>Quanto sole perdono i personaggi in ombra</td></tr>
+<tr><td><code>tune_chr_gap_m</code></td><td>1,6 m</td><td>…da caster almeno così lontani verso il sole</td></tr>
+<tr><td><code>tune_chr_floor</code></td><td>0,5</td><td>Personaggi a sole basso mai sotto 0,5× il colore del gioco</td></tr>
+<tr><td><code>tune_chr_rim</code></td><td>0,6</td><td>Bordo luna/cielo sui personaggi di notte</td></tr>
+<tr><td><code>tune_chr_contact</code></td><td>0,55</td><td>Ombra di contatto sotto i piedi di Jak</td></tr>
+<tr><td><code>tune_spill_chr</code></td><td>0,4</td><td>Light spill sui personaggi</td></tr>
+<tr><td><code>tune_sky_enclosed</code></td><td>1</td><td>Sotto un tetto il cielo delle finestre è quello del gioco</td></tr>
+<tr><td><code>tune_pane_keep</code></td><td>1</td><td>Sotto un tetto i vetri blended come li disegna il gioco</td></tr>
+<tr><td><code>tune_shaft_keep</code></td><td>1</td><td>Colonne di luce traslucide del gioco tenute come disegnate</td></tr>
+<tr><td><code>tune_adapt_hi</code></td><td>1</td><td>L'adattamento non solleva le parti chiare di una stanza buia</td></tr>
+<tr><td><code>tune_albedo_gain</code> / <code>_mix</code></td><td>0,5 / 1</td><td>Uso dell'albedo target come colore delle lampade (con <code>lights.albedo</code>)</td></tr>
+<tr><td><code>shadow.mid_on</code></td><td>spento</td><td>Cascata media 2048 su ±320 m</td></tr>
+<tr><td><code>shadow.cache</code></td><td>spento</td><td>Mappe lontana e media tenute tra i fotogrammi</td></tr>
+<tr><td><code>shadow.near_cache</code></td><td>spento</td><td>Parte statica della mappa vicina tenuta</td></tr>
+<tr><td><code>lights.tiles</code></td><td>attivo</td><td>Tessere dello schermo per i cicli delle luci</td></tr>
+<tr><td><code>lights.shadow_maps</code></td><td>8</td><td>Cube map d'ombra per le lampade (0: march in profondità)</td></tr>
+<tr><td><code>shadow.half</code></td><td>attivo</td><td>Ombre del sole del mondo a metà dimensione</td></tr>
+<tr><td><code>ssao.temporal</code> / <code>gi.temporal</code></td><td>attivi</td><td>Metà campioni a fotogramma più la storia</td></tr>
+<tr><td><code>post.rt_ao_temporal</code></td><td>con <code>rt_ao</code></td><td>AO tracciata: 1 raggio a fotogramma accumulato</td></tr>
+<tr><td><code>post.sky_map</code></td><td>attivo</td><td>Cielo aperto sopra la camera (pioggia, lampi)</td></tr>
+<tr><td><code>post.probes</code></td><td>spento</td><td>Probe di luce 32×8×32</td></tr>
+<tr><td><code>post.hiz</code> / <code>post.hiz_surf</code></td><td>attivi</td><td>Riflessi di acqua e superfici attraverso la piramide Hi-Z</td></tr>
+<tr><td><code>post.vrs</code></td><td>1</td><td>Variable rate shading sul composite</td></tr>
+<tr><td><code>post.glow_hdr_gain</code></td><td>0,7</td><td>Somma dei bagliori grandi nel fotogramma half float</td></tr>
+<tr><td><code>taa.motion</code></td><td>attivo</td><td>Motion vector propri dei personaggi</td></tr>
+<tr><td><code>clouds.slim</code> / <code>clouds.rays_slim</code></td><td>attivi</td><td>Nuvole e raggi con programmi snelli</td></tr>
+<tr><td><code>grass.ground</code></td><td>1</td><td>Erba fitta sui pavimenti erbosi</td></tr>
+<tr><td><code>scenery.lod_size</code> / <code>scenery.coarse</code></td><td>2 / 1</td><td>LOD per dimensione, pietre inclinate grezze lontano</td></tr>
+<tr><td><code>bg.fade_in</code> / <code>fg.fade_in</code></td><td>0,5 s / 1</td><td>Livelli, personaggi e prop in dissolvenza alla comparsa</td></tr>
+<tr><td><code>merc.used_bones</code></td><td>1</td><td>Merc2 carica solo le ossa usate</td></tr>
+<tr><td><code>lights.albedo</code></td><td>spento</td><td>Terza MRT con l'albedo dei livelli</td></tr>
+<tr><td><code>volume.local_lights</code></td><td>spento</td><td>Luce di lampade e fuochi nell'aria</td></tr>
+<tr><td><code>post.hdr_scene</code></td><td>spento</td><td>Fotogramma e copie in RGBA16F (verdetto: nessun guadagno)</td></tr>
+<tr><td><code>weather.town_dust</code></td><td>0 in <code>was*</code></td><td>Niente tempesta di sabbia nelle città murate</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="timeline">17. Cronologia</h2>
+<ul class="timeline">
+<li><time>24 ott</time>Primo post-processing per Jak 3: bloom, grading, sharpen, vignetta; poi SSAO, DoF lontano, ombre del sole in screen space, god rays, FXAA, heat haze, motion blur, SSR sul mare, SSGI.</li>
+<li><time>25 ott</time>TAA con jitter Halton, foschia volumetrica, mappa d'ombra del sole 4096 su 160 m, luci dinamiche dalle sfere dei livelli, normali dei livelli calcolate al caricamento, fuochi, menu Enhanced con preset Classico/Medio/Massimo.</li>
+<li><time>26 ott</time>Riflessi e AO ray-traced (poi spenti), grading per area, meteo per zona, pioggia vera nel mondo, nuvole volumetriche, effetti portati su Jak 1 e Jak 2.</li>
+<li><time>27 ott</time>Notti scure, stelle e luna, fari dei veicoli, lens flare, ombre delle nuvole, light spill, luci a mano.</li>
+<li><time>28 ott</time>TAA spostato dopo il composite; aspetto del deserto (sabbia dorata, increspature, foschia calda, ora dorata); hot reload degli shader; prestazioni (hash, AO a mezza risoluzione, auto qualità).</li>
+<li><time>29-30 ott</time>Mappa d'ombra lontana 2 × 1,2 km, terreno roccioso, scenografia dettagliata e impostori, materiali per classe, parallasse, personaggi più ricchi; composite senza array: 38 → 60 fps.</li>
+<li><time>31 ott - 3 nov</time>Mezzogiorno del deserto meno saturo, bagliori limitati a 20 m, sole che scorre su un solo percorso.</li>
+<li><time>6 nov</time>Nebbia Enhanced spenta.</li>
+<li><time>7 nov</time>Effetti di giorno, revisione delle ombre, ciclo di sviluppo rapido (shader e numeri senza rebuild), release gate.</li>
+<li><time>8 nov</time><code>gfx-polish</code> (6 giri di correzioni), poi tinta notturna, tramonto senza dominanti, vetri del palazzo, timer per passaggio, GTAO e cache ombre (spenti), slider di luminosità, dither, HDR, albedo target, luci nell'aria (spenti). In serata: scena HDR M2-M4 (resta spenta), Hi-Z e riflessi a 300 m, sky map e probe GI, cielo fisico, tessere di luci attive, nuvole snelle, occlusione al suolo dei personaggi, finestre e lampade di notte, variazione dei prati, riflesso radente.</li>
+<li><time>9 nov</time>SSAO e GI temporali, ombre del sole a metà dimensione, motion vector dei personaggi, VRS sul composite, regressione CPU corretta, mappe d'ombra delle lampade (8 slot), erba per classe di terreno, LOD della scenografia per dimensione, dissolvenza alla comparsa, controluce, alberi TIE al vento, pioggia e terreno bagnato, luna e luccichii sull'acqua, fuochi sotto i tetti, foschia lontana sfumata all'ora dorata, terreno pallido solo negli slum (spento); uniform impacchettati per il limite di 1024 registri (<code>00d8df9c7</code>).</li>
+</ul>
+
+<footer>
+Fonti: storia git di <code>game/graphics/opengl_renderer</code> (ramo <code>main</code>), <code>EnhancedPost*.cpp/.h</code>, <code>shaders/enh_*.frag</code>, <code>sprite/GlowRenderer.cpp</code>, skill <code>retro-renderer-modern-post</code>. I numeri sono quelli riportati nei commit e nelle note, misurati a 640×360 salvo dove indicato.
+</footer>
+</main>
+</body>
+</html>
