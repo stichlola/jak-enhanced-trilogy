@@ -79,6 +79,9 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
                          const TfragRenderSettings& settings,
                          SharedRenderState* render_state,
                          ScopedProfilerNode& prof);
+// the ground-class fields held back by enhanced_draw_grass (grass.ground_late), drawn after the
+// level's blended tfrag (called by the TRANS tfrag renderer, at its end)
+void enhanced_flush_ground_grass(SharedRenderState* render_state, ScopedProfilerNode& prof);
 
 // painted in the in-game editor: the lush strokes and the edge ones (x, z, the brush's radius, m),
 // how far it thins away past the lush where no edge is near (m). The painted zones are baked again

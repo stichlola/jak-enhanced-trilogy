@@ -1130,6 +1130,122 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
 }
 
 namespace {
+// The frame so far (its color, mipmapped, and depth), copied before the first ground-class field
+// draws: each blade takes the floor's color as drawn under its foot (shrub_grass.vert), not a
+// color baked at load (the post lights the same texture olive in one spot, orange in another)
+struct SceneCopy {
+  GLuint fbo = 0, color = 0, depth = 0;
+  GLuint nfbo = 0, normal = 0;  // (the normals: their length is the post's material tag)
+  int w = 0, h = 0;
+  u64 frame = ~0ull;
+  bool ok = false;
+};
+SceneCopy g_scene;
+constexpr int kSceneColorUnit = 11, kSceneDepthUnit = 12, kSceneNormalUnit = 13;
+
+bool copy_scene(SharedRenderState* render_state) {
+  auto& s = g_scene;
+  if (s.frame == render_state->frame_idx) {
+    return s.ok;
+  }
+  s.frame = render_state->frame_idx;
+  s.ok = false;
+  // (only into the frame itself: not a reflection's or a shadow's target)
+  GLint bound = 0;
+  glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+  if ((GLuint)bound != render_state->render_fb) {
+    return false;
+  }
+  const int w = render_state->render_fb_w, h = render_state->render_fb_h;
+  if (w <= 0 || h <= 0) {
+    return false;
+  }
+  if (!s.fbo || w != s.w || h != s.h) {
+    if (!s.fbo) {
+      glGenFramebuffers(1, &s.fbo);
+      glGenTextures(1, &s.color);
+      glGenTextures(1, &s.depth);
+    }
+    s.w = w;
+    s.h = h;
+    glBindTexture(GL_TEXTURE_2D, s.color);
+    const int levels = 1 + (int)std::floor(std::log2((float)std::max(w, h)));
+    for (int l = 0; l < levels; l++) {
+      glTexImage2D(GL_TEXTURE_2D, l, GL_RGBA16F, std::max(1, w >> l), std::max(1, h >> l), 0, GL_RGBA,
+                   GL_FLOAT, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, levels - 1);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindTexture(GL_TEXTURE_2D, s.depth);
+    // (the render buffer's format: a depth blit needs the same on both sides)
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, w, h, 0, GL_DEPTH_STENCIL,
+                 GL_UNSIGNED_INT_24_8, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, s.fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.color, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s.depth, 0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    glReadBuffer(GL_COLOR_ATTACHMENT0);
+    bool complete = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    if (!s.nfbo) {
+      glGenFramebuffers(1, &s.nfbo);
+      glGenTextures(1, &s.normal);
+    }
+    glBindTexture(GL_TEXTURE_2D, s.normal);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, s.nfbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s.normal, 0);
+    glDrawBuffer(GL_COLOR_ATTACHMENT0);
+    complete = complete && glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
+    glBindFramebuffer(GL_FRAMEBUFFER, render_state->render_fb);
+    if (!complete) {
+      lg::warn("[enhanced] grass: scene copy framebuffer incomplete");
+      glDeleteFramebuffers(1, &s.fbo);
+      s.fbo = 0;
+      return false;
+    }
+  }
+  // (and for msaa, resolves it)
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_state->render_fb);
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s.fbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+  glReadBuffer(GL_COLOR_ATTACHMENT1);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, s.nfbo);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_state->render_fb);
+  glActiveTexture(GL_TEXTURE0 + kSceneColorUnit);
+  glBindTexture(GL_TEXTURE_2D, s.color);
+  glGenerateMipmap(GL_TEXTURE_2D);
+  glActiveTexture(GL_TEXTURE0);
+  s.ok = true;
+  return true;
+}
+
+struct LateField {
+  std::shared_ptr<const GrassField> field;
+  int tod;
+  float base_rgb[3];
+  const tfrag3::ShrubTree* tree;
+  TfragRenderSettings settings;
+  float density_mul;
+  GLuint tod_tex;
+};
+std::vector<LateField> g_late;
+u64 g_late_frame = ~0ull;
+
 void draw_field(const std::shared_ptr<const GrassField>& fp,
                 int tod,
                 const float* base_rgb,
@@ -1215,6 +1331,9 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
     make_gl();
   }
   GLuint heights = fgl.tex;
+  // (ground-class fields: the floor's color as drawn, from the frame so far)
+  static const EnhancedTune k_screen("grass.ground_screen", 1.f);
+  const bool screen = f.ground_class && k_screen > 0.f && copy_scene(render_state);
   auto& sh = render_state->shaders[ShaderId::SHRUB_GRASS];
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_GRASS);
   const auto id = sh.id();
@@ -1224,6 +1343,24 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   glBindTexture(GL_TEXTURE_2D, g_gl.white);
   glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
   glUniform1i(glGetUniformLocation(id, "tex_T10"), 10);
+  glUniform1i(glGetUniformLocation(id, "enh_scene_color"), kSceneColorUnit);
+  glUniform1i(glGetUniformLocation(id, "enh_scene_depth"), kSceneDepthUnit);
+  glUniform1i(glGetUniformLocation(id, "enh_scene_normal"), kSceneNormalUnit);
+  glUniform1f(glGetUniformLocation(id, "enh_screen"), screen ? (float)k_screen : 0.f);
+  {
+    // (the blades the floor's material for the post: its tag, read under each foot)
+    static const EnhancedTune k_tag("grass.ground_tag", 1.f);
+    glUniform1f(glGetUniformLocation(id, "enh_tag_len"), screen && k_tag > 0.f ? 0.97f : 0.f);
+  }
+  if (screen) {
+    glActiveTexture(GL_TEXTURE0 + kSceneColorUnit);
+    glBindTexture(GL_TEXTURE_2D, g_scene.color);
+    glActiveTexture(GL_TEXTURE0 + kSceneDepthUnit);
+    glBindTexture(GL_TEXTURE_2D, g_scene.depth);
+    glActiveTexture(GL_TEXTURE0 + kSceneNormalUnit);
+    glBindTexture(GL_TEXTURE_2D, g_scene.normal);
+    glActiveTexture(GL_TEXTURE0);
+  }
   glUniform1f(glGetUniformLocation(id, "enh_tile"), tile);
   glUniform4f(glGetUniformLocation(id, "enh_field"), f.x0 - step * 0.5f, f.z0 - step * 0.5f,
               f.n * step, f.water);
@@ -1348,9 +1485,27 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
     draw_field(f, f->tod, f->base_rgb, tree, settings, render_state, prof);
     // the ground-class fields (grass.ground: 0 off, else their density, times the zones')
     static const EnhancedTune k_ground("grass.ground", 0.f);
+    // (late: after the level's blended tfrag, whose layers over the floor (the forest's pale
+    // olive) the blades' color copy has to see; drawn now they'd also hide those layers' patches)
+    static const EnhancedTune k_late("grass.ground_late", 1.f);
     if (k_ground > 0.f) {
       for (const auto& g : f->ground) {
-        draw_field(g, g->tod, g->base_rgb, tree, settings, render_state, prof, k_ground);
+        if (k_late > 0.f) {
+          if (g_late_frame != render_state->frame_idx) {
+            g_late.clear();
+            g_late_frame = render_state->frame_idx;
+          }
+          LateField l{g, g->tod, {g->base_rgb[0], g->base_rgb[1], g->base_rgb[2]}, &tree, settings, k_ground, 0};
+          // (the tree's time of day texture, bound now: the flush binds it again)
+          GLint tod_tex = 0;
+          glActiveTexture(GL_TEXTURE10);
+          glGetIntegerv(GL_TEXTURE_BINDING_1D, &tod_tex);
+          glActiveTexture(GL_TEXTURE0);
+          l.tod_tex = (GLuint)tod_tex;
+          g_late.push_back(std::move(l));
+        } else {
+          draw_field(g, g->tod, g->base_rgb, tree, settings, render_state, prof, k_ground);
+        }
       }
     }
   }
@@ -1408,4 +1563,24 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
   for (const auto& [field, host] : orphans) {
     draw_field(field, host.tod, host.base_rgb, tree, settings, render_state, prof);
   }
+}
+
+void enhanced_flush_ground_grass(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  if (g_late.empty()) {
+    return;
+  }
+  if (g_late_frame != render_state->frame_idx) {
+    g_late.clear();
+    return;
+  }
+  // (a fresh copy of the frame: this level's blended layers are in it now)
+  g_scene.frame = ~0ull;
+  for (const auto& l : g_late) {
+    glActiveTexture(GL_TEXTURE10);
+    glBindTexture(GL_TEXTURE_1D, l.tod_tex);
+    glActiveTexture(GL_TEXTURE0);
+    draw_field(l.field, l.tod, l.base_rgb, *l.tree, l.settings, render_state, prof, l.density_mul);
+  }
+  g_late.clear();
+  glBindVertexArray(0);
 }

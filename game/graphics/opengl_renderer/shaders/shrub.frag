@@ -27,6 +27,7 @@ uniform int gfx_hack_no_tex;
 uniform float enh_foliage;  // Enhanced: 1 on grass and leaves (cutout draws)
 uniform float enh_stone;    // Enhanced: 1 on a stone's detailed model (tagged rock: a normal 0.75 long)
 uniform float enh_wet;      // Enhanced: how soaked they are (rain), 0..1
+uniform float enh_tag_len;  // Enhanced: the normal's length (the post's material tag) when set, else the usual
 
 // the smooth normal from the vertices where it stays within ~35 degrees of the triangle's own
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
@@ -50,7 +51,11 @@ vec4 enh_pack_normal(vec3 n) {
     return vec4(0.0);
   }
   // (grass and bushes 0.97 long: their pale sunlit tips aren't taken for a torch's flame)
-  return vec4(n * (enh_stone > 0.5 ? 0.75 : 0.97) * 0.5 + 0.5, 1.0);
+  // (a ground-class grass field's blades: the floor's own tag, so the post lights them as the floor)
+  // (shrub_grass.vert hands the floor's in enh_xfade.x, its y 0: no crossfade)
+  float tag = enh_tag_len > 0.0 ? (enh_xfade.y == 0.0 && enh_xfade.x > 0.1 ? enh_xfade.x : enh_tag_len)
+                                : (enh_stone > 0.5 ? 0.75 : 0.97);
+  return vec4(n * tag * 0.5 + 0.5, 1.0);
 }
 
 // a 4x4 ordered dither threshold for the pixel (fixed: shifted each frame it shimmered, the
