@@ -1577,16 +1577,35 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
 
   // the light's frame: f from the sun down, right and up across; a square of 2 * range around a
   // point ahead of the camera, snapped to whole texels so the edges don't crawl as it moves
-  // (in steps of ~0.15 degrees: the sun's path and the area's eased turn rotated the maps by a
-  // fraction of a texel every frame, and the shadows' edges crawled, 9 cm a frame a km out)
+  // The direction follows the sun every frame. The grids are snapped relative to an anchor near the
+  // camera (m_shadow_anchor), not the world origin: snapped from the origin, the sun's turn slid every
+  // grid by angle x distance from the origin (km: 9 cm a frame) in random fractions of a texel, and
+  // the edges crawled; from the anchor it is angle x distance from the camera, a slow even drift.
+  // (shadow.dir_step_deg > 0: the old fix, the direction in steps of that many degrees, each step a
+  // visible jump of every shadow, ~1 a second with Jak 3's fast day; 0: every frame)
   {
     const float live[3] = {-sun[0] / len, -sun[1] / len, -sun[2] / len};
     const float dot = live[0] * m_shadow_dir[0] + live[1] * m_shadow_dir[1] + live[2] * m_shadow_dir[2];
-    static const EnhancedTune t_step("shadow.dir_step_deg", 0.15f);
-    if (dot < std::cos((float)t_step * 3.14159265f / 180.f)) {
+    static const EnhancedTune t_step("shadow.dir_step_deg", 0.f);
+    if ((float)t_step <= 0.f) {
+      m_shadow_turn_deg += std::acos(std::clamp(dot, -1.f, 1.f)) * 180.f / 3.14159265f;
+      memcpy(m_shadow_dir, live, sizeof(live));
+    } else if (dot < std::cos((float)t_step * 3.14159265f / 180.f)) {
+      m_shadow_turn_deg += std::acos(std::clamp(dot, -1.f, 1.f)) * 180.f / 3.14159265f;
       memcpy(m_shadow_dir, live, sizeof(live));
       m_shadow_far_ready = false;  // (the far map redrawn now with it, not next frame)
       m_shadow_mid_ready = false;
+    }
+    static const EnhancedTune t_anchor("shadow.anchor_m", 32.f);
+    const float am = (float)t_anchor * kMeter;
+    const float ax = cam.trans[0] - m_shadow_anchor[0], ay = cam.trans[1] - m_shadow_anchor[1],
+                az = cam.trans[2] - m_shadow_anchor[2];
+    if (!m_shadow_anchor_set || am <= 0.f || ax * ax + ay * ay + az * az > am * am) {
+      // (0: the world origin, as before)
+      for (int i = 0; i < 3; i++) {
+        m_shadow_anchor[i] = am > 0.f ? cam.trans[i] : 0.f;
+      }
+      m_shadow_anchor_set = true;
     }
   }
   float f[3] = {m_shadow_dir[0], m_shadow_dir[1], m_shadow_dir[2]};
@@ -1623,12 +1642,18 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
     for (int i = 0; i < 3; i++) {
       center[i] = cam.trans[i] + fwd[i] * range * 0.5f;
     }
-    const float texel = 2.f * range / res;
-    float cr = right[0] * center[0] + right[1] * center[1] + right[2] * center[2];
-    float cu = up[0] * center[0] + up[1] * center[1] + up[2] * center[2];
-    float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
-    cr = std::floor(cr / (texel * snap)) * texel * snap;
-    cu = std::floor(cu / (texel * snap)) * texel * snap;
+    const double texel = 2.0 * range / res;
+    auto dot3 = [](const float* a, const double* b) {
+      return (double)a[0] * b[0] + (double)a[1] * b[1] + (double)a[2] * b[2];
+    };
+    const double anc[3] = {m_shadow_anchor[0], m_shadow_anchor[1], m_shadow_anchor[2]};
+    const double rel[3] = {center[0] - anc[0], center[1] - anc[1], center[2] - anc[2]};
+    // (snapped from the anchor, then back to world)
+    const float cr = (float)(std::floor(dot3(right, rel) / (texel * snap)) * texel * snap +
+                             dot3(right, anc));
+    const float cu =
+        (float)(std::floor(dot3(up, rel) / (texel * snap)) * texel * snap + dot3(up, anc));
+    const float cf = f[0] * center[0] + f[1] * center[1] + f[2] * center[2];
     const float rows[3][4] = {{right[0] / range, right[1] / range, right[2] / range, -cr / range},
                               {up[0] / range, up[1] / range, up[2] / range, -cu / range},
                               {f[0] / depth, f[1] / depth, f[2] / depth, -cf / depth}};
@@ -1842,9 +1867,11 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   }
   // (how often the far, middle and near static maps were drawn, every ~5 s)
   if (++m_shadow_cache_frames >= 300) {
-    lg::info("[enhanced] shadow maps drawn: far {} mid {} near {} of {} frames (cache {}, near cache {})",
+    lg::info("[enhanced] shadow maps drawn: far {} mid {} near {} of {} frames (cache {}, near cache {}); "
+             "sun turned {:.3f} deg",
              m_shadow_cache_far_n, m_shadow_cache_mid_n, m_shadow_cache_near_n, m_shadow_cache_frames,
-             cache ? "on" : "off", near_cache ? "on" : "off");
+             cache ? "on" : "off", near_cache ? "on" : "off", m_shadow_turn_deg);
+    m_shadow_turn_deg = 0.f;
     m_shadow_cache_frames = m_shadow_cache_far_n = m_shadow_cache_mid_n = m_shadow_cache_near_n = 0;
   }
   glDisableVertexAttribArray(1);
@@ -2402,6 +2429,9 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   // away still throws his long shadow across the temple floor, where the player looks; 0: off)
   static const EnhancedTune t_chars_cam_m("lights.shadow_chars_cam_m", 15.f);
   const float cam_m = std::max((float)t_chars_cam_m, 0.f) * kMeter;
+  static const EnhancedTune t_chars_min_m("lights.shadow_chars_min_m", 1.5f);
+  const float chars_min = std::max((float)t_chars_min_m, 0.f) * kMeter;
+  int skipped_close = 0;
   std::vector<u8> near_cam(places.size(), 0);
   for (size_t k = 0; k < places.size(); k++) {
     const auto& c = places[k].second;
@@ -2443,6 +2473,13 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
         const float fy = d[0] * u[0] + d[1] * u[1] + d[2] * u[2];
         const float reach =
             std::min(sl.far_u, near_cam[k] ? std::max(sl.radius_u, chars_m) : chars_m);
+        // (a character right at the lamp left out: Daxter on Jak's shoulder passing a wall lamp or
+        // a brazier at 0.5-1 m threw his shadow 5-10x his size over the walls and the street; a
+        // real lamp is no point and would blur it away. lights.shadow_chars_min_m, 0: off)
+        if (dl < chars_min) {
+          skipped_close++;
+          continue;
+        }
         if (dl - rad > reach || fz < -rad || std::abs(fx) > fz + rad * 1.4143f ||
             std::abs(fy) > fz + rad * 1.4143f) {
           continue;
@@ -2481,10 +2518,10 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   m_lamp_static_total += static_faces;
   if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
     lg::info("[enhanced] lamp shadows: {} wanted ({} lamps, {} still), {} live, {} static faces "
-             "this frame ({} in 300 frames, {} new slots), {} character draws, {} faces copied; "
-             "camera {:.1f},{:.1f},{:.1f}; slots {}",
+             "this frame ({} in 300 frames, {} new slots), {} character draws ({} too close), {} "
+             "faces copied; camera {:.1f},{:.1f},{:.1f}; slots {}",
              n_want, m_lamp_want.size(), wanted.size(), live, static_faces, m_lamp_static_total,
-             m_lamp_assigns, char_draws, copied, cam.trans[0] / kMeter, cam.trans[1] / kMeter,
+             m_lamp_assigns, char_draws, skipped_close, copied, cam.trans[0] / kMeter, cam.trans[1] / kMeter,
              cam.trans[2] / kMeter,
              [&]() {
                std::string o;

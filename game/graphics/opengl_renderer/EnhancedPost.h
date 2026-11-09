@@ -781,7 +781,12 @@ class EnhancedPost {
   float m_light_mvp_far[16] = {};
   // the maps' depth spans (meters): the composite's biases and penumbrae are in meters
   float m_shadow_near_span_m = 600.f;
-  float m_shadow_dir[3] = {0.f, 0.f, 0.f};  // the light's direction the maps use (in steps)
+  float m_shadow_dir[3] = {0.f, 0.f, 0.f};  // the light's direction the maps use
+  // the world point the maps' texel grids are pinned to (game units; moved in shadow.anchor_m steps
+  // with the camera): the sun's turn moves a grid by angle x distance from it, not from the origin
+  float m_shadow_anchor[3] = {0.f, 0.f, 0.f};
+  bool m_shadow_anchor_set = false;
+  float m_shadow_turn_deg = 0.f;  // how far the maps' direction turned since the last log line
   float m_shadow_far_span_m = 6000.f;
   // the middle map (tuning shadow.mid_on): 2048 over +-320 m, between the near and the far one,
   // drawn on the frames the far map skips
