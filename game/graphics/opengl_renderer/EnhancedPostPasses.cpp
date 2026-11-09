@@ -179,7 +179,9 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   // and the level normals (msaa: averaged, renormalized in the shaders)
   enh_cpu_split("ssao-depth-blit");
   m_normals_ready = false;
-  if (g_enhanced_normals.enabled && src_fbo == g_enhanced_normals.fbo) {
+  static const EnhancedTune t_probe_blits("debug.ssao_probe", 0.f);
+  const bool probe_no_blits = (int)(float)t_probe_blits == 2;
+  if (g_enhanced_normals.enabled && src_fbo == g_enhanced_normals.fbo && !probe_no_blits) {
     glReadBuffer(GL_COLOR_ATTACHMENT1);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_normal_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -188,7 +190,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   }
   // and their albedo (lights.albedo)
   m_albedo_ready = false;
-  if (g_enhanced_normals.albedo && src_fbo == g_enhanced_normals.fbo) {
+  if (g_enhanced_normals.albedo && src_fbo == g_enhanced_normals.fbo && !probe_no_blits) {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
     glReadBuffer(GL_COLOR_ATTACHMENT2);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_albedo_fbo);
@@ -413,7 +415,21 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glBeginQuery(GL_TIME_ELAPSED, ao_probe.query);
   }
   enh_cpu_split("ssao-uniforms");
-  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  // (test, tuning debug.ssao_probe: where the main draw's CPU goes. 1 skips it, 3 flushes before
+  // it, 4 draws it twice; 2 skips the normal/albedo blits above)
+  static const EnhancedTune t_probe("debug.ssao_probe", 0.f);
+  const int probe = (int)(float)t_probe;
+  if (probe == 3) {
+    glFlush();
+    enh_cpu_split("ssao-flush");
+  }
+  if (probe != 1) {
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
+  if (probe == 4) {
+    enh_cpu_split("ssao-main1");
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  }
   enh_cpu_split("ssao-main");
   if (ao_phase >= 0 && ao_phase < 3) {
     glEndQuery(GL_TIME_ELAPSED);
