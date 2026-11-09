@@ -837,7 +837,7 @@
              )
             (else
               ;; its bone's length as it is
-              (matrix-inverse-of-rot-trans! inv (-> st before p))
+              (matrix-4x4-inverse! inv (-> st before p))
               (vector-matrix*! (-> loc trans) (-> st before k trans) inv)
               )
             )
@@ -868,6 +868,42 @@
       )
     )
   (none)
+  )
+
+;; Two joints' local turns mixed by slerp, not by blending matrix rows: rows lerped between turns far
+;; apart (his walk's swung arm and the plain idle's hanging one) come out nearly parallel once
+;; renormalized (measured: arm bones' rows up to 0.93 cos apart walking unarmed, sheared arms).
+(defun enhanced-sig-slerp-local! ((dst matrix) (a matrix) (b matrix) (w float))
+  "dst = a's turn toward b's by w (slerp), a's row lengths, a's trans. dst may be a."
+  (let ((na (new 'stack-no-clear 'matrix))
+        (nb (new 'stack-no-clear 'matrix))
+        (qa (new 'stack-no-clear 'quaternion))
+        (qb (new 'stack-no-clear 'quaternion))
+        (len (new 'stack-no-clear 'vector))
+        (tr (vector-copy! (new 'stack-no-clear 'vector) (-> a trans)))
+        )
+    (matrix-copy! na a)
+    (matrix-copy! nb b)
+    (dotimes (r 3)
+      (set! (-> len data r) (vector-length (-> a vector r)))
+      (set! (-> na vector r w) 0.0)
+      (set! (-> nb vector r w) 0.0)
+      (vector-normalize! (-> na vector r) 1.0)
+      (vector-normalize! (-> nb vector r) 1.0)
+      )
+    (matrix->quaternion qa na)
+    (matrix->quaternion qb nb)
+    (quaternion-slerp! qa qa qb w)
+    (quaternion-normalize! qa)
+    (quaternion->matrix dst qa)
+    (dotimes (r 3)
+      (vector-float*! (-> dst vector r) (-> dst vector r) (-> len data r))
+      (set! (-> dst vector r w) 0.0)
+      )
+    (vector-copy! (-> dst trans) tr)
+    (set! (-> dst trans w) 1.0)
+    dst
+    )
   )
 
 ;; walking unarmed: how far both arms go toward his plain idle's hanging ones (0-1). His museum walk
@@ -987,16 +1023,12 @@
                        (matrix-4x4-inverse! inv (-> st before mp))
                        (matrix*! mixed (-> st before m) inv)
                        (enhanced-sig-mirror! inv mixed)
-                       (matrix-copy! mixed local)
-                       (enhanced-matrix-blend-rows! local mixed inv rest-w mixed)
-                       (vector-copy! (-> local trans) (-> mixed trans))
+                       (enhanced-sig-slerp-local! local local inv rest-w)
                        )
                      )
                    ;; walking: both toward the plain idle's
                    (when (< 0.0 *enhanced-sig-calm-weight*)
-                     (matrix-copy! mixed local)
-                     (enhanced-matrix-blend-rows! local mixed (-> ra local k) *enhanced-sig-calm-weight* mixed)
-                     (vector-copy! (-> local trans) (-> mixed trans))
+                     (enhanced-sig-slerp-local! local local (-> ra local k) *enhanced-sig-calm-weight*)
                      )
                    )
                  )
@@ -1098,6 +1130,69 @@
     )
   )
 
+;; His skirt panels, belt bags and water bottle hang from his thighs (skirtLA/RA on Lthigh/Rthigh) and
+;; the skirt flaps from his hips. In Jak's pose (his run, with the legs' IK) they took Jak's whole leg swing
+;; plus his own walk's cloth motion out of step: measured ~100 deg off their bind hang at a run (his own
+;; walk ~35). By pose-blend x this, they hang from his hips as in his bind pose instead (their chains'
+;; joints toward their bind turns by the same), the thighs keeping the rest of the swing.
+(define *enhanced-sig-skirt-damp* 0.8)
+(defconstant SIG_HIPS 17)
+(defconstant SIG_SKIRT_FIRST 63)  ;; skirtLA; from it on: skirts, bags, bottle, flaps (to 75)
+
+(defbehavior enhanced-sig-skirt enhanced-skin ()
+  "His skirt and what hangs with it, toward hanging from his hips (see *enhanced-sig-skirt-damp*)."
+  (let* ((st *enhanced-sig-gun*)
+         (nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (w (* (-> self pose-blend) *enhanced-sig-skirt-damp*))
+         (inv (new 'stack-no-clear 'matrix))
+         (local (new 'stack-no-clear 'matrix))
+         (bl (new 'stack-no-clear 'matrix))
+         )
+    (when (and (< 0.0 w) (> n SIG_SKIRT_FIRST))
+      (dotimes (k n)
+        (set! (-> st moved k) 0)
+        (if (>= k SIG_SKIRT_FIRST)
+            (matrix-copy! (-> st before k) (-> nodes data k bone transform))
+            )
+        )
+      (let ((k SIG_SKIRT_FIRST))
+        (while (< k n)
+          (let ((p (enhanced-sig-gun-parent nodes k)))
+            (when (and (> p 0) (< p k))
+              (cond
+                ((or (= p SIG_HIPS) (= p 18) (= p 22))
+                 ;; a chain's top: its bind turn against the hips, carried by the hips now
+                 (matrix-inverse-of-rot-trans! inv (-> self bind-world SIG_HIPS))
+                 (matrix*! bl (-> self bind-world k) inv)
+                 (matrix-4x4-inverse! inv (-> nodes data SIG_HIPS bone transform))
+                 (matrix*! local (-> st before k) inv)
+                 (enhanced-sig-slerp-local! local local bl w)
+                 (matrix*! (-> nodes data k bone transform) local (-> nodes data SIG_HIPS bone transform))
+                 ;; (it stays where it was: only its turn changes)
+                 (vector-copy! (-> nodes data k bone transform trans) (-> st before k trans))
+                 (set! (-> st moved k) 1)
+                 )
+                ((nonzero? (-> st moved p))
+                 (matrix-4x4-inverse! inv (-> st before p))
+                 (matrix*! local (-> st before k) inv)
+                 (matrix-inverse-of-rot-trans! inv (-> self bind-world p))
+                 (matrix*! bl (-> self bind-world k) inv)
+                 (enhanced-sig-slerp-local! local local bl w)
+                 (matrix*! (-> nodes data k bone transform) local (-> nodes data p bone transform))
+                 (set! (-> st moved k) 1)
+                 )
+                )
+              )
+            )
+          (+! k 1)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior enhanced-sig-gun-post enhanced-skin ()
   "Each frame after his bones are done (enhanced-skin-post, after enhanced-skin-big-gun put the gun on his
    back): his arms, the gun out in his hand, its muzzle for Jak's shots (enhanced-player-muzzle!)."
@@ -1108,8 +1203,9 @@
       (if *enhanced-sig-gun-test*
           (enhanced-sig-gun-test-step tgt)
           )
-      ;; his feet (in Jak's pose: planted at his size)
+      ;; his feet (in Jak's pose: planted at his size), then his skirt off Jak's leg swing
       (enhanced-sig-legs)
+      (enhanced-sig-skirt)
       (let* ((out? (and (nonzero? (-> tgt gun)) (using-gun? tgt) (not (focus-test? tgt pilot))))
              ;; charging (R1 held) or just fired
              (aim? (and out?
