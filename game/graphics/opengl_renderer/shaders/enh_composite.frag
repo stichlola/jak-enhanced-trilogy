@@ -293,7 +293,7 @@ uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fa
 uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b)
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
-uniform float tune_night_pale = 1.0;       // (Haven's slums only: pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
+uniform float tune_night_pale = 0.0;       // (off: slums 22h 19% darker than main, nights must not get darker; 1 = Haven's slums only, pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
 uniform float tune_night_pale_knee = 0.09; // ...above this luma (of the final picture)
 uniform float tune_night_pale_slope = 0.35; // ...what is left of the luma over the knee
 uniform float tune_night_pale_cap = 0.45;   // ...never under this x its luma (-55% at most)
