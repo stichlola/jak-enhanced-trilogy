@@ -203,12 +203,22 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   const std::string scissor_adjust = "512.0 / " + scissor_height;
 
   // read the shader source
-  auto vert_src = ascii_only(
-      file_util::read_text_file(file_util::get_file_path({shader_folder, shader_name + ".vert"})));
+  auto vert_src = ascii_only(file_util::read_text_file(
+      file_util::get_file_path({shader_folder, vert_file(shader_name) + ".vert"})));
   // (Enhanced: the detailed scenery's instanced models are colored like the shrubs they replace)
   const std::string frag_name = frag_file(shader_name);
   auto frag_src = ascii_only(
       file_util::read_text_file(file_util::get_file_path({shader_folder, frag_name + ".frag"})));
+  // (Enhanced: the cloud pass alone, without the composite's registers: more pixels in flight)
+  // (and the cloud rays alone, enh_cloud_rays)
+  // (and the world's sun shadow looks at half size, enh_sun_half)
+  if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half") {
+    const auto nl = frag_src.find('\n');
+    frag_src.insert(nl == std::string::npos ? 0 : nl + 1,
+                    shader_name == "enh_clouds"       ? "#define ENH_CLOUD_ONLY 1\n"
+                    : shader_name == "enh_cloud_rays" ? "#define ENH_RAYS_ONLY 1\n"
+                                                      : "#define ENH_SUN_HALF_ONLY 1\n");
+  }
 
   vert_src = std::regex_replace(vert_src, std::regex("HEIGHT_SCALE"), height_scale);
   vert_src = std::regex_replace(vert_src, std::regex("SCISSOR_HEIGHT"), scissor_height);
@@ -246,6 +256,36 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
         "    float l = dot(color.rgb, vec3(0.299, 0.587, 0.114));\n"
         "    color.rgb = mix(vec3(l), color.rgb, enh_grade.a) * enh_grade.rgb;\n"
         "  }\n}\n";
+  }
+
+  // Enhanced: the game's fragment shaders write their colour clamped to 0..1, as an RGBA8 frame
+  // stores it. In a half-float frame (post.hdr_scene) the PS2 shaders' "color *= 2" kept up to 2.0
+  // per fragment: an alpha past 1 made SRC_ALPHA / ONE_MINUS_SRC_ALPHA blends add light (1 - a < 0
+  // takes it away), and HUD textures (the minimap) came out over-bright. Only additive sums of
+  // several fragments go past 1 now, which is what the float frame is for. Shaders that copy the
+  // frame itself (distortion, depth cue, glow probe reads) keep their values.
+  // JAK_ENHANCED_FRAG_CLAMP=0 turns it off.
+  {
+    static const bool clamp_on = [] {
+      const char* e = std::getenv("JAK_ENHANCED_FRAG_CLAMP");
+      return !(e && e[0] == '0');
+    }();
+    static const char* const keep[] = {"sprite_distort", "sprite_distort_instanced", "slow_time",
+                                       "depth_cue", "post_processing", "simple_texture",
+                                       "glow_probe_read", "glow_probe_read_debug",
+                                       "glow_probe_downsample", "glow_depth_copy"};
+    bool skip = !clamp_on || shader_name.rfind("enh_", 0) == 0;
+    for (const char* k : keep) {
+      skip = skip || shader_name == k;
+    }
+    std::smatch out;
+    if (!skip && std::regex_search(frag_src, out, std::regex("out\\s+vec4\\s+(\\w+)\\s*;"))) {
+      const std::string var = out[1].str();
+      frag_src = std::regex_replace(frag_src, std::regex("void\\s+main\\s*\\(\\s*\\)"),
+                                    "void enh_unclamped_main()");
+      frag_src += "\nvoid main() {\n  enh_unclamped_main();\n  " + var + " = clamp(" + var +
+                  ", 0.0, 1.0);\n}\n";
+    }
   }
 
   // Enhanced TAA: wrap main() to add the frame's sub-pixel jitter to the final position
@@ -326,6 +366,28 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   glDeleteShader(m_vert_shader);
   glDeleteShader(m_frag_shader);
   m_is_okay = true;
+  // (Enhanced test switch JAK_ENHANCED_SHADER_STATS: the enh_* programs' size as the driver built
+  // them, in the log. NVIDIA's program binary carries its assembly, ending in a line such as
+  // "# 2318 instructions, 63 R-regs": registers per pixel decide how many pixels run at once)
+  static const bool shader_stats = std::getenv("JAK_ENHANCED_SHADER_STATS") != nullptr;
+  if (shader_stats && shader_name.rfind("enh_", 0) == 0) {
+    GLint blen = 0;
+    glGetProgramiv(m_program, GL_PROGRAM_BINARY_LENGTH, &blen);
+    if (blen > 0) {
+      std::string bin((size_t)blen, '\0');
+      GLenum fmt = 0;
+      glGetProgramBinary(m_program, blen, nullptr, &fmt, bin.data());
+      std::string stats;
+      for (size_t at = bin.find("R-regs"); at != std::string::npos; at = bin.find("R-regs", at + 6)) {
+        const size_t from = bin.rfind('#', at);
+        if (from != std::string::npos && at - from < 80) {
+          stats += (stats.empty() ? "" : " | ") + bin.substr(from + 1, at + 6 - from - 1);
+        }
+      }
+      lg::info("[enhanced] shader {} stats: {}", shader_name,
+               stats.empty() ? fmt::format("{} bytes, no assembly text", blen) : stats);
+    }
+  }
   if (m_jitters) {
     m_jitter_loc = glGetUniformLocation(m_program, "enh_jitter");
   }
@@ -364,7 +426,65 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
 }
 
 std::string Shader::frag_file(const std::string& shader_name) {
+  if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half") {
+    return "enh_composite";
+  }
   return shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
+}
+
+std::string Shader::vert_file(const std::string& shader_name) {
+  return shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half"
+             ? "enh_composite"
+             : shader_name;
+}
+
+void Shader::copy_uniforms_from(const Shader& src) const {
+  if (m_copy_src != src.m_program || m_copy_dst != m_program) {
+    m_copy.clear();
+    m_copy_src = src.m_program;
+    m_copy_dst = m_program;
+    GLint count = 0;
+    glGetProgramiv(m_program, GL_ACTIVE_UNIFORMS, &count);
+    for (GLint idx = 0; idx < count; idx++) {
+      char name[256];
+      GLint size = 0;
+      GLenum type = 0;
+      glGetActiveUniform(m_program, idx, sizeof(name), nullptr, &size, &type, name);
+      if (uniform_layout(type).first < 0) {
+        continue;
+      }
+      std::string base = name;
+      if (auto b = base.find('['); b != std::string::npos) {
+        base.resize(b);
+      }
+      for (GLint e = 0; e < size; e++) {
+        const std::string el = size > 1 ? base + "[" + std::to_string(e) + "]" : std::string(name);
+        CopiedUniform c;
+        c.dst_loc = glGetUniformLocation(m_program, el.c_str());
+        c.src_loc = glGetUniformLocation(src.m_program, el.c_str());
+        c.type = type;
+        if (c.dst_loc >= 0 && c.src_loc >= 0) {
+          m_copy.push_back(c);
+        }
+      }
+    }
+    lg::info("[enhanced] shader {}: {} uniforms copied from {}", m_name, m_copy.size(), src.m_name);
+  }
+  glUseProgram(m_program);
+  for (const auto& c : m_copy) {
+    float f[16];
+    GLint i[16];
+    GLuint u[16];
+    const int kind = uniform_layout(c.type).first;
+    if (kind == 0) {
+      glGetUniformfv(src.m_program, c.src_loc, f);
+    } else if (kind == 1) {
+      glGetUniformiv(src.m_program, c.src_loc, i);
+    } else {
+      glGetUniformuiv(src.m_program, c.src_loc, u);
+    }
+    set_uniform(c.dst_loc, c.type, f, i, u);
+  }
 }
 
 void Shader::apply_tuning() const {
@@ -518,6 +638,10 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_SHADOW_MERC) = {"enh_shadow_merc", version};
   at(ShaderId::SHRUB_INST) = {"shrub_inst", version};
   at(ShaderId::ENH_TERRAIN) = {"enh_terrain", version};
+  at(ShaderId::ENH_CLOUDS) = {"enh_clouds", version};
+  at(ShaderId::ENH_CLOUD_RAYS) = {"enh_cloud_rays", version};
+  at(ShaderId::ENH_SUN_HALF) = {"enh_sun_half", version};
+  at(ShaderId::ENH_MOTION) = {"enh_motion", version};
   at(ShaderId::SHRUB_IMP) = {"shrub_imp", version};
   at(ShaderId::SHRUB_GRASS) = {"shrub_grass", version};
 
@@ -554,7 +678,7 @@ void ShaderLibrary::hot_reload() {
     auto t = std::filesystem::last_write_time(
         file_util::get_file_path({Shader::shader_folder, Shader::frag_file(name) + ".frag"}), ec);
     const auto tv = std::filesystem::last_write_time(
-        file_util::get_file_path({Shader::shader_folder, name + ".vert"}), ec);
+        file_util::get_file_path({Shader::shader_folder, Shader::vert_file(name) + ".vert"}), ec);
     t = std::max(t, tv);
     auto& seen = last[&shader - m_shaders];
     if (!forced && seen == std::filesystem::file_time_type{}) {

@@ -35,7 +35,16 @@ uniform vec3 cam_pos;        // world
 uniform vec3 rt_ao;          // ray length, strength, how far from the camera (game units, -, game units)
 
 in vec2 tex_coord;
-out float ao_out;
+layout(location = 0) out float ao_out;
+// temporal (ssao.temporal): half the taps each frame, the other half the frame before, through the
+// reprojected history (r: the screen-space occlusion, g: the view distance it was found at)
+layout(location = 1) out vec2 hist_out;
+uniform int ao_temporal;      // 0 off, 1 on (history in tex_T12), 2 on, no history yet
+uniform int ao_frame;         // which half of the taps (0/1)
+uniform sampler2D tex_T12;
+uniform mat3 to_prev;         // view -> previous frame's view
+uniform vec3 to_prev_offset;
+uniform vec2 prev_f;          // previous fx, fy
 
 const int SAMPLES = 16;
 const float TURNS = 7.0;
@@ -244,6 +253,7 @@ float gtao(vec2 uv, float d, vec3 p, vec3 n, vec2 r_uv, float r_world, float noi
 void main() {
   vec2 uv = tex_coord;
   float d = texture(tex_T0, uv).r;
+  hist_out = vec2(1.0, 0.0);
   if (d <= 1e-7) {
     ao_out = 1.0;  // sky / nothing drawn
     return;
@@ -254,6 +264,10 @@ void main() {
     ao_out = 1.0;
     return;
   }
+  // (temporal: every other tap, this frame's half)
+  bool tmp = ao_temporal != 0;
+  int t_step = tmp ? 2 : 1;
+  int t_first = tmp ? ao_frame : 0;
 
   // normal from the neighbor on each axis with the smaller depth jump (no halos on edges)
   vec3 pr = view_pos(uv + vec2(texel.x, 0));
@@ -309,7 +323,7 @@ void main() {
 
   float sum = 0.0;
   float r2 = radius * radius * r_scale * r_scale;
-  for (int i = 0; i < (tune_ao_gtao > 0.5 ? 0 : SAMPLES); i++) {
+  for (int i = t_first; i < (tune_ao_gtao > 0.5 ? 0 : SAMPLES); i += t_step) {
     float t = (float(i) + 0.5) / float(SAMPLES);
     float angle = t * TURNS * 6.2831853 + spin;
     vec2 suv = uv + r_uv * t * vec2(cos(angle), sin(angle));
@@ -325,7 +339,7 @@ void main() {
     sum += falloff * max(0.0, dot(v, n) - 0.12 * sqrt(vv) - 0.002 * dist) / (vv + 0.01 * r2) * sqrt(r2);
   }
 
-  float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
+  float ao = max(0.0, 1.0 - 2.0 * intensity * sum * float(t_step) / float(SAMPLES));
   if (tune_ao_gtao > 0.5) {
     float vis = gtao(uv, d, p, n, r_uv, radius * r_scale, noise, spin);
     ao = pow(vis, tune_ao_gtao_pow * intensity / 1.4);
@@ -341,7 +355,7 @@ void main() {
     w_uv *= w_scale;
     float w_r2 = r2 * wide_k * wide_k * w_scale * w_scale;
     float w_sum = 0.0;
-    for (int i = 0; i < WIDE; i++) {
+    for (int i = t_first; i < WIDE; i += t_step) {
       float t = (float(i) + 0.5) / float(WIDE);
       float angle = t * 3.0 * 6.2831853 + spin + 1.3;
       vec2 suv = uv + w_uv * sqrt(t) * vec2(cos(angle), sin(angle));
@@ -354,7 +368,24 @@ void main() {
       float falloff = 1.0 - smoothstep(0.5 * w_r2, w_r2, vv);
       w_sum += falloff * max(0.0, dot(v, n) - 0.004 * dist) / (vv + 0.02 * w_r2) * sqrt(w_r2);
     }
-    ao *= max(0.6, 1.0 - 0.9 * intensity * w_sum / float(WIDE));
+    ao *= max(0.6, 1.0 - 0.9 * intensity * w_sum * float(t_step) / float(WIDE));
+  }
+  // temporal: this half averaged with last frame's other half, found at the same world point (the
+  // occlusion of static geometry doesn't move with the camera); none where the distance there
+  // differs (something moved, or it was hidden)
+  if (tmp) {
+    float now = ao;
+    if (ao_temporal == 1) {
+      vec3 pp = to_prev * p + to_prev_offset;
+      vec2 puv = 0.5 * vec2(prev_f.x * pp.x, prev_f.y * pp.y) / pp.z + 0.5;
+      if (pp.z > 0.0 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)))) {
+        vec2 h = texture(tex_T12, puv).rg;
+        if (abs(h.y - abs(pp.z)) < 0.03 * abs(pp.z)) {
+          ao = 0.5 * (now + h.x);
+        }
+      }
+    }
+    hist_out = vec2(now, dist);
   }
 
   // traced through the levels: corners and alleys darken from what's really there, on or off the

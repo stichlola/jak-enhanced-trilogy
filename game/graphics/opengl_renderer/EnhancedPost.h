@@ -111,6 +111,15 @@ struct EnhancedCasters {
   u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
+  // each model drawn (its draws share its first_bone): found again next frame by name and place, its
+  // bones then give the TAA where each of its pixels was (EnhancedPost::do_motion)
+  struct Instance {
+    u64 hash = 0;
+    u32 first_bone = 0;  // in bone vectors, as Draw's
+    u32 bone_count = 0;
+    const char* name = "";  // the model's (the level keeps it while drawn; log only)
+  };
+  std::vector<Instance> instances;
   // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2
   // reuses its own ones within the frame, before the shadow pass replays the draws
   struct ModCopy {
@@ -420,6 +429,19 @@ class EnhancedPost {
   bool m_albedo_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
+  // (ssao.temporal: the occlusion pass's own history, RG16F ping-pong, and an MRT target each that
+  // writes m_ao_tex[0] and the history)
+  GLuint m_ao_hist_fbo[2] = {0, 0};
+  GLuint m_ao_hist_tex[2] = {0, 0};
+  int m_ao_hist_cur = 0;
+  bool m_ao_hist_valid = false;
+  unsigned m_ao_frame = 0;
+  // (gi.temporal: the same for the indirect light, RGBA16F)
+  GLuint m_gi_hist_fbo[2] = {0, 0};
+  GLuint m_gi_hist_tex[2] = {0, 0};
+  int m_gi_hist_cur = 0;
+  bool m_gi_hist_valid = false;
+  unsigned m_gi_frame = 0;
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
@@ -613,6 +635,32 @@ class EnhancedPost {
   GLuint m_caster_bones = 0;
   size_t m_caster_bones_size = 0;
   GLuint m_caster_vao = 0;
+  // TAA motion vectors (taa.motion): where each character pixel was last frame, from its model's
+  // bones this frame and last (found again by name and place). RG16F, uv offset; (64, 0): none
+  bool do_motion(SharedRenderState* render_state,
+                 ScopedProfilerNode& prof,
+                 int w,
+                 int h,
+                 const float to_prev[3][3],
+                 const float offset[3],
+                 bool reproject);
+  struct MotionModel {
+    u64 hash = 0;
+    u32 bone_count = 0;
+    u32 first_bone = 0;
+    float center[3] = {0, 0, 0};  // its bones' mean place, in its frame's view space
+  };
+  std::vector<MotionModel> m_mv_prev;
+  GLuint m_mv_bones[2] = {0, 0};
+  size_t m_mv_bones_size[2] = {0, 0};
+  int m_mv_cur = 0;
+  bool m_mv_prev_ok = false;
+  GLuint m_mv_fbo = 0;
+  GLuint m_mv_tex = 0;
+  int m_mv_w = 0;
+  int m_mv_h = 0;
+  int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
+  int m_mv_models = 0;
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;
@@ -685,13 +733,26 @@ class EnhancedPost {
   bool m_vol_ready = false;
 
   // the clouds, a pixel for every 2x2, blended over frames (draw_clouds)
-  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof);
+  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof,
+                   SharedRenderState* render_state);
   GLuint m_cloud_fbo[2] = {0, 0};
   GLuint m_cloud_tex[2] = {0, 0};
   int m_cloud_w = 0;
   int m_cloud_h = 0;
   int m_cloud_cur = 0;
   bool m_cloud_history = false;
+  GLuint m_rays_fbo = 0;  // the rays through the clouds at the clouds' size (enh_cloud_rays)
+  GLuint m_rays_tex = 0;
+  int m_rays_w = 0;
+  int m_rays_h = 0;
+  // the world's sun shadow looks at half size, by enh_sun_half (unit 31, sun_half_on)
+  void draw_sun_half(GLuint id, int w, int h, GLuint render_fbo, ScopedProfilerNode& prof,
+                     SharedRenderState* render_state);
+  GLuint m_sun_half_fbo = 0;
+  GLuint m_sun_half_tex = 0;
+  int m_sun_half_w = 0;
+  int m_sun_half_h = 0;
+  GLuint m_noise_tex = 0;  // gnoise as a picture (post.noise_lut, unit 20)
 
   // the area's look and weather, eased toward the current area's each frame (update_scene)
   struct Grade {
@@ -808,6 +869,7 @@ class EnhancedPost {
   GLuint m_adapt_pbo[2] = {0, 0};
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
+  bool m_adapt_half[2] = {false, false};  // that buffer holds half floats (an RGBA16F scene)
   float m_adapt = 1.f;
   float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
   float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak
@@ -833,6 +895,7 @@ class EnhancedPost {
  public:
   float gpu_ms() const { return m_gpu_ms; }
   float gpu_post_ms() const { return m_gpu_post_ms; }
+  float gpu_lag_ms() const { return m_gpu_lag_ms; }
   int auto_level() const { return m_auto_level; }
   static std::string pass_times();
 
@@ -844,6 +907,15 @@ class EnhancedPost {
   float m_gpu_ms = 0.f;
   float m_gpu_post_ms = 0.f;
   float m_gpu_other_ms = 0.f;  // the frame's GPU time outside the post pass, when it was measurable
+  // how far the GPU is behind the CPU when a frame starts (its frame-start timestamp against the
+  // GPU clock the CPU read as it queued it), smoothed: near 0 = the GPU waited for the CPU, so it
+  // has time to spare whatever its (lowered) clock makes the passes read; several ms = it's still
+  // drawing the frame before, the graphics card is what holds the frame back
+  GLint64 m_gpu_cpu_t0[4] = {};
+  float m_gpu_lag_ms = 0.f;
+  double m_gpu_room_since = 0.0;  // since when the GPU waits for the CPU at 60 fps (0 = it doesn't)
+  double m_auto_up_at = -1e9;     // the last step back up, and how long to wait before the next
+  double m_auto_up_wait = 10.0;
   float m_frame_ms = 16.7f;    // the real frame time (the CPU's clock), smoothed
   double m_last_frame = 0.0;
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)

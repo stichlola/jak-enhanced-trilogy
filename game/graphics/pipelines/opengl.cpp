@@ -632,9 +632,23 @@ void render_game_frame(int game_width,
     options.internal_res_screenshot = false;
     // (Enhanced: the auto quality's last levels draw the game at fewer pixels; the window
     // stretches it)
+    // (JAK_ENHANCED_TEST_RES=WxH: a test run in a small window draws the game at the player's
+    // resolution, e.g. 2560x1600, so the GPU timers measure the real cost; the window shrinks it)
+    static const std::pair<int, int> test_res = [] {
+      int tw = 0, th = 0;
+      const char* e = std::getenv("JAK_ENHANCED_TEST_RES");
+      if (e && sscanf(e, "%dx%d", &tw, &th) == 2 && tw > 0 && th > 0) {
+        return std::make_pair(tw, th);
+      }
+      return std::make_pair(0, 0);
+    }();
+    if (test_res.first > 0) {
+      options.game_res_w = test_res.first;
+      options.game_res_h = test_res.second;
+    }
     if (g_enhanced_render_scale < 1.f) {
-      options.game_res_w = std::max(1, (int)(game_width * g_enhanced_render_scale));
-      options.game_res_h = std::max(1, (int)(game_height * g_enhanced_render_scale));
+      options.game_res_w = std::max(1, (int)(options.game_res_w * g_enhanced_render_scale));
+      options.game_res_h = std::max(1, (int)(options.game_res_h * g_enhanced_render_scale));
     }
     // (JAK_ENHANCED_PROFILE=1: each renderer waits for the GPU, so the log's profile is GPU time)
     static const bool profile_env = std::getenv("JAK_ENHANCED_PROFILE") != nullptr;
@@ -858,6 +872,17 @@ void GLDisplay::render() {
   // Enhanced: test switch JAK_ENHANCED_UNCAPPED=1: no limiter and no vsync, so the cost of the
   // effects can be timed at full clocks even when a frame takes less than 1/60 s
   static const bool uncapped = std::getenv("JAK_ENHANCED_UNCAPPED") != nullptr;
+  // Enhanced: hand the frame's last commands to the GPU before the limiter sleeps. Without it
+  // they sat in the driver until the swap: the GPU idled through the sleep, then drew the end of
+  // the frame (the post's last blit, the window blit, the HUD) after it, so the picture showed
+  // a few ms late and every GPU timer up to there counted the sleep (the post read 10-12 ms at
+  // 60 fps for ~2 ms of work). tuning.json "debug": {"flush_before_limiter": 0} = as before.
+  {
+    static const EnhancedTune t_flush("debug.flush_before_limiter", 1.f);
+    if ((float)t_flush > 0.5f) {
+      glFlush();
+    }
+  }
   if (uncapped) {
     SDL_GL_SetSwapInterval(0);
   } else if (Gfx::g_global_settings.framelimiter) {

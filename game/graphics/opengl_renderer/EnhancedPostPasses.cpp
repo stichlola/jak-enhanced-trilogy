@@ -53,6 +53,12 @@ void EnhancedPost::free_ssao() {
     glDeleteFramebuffers(2, m_ao_fbo);
     glDeleteTextures(2, m_ao_tex);
   }
+  if (m_ao_hist_fbo[0]) {
+    glDeleteFramebuffers(2, m_ao_hist_fbo);
+    glDeleteTextures(2, m_ao_hist_tex);
+    m_ao_hist_fbo[0] = m_ao_hist_fbo[1] = m_ao_hist_tex[0] = m_ao_hist_tex[1] = 0;
+  }
+  m_ao_hist_valid = false;
   m_depth_fbo = m_depth_tex = 0;
   m_ao_fbo[0] = m_ao_fbo[1] = m_ao_tex[0] = m_ao_tex[1] = 0;
   m_ssao_w = m_ssao_h = 0;
@@ -279,7 +285,54 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   if (m_settings.ssao_debug && (debug_counter % 300) == 1) {
     lg::info("[enhanced] rt ao {} ready {} levels {}", m_settings.rt_ao, m_rt_ready, m_rt_count);
   }
-  glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
+  // temporal (ssao.temporal): half the taps a frame, averaged with the other half found last frame
+  // at the same world point (the pass's own RG16F history, written as a second target)
+  // (0.77 -> 0.55 ms at 2560x1600, Spargus 18h; the occlusion equal within 0.9/255)
+  static const EnhancedTune kAoTemporal("ssao.temporal", 1.f);
+  const bool ao_tmp = (float)kAoTemporal > 0.f && m_settings.ssao_intensity > 0.f;
+  if (ao_tmp && !m_ao_hist_fbo[0]) {
+    glGenFramebuffers(2, m_ao_hist_fbo);
+    glGenTextures(2, m_ao_hist_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_ao_hist_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, aw, ah, 0, GL_RG, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_ao_hist_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_ao_tex[0], 0);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_ao_hist_tex[i], 0);
+      const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+      glDrawBuffers(2, bufs);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_ao_hist_valid = false;
+  }
+  if (!ao_tmp) {
+    m_ao_hist_valid = false;
+  }
+  glUniform1i(glGetUniformLocation(id, "ao_temporal"), !ao_tmp ? 0 : m_ao_hist_valid ? 1 : 2);
+  if (ao_tmp) {
+    m_ao_frame++;
+    glUniform1i(glGetUniformLocation(id, "ao_frame"), (int)(m_ao_frame & 1u));
+    float to_prev[3][3];
+    float offset[3];
+    // (a cut or a teleport: no history)
+    if (!enh_post::view_to_prev(cam, m_prev_camera, to_prev, offset)) {
+      glUniform1i(glGetUniformLocation(id, "ao_temporal"), 2);
+    }
+    glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
+    glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, m_ao_hist_tex[1 - m_ao_hist_cur]);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ao_hist_fbo[m_ao_hist_cur]);
+  } else {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_ao_fbo[0]);
+  }
   if (ao_phase >= 0 && ao_phase < 3) {
     glBeginQuery(GL_TIME_ELAPSED, ao_probe.query);
   }
@@ -292,6 +345,10 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     ao_probe.count[ao_phase]++;
   }
   prof.add_draw_call();
+  if (ao_tmp) {
+    m_ao_hist_cur = 1 - m_ao_hist_cur;
+    m_ao_hist_valid = true;
+  }
 
   // depth-aware blur, horizontal then vertical; the result ends up back in m_ao_tex[0]
   auto& blur = render_state->shaders[ShaderId::ENH_SSAO_BLUR];
@@ -874,6 +931,59 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   for (int i = 0; i < 3; i++) {
     glActiveTexture(GL_TEXTURE17 + i);
     glBindTexture(GL_TEXTURE_2D, m_sand_tex[i] ? m_sand_tex[i] : m_black_tex);
+  }
+  // the composite's gradient noise (gnoise) as a picture: 64 of its cells a side, 16 texels a cell,
+  // read bilinearly on unit 20 (noise_lut 1) instead of four hashes a call; the same noise for
+  // world points 0-64 cells from the origin, repeating past them. Tuning "post.noise_lut" 0: hashed
+  // (desert 16h, 2560x1600: composite 12.37 -> 12.25 ms, pictures equal within TAA noise)
+  {
+    static const EnhancedTune t_noise_lut("post.noise_lut", 1.f);
+    const bool use_lut = (float)t_noise_lut > 0.5f;
+    if (use_lut && !m_noise_tex) {
+      constexpr int kCells = 64, kPer = 16, kSize = kCells * kPer;
+      auto fract = [](float v) { return v - std::floor(v); };
+      auto hash2 = [&](int ix, int iy, float& hx, float& hy) {
+        const float qx = (float)(((ix % kCells) + kCells) % kCells);
+        const float qy = (float)(((iy % kCells) + kCells) % kCells);
+        float px = fract(qx * 0.1031f), py = fract(qy * 0.1030f), pz = fract(qx * 0.0973f);
+        const float dd = px * (py + 33.33f) + py * (pz + 33.33f) + pz * (px + 33.33f);
+        px += dd;
+        py += dd;
+        pz += dd;
+        hx = -1.f + 2.f * fract((px + py) * pz);
+        hy = -1.f + 2.f * fract((px + pz) * py);
+      };
+      std::vector<float> data((size_t)kSize * kSize);
+      for (int ty = 0; ty < kSize; ty++) {
+        for (int tx = 0; tx < kSize; tx++) {
+          const int ix = tx / kPer, iy = ty / kPer;
+          const float fx = (float)(tx % kPer) / kPer, fy = (float)(ty % kPer) / kPer;
+          const float ux = fx * fx * (3.f - 2.f * fx), uy = fy * fy * (3.f - 2.f * fy);
+          float hx, hy;
+          hash2(ix, iy, hx, hy);
+          const float a = hx * fx + hy * fy;
+          hash2(ix + 1, iy, hx, hy);
+          const float b = hx * (fx - 1.f) + hy * fy;
+          hash2(ix, iy + 1, hx, hy);
+          const float c = hx * fx + hy * (fy - 1.f);
+          hash2(ix + 1, iy + 1, hx, hy);
+          const float d = hx * (fx - 1.f) + hy * (fy - 1.f);
+          const float ab = a + (b - a) * ux, cd = c + (d - c) * ux;
+          data[(size_t)ty * kSize + tx] = ab + (cd - ab) * uy;
+        }
+      }
+      glGenTextures(1, &m_noise_tex);
+      glBindTexture(GL_TEXTURE_2D, m_noise_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, kSize, kSize, 0, GL_RED, GL_FLOAT, data.data());
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    }
+    glActiveTexture(GL_TEXTURE20);
+    glBindTexture(GL_TEXTURE_2D, m_noise_tex ? m_noise_tex : m_black_tex);
+    glUniform1i(glGetUniformLocation(id, "tex_T20"), 20);
+    glUniform1f(glGetUniformLocation(id, "noise_lut"), use_lut && m_noise_tex ? 1.f : 0.f);
   }
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T10"), 10);

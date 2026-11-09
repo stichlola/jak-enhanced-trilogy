@@ -275,14 +275,15 @@ uniform float tune_spec_clamp = 4.0;  // a lamp's highlight never past this many
 // stops before its fragment work: the tail-span after it holds that)
 #define ENH_LIGHT_TILES
 #ifdef ENH_LIGHT_TILES
-uniform highp usampler2D tex_T28;  // 32x18, R32UI: bit i = light i may reach the tile
-uniform float light_tiles_on;      // 1: tex_T28 is filled (lights.tiles)
+uniform highp usampler2D tex_T28;  // 32x18, RGBA32UI: r bit i = light i may reach the tile, g/b beacons 0-31/32-63
+uniform float light_tiles_on;      // bits: 1 r is filled (lights.tiles), 2 g/b are (beacons.tiles)
 #endif
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
 uniform float tune_chr_contact = 0.55;   // Jak's contact shadow under his feet (0: off)
+uniform sampler2D tex_T30;  // the rays through the clouds at the clouds' size (enh_cloud_rays, cloud_info.w 1)
 uniform sampler2D tex_T29;  // the characters' lowest points around Jak, from below (do_chr_occlusion)
 uniform mat4 chr_occ_mvp;   // world -> that map
 uniform float chr_occ_on;   // its height span (m); 0: none this frame
@@ -378,7 +379,14 @@ vec2 hash2(vec2 q) {
   return -1.0 + 2.0 * fract((p3.xx + p3.yz) * p3.zy);
 }
 
+// (noise_lut 1: read from tex_T20, the same noise as a picture, EnhancedPostPasses: 64 cells a
+// side, 16 texels each, repeating past them; a bilinear read instead of four hashes)
+uniform float noise_lut;
+uniform sampler2D tex_T20;
 float gnoise(vec2 x) {
+  if (noise_lut > 0.5) {
+    return textureLod(tex_T20, x * (1.0 / 64.0) + 0.5 / 1024.0, 0.0).r;
+  }
   vec2 i = floor(x);
   vec2 f = fract(x);
   vec2 u = f * f * (3.0 - 2.0 * f);
@@ -482,6 +490,20 @@ float light_blocked_by(vec3 from, vec3 lp, float jitter, float reach, int steps)
     }
   }
   return 0.0;
+}
+
+// the lights that may touch this pixel (light tiles, lights.tiles): each light's sphere grown to
+// what any loop over the lights reaches (1.6 x its radius: the highlights on metal, the glow in the
+// air along the ray; and its halo's angle), lowest index first; every light with the tiles off
+uint light_tile_bits() {
+  uint bits = light_count >= 32 ? 0xffffffffu : (1u << uint(max(light_count, 0))) - 1u;
+#ifdef ENH_LIGHT_TILES
+  if ((int(light_tiles_on + 0.5) & 1) != 0) {
+    ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
+    bits &= texelFetch(tex_T28, lt, 0).r;
+  }
+#endif
+  return bits;
 }
 
 float light_blocked(vec3 from, vec3 lp, float jitter) {
@@ -2223,6 +2245,9 @@ vec3 fxaa_at(vec2 uv) {
 // the occlusion and the characters' sun shadows, made at half the resolution a side: of the four
 // texels around, those at this pixel's depth (plain bilinear blurred them across the edges of
 // grass blades and pebbles, and the TAA's jitter moved those edges each frame: they flickered)
+// (the four texels and their weights, kept for sun_half_upsample: its picture has the same size)
+ivec2 up_ic[4];
+vec4 up_w = vec4(0.25);
 float ao_upsample(vec2 uv, float zc) {
   vec2 size = vec2(textureSize(tex_T2, 0));
   vec2 g = uv * size - 0.5;
@@ -2243,8 +2268,21 @@ float ao_upsample(vec2 uv, float zc) {
     float w = (bw + 1e-3) / (1.0 + dz * dz * 16.0);
     sum += texelFetch(tex_T2, ic, 0).r * w;
     wsum += w;
+    up_ic[k] = ic;
+    up_w[k] = w;
   }
+  up_w /= wsum;
   return sum / wsum;
+}
+
+// the world's sun shadow looks made at half the resolution a side (enh_sun_half, unit 31), upsampled
+// as the occlusion is: with the four texels and depth weights ao_upsample found for this pixel (both
+// pictures (w + 1) / 2 by (h + 1) / 2; it ran first, on every pixel the sun shadows shade)
+uniform float sun_half_on;
+uniform sampler2D tex_T31;
+vec3 sun_half_upsample() {
+  return texelFetch(tex_T31, up_ic[0], 0).rgb * up_w.x + texelFetch(tex_T31, up_ic[1], 0).rgb * up_w.y +
+         texelFetch(tex_T31, up_ic[2], 0).rgb * up_w.z + texelFetch(tex_T31, up_ic[3], 0).rgb * up_w.w;
 }
 
 // the terrain's pictures without their repeats showing (Inigo Quilez's "texture repetition" 3): a
@@ -2316,7 +2354,76 @@ vec3 sky_over(vec2 q) {
   vec3 g = sky_copy > 1.5 ? textureLod(tex_T23, q, 0.0).rgb : textureLod(tex_T0, q, 0.0).rgb;
   return g - textureLod(tex_T25, q, 0.0).rgb;
 }
+// the rays through the gaps in the clouds: how much open sky (sky pixels with little cloud) lies
+// along the line from here back to the low sun, 0..1
+float cloud_rays_lit(vec2 at) {
+  vec2 suv = vec2(sky_sun.x * proj.z, sky_sun.y * proj.w) / sky_sun.z * 0.5 + 0.5;
+  vec2 to_sun = suv - at;
+  ivec2 csize = textureSize(tex_T15, 0);
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  float lit = 0.0;
+  for (int i = 0; i < 10; i++) {
+    vec2 q = at + to_sun * (float(i) + jit) / 10.0;
+    if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0 || textureLod(tex_T3, q, 0.0).r > 1e-7) {
+      continue;
+    }
+    vec4 cl = texelFetch(tex_T15, ivec2(q * vec2(csize)), 0);
+    if (cl.a >= 0.0 && !isnan(cl.a)) {
+      lit += cl.a * cl.a;
+    }
+  }
+  return lit / 10.0;
+}
+
 void main() {
+#ifdef ENH_CLOUD_ONLY
+  // (the slim cloud program, enh_clouds: everything below is compiled out, so the march gets the
+  // registers it needs, not the whole composite's)
+  color = cloud_march();
+}
+void composite_unused() {
+#endif
+#ifdef ENH_RAYS_ONLY
+  // (the rays alone, enh_cloud_rays: one pixel per 2x2 into a small target the composite reads
+  // back; in the composite their 20 reads a pixel cost 1.4 ms at 2560x1600, desert 16h)
+  // (only where the composite asks: the same tests)
+  vec3 rray = normalize(vec3((tex_coord.x * 2.0 - 1.0) / proj.z, (tex_coord.y * 2.0 - 1.0) / proj.w, 1.0));
+  float rcover = smoothstep(0.1, 0.35, clouds.y) * (1.0 - smoothstep(0.75, 1.0, clouds.y));
+  bool want = cloud_rays > 0.0 && clouds.x > 0.0 && sky_sun.w > 0.0 && sky_sun.w < 0.45 && sky_sun.z > 0.1 &&
+              weather.x < 0.5 && pow(max(dot(rray, sky_sun.xyz), 0.0), 3.0) * rcover > 0.005;
+  color = vec4(want ? cloud_rays_lit(tex_coord) : 0.0, 0.0, 0.0, 1.0);
+}
+void composite_unused() {
+#endif
+#ifdef ENH_SUN_HALF_ONLY
+  // (the sun shadow map's two looks for the world's pixels, enh_sun_half: one pixel per 2x2, read
+  // back by the composite with depth weights (sun_half_on 1); characters keep theirs at full size.
+  // r: the map at the point pushed off along its normal; g: the rough look from 2 m toward the sun.
+  // Each wider than the composite's own tests (its soft normal is a full-size pixel's))
+  {
+    float hd = texture(tex_T3, tex_coord).r;
+    vec2 hres = vec2(0.0);
+    float hcs = 0.0;
+    if (hd > 1e-7 && shadow_strength > 0.0 && sun_dir.w > 0.0) {
+      float hz = view_z(hd);
+      vec3 hp = view_pos(tex_coord, hd);
+      vec3 hn = surface_normal(tex_coord, hp);
+      float hndl = dot(soft_normal(tex_coord, hn, hz), sun_dir.xyz);
+      if (hndl > -0.15) {
+        hres.x = sun_shadow(view_to_world * (hp + hn * (0.08 * 4096.0 + hz * 0.002)) + cam_pos);
+      }
+      if (hndl < 0.45) {
+        hres.y = sun_shadow_rough(view_to_world * (hp + sun_dir.xyz * (2.0 * 4096.0 + hz * 0.01)) + cam_pos);
+      }
+      if (hndl > -0.15 && hz < 30.0 * 4096.0) {
+        hcs = contact_shadow(hp + hn * (0.03 * 4096.0 + hz * 0.001), sun_dir.xyz);
+      }
+    }
+    color = vec4(hres, hcs, 1.0);
+  }
+}
+void composite_unused() {
+#endif
   if (cloud_pass == 1) {
     color = cloud_march();
     return;
@@ -3412,7 +3519,12 @@ void main() {
     // its own head, arms and Daxter don't shade it: at noon the map put Jak in his own shadow and the
     // shade's tint turned his hair green; walls and roofs further off still do)
     bool chr_gap = chr && tune_chr_gap_m > 0.0;
-    if (ndl > 0.0 && !chr_gap) {
+    // (the world's pixels: both looks below made at half size by enh_sun_half, sun_half_on 1)
+    bool sh_half = sun_half_on > 0.5 && !chr;
+    vec3 sh_hv = sh_half ? sun_half_upsample() : vec3(0.0);
+    if (ndl > 0.0 && !chr_gap && sh_half) {
+      sh = sh_hv.x * facing;
+    } else if (ndl > 0.0 && !chr_gap) {
       // pushed off the surface along its normal (more far away, where a texel is bigger)
       vec3 w = view_to_world * (p + nn * (0.08 * 4096.0 + z * 0.002)) + cam_pos;
       sh = sun_shadow(w) * facing;
@@ -3424,7 +3536,9 @@ void main() {
     // turned away from the sun the map can't tell a shadow from the surface itself: looked at from
     // 2 m toward the sun, past the small shapes. Without it, inside a mountain's shadow the edges
     // of the rocks kept their full light
-    if (facing < 1.0 && !chr) {
+    if (facing < 1.0 && !chr && sh_half) {
+      sh = max(sh, sh_hv.y * (1.0 - facing));
+    } else if (facing < 1.0 && !chr) {
       vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
       sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
     }
@@ -3442,7 +3556,7 @@ void main() {
     // crate's edge; a short march toward the sun through the depth buffer finds them (50 cm)
     if (ndl > 0.0 && z < 30.0 * 4096.0 && !chr_gap) {
       vec3 from = p + nn * (0.03 * 4096.0 + z * 0.001);
-      float cs = contact_shadow(from, sun_dir.xyz);
+      float cs = sh_half ? sh_hv.z : contact_shadow(from, sun_dir.xyz);
       sh = max(sh, cs * 0.7 * smoothstep(30.0 * 4096.0, 15.0 * 4096.0, z) * facing);
     }
     if (tune_shadow_dbg > 0.5 && tune_shadow_dbg < 1.5) {
@@ -3675,13 +3789,7 @@ void main() {
     }
     // (light tiles: only the lights whose reach may touch this pixel's 32x18 screen tile, lowest
     // index first as before, so the strongest still cast the shadows)
-    uint lbits = light_count >= 32 ? 0xffffffffu : (1u << uint(light_count)) - 1u;
-#ifdef ENH_LIGHT_TILES
-    if (light_tiles_on > 0.5) {
-      ivec2 lt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
-      lbits &= texelFetch(tex_T28, lt, 0).r;
-    }
-#endif
+    uint lbits = light_tile_bits();
     while (lbits != 0u) {
       int i = findLSB(lbits);
       lbits &= lbits - 1u;
@@ -3893,7 +4001,8 @@ void main() {
       }
       // the lamps' highlights on it (a factory's pipes, a car's paint at night): metal's broad and
       // tinted by the metal, gloss tight and in the lamp's own color
-      for (int i = 0; i < light_count; i++) {
+      for (uint mb = light_tile_bits(); mb != 0u; mb &= mb - 1u) {
+        int i = findLSB(mb);
         vec3 tl = light_pos[i].xyz - p;
         float d = length(tl);
         float rr = d / max(light_pos[i].w, 1.0);
@@ -4229,22 +4338,9 @@ void main() {
     float toward = pow(max(dot(ray, sky_sun.xyz), 0.0), 3.0);
     float cover = smoothstep(0.1, 0.35, clouds.y) * (1.0 - smoothstep(0.75, 1.0, clouds.y));
     if (toward * cover > 0.01) {
-      vec2 suv = vec2(sky_sun.x * proj.z, sky_sun.y * proj.w) / sky_sun.z * 0.5 + 0.5;
-      vec2 to_sun = suv - tex_coord;
-      ivec2 csize = textureSize(tex_T15, 0);
-      float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-      float lit = 0.0;
-      for (int i = 0; i < 10; i++) {
-        vec2 q = tex_coord + to_sun * (float(i) + jit) / 10.0;
-        if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0 || texture(tex_T3, q).r > 1e-7) {
-          continue;
-        }
-        vec4 cl = texelFetch(tex_T15, ivec2(q * vec2(csize)), 0);
-        if (cl.a >= 0.0 && !isnan(cl.a)) {
-          lit += cl.a * cl.a;
-        }
-      }
-      c += sun_color() * smoothstep(0.15, 0.9, lit / 10.0) * toward * cover * cloud_rays * 0.45 *
+      // (cloud_info.w 1: marched at the clouds' size by enh_cloud_rays, read back here)
+      float lit = cloud_info.w > 0.5 ? textureLod(tex_T30, tex_coord, 0.0).r : cloud_rays_lit(tex_coord);
+      c += sun_color() * smoothstep(0.15, 0.9, lit) * toward * cover * cloud_rays * 0.45 *
            (1.0 - smoothstep(0.25, 0.45, sky_sun.w));
     }
   }
@@ -4551,7 +4647,9 @@ void main() {
     vec3 halo = vec3(0.0);
     vec3 shine = vec3(0.0);
     float scene_dist = z > 0.0 ? length(p) : 1e12;
-    for (int i = 0; i < min(light_count, 32); i++) {
+    const uint air_bits = light_tile_bits();
+    for (uint ab = air_bits; ab != 0u; ab &= ab - 1u) {
+      int i = findLSB(ab);
       // the light scattered toward the camera along the ray up to the scene: the integral of
       // 1 / (h^2 + (t - tc)^2), h the light's distance off the ray
       vec3 lp = light_pos[i].xyz;
@@ -4580,7 +4678,8 @@ void main() {
     // all of them together at most a soft glow (scaled down, its hue kept)
     float shine_max = max(shine.r, max(shine.g, shine.b));
     c += shine * min(1.0, 0.15 / max(shine_max, 1e-4));
-    for (int i = 0; i < min(light_count, 16); i++) {
+    for (uint hb = air_bits & 0xffffu; hb != 0u; hb &= hb - 1u) {
+      int i = findLSB(hb);
       vec3 lp = light_pos[i].xyz;
       float ld = length(lp);
       if (lp.z <= 0.0 || ld < 1.0) {
@@ -4669,7 +4768,19 @@ void main() {
   // however far it is (the game's own glow shrinks to nothing), hidden behind what's in front
   float aspect_px = texel.y / texel.x;
   float night_air = weather.x * 0.8 + weather2.y + weather.y * 0.5 + weather2.x * 0.3 + sun_haze * 0.4;
-  for (int i = 0; i < beacon_count; i++) {
+  // (beacon tiles, beacons.tiles: only the beacons whose 40 px square touches this pixel's tile)
+  uvec2 bbits = uvec2(beacon_count >= 32 ? 0xffffffffu : (1u << uint(max(beacon_count, 0))) - 1u,
+                      beacon_count >= 64 ? 0xffffffffu
+                                         : (beacon_count > 32 ? (1u << uint(beacon_count - 32)) - 1u : 0u));
+#ifdef ENH_LIGHT_TILES
+  if ((int(light_tiles_on + 0.5) & 2) != 0) {
+    ivec2 bt = clamp(ivec2(tex_coord * vec2(32.0, 18.0)), ivec2(0), ivec2(31, 17));
+    bbits &= texelFetch(tex_T28, bt, 0).gb;
+  }
+#endif
+  for (int bw = 0; bw < 2; bw++)
+  for (uint bb = bw == 0 ? bbits.x : bbits.y; bb != 0u; bb &= bb - 1u) {
+    int i = findLSB(bb) + 32 * bw;
     vec3 bp = beacon_pos[i].xyz;
     vec2 buv = 0.5 * vec2(proj.z * bp.x, proj.w * bp.y) / bp.z + 0.5;
     vec2 dpx = (tex_coord - buv) / texel.y;

@@ -1173,6 +1173,59 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
 
   m_profiler.finish();
 
+  // Enhanced: where the renderer's CPU time goes, without any glFinish (tuning.json "debug":
+  // {"cpu_profile": 1}): each top-level step and each bucket's mean ms a frame, the slowest
+  // first, "[enhanced] cpu ..." in the log every 5 s. A step that blocks on the GPU (a read back,
+  // a full command queue) shows here as CPU time.
+  {
+    static const EnhancedTune t_cpu_profile("debug.cpu_profile", 0.f);
+    static std::vector<std::pair<std::string, double>> acc;
+    static int acc_n = 0;
+    static auto acc_t = std::chrono::steady_clock::now();
+    if ((float)t_cpu_profile > 0.5f) {
+      auto add = [&](const std::string& name, float sec) {
+        for (auto& [n, v] : acc) {
+          if (n == name) {
+            v += sec * 1000.0;
+            return;
+          }
+        }
+        acc.emplace_back(name, sec * 1000.0);
+      };
+      for (const auto& c : m_profiler.root()->children()) {
+        add(c.name(), c.stats().duration);
+        for (const auto& b : c.children()) {
+          add(c.name() + "/" + b.name(), b.stats().duration);
+          for (const auto& d : b.children()) {
+            add(c.name() + "/" + b.name() + "/" + d.name(), d.stats().duration);
+          }
+        }
+      }
+      add("(render)", m_profiler.root_time());
+      acc_n++;
+      const auto now = std::chrono::steady_clock::now();
+      if (std::chrono::duration<double>(now - acc_t).count() >= 5.0 && acc_n > 0) {
+        std::sort(acc.begin(), acc.end(),
+                  [](const auto& a, const auto& b) { return a.second > b.second; });
+        std::string out;
+        int shown = 0;
+        for (const auto& [n, v] : acc) {
+          if (shown++ >= 24 || v / acc_n < 0.02) {
+            break;
+          }
+          out += fmt::format("{}{} {:.2f}", out.empty() ? "" : ", ", n, v / acc_n);
+        }
+        lg::info("[enhanced] cpu ms/frame (n={}): {}", acc_n, out);
+        acc.clear();
+        acc_n = 0;
+        acc_t = now;
+      }
+    } else {
+      acc_n = 0;
+      acc_t = std::chrono::steady_clock::now();
+    }
+  }
+
   // Enhanced: average frame rate in the log every 5 seconds, for before/after measurements
   {
     using clock = std::chrono::steady_clock;
@@ -1325,7 +1378,11 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
   window_fb.multisampled = false;
 
   // see if the render FBO is still applicable (Enhanced: and its color format, post.hdr_scene,
-  // switched live from the tuning file)
+  // switched live from the tuning file). Default off, by measurement: with the game's fragment
+  // shaders clamped (Shader.cpp) and post.glow_hdr_gain 0.7, A/B in one run showed no gain at the
+  // Spargus torches at 21h (frame means within 0.5/255), the arena pool equal either way, and a
+  // wider, brighter glow under the Hellcat on sand (against the dark look); gain 1.0 adds a pink
+  // fringe on shots. Kept as an option for future HDR effects; same fps either way.
   static const EnhancedTune t_hdr_scene("post.hdr_scene", 0.f);
   const bool hdr_scene = (float)t_hdr_scene > 0.5f;
   if (settings.save_screenshot || window_resized || !m_fbo_state.render_fbo ||
