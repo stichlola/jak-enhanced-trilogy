@@ -161,7 +161,10 @@ uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
+uniform float tune_water_hiz_fallback = 1.0;  // where the Hi-Z trace misses, the old march tries (0: the miss keeps the sky sample: pale patches by a quay)
 uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
+uniform float tune_water_oasis = 1.0;  // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
+const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -244,8 +247,8 @@ uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun get
 uniform float tune_rock_sat = 0.42;   // desert rock by day: saturation cap (0: off)
 // (M1, off: at 1.5x the templex hall's floor 10 m out moved 52.0 -> 52.4, inside the flicker; the
 // fires' radius is a few meters, the pool needs ~3x, past the light tiles' 1.6x: grow them first)
-uniform float tune_fire_floor = 1.0;       // a fire under a roof lights the floor this much further (x radius, <= 1.5; 1: off)
-uniform float tune_fire_floor_gain = 0.15;  // ...and that floor pool this much stronger (on k, squared after)
+uniform float tune_fire_floor = 3.0;       // a fire under a roof lights the floor this much further (x radius, <= 3; 1: off)
+uniform float tune_fire_floor_gain = 0.3;  // ...and that floor pool this much stronger (on k, squared after)
 uniform float tune_lamp_jak_m = 2.5;  // lamps' shadows let go within this far of Jak's feet (m; 0: off)
 uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
@@ -3106,7 +3109,15 @@ void composite_unused() {
     }
     // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
     // water, not the sea around it, which lies at 9 m)
-    bool pond_here = pond != 0 && abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4;
+    // (an oasis that lies at the sea's own 9 m, desert-ashelin's, is the game's sea plane showing
+    // through a hollow: by height it took the sea's look, a pale shallows line along its shore.
+    // Within a disc around it, a pond too; no sea comes within kilometers)
+    bool oasis_here = false;
+    for (int k = 0; k < 1 && tune_water_oasis > 0.5; k++) {
+      oasis_here = oasis_here || distance(water_world, k_oases[k].xy) < k_oases[k].z;
+    }
+    bool pond_here = pond != 0 &&
+                     (abs((dot(up_view, p) + cam_pos.y) / 4096.0 - 9.0) > 0.4 || oasis_here);
     // (the sea's shallows only half clear: fully clear, they stood out bright and pale against the
     // deeper water around them)
     // (the sea: the bed shows only along the very edge, the last half meter. The game draws the near
@@ -3328,7 +3339,8 @@ void composite_unused() {
     float mirror_k = smoothstep(25.0 * 4096.0, 50.0 * 4096.0, z) * step(80.5, tune_water_ssr_far);
     vec3 rs = normalize(mix(r, reflect(vdir, up_view), mirror_k));
     bool hiz = hiz_levels > 0 && !(abs(tune_hiz_dbg - 1.0) < 0.5 && tex_coord.x < 0.5);
-    if (hiz && z < tune_hiz_range_m * 4096.0) {
+    bool hiz_ran = hiz && z < tune_hiz_range_m * 4096.0;
+    if (hiz_ran) {
       // (post.hiz: a tile at a time through the depth pyramid, 5x the old march's reach)
       vec2 huv;
       if (hiz_trace(p, r, z, tune_hiz_len_m * 4096.0,
@@ -3338,7 +3350,11 @@ void composite_unused() {
                   (1.0 - smoothstep(0.75 * tune_hiz_range_m * 4096.0, tune_hiz_range_m * 4096.0, z));
         ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
       }
-    } else if (z < ssr_far) {
+    }
+    // (where the Hi-Z trace found nothing, the old march still looks: Haven port 18h, the near water
+    // behind the dock reflected ragged pale patches of sky where the quay's houses stand; the march
+    // (the calm mirror ray, further out) finds them)
+    if (z < ssr_far && (!hiz_ran || (ssr_hit == 0.0 && tune_water_hiz_fallback > 0.5))) {
       float step_len = 0.25 * 4096.0 + z * 0.01;
       // start each pixel's march a little further along (the TAA averages the steps away: no
       // staircase where the reflection meets what it reflects)
@@ -4244,11 +4260,11 @@ void composite_unused() {
       float r = light_pos[i].w;
       // a fire under a roof (alpha 0.25): the floor in front of it lit further out, a warm pool
       // across the room, not only the wall behind it (templex braziers at noon). The tiles keep
-      // 1.6x the radius, so up to 1.5x here
+      // 1.6x the radius, these fires' grown with tune_fire_floor in C++, so up to 3x here
       float fire_floor = 0.0;
       if (tune_fire_floor > 1.0 && abs(light_color[i].a - 0.25) < 0.1) {
         fire_floor = smoothstep(0.6, 0.9, dot(nn, up_view));
-        r *= mix(1.0, min(tune_fire_floor, 1.5), fire_floor);
+        r *= mix(1.0, min(tune_fire_floor, 3.0), fire_floor);
       }
       if (d < r) {
         float k = 1.0 - (d * d) / (r * r);

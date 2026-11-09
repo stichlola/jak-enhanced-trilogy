@@ -2295,7 +2295,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           const float* lp = pos + i * 4;
           // (grown to what every loop over the lights reaches: highlights and the air's glow 1.6
           // radii, the halo ~2.4 x its spread of at least 0.01 rad)
-          const float r = std::max(1.6f * lp[3],
+          // (a fire under a roof, alpha 0.25, lights the floor out to tune_fire_floor radii: its
+          // tiles grow with it, or the pool ends in tile-shaped steps)
+          static const EnhancedTune t_fire_floor("shaders.tune_fire_floor", 3.f);
+          const bool roof_fire = std::abs(color[i * 4 + 3] - 0.25f) < 0.1f;
+          const float reach =
+              roof_fire ? std::max(1.6f, 1.07f * std::min((float)t_fire_floor, 3.f)) : 1.6f;
+          const float r = std::max(reach * lp[3],
                                    0.03f * std::sqrt(lp[0] * lp[0] + lp[1] * lp[1] + lp[2] * lp[2]));
           int x0 = 0, x1 = kTx - 1, y0 = 0, y1 = kTy - 1;
           if (lp[2] - r > 0.1f * kMeter) {

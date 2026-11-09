@@ -4,7 +4,12 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 
+#include <algorithm>
+#include <unordered_map>
+
+#include "common/log/log.h"
 #include "common/util/os.h"
 #include "common/util/simd_util.h"
 
@@ -259,6 +264,31 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
 
 std::string g_enhanced_bg_level;
 
+// Enhanced: a level that starts being drawn (just loaded, or shown again after a gap) fades in
+// over bg.fade_in seconds, dithered, instead of popping in whole (0: off). Every displayed level
+// sends its trees each frame whatever the camera sees, so turning round doesn't restart it.
+// (counted in frames, at 60 a second: a loading hitch of 0.4 s between two frames restarted a
+// fade by the clock, and a long first frame would skip it)
+static float enhanced_level_fade_in(const std::string& name, u64 frame) {
+  static const EnhancedTune t_fade("bg.fade_in", 0.5f);
+  if (name.empty() || t_fade <= 0.f) {
+    return 1.f;
+  }
+  struct Seen {
+    u64 first = 0, last = 0;
+    bool any = false;
+  };
+  static std::unordered_map<std::string, Seen> seen;
+  auto& s = seen[name];
+  if (!s.any || frame > s.last + 2) {
+    s.first = frame;
+    s.any = true;
+    lg::info("[enhanced] level {} fades in", name);
+  }
+  s.last = std::max(s.last, frame);
+  return std::clamp(float(frame - s.first) / (t_fade * 60.f), 0.f, 1.f);
+}
+
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
                             ShaderId shader) {
@@ -269,6 +299,10 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   glUniform1i(glGetUniformLocation(id, "decal"), false);
   glUniform1f(glGetUniformLocation(id, "enh_parallax"), 0.f);  // Enhanced: per draw, off unless asked
   glUniform2f(glGetUniformLocation(id, "enh_notile"), 0.f, 0.f);
+  if (shader == ShaderId::TFRAG3 || shader == ShaderId::SHRUB) {
+    glUniform1f(glGetUniformLocation(id, "enh_fade_in"),
+                enhanced_level_fade_in(g_enhanced_bg_level, render_state->frame_idx));
+  }
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glUniformMatrix4fv(glGetUniformLocation(id, "camera"), 1, GL_FALSE, settings.camera[0].data());
 

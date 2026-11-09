@@ -139,8 +139,13 @@ float enh_dither() {
   return fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
 }
 
+uniform float enh_fade_in = 1.0;  // a level just drawn: 0 -> 1 over half a second (no pop-in)
+
 void main() {
   enh_albedo_out = vec4(0.0);
+  if (enh_fade_in < 1.0 && enh_fade_in <= enh_dither()) {
+    discard;
+  }
   if (enh_lod_kind != 0 && enh_lod.y > 0.0 &&
       smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) <= enh_dither()) {
     discard;
