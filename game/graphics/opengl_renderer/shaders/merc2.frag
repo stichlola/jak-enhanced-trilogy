@@ -44,6 +44,14 @@ const int MAT_EYE = 7;
 const int MAT_LENS = 8;
 const int MAT_LAMP = 9;  // a lamp, a lit sign on a prop: written 0.2 long, the composite lights it at night
 // the relief's height per material: faces have lines painted on them, glass has none
+uniform float enh_fade_in = 1.0;  // Enhanced: the level just drawn dithers in (Merc2, fg.fade_in)
+float enh_fade_dither() {
+  ivec2 p = ivec2(gl_FragCoord.xy) & 3;
+  // (tfrag3.frag's 4x4 Bayer matrix, by bit math)
+  int q = p.x ^ p.y;
+  int m = ((q & 1) << 3) | ((p.y & 1) << 2) | (q & 2) | ((p.y & 2) >> 1);
+  return (float(m) + 0.5) / 16.0;
+}
 const float BUMP_K[10] = float[10](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
 
 void main() {
@@ -53,6 +61,9 @@ void main() {
   vec2 st_dy = dFdy(vtx_st);
   vec3 p_dx = -dFdx(enh_pos);
   vec3 p_dy = -dFdy(enh_pos);
+  if (enh_fade_in < 1.0 && enh_fade_in <= enh_fade_dither()) {
+    discard;
+  }
 
   vec4 T0 = vec4(1.0);
   if (gfx_hack_no_tex == 0) {

@@ -139,6 +139,7 @@ class Merc2 {
     GLuint enh_mat;
     GLuint enh_eye_lid;
     GLuint enh_relief;
+    GLuint enh_fade_in;  // Enhanced: the level's fade-in (fg.fade_in)
   };
 
   Uniforms m_merc_uniforms, m_emerc_uniforms;

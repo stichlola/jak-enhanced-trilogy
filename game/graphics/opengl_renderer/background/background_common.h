@@ -46,6 +46,8 @@ DoubleDraw setup_opengl_from_draw_mode(DrawMode mode, u32 tex_unit, bool mipmap)
 // Enhanced: the level whose background is being drawn (set before first_tfrag_draw_setup), so
 // parts of some levels can be cut away where they now open onto new areas (see Shader.cpp).
 extern std::string g_enhanced_bg_level;
+// Enhanced: how far that level's fade-in has come (1 = whole, or not faded: no background drawn)
+float enhanced_level_fade_peek(const std::string& name, u64 frame);
 
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
