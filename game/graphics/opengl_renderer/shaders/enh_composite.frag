@@ -159,6 +159,7 @@ uniform float tune_spill_sat = 0.45;  // the light spill's color at most this sa
 uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
+uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -294,7 +295,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front)
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3219,21 +3220,30 @@ void composite_unused() {
     // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
     // (a wave tilted toward the eye reflects a ray going down: it'd see the sea itself or the
     // rock, dark blots on the water. Kept just over the horizon, it sees the sky low down)
+    // (near the horizon the calm mirror ray itself rises less than that: every ray of the last few
+    // rows under the horizon was lifted to the same height, one sky pixel, a flat band without
+    // ripples along the far sea. There the floor is half the calm ray's rise)
     vec3 re = r;
     float re_up = dot(re, up_view);
-    if (re_up < 0.03) {
-      re = normalize(re + up_view * (0.03 - re_up));
+    float re_floor = tune_water_env_floor > 0.5 ? min(0.03, 0.5 * max(-dot(vdir, up_view), 0.0) + 0.002) : 0.03;
+    if (re_up < re_floor) {
+      re = normalize(re + up_view * (re_floor - re_up));
     }
     vec3 refl = fog_color;
+    vec3 env_dbg = vec3(0.0);
     if (re.z > 1e-3) {
+      env_dbg.g = 1.0;
       vec2 env_uv = clamp(0.5 * vec2(proj.z * re.x, proj.w * re.y) / re.z + 0.5, vec2(0.002), vec2(0.998));
       refl = texture(tex_T0, env_uv).rgb;
       // (where that lands on the water, the sky's color there instead)
       float ed = texture(tex_T3, env_uv).r;
       float efd = texture(tex_T6, env_uv).r;
-      if (texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) {
+      if ((texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) &&
+          abs(tune_water_dbg - 12.0) > 0.5) {
         refl = fog_color;
+        env_dbg.r = 1.0;
       }
+      env_dbg.b = env_uv.y;
     }
     vec3 ssr = refl;
     float ssr_hit = 0.0;
@@ -3322,6 +3332,18 @@ void composite_unused() {
     }
     if (abs(tune_water_dbg - 6.0) < 0.5) {
       wc = vec3(ssr_hit * 4.0, mirror_k * 4.0, 0.0);  // (test: hits red, the far mirror's share green)
+    }
+    if (abs(tune_water_dbg - 8.0) < 0.5) {
+      wc = vec3(clamp(water_y / 4096.0 - 8.0, 0.0, 1.0), shade * 0.5, clamp(length(slope) * 0.5, 0.0, 1.0));
+    }
+    if (abs(tune_water_dbg - 9.0) < 0.5) {
+      wc = vec3(water_deep ? 1.0 : 0.0, near_fade, clamp(fresnel, 0.0, 1.0));
+    }
+    if (abs(tune_water_dbg - 10.0) < 0.5) {
+      wc = env_dbg;
+    }
+    if (abs(tune_water_dbg - 11.0) < 0.5) {
+      wc = refl;
     }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
