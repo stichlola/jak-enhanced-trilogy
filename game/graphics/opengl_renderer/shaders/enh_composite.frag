@@ -159,6 +159,7 @@ uniform float tune_spill_sat = 0.45;  // the light spill's color at most this sa
 uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
+uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -239,6 +240,10 @@ uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 t
 uniform float tune_chr_bounce = 0.5;  // shade taken off them under a high sun (light back from the ground)
 uniform float tune_chr_dusk = 0.3;    // extra darkening in shade as the sun gets low (on tune_chr_dark)
 uniform float tune_rock_sat = 0.42;   // desert rock by day: saturation cap (0: off)
+// (M1, off: at 1.5x the templex hall's floor 10 m out moved 52.0 -> 52.4, inside the flicker; the
+// fires' radius is a few meters, the pool needs ~3x, past the light tiles' 1.6x: grow them first)
+uniform float tune_fire_floor = 1.0;       // a fire under a roof lights the floor this much further (x radius, <= 1.5; 1: off)
+uniform float tune_fire_floor_gain = 0.15;  // ...and that floor pool this much stronger (on k, squared after)
 uniform float tune_lamp_jak_m = 2.5;  // lamps' shadows let go within this far of Jak's feet (m; 0: off)
 uniform float tune_chr_pool = 0.12;   // bloom luma beside a character from which, with a low sun, it keeps the game's light in shade (0: off)
 uniform float tune_chr_dusk_desat = 0.2;  // and color taken off them then
@@ -290,7 +295,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front)
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -360,6 +365,7 @@ uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G
 uniform float tune_chr_gold_rim = 0.7;  // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
+uniform float tune_ground_cav = 1.0;   // the rocky ground's hollows darker and tops lighter by the sky's light, shade too (0: off)
 uniform float tune_rock_night = 1.0;  // the rocky ground's warm weathering tint let go at night (0: off)
 uniform float tune_night_lamp_cool = 1.0; // night: a lamp pool's faint part toward the moon's hue (0: off)
 uniform float tune_night_lamp_lo = 0.15;
@@ -3214,13 +3220,19 @@ void composite_unused() {
     // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
     // (a wave tilted toward the eye reflects a ray going down: it'd see the sea itself or the
     // rock, dark blots on the water. Kept just over the horizon, it sees the sky low down)
+    // (near the horizon the calm mirror ray itself rises less than that: every ray of the last few
+    // rows under the horizon was lifted to the same height, one sky pixel, a flat band without
+    // ripples along the far sea. There the floor is half the calm ray's rise)
     vec3 re = r;
     float re_up = dot(re, up_view);
-    if (re_up < 0.03) {
-      re = normalize(re + up_view * (0.03 - re_up));
+    float re_floor = tune_water_env_floor > 0.5 ? min(0.03, 0.5 * max(-dot(vdir, up_view), 0.0) + 0.002) : 0.03;
+    if (re_up < re_floor) {
+      re = normalize(re + up_view * (re_floor - re_up));
     }
     vec3 refl = fog_color;
+    vec3 env_dbg = vec3(0.0);
     if (re.z > 1e-3) {
+      env_dbg.g = 1.0;
       vec2 env_uv = clamp(0.5 * vec2(proj.z * re.x, proj.w * re.y) / re.z + 0.5, vec2(0.002), vec2(0.998));
       refl = texture(tex_T0, env_uv).rgb;
       // (where that lands on the water, the sky's color there instead)
@@ -3228,7 +3240,9 @@ void composite_unused() {
       float efd = texture(tex_T6, env_uv).r;
       if (texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) {
         refl = fog_color;
+        env_dbg.r = 1.0;
       }
+      env_dbg.b = env_uv.y;
     }
     vec3 ssr = refl;
     float ssr_hit = 0.0;
@@ -3317,6 +3331,18 @@ void composite_unused() {
     }
     if (abs(tune_water_dbg - 6.0) < 0.5) {
       wc = vec3(ssr_hit * 4.0, mirror_k * 4.0, 0.0);  // (test: hits red, the far mirror's share green)
+    }
+    if (abs(tune_water_dbg - 8.0) < 0.5) {
+      wc = vec3(clamp(water_y / 4096.0 - 8.0, 0.0, 1.0), shade * 0.5, clamp(length(slope) * 0.5, 0.0, 1.0));
+    }
+    if (abs(tune_water_dbg - 9.0) < 0.5) {
+      wc = vec3(water_deep ? 1.0 : 0.0, near_fade, clamp(fresnel, 0.0, 1.0));
+    }
+    if (abs(tune_water_dbg - 10.0) < 0.5) {
+      wc = env_dbg;
+    }
+    if (abs(tune_water_dbg - 11.0) < 0.5) {
+      wc = refl;
     }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
@@ -4132,8 +4158,18 @@ void composite_unused() {
       vec3 to_light = light_pos[i].xyz - p;
       float d = length(to_light);
       float r = light_pos[i].w;
+      // a fire under a roof (alpha 0.25): the floor in front of it lit further out, a warm pool
+      // across the room, not only the wall behind it (templex braziers at noon). The tiles keep
+      // 1.6x the radius, so up to 1.5x here
+      float fire_floor = 0.0;
+      if (tune_fire_floor > 1.0 && abs(light_color[i].a - 0.25) < 0.1) {
+        fire_floor = smoothstep(0.6, 0.9, dot(nn, up_view));
+        r *= mix(1.0, min(tune_fire_floor, 1.5), fire_floor);
+      }
       if (d < r) {
         float k = 1.0 - (d * d) / (r * r);
+        // (and its warm bounce: the pool a little stronger, under the wall's own level)
+        k *= 1.0 + tune_fire_floor_gain * fire_floor;
         float ndl = dot(soft_n, to_light / max(d, 1.0));
         // (a light Jak carries stands low over the ground: mostly wrapped around the shapes, or it
         // draws every triangle of the terrain and leaves the steps black)
@@ -5391,6 +5427,15 @@ void composite_unused() {
           vec3 tint = relief > 1.0 ? mix(vec3(1.0), vec3(1.1, 0.98, 0.84), min(relief - 1.0, 1.0))
                                    : mix(vec3(1.0), vec3(0.92, 0.96, 1.08), min(1.0 - relief, 1.0) * 2.0);
           c *= mix(vec3(1.0), relief * tint, rk);
+          // (and the sky's light: the hollows between the stones darker, the tops lighter, in the
+          // shade too, where the sun's relief is gone and the slab went flat)
+          if (tune_ground_cav > 0.0) {
+            const float ce = 0.3;
+            float hn = (ground_height(wp.xz + vec2(ce, 0.0), glod, plod) + ground_height(wp.xz - vec2(ce, 0.0), glod, plod) +
+                        ground_height(wp.xz + vec2(0.0, ce), glod, plod) + ground_height(wp.xz - vec2(0.0, ce), glod, plod)) * 0.25;
+            float cav = clamp((h0 - hn) * 9.0, -0.3, 0.3);
+            c *= 1.0 + cav * close * tune_ground_cav * mix(1.0, 0.4, sun_lit * clamp(base * 4.0, 0.0, 1.0));
+          }
         }
         // (and sand blown over it in drifts: lighter, yellower patches with soft edges)
         float drift = smoothstep(0.05, 0.4, gnoise(wp.xz / 4.5 + 6.6) + 0.35 * gnoise(wp.xz / 1.3 + 2.2));

@@ -172,7 +172,8 @@ inline u8 enhanced_material(std::string name) {
     return kPlain;
   }
   // (window panes: glossy, and told apart for the night's lit windows)
-  if (has({"window"}) && !has({"frame", "sill"})) {
+  // (not Spargus' wascity-stain-window-01: streaks under a window, lit warm at night it was a pane)
+  if (has({"window"}) && !has({"frame", "sill", "stain"})) {
     return kWindow;
   }
   if (has({"glass", "marble", "wet", "puddle", "shiny", "polish", "crystal", "gem", "jewel"})) {
