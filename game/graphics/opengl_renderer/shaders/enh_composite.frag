@@ -166,6 +166,7 @@ uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a leve
 uniform float tune_ground_fine = 1.8;  // the rocky ground's near grain (stone, gravel) strength (1: desert-start's slab a blurry plane)
 uniform float tune_water_night_floor = 0.5;  // at night the water's body no darker than this share of the game's own water (0: off; a slum canal 22h was a black hole)
 uniform float tune_water_moon = 1.0;  // the moon's glitter path on the water at night (0: off)
+uniform float tune_water_lamp_map = 1.0;  // a lamp's column on the water only where its shadow map lets its light reach (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
@@ -3468,6 +3469,14 @@ void composite_unused() {
         float nh = max(dot(n, h), 0.0);
         float sp = pow(nh, 500.0) * 5.0 + pow(nh, 70.0) * 0.2;
         float rr = d / max(light_pos[i].w, 4096.0);
+        // (not a lamp behind the canal's wall: its light never reaches this water, so it has no
+        // image on it. The SSR test below misses it when the reflected ray climbs the wall off the
+        // top of the screen: a soft white blob on dark canal water at 22h, none in vanilla)
+        int ls = tune_water_lamp_map > 0.0 && light_shadow > 0.0 ? lamp_map_slot(i) : -1;
+        if (ls >= 0 && sp > 0.001) {
+          sp *= 1.0 - tune_water_lamp_map *
+                          (1.0 - lamp_map_lit(ls, view_to_world * p + cam_pos, view_to_world * up_view, 0.5));
+        }
         lsum += light_color[i].rgb * sp / (1.0 + 0.04 * rr * rr);
       }
       for (int i = 0; i < spot_count; i++) {
