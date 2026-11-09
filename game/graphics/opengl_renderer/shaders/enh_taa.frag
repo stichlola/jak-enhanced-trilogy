@@ -11,6 +11,7 @@ uniform sampler2D tex_T1;  // history
 uniform sampler2D tex_T3;  // depth
 uniform sampler2D tex_T4;  // the characters' motion vectors (uv offset to last frame; x >= 32: none)
 uniform int has_motion = 0;
+uniform float mv_stamp = -1.0;  // b of this frame's vectors (taa.motion_stamp), -1: none, all count
 uniform float tune_taa_dbg = 0.0;  // 1: red where motion vectors were used (into the history too: a test view)
 uniform vec4 proj;         // a, b, fx, fy (see enh_ssao.frag)
 uniform vec2 texel;
@@ -115,8 +116,9 @@ void main() {
   // pixel's around, as the depth above: its edge carries its motion)
   bool moved = false;
   if (has_motion != 0) {
-    vec2 mv = texture(tex_T4, uv + near_o).rg;
-    if (mv.x < 32.0) {
+    vec3 mvs = texture(tex_T4, uv + near_o).rgb;
+    vec2 mv = mvs.rg;
+    if (mv.x < 32.0 && (mv_stamp < 0.0 || abs(mvs.b - mv_stamp) < 0.5)) {
       prev_uv = uv + mv;
       pp.z = 1.0;
       moved = true;

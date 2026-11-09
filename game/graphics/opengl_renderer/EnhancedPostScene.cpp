@@ -51,6 +51,45 @@ struct LagProbe {
 };
 LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"}, g_lag_taa{"taa"},
     g_lag_end{"end"};
+
+// the composite's CPU setup split in steps ("debug": {"cpu_profile": 1}): each ENH_CPU_SPLIT names
+// the stretch of code that ends there; "[enhanced] post cpu setup" in the log every 5 s
+struct CpuSplits {
+  static constexpr int kN = 40;
+  double acc[kN] = {};
+  const char* names[kN] = {};
+  int idx = 0;
+  bool on = false;
+  std::chrono::steady_clock::time_point last;
+  void start(bool enable) {
+    on = enable;
+    idx = 0;
+    if (on) {
+      last = std::chrono::steady_clock::now();
+    }
+  }
+  void mark(const char* name) {
+    if (!on || idx >= kN) {
+      return;
+    }
+    const auto t = std::chrono::steady_clock::now();
+    acc[idx] += std::chrono::duration<double, std::milli>(t - last).count();
+    names[idx++] = name;
+    last = t;
+  }
+  std::string report(int frames) {
+    std::string out;
+    for (int i = 0; i < kN; i++) {
+      if (names[i] && frames > 0 && acc[i] / frames >= 0.005) {
+        out += fmt::format("{} {:.3f}, ", names[i], acc[i] / frames);
+      }
+      acc[i] = 0.0;
+    }
+    return out;
+  }
+};
+CpuSplits g_setup_splits;
+#define ENH_CPU_SPLIT(name) g_setup_splits.mark(name)
 }  // namespace
 
 // post.hiz: the depth copy's view depths (sky and the sea itself: far) and their mip chain of
@@ -429,6 +468,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     scene_hdr = hdr_scene;
     glGenFramebuffers(1, &m_scene_fbo);
     glGenTextures(1, &m_scene_tex);
+    m_adapt_scene_tex = 0;  // (read_exposure asks for its format again)
     glBindTexture(GL_TEXTURE_2D, m_scene_tex);
     glTexImage2D(GL_TEXTURE_2D, 0, hdr_scene ? GL_RGBA16F : GL_RGBA8, w, h, 0, GL_RGBA,
                  hdr_scene ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
@@ -475,7 +515,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // up, and the CPU's own time for it; "[enhanced] post cpu" in the log every 5 s)
   static enh_post::PassTimer t_setup_gap("enh-setup-span");
   auto setup_span = std::make_unique<enh_post::PassTimerScope>(t_setup_gap);
-  const auto setup_cpu0 = std::chrono::steady_clock::now();  update_scene();
+  const auto setup_cpu0 = std::chrono::steady_clock::now();
+  g_setup_splits.start(lag_probes);
+  update_scene();
+  ENH_CPU_SPLIT("update_scene");
   if (have_scene) {
     // (and the common level: the HUD's textures are there, enhanced_character_hud)
     auto levels = render_state->loader->get_in_use_levels();
@@ -483,10 +526,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       levels.push_back(common);
     }
     enhanced_editor_levels(levels);
+    ENH_CPU_SPLIT("editor_levels");
     enhanced_editor_frame(w, h, m_depth_fbo, cam, m_last_proj.data());
+    ENH_CPU_SPLIT("editor_frame");
   }
   if (have_scene) {
     read_exposure(w, h);
+    ENH_CPU_SPLIT("read_exposure");
   }
   if (have_scene && m_cine > 0.f) {
     read_focus(w, h);
@@ -498,6 +544,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   float to_prev[3][3];  // [k][c]: column k of the GLSL mat3
   float offset[3];
   bool reproject = false;
+  ENH_CPU_SPLIT("scene+editor+exposure");
   if (have_scene && m_prev_camera.valid && cam.valid) {
     float moved = 0.f;
     for (int k = 0; k < 3; k++) {
@@ -527,6 +574,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   const bool taa_on = m_settings.taa && m_jittered && have_scene;
   static const bool taa_cycle = std::getenv("JAK_ENHANCED_TAA_CYCLE") != nullptr;
   int taa_mode = taa_on ? 1 : -1;  // 0 early, 1 late
+  ENH_CPU_SPLIT("to_prev");
   if (taa_on && taa_cycle) {
     static int last_mode = -2;
     taa_mode = (int)(m_time / 6.0) % 3;
@@ -582,13 +630,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       static int frames = 0;
       if ((float)t_motion > 0.5f && ++frames >= 300) {
         lg::info("[enhanced] taa motion: {} of {} models found again, {} still, {} draws, "
-                 "{} KB of bones, cpu {:.3f} ms (match {:.3f}, upload {:.3f}, draws {:.3f})",
+                 "{} KB of bones, cpu {:.3f} ms (match {:.3f}, upload {:.3f}, bind {:.3f}, clear {:.3f}, program {:.3f}, draws {:.3f})",
                  m_mv_matched, m_mv_models, m_mv_still, m_mv_draws,
                  g_enhanced_casters.bones.size() * 4 / 1024, motion_cpu_ms / frames,
-                 m_mv_cpu[0] / frames, m_mv_cpu[1] / frames, m_mv_cpu[2] / frames);
+                 m_mv_cpu[0] / frames, m_mv_cpu[1] / frames, m_mv_cpu[2] / frames, m_mv_cpu[3] / frames, m_mv_cpu[4] / frames, m_mv_cpu[5] / frames);
         frames = 0;
         motion_cpu_ms = 0.0;
-        m_mv_cpu[0] = m_mv_cpu[1] = m_mv_cpu[2] = 0.0;
+        m_mv_cpu[0] = m_mv_cpu[1] = m_mv_cpu[2] = m_mv_cpu[3] = m_mv_cpu[4] = m_mv_cpu[5] = 0.0;
       }
     }
     const int cur = m_taa_cur;
@@ -606,6 +654,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindTexture(GL_TEXTURE_2D, motion ? m_mv_tex : 0);
     glUniform1i(glGetUniformLocation(rid, "tex_T4"), 4);
     glUniform1i(glGetUniformLocation(rid, "has_motion"), motion ? 1 : 0);
+    glUniform1f(glGetUniformLocation(rid, "mv_stamp"), m_mv_stamp);
     glUniform1f(glGetUniformLocation(rid, "tune_taa_dbg"), (float)t_taa_dbg);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_depth_tex);
@@ -634,6 +683,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     m_taa_history = true;
     return m_taa_tex[cur];
   };
+  ENH_CPU_SPLIT("taa-cycle");
   if (taa && taa_mode == 0) {
     scene_tex = resolve_taa(m_scene_tex);
   } else if (!taa) {
@@ -650,12 +700,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // (not used by the AO: the shipping one is the Alchemy taps, 0.07-0.18 ms at 640x360, nothing
   // left for a pyramid to save, and it runs in prepare(), before the pyramid exists; contact
   // shadows march 0.5 m, a few pixels)
+  ENH_CPU_SPLIT("taa-mode0");
   m_hiz_ready = false;
   m_hiz_surf = (float)t_hiz > 0.5f && (float)t_hiz_surf > 0.5f;
   if ((float)t_hiz > 0.5f && have_scene &&
       (m_hiz_surf || (m_settings.water_reflections && (m_ocean_ready || m_far_ocean_ready)))) {
     build_hiz(screen_vao, render_state, prof);
   }
+  ENH_CPU_SPLIT("hiz");
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   glViewport(0, 0, w, h);
@@ -666,6 +718,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glBindVertexArray(screen_vao);
   auto& shader = activate_composite(render_state, w, h);
   auto id = shader.id();
+  ENH_CPU_SPLIT("activate");
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, scene_tex);
   // the game's brightness/contrast is applied later, on the whole frame
@@ -727,6 +780,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // as in the game
   glUniform1i(glGetUniformLocation(id, "pond"), m_pond ? 1 : 0);
   glUniform1f(glGetUniformLocation(id, "relight"), m_settings.relight);
+  ENH_CPU_SPLIT("water-u");
   {
     // dynamic lights: the glows in view space, the brightest and nearest first, at most kLights
     constexpr int kLights = 32;
@@ -1033,6 +1087,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.score = 1e6f;
       candidates.push_back(c);
     }
+    ENH_CPU_SPLIT("glows+blasts");
     // the levels' own lamps (light spheres), sent by the game with their time-of-day palette
     int lamps = 0;
     if (on) {
@@ -1064,6 +1119,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         candidates.push_back(c);
       }
     }
+    ENH_CPU_SPLIT("level-lamps");
     // the fires and lamps the levels place (torches, braziers, gas lamps): each its own light,
     // stronger as the night falls, reaching further than the glows (a town's torches light its
     // gate from across the desert). Not where a glow already lights the same spot.
@@ -1162,6 +1218,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.score = 1.5f * c.pos[3] / (dist + c.pos[3]);
       candidates.push_back(c);
     }
+    ENH_CPU_SPLIT("placed-fires");
     // Jak's lantern: on foot or on the board in the desert as the night darkens, a Wastelander's
     // lantern bulb (Damas's people cross the sands by night with them), a little machine of its own:
     // it rises off Jak's shoulder as the dark comes, hovers up to his right and follows him on a
@@ -1276,6 +1333,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         m_bulb_out = false;  // next time it rises off the shoulder again
       }
     }
+    ENH_CPU_SPLIT("lantern");
     // the lights placed by hand (lights.json), the night ones lit as the night falls
     for (const auto& ml : g_manual_lights[game_index()]) {
       const float lit = ml.night ? std::max(m_night, night_darkness()) : 1.f;
@@ -1323,6 +1381,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       c.score = (ml.color[0] + ml.color[1] + ml.color[2]) * ml.intensity * c.pos[3] / (dist + c.pos[3]);
       candidates.push_back(c);
     }
+    ENH_CPU_SPLIT("manual");
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
     // only those whose reach (and halo, 1.5x) touches the view: every pixel loops over the list
@@ -1360,6 +1419,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       sl.strength = m_settings.lit_smoke;
     }
+    ENH_CPU_SPLIT("sort+upload");
     // the fires: forget the ones not seen for a second, the nearest few for the hot air and embers
     m_fires.erase(std::remove_if(m_fires.begin(), m_fires.end(),
                                  [&](const FireMemory& f) { return m_time - f.last > 1.0; }),
@@ -1414,6 +1474,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform1f(glGetUniformLocation(id, "reflect_amount"), g_world.reflect[game_index()]);
     glUniform1f(glGetUniformLocation(id, "reflect_rough"), g_world.rough[game_index()]);
     glUniform1f(glGetUniformLocation(id, "relief"), m_settings.relief);
+    ENH_CPU_SPLIT("fires");
     {
       // Jak's recent path: a point every 0.1 s while he moves (every 0.5 s standing), kept 2 s;
       // the shader starts a ring on the water from each one that lies at the water's height
@@ -1451,6 +1512,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "wake"), kWake, wake);
       glUniform1f(glGetUniformLocation(id, "wake_strength"), m_settings.wake);
     }
+    ENH_CPU_SPLIT("b1417");
     {
       // footprints where Jak walks on soft ground (the game knows the ground's material), ruts where
       // he drives; kept 90 s
@@ -1706,6 +1768,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "puff_info"), kPuffs, puff_info);
     }
     // the nearest explosions in view for the shockwave: view space + radius, age
+    ENH_CPU_SPLIT("b1454");
     {
       constexpr int kBlasts = 4;
       float blast_pos[kBlasts * 4] = {};
@@ -1752,6 +1815,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1f(glGetUniformLocation(id, "blast_strength"), m_settings.blast);
       enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
     }
+    ENH_CPU_SPLIT("b1709");
     // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
     // city), dry and calm, a few dozen meters around Jak, each wandering on its own
     {
@@ -1842,6 +1906,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform1fv(glGetUniformLocation(id, "fire_seed"), kFires, fire_seed);
     glUniform3f(glGetUniformLocation(id, "fire"), m_settings.fire_haze, m_settings.fire_embers,
                 (float)std::fmod(m_time, 1000.0));
+    ENH_CPU_SPLIT("fireflies");
     // dark nights: how dark (the desert darkest, a city least), and the lights reach further and
     // shine stronger into it
     const float dark = night_darkness();
@@ -1945,6 +2010,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    ENH_CPU_SPLIT("dark+beacons");
     // the screen tiles' masks, uploaded after the beacons: per 32x18 tile r = the lights that may
     // reach it, g/b = the beacons 0-31/32-63 whose point and halo may show in it
     constexpr int kTx = 32, kTy = 18;
@@ -2000,6 +2066,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
+    ENH_CPU_SPLIT("tile-masks");
     {
       // the beacons, the brightest and nearest first, shown as the night falls
       // (a town's every lamp: Spargus's gate and walls are more than twenty)
@@ -2070,6 +2137,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
     }
+    ENH_CPU_SPLIT("b2003");
     {
       // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
       // 1024 constant registers)
@@ -2095,6 +2163,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform1f(glGetUniformLocation(id, "light_tiles_on"), (float)tile_flags);
     }
     static int debug_counter = 0;
+    ENH_CPU_SPLIT("b2073");
     if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
       lg::info("[enhanced] lights: {} glows, {} lamps, {} used", g_enhanced_lights.count, lamps, n);
       for (int i = 0; i < std::min(n, 6); i++) {
@@ -2105,6 +2174,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
     }
   }
+  ENH_CPU_SPLIT("ssao-dbg");
   {
     // the sun for the glints, only when it's above the horizon
     float len = std::sqrt(m_sun_view[0] * m_sun_view[0] + m_sun_view[1] * m_sun_view[1] +
@@ -2117,6 +2187,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                 sun ? m_sun_view[1] / len : 0.f, sun ? m_sun_view[2] / len : 0.f,
                 sun ? m_settings.water_glint * std::min(1.f, up * 4.f) : 0.f);
   }
+  ENH_CPU_SPLIT("b2108");
   m_ocean_ready = false;
 
   // camera motion blur: view -> previous view is R^T Rp, with the camera's move as an offset
@@ -2157,6 +2228,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
   }
   // the world's sun shadow looks at half size (tuning "shadow.half")
+  ENH_CPU_SPLIT("mb+player+clouds");
   if (have_scene) {
     draw_sun_half(id, w, h, render_fbo, prof, render_state);
   } else {
@@ -2167,6 +2239,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // JAK_ENHANCED_COMPOSITE_OFF="sand;rock_detail;light_count,lantern": every 3 s the next group of
   // uniforms is zeroed (first: none), the draw timed on the GPU (waited for: the clock stays up);
   // after two rounds the log has each group's average)
+  ENH_CPU_SPLIT("b2160");
   struct CostProbe {
     std::vector<std::vector<std::string>> groups;
     std::vector<double> sum;
@@ -2262,6 +2335,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (probe_group >= 0) {
     glBeginQuery(GL_TIME_ELAPSED, probe.query);
   }
+  ENH_CPU_SPLIT("probe");
   setup_span.reset();
   {
     static double cpu_setup = 0.0, cpu_total = 0.0;
@@ -2275,6 +2349,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       lg::info("[enhanced] post cpu: to composite {:.2f} ms, of it setup {:.2f} ms (n={})",
                cpu_total / cpu_n, cpu_setup / cpu_n, cpu_n);
       if (lag_probes) {
+        lg::info("[enhanced] post cpu setup: {}", g_setup_splits.report(cpu_n));
         lg::info("[enhanced] gpu lag behind cpu (ms): frame {:.2f}, {}, {}, {}, {}, {}", m_gpu_lag_ms,
                  g_lag_start.report(), g_lag_composite.report(), g_lag_blit.report(), g_lag_taa.report(), g_lag_end.report());
       }

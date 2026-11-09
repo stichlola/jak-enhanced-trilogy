@@ -859,6 +859,14 @@ void EnhancedPost::read_exposure(int w, int h) {
       }
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
       const float mean = std::exp(sum / kN);
+      {
+        static const EnhancedTune t_cpu_profile("debug.cpu_profile", 0.f);
+        static int frames = 0;
+        if ((float)t_cpu_profile > 0.5f && ++frames >= 300) {
+          frames = 0;
+          lg::info("[enhanced] exposure: mean {:.4f}, eye {:.4f}", mean, m_adapt);
+        }
+      }
       const float want = m_settings.eye_adapt > 0.f
                              ? std::pow(std::clamp(0.36f / mean, 0.8f, 1.6f), m_settings.eye_adapt * 0.6f)
                              : 1.f;
@@ -874,17 +882,61 @@ void EnhancedPost::read_exposure(int w, int h) {
     m_adapt_pending[prev] = false;
   }
   glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
-  GLint comp = GL_UNSIGNED_NORMALIZED;
-  glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
-  const bool half = comp == GL_FLOAT;
+  // (the format query once per scene texture: it is recreated on a resize or a format switch)
+  if (m_adapt_scene_tex != m_scene_tex) {
+    GLint comp = GL_UNSIGNED_NORMALIZED;
+    glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                          GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
+    m_adapt_scene_half = comp == GL_FLOAT;
+    m_adapt_scene_tex = m_scene_tex;
+  }
+  const bool half = m_adapt_scene_half;
   m_adapt_half[m_adapt_cur] = half;
-  glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
-  int i = 0;
-  for (int y = 0; y < 6; y++) {
-    for (int x = 0; x < 8; x++) {
-      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
-                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
+  // (tuning "post": {"exposure_blit": 0}: the 48 one-pixel reads as before. 48 reads cost 0.23 ms
+  // of render-thread CPU a frame (Spargus 18h); one nearest blit to 8x6 picks the same pixels,
+  // (2x + 1) w / 16 and (2y + 1) h / 12, and one read takes them all)
+  static const EnhancedTune t_blit("post.exposure_blit", 1.f);
+  if ((float)t_blit > 0.5f) {
+    if (!m_adapt_fbo || m_adapt_tex_half != half) {
+      if (!m_adapt_fbo) {
+        glGenFramebuffers(1, &m_adapt_fbo);
+        glGenTextures(1, &m_adapt_tex);
+      }
+      glBindTexture(GL_TEXTURE_2D, m_adapt_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, half ? GL_RGBA16F : GL_RGBA8, 8, 6, 0, GL_RGBA,
+                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_adapt_fbo);
+      glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_adapt_tex, 0);
+      m_adapt_tex_half = half;
+    }
+    GLint draw_fbo = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+    const bool scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (scissor) {
+      glDisable(GL_SCISSOR_TEST);
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_adapt_fbo);
+    glBlitFramebuffer(0, 0, w, h, 0, 0, 8, 6, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (scissor) {
+      glEnable(GL_SCISSOR_TEST);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_adapt_fbo);
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    glReadPixels(0, 0, 8, 6, GL_RGBA, half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, nullptr);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw_fbo);
+  } else {
+    glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
+    int i = 0;
+    for (int y = 0; y < 6; y++) {
+      for (int x = 0; x < 8; x++) {
+        glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
+                     half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
+      }
     }
   }
   glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -2197,17 +2249,26 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   m_mv_prev = std::move(now);
   m_mv_prev_ok = true;
 
-  if (w != m_mv_w || h != m_mv_h) {
+  // (taa.motion_stamp, default on: the target is never cleared. Each frame's vectors carry the
+  // frame's stamp in b and the TAA takes only this frame's; one full clear when the stamp wraps,
+  // every 1024 frames. The clear cost 0.13-0.23 ms of render-thread CPU a frame (Spargus 18h),
+  // whatever the color or a second target in turn; taa.motion_stamp 0: RG16F, cleared each frame)
+  static const EnhancedTune t_stamp("taa.motion_stamp", 1.f);
+  const bool stamped = (float)t_stamp > 0.5f;
+  bool fresh = false;
+  if (w != m_mv_w || h != m_mv_h || stamped != m_mv_stamped) {
     if (m_mv_fbo) {
       glDeleteFramebuffers(1, &m_mv_fbo);
       glDeleteTextures(1, &m_mv_tex);
     }
     m_mv_w = w;
     m_mv_h = h;
+    m_mv_stamped = stamped;
     glGenFramebuffers(1, &m_mv_fbo);
     glGenTextures(1, &m_mv_tex);
     glBindTexture(GL_TEXTURE_2D, m_mv_tex);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, nullptr);
+    glTexImage2D(GL_TEXTURE_2D, 0, stamped ? GL_RGBA16F : GL_RG16F, w, h, 0,
+                 stamped ? GL_RGBA : GL_RG, GL_HALF_FLOAT, nullptr);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2215,6 +2276,7 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
     glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_mv_tex, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
+    fresh = true;
   }
   mv_lap(1);
   if (prev_of.empty()) {
@@ -2229,9 +2291,18 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   glDisable(GL_CULL_FACE);
   glDisable(GL_SCISSOR_TEST);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glClearColor(64.f, 0.f, 0.f, 0.f);
-  glClear(GL_COLOR_BUFFER_BIT);
-  glClearColor(0.f, 0.f, 0.f, 0.f);
+  mv_lap(2);
+  if (stamped) {
+    m_mv_stamp = (m_mv_stamp >= 1024.f || m_mv_stamp < 1.f) ? 1.f : m_mv_stamp + 1.f;
+  } else {
+    m_mv_stamp = -1.f;
+  }
+  if (!stamped || fresh || m_mv_stamp == 1.f) {
+    glClearColor(64.f, 0.f, 0.f, 0.f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    glClearColor(0.f, 0.f, 0.f, 0.f);
+  }
+  mv_lap(3);
 
   auto& shader = render_state->shaders[ShaderId::ENH_MOTION];
   shader.activate();
@@ -2239,7 +2310,7 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   // (the block bindings and locations once per program: set each frame they cost the draws'
   // stage more than the draws)
   static GLuint bound_prog = 0;
-  static GLint loc_proj = -1, loc_prev_f = -1, loc_tol = -1;
+  static GLint loc_proj = -1, loc_prev_f = -1, loc_tol = -1, loc_stamp = -1;
   if (bound_prog != id) {
     bound_prog = id;
     glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
@@ -2247,12 +2318,14 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
     loc_proj = glGetUniformLocation(id, "proj");
     loc_prev_f = glGetUniformLocation(id, "prev_f");
     loc_tol = glGetUniformLocation(id, "depth_tol");
+    loc_stamp = glGetUniformLocation(id, "stamp");
     glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
   }
   glUniform4f(loc_proj, m_last_proj[0], m_last_proj[1], m_last_proj[2], m_last_proj[3]);
   glUniform2f(loc_prev_f, m_prev_camera.fx, m_prev_fy);
   static const EnhancedTune t_tol("taa.motion_depth_tol", 0.03f);
   glUniform1f(loc_tol, (float)t_tol);
+  glUniform1f(loc_stamp, std::max(m_mv_stamp, 0.f));
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_depth_tex);
   glActiveTexture(GL_TEXTURE0);
@@ -2265,6 +2338,7 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   glEnableVertexAttribArray(5);
   glEnable(GL_PRIMITIVE_RESTART);
   glPrimitiveRestartIndex(UINT32_MAX);
+  mv_lap(4);
   GLuint last_vertices = 0;
   // (a model's draws in a row on the same buffers go as one multi-draw: taa.motion_batch 0 = one
   // call each)
@@ -2340,7 +2414,7 @@ bool EnhancedPost::do_motion(SharedRenderState* render_state,
   flush();
   glDisable(GL_PRIMITIVE_RESTART);
   glBindVertexArray(0);
-  mv_lap(2);
+  mv_lap(5);
   return true;
 }
 

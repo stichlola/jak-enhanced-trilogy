@@ -2,12 +2,13 @@
 
 // Jak Enhanced Trilogy: a character pixel's motion vector (see enh_motion.vert): the uv offset to
 // where this point of the model was last frame. Only where the model is what the scene shows (its
-// distance within depth_tol of the depth buffer's): elsewhere the target keeps (64, 0), "none".
+// distance within depth_tol of the depth buffer's): elsewhere the target keeps (64, 0), "none", or an older frame's stamp in b.
 
 uniform sampler2D tex_depth;
 uniform vec4 proj;      // a, b, fx, fy
 uniform vec2 prev_f;    // last frame's fx, fy
 uniform float depth_tol;
+uniform float stamp;  // this frame's (taa.motion_stamp: the target isn't cleared), 0 when off
 
 in vec3 cur_v;
 in vec3 prev_v;
@@ -21,5 +22,5 @@ void main() {
   }
   vec2 uv = 0.5 * proj.zw * cur_v.xy / cur_v.z + 0.5;
   vec2 puv = 0.5 * prev_f * prev_v.xy / prev_v.z + 0.5;
-  color = vec4(puv - uv, 0.0, 1.0);
+  color = vec4(puv - uv, stamp, 1.0);
 }

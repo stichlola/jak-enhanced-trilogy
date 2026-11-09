@@ -709,13 +709,15 @@ class EnhancedPost {
   bool m_mv_prev_ok = false;
   GLuint m_mv_fbo = 0;
   GLuint m_mv_tex = 0;
+  bool m_mv_stamped = false;  // the target is RGBA16F with the frame's stamp (taa.motion_stamp)
+  float m_mv_stamp = -1.f;     // this frame's, 1..1024; -1 when off
   int m_mv_w = 0;
   int m_mv_h = 0;
   int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
   int m_mv_models = 0;
   int m_mv_still = 0;    // ...of them still in the world (the camera's reprojection is theirs)
   int m_mv_draws = 0;    // draw calls made for the moving ones
-  double m_mv_cpu[3] = {0, 0, 0};  // ms summed: matching, bones' upload, draws (the log's)
+  double m_mv_cpu[6] = {0, 0, 0, 0, 0, 0};  // ms summed: matching, bones' upload, bind, clear, program, draws (the log's)
   std::vector<float> m_mv_prev_bones;  // last frame's cs.bones (the still test)
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
@@ -926,6 +928,11 @@ class EnhancedPost {
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
   bool m_adapt_half[2] = {false, false};  // that buffer holds half floats (an RGBA16F scene)
+  // (post.exposure_blit: the 48 pixels blitted to an 8x6 target, then one read, not 48 reads)
+  GLuint m_adapt_fbo = 0, m_adapt_tex = 0;
+  bool m_adapt_tex_half = false;
+  GLuint m_adapt_scene_tex = 0;  // the scene texture whose format was last queried
+  bool m_adapt_scene_half = false;
   float m_adapt = 1.f;
   float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
   float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak
