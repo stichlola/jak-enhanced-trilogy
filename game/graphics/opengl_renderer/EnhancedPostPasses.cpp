@@ -170,12 +170,14 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
+  enh_cpu_split("ssao-alloc");
   // copy (and for msaa, resolve) the depth buffer into a texture we can sample
   glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_depth_fbo);
   glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
                     GL_NEAREST);
   // and the level normals (msaa: averaged, renormalized in the shaders)
+  enh_cpu_split("ssao-depth-blit");
   m_normals_ready = false;
   if (g_enhanced_normals.enabled && src_fbo == g_enhanced_normals.fbo) {
     glReadBuffer(GL_COLOR_ATTACHMENT1);
@@ -195,6 +197,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
     m_albedo_ready = true;
   }
 
+  enh_cpu_split("ssao-blits");
   glDisable(GL_DEPTH_TEST);
   glDisable(GL_BLEND);
   glBindVertexArray(screen_vao);
@@ -409,7 +412,9 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   if (ao_phase >= 0 && ao_phase < 3) {
     glBeginQuery(GL_TIME_ELAPSED, ao_probe.query);
   }
+  enh_cpu_split("ssao-uniforms");
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  enh_cpu_split("ssao-main");
   if (ao_phase >= 0 && ao_phase < 3) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
@@ -511,18 +516,24 @@ void EnhancedPost::prepare(GLuint scene_tex,
   if (m_settings.shadow_map && g_enhanced_camera.valid) {
     ENH_TIMED("enh-shadow-map", do_shadow_map(render_state, prof));
   }
+  enh_cpu_split("shadow-map");
   m_chr_occ_ready = false;
   if (m_settings.shadow_map && m_settings.shadow_casters && g_enhanced_camera.valid) {
     ENH_TIMED("enh-chr-occ", do_chr_occlusion(render_state, prof));
   }
+  enh_cpu_split("chr-occ");
   // the levels' ray tracing hierarchies (occlusion, reflections)
   ENH_TIMED("enh-rt-update", update_rt(render_state));
+  enh_cpu_split("rt-update");
   // the open sky straight up around the camera (post.sky_map: the rain stays off what's roofed)
   ENH_TIMED("enh-sky-map", build_sky_map(screen_vao, render_state, prof));
+  enh_cpu_split("sky-map");
   // the light probes around the camera (post.probes: the characters' sky and bounce light)
   ENH_TIMED("enh-probes", build_probes(screen_vao, render_state, prof));
+  enh_cpu_split("probes");
   if (m_settings.ssao) {
     ENH_TIMED("enh-ssao", do_ssao(scene_fbo, w, h, screen_vao, render_state, prof));
+    enh_cpu_split("ssao");
     // (the auto quality sets aside the volume first, then the indirect light, then the god rays)
     // (also for the lamps' and fires' light in the air, with no mist: volume.local_lights)
     // (the lights alone cost far less than the mist: kept to the auto quality's second level)
@@ -531,19 +542,23 @@ void EnhancedPost::prepare(GLuint scene_tex,
          (m_fade_gi > 0.f && m_fog <= 0.01f && volume_lights_on()))) {
       ENH_TIMED("enh-volume", do_volume(render_state, screen_vao, prof));
     }
+    enh_cpu_split("volume");
     if (m_settings.gi && m_fade_gi > 0.f && m_ssao_ready) {
       ENH_TIMED("enh-gi", do_gi(scene_tex, screen_vao, render_state, prof));
     }
+    enh_cpu_split("gi");
     if (((m_settings.shafts && m_fade_rays > 0.f) || m_grade.sun_haze > 0.f) && m_ssao_ready &&
         g_enhanced_sun.valid) {
       ENH_TIMED("enh-shafts", do_shafts(scene_tex, screen_vao, render_state, prof));
     }
   }
+  enh_cpu_split("shafts");
   // set again by the next frame's background draws
   g_enhanced_camera.valid = false;
   if (!m_settings.bloom) {
     return;
   }
+  enh_cpu_split("prep-misc");
   resize(w, h);
 
   glDisable(GL_DEPTH_TEST);
@@ -594,7 +609,9 @@ void EnhancedPost::prepare(GLuint scene_tex,
       src_h = level.h;
     }
   };
+  enh_cpu_split("bloom-setup");
   ENH_TIMED("enh-bloom-down", bloom_down());
+  enh_cpu_split("bloom-down");
 
   // up: tent-filter each level and add it onto the next bigger one
   auto& up = render_state->shaders[ShaderId::ENH_BLOOM_UP];

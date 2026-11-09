@@ -92,6 +92,10 @@ CpuSplits g_setup_splits;
 #define ENH_CPU_SPLIT(name) g_setup_splits.mark(name)
 }  // namespace
 
+void enh_cpu_split(const char* name) {
+  g_setup_splits.mark(name);
+}
+
 // post.hiz: the depth copy's view depths (sky and the sea itself: far) and their mip chain of
 // nearest depths, R32F, at most 10 levels (a 1080p frame's tiles up to 512 pixels). ~0.05 ms.
 void EnhancedPost::build_hiz(GLuint screen_vao,
@@ -497,12 +501,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (lag_probes) {
     g_lag_start.mark(pass_timer_frame());
   }
+  g_setup_splits.start(lag_probes);
   static enh_post::PassTimer t_post_total("enh-total");
   enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
   glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
   ENH_TIMED("enh-scene-copy", glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
+  ENH_CPU_SPLIT("scene-copy");
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
@@ -516,7 +522,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   static enh_post::PassTimer t_setup_gap("enh-setup-span");
   auto setup_span = std::make_unique<enh_post::PassTimerScope>(t_setup_gap);
   const auto setup_cpu0 = std::chrono::steady_clock::now();
-  g_setup_splits.start(lag_probes);
+  ENH_CPU_SPLIT("prepare-rest");
   update_scene();
   ENH_CPU_SPLIT("update_scene");
   if (have_scene) {
