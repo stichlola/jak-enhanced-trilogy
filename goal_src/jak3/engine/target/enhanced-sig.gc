@@ -1134,6 +1134,51 @@
 (defconstant SIG_HIPS 17)
 (defconstant SIG_SKIRT_FIRST 63)  ;; skirtLA; from it on: skirts, bags, bottle, flaps (to 75)
 
+;; A skirt panel's top follows its thigh, but not all the way: with the leg kicked up behind him on the
+;; run the rear panel flipped up and out almost level. Its line (top to next joint) may leave its hanging
+;; line (bind, carried by his hips) by at most these: behind him (the leg going back) and in front (the
+;; knee coming through: more, so the leg stays inside).
+(define *enhanced-sig-skirt-back-max* (degrees 28))
+(define *enhanced-sig-skirt-front-max* (degrees 45))
+
+(defbehavior enhanced-sig-skirt-clamp enhanced-skin ()
+  "skirtLA (63) and skirtRA (68) turned back toward hanging when they swing past the limits."
+  (let* ((nodes (-> self node-list))
+         (m (new 'stack-no-clear 'matrix))
+         (cur (new 'stack-no-clear 'vector))
+         (rest (new 'stack-no-clear 'vector))
+         (fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
+         (q (new 'stack-no-clear 'quaternion))
+         )
+    (set! (-> fwd w) 0.0)
+    (vector-normalize! fwd 1.0)
+    ;; his hips' turn from the bind pose
+    (matrix-4x4-inverse! m (-> self bind-world SIG_HIPS))
+    (matrix*! m m (-> nodes data SIG_HIPS bone transform))
+    (dotimes (i 2)
+      (let ((k (if (zero? i) 63 68)))
+        (vector-! cur (-> nodes data (+ k 1) bone transform trans) (-> nodes data k bone transform trans))
+        (set! (-> cur w) 0.0)
+        (vector-normalize! cur 1.0)
+        (vector-! rest (-> self bind-world (+ k 1) trans) (-> self bind-world k trans))
+        (set! (-> rest w) 0.0)
+        (vector-matrix*! rest rest m)
+        (set! (-> rest w) 0.0)
+        (vector-normalize! rest 1.0)
+        (let* ((ang (acos (fmax -1.0 (fmin 1.0 (vector-dot cur rest)))))
+               (lim (if (< (vector-dot cur fwd) (vector-dot rest fwd)) *enhanced-sig-skirt-back-max* *enhanced-sig-skirt-front-max*))
+               )
+          (when (< lim ang)
+            (quaternion-from-two-vectors-partial! q cur rest (- 1.0 (/ lim ang)))
+            (enhanced-sig-turn-tree! k q (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data k bone transform trans)))
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior enhanced-sig-skirt enhanced-skin ()
   "His skirt and what hangs with it, toward hanging from his hips (see *enhanced-sig-skirt-damp*)."
   (let* ((st *enhanced-sig-gun*)
@@ -1145,6 +1190,7 @@
          (bl (new 'stack-no-clear 'matrix))
          )
     (when (and (< 0.0 w) (> n SIG_SKIRT_FIRST))
+      (enhanced-sig-skirt-clamp)
       (dotimes (k n)
         (set! (-> st moved k) 0)
         (if (>= k SIG_SKIRT_FIRST)
