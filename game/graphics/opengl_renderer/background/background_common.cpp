@@ -264,7 +264,8 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
 
 std::string g_enhanced_bg_level;
 
-// Enhanced: a level that starts being drawn (just loaded, or shown again after a gap) fades in
+// Enhanced (off by default: suspected of smearing levels while they load): a level that starts
+// being drawn (just loaded, or shown again after a gap) fades in
 // over bg.fade_in seconds, dithered, instead of popping in whole (0: off). Every displayed level
 // sends its trees each frame whatever the camera sees, so turning round doesn't restart it.
 // (counted in frames, at 60 a second: a loading hitch of 0.4 s between two frames restarted a
@@ -281,7 +282,7 @@ std::unordered_map<std::string, FadeSeen>& fade_seen() {
 }  // namespace
 
 static float enhanced_level_fade_in(const std::string& name, u64 frame) {
-  static const EnhancedTune t_fade("bg.fade_in", 0.5f);
+  static const EnhancedTune t_fade("bg.fade_in", 0.f);
   if (name.empty() || t_fade <= 0.f) {
     return 1.f;
   }
@@ -300,8 +301,8 @@ static float enhanced_level_fade_in(const std::string& name, u64 frame) {
 // background hasn't been drawn (common, Jak's own models) is shown whole. The level's background
 // buckets come before its merc in the frame, so a restart is already counted here.
 float enhanced_level_fade_peek(const std::string& name, u64 frame) {
-  static const EnhancedTune t_fade("bg.fade_in", 0.5f);
-  static const EnhancedTune t_fg("fg.fade_in", 1.f);
+  static const EnhancedTune t_fade("bg.fade_in", 0.f);
+  static const EnhancedTune t_fg("fg.fade_in", 0.f);
   if (name.empty() || t_fade <= 0.f || t_fg <= 0.f) {
     return 1.f;
   }
