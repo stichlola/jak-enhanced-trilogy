@@ -299,6 +299,9 @@ uniform float light_tiles_on;      // bits: 1 r is filled (lights.tiles), 2 g/b 
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
 uniform float tune_flash_night = 0.5;  // ...at night x this, gain and ceiling (a blast lit the dark ground near white: 1 as before)
 uniform float tune_flash_day = 1.0;    // ...by day x this (desert noon: 1-3 changed the frame by <1%: not what holds the day flash back)
+uniform float tune_flash_day_late = 0.7;  // ...by day this share again after the highlights' squeeze (sunlit sand had no room left: a noon blast lit nothing; 0: off)
+uniform float tune_flash_dbg = 0.0;    // test: 1 = the flash's light alone (magenta), 2 = it added again at the very end
+vec3 g_flash = vec3(0.0);  // the flash's light added in the lights' pass (for the day's late share)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
@@ -4410,8 +4413,10 @@ void composite_unused() {
       float fg = mix(tune_flash_day, tune_flash_night, night_dark.x);
       float fk = tune_flash * fg;
       flash_add *= fk / (1.0 + 0.25 * fm * fk / max(fg, 0.01));
-      c += (night_dark.x > 0.0 ? albedo * mix(1.0, 1.6, night_dark.x) : c) * flash_add * ao +
+      vec3 fl_add = (night_dark.x > 0.0 ? albedo * mix(1.0, 1.6, night_dark.x) : c) * flash_add * ao +
            0.12 * flash_add * ao;
+      g_flash = fl_add;
+      c += fl_add;
     }
   }
 
@@ -6608,6 +6613,12 @@ void composite_unused() {
     }
   }
 
+  // an explosion's flash by day, again here: the highlights' squeeze (luma past 0.7, then past 0.85)
+  // and the grade left the noon sand nowhere to go, the blast's light pool was +3 of 255 on the frame.
+  // Added here it reads as a warm pool for its half second; the shoulder below keeps its hue
+  if (tune_flash_day_late > 0.0 && night_dark.x < 1.0) {
+    c += g_flash * tune_flash_day_late * (1.0 - night_dark.x);
+  }
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
   // the clamp below cut them to a flat white-yellow with the hue gone. The brightest channel rolls
   // off from the knee (hue kept, below it nothing changes), and what was far past 1 goes toward
@@ -6635,6 +6646,9 @@ void composite_unused() {
   if (tune_albedo_dbg > 0.5 && tex_coord.x > 0.5) {
     vec4 ad = texture(tex_T27, tex_coord);
     c = tune_albedo_dbg < 1.5 ? ad.rgb : vec3(ad.a);
+  }
+  if (tune_flash_dbg > 0.5) {
+    c = tune_flash_dbg < 1.5 ? vec3(luma(g_flash), 0.0, luma(g_flash)) + c * 0.3 : c + g_flash;
   }
   color = vec4(clamp(c, 0.0, 1.0) * color_mult.rgb * color_mult.a, 1.0) + color_add;
   // dither to the 8-bit target: a triangular +-1 step of interleaved gradient noise, turned every
