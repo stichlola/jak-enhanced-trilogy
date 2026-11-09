@@ -295,7 +295,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3238,7 +3238,8 @@ void composite_unused() {
       // (where that lands on the water, the sky's color there instead)
       float ed = texture(tex_T3, env_uv).r;
       float efd = texture(tex_T6, env_uv).r;
-      if (texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) {
+      if ((texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) &&
+          abs(tune_water_dbg - 12.0) > 0.5) {
         refl = fog_color;
         env_dbg.r = 1.0;
       }
