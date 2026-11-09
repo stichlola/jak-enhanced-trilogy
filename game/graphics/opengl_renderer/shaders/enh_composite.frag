@@ -374,7 +374,9 @@ uniform float tune_night_hue = 0.8;  // night: the dim land's hue toward the gam
 uniform float tune_night_hue_lo = 0.3;
 uniform float tune_night_hue_hi = 0.6;
 uniform float tune_night_hue_chr = 0.5;  // the characters too, at this share (G3: Jak pink and pasted on the moonlit desert; 0: off)
-uniform float tune_chr_gold_rim = 0.7;  // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
+uniform float tune_backlight = 0.0;      // backlit grass and leaves toward the sun: the light through them (0: off, >= 10 shows its weight)
+uniform float tune_backlight_cos = 0.55; // from how close to the sun's direction (cosine)
+uniform float tune_chr_gold_rim = 0.7; // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
 uniform float tune_morning_sat_cap = 1.1;  // the morning: the land's saturation at most this times the game's (0: off)
 uniform float tune_ground_cav = 1.0;   // the rocky ground's hollows darker and tops lighter by the sky's light, shade too (0: off)
@@ -6214,6 +6216,30 @@ void composite_unused() {
     float back = smoothstep(-0.4, 0.6, dot(-v, sky_sun.xyz));
     float rim = pow(1.0 - ndv, 3.0) * (0.3 + 0.7 * side) * back * golden * sun_lit * (1.0 - 0.6 * rock_sh);
     c += sun_color() * rim * tune_chr_gold_rim * (0.3 + luma(c));
+  }
+  // backlit grass and leaves (shrub.frag's foliage, 0.97 long): looking toward the sun, its light
+  // through the blades, in their own color deepened (light through a leaf comes out greener) and
+  // warmed by the sun; the faces turned from the sun take most. Not in the sun's shade, not under
+  // an overcast sky, not at night
+  if (tune_backlight > 0.0 && sky_sun.w > 0.0 && z > 0.0 && pix_tag > 0.955 && pix_tag < 0.983) {
+    float toward = smoothstep(tune_backlight_cos, 1.0, dot(normalize(p), sky_sun.xyz));
+    float thru = 1.0 - 0.6 * clamp(dot(surf_n, sky_sun.xyz), 0.0, 1.0);
+    float over_b = clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0);
+    float k = toward * thru * (1.0 - over_b) * (1.0 - clouds.w) * smoothstep(0.0, 0.08, sky_sun.w);
+    // (not sun_lit: that is N.L, 0 on the faces turned away, the very ones lit through. The shadow
+    // map 0.6 m toward the sun instead, past the blades themselves: a tree's or a cliff's shade stops it)
+    if (k > 0.0 && shadow_strength > 0.0 && sun_dir.w > 0.0) {
+      vec3 bw = view_to_world * (p + sun_dir.xyz * (0.6 * 4096.0 + z * 0.002)) + cam_pos;
+      k *= 1.0 - sun_shadow(bw);
+    }
+    if (tune_backlight > 9.0) {
+      // (test: its weight in magenta; toward the sun but held back (shade, cloud) in cyan)
+      c = k > 0.0 ? vec3(k, 0.0, k) : vec3(0.0, toward, toward) * 0.5;
+    } else if (k > 0.0) {
+      vec3 g = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
+      vec3 leaf = g * g / max(max(g.r, max(g.g, g.b)), 0.02);  // (its hue, deeper)
+      c += leaf * sun_color() * k * tune_backlight;
+    }
   }
   // the low sun's sky fill: the ground turned from it is still lit by the whole bright sky and the
   // sunlit dunes around. The rocky ground's low-light darkening (x0.5), the relight, the golden
