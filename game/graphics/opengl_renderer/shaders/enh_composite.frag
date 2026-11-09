@@ -296,6 +296,8 @@ uniform highp usampler2D tex_T28;  // 32x18, RGBA32UI: r bit i = light i may rea
 uniform float light_tiles_on;      // bits: 1 r is filled (lights.tiles), 2 g/b are (beacons.tiles)
 #endif
 uniform float tune_flash = 2.5;  // explosions' and shots' flash light (light_color.a 2), past the lamps' ceiling (0: as a lamp)
+uniform float tune_flash_night = 0.5;  // ...at night x this, gain and ceiling (a blast lit the dark ground near white: 1 as before)
+uniform float tune_flash_day = 1.0;    // ...by day x this (desert noon: 1-3 changed the frame by <1%: not what holds the day flash back)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
@@ -4392,7 +4394,11 @@ void composite_unused() {
     // the room flashes)
     float fm = max(flash_add.r, max(flash_add.g, flash_add.b));
     if (fm > 0.0) {
-      flash_add *= tune_flash / (1.0 + 0.25 * fm * tune_flash);
+      // (its gain and its ceiling, 4 x the light, by day and by night: the ceiling is what a big blast
+      // reaches, so the night's switch scales both)
+      float fg = mix(tune_flash_day, tune_flash_night, night_dark.x);
+      float fk = tune_flash * fg;
+      flash_add *= fk / (1.0 + 0.25 * fm * fk / max(fg, 0.01));
       c += (night_dark.x > 0.0 ? albedo * mix(1.0, 1.6, night_dark.x) : c) * flash_add * ao +
            0.12 * flash_add * ao;
     }
