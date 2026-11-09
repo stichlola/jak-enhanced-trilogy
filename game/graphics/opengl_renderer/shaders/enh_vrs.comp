@@ -28,6 +28,7 @@ uniform vec4 proj;         // a, b, fx, fy
 uniform vec3 thr;          // edge step, mean step (luma), relative depth step (0: no depth)
 uniform int force;         // >= 0: this rate everywhere (test)
 uniform int show;
+uniform int stats;         // count the tiles at each rate (post.vrs_log)
 
 layout(r8ui, binding = 0) uniform uimage2D flags_img;
 layout(r8ui, binding = 1) uniform uimage2D rate_img;
@@ -115,7 +116,9 @@ void main() {
   if (force >= 0) {
     rate = uint(force);
   }
-  atomicAdd(counts[min(rate, 7u)], 1u);
+  if (stats == 1) {
+    atomicAdd(counts[min(rate, 7u)], 1u);
+  }
   if (show == 1 && rate != 0u) {
     rate = 4u;
   }

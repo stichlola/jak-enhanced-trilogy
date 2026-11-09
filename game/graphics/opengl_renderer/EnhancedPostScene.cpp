@@ -66,8 +66,8 @@ LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"},
 // adaptive; post.vrs_force n (0..6: 1x1, 2x1, 1x2, 2x2, 4x4, ...) the same rate everywhere (test);
 // post.vrs_show 1: the coarse tiles drawn 4x4, as blocks; post.vrs_edge / post.vrs_tex /
 // post.vrs_depth: the steps that need full rate (one luma step, the tile's mean luma step, a
-// relative depth step; 0 = depth not used). "[enhanced] vrs" in the log every 5 s: share of the
-// tiles at each rate.
+// relative depth step; 0 = depth not used). post.vrs_log 1: "[enhanced] vrs" in the log every
+// 5 s, share of the tiles at each rate (it waits for the GPU: test only).
 namespace vrs {
 constexpr GLenum kShadingRateImage = 0x9563;  // GL_SHADING_RATE_IMAGE_NV
 constexpr GLenum kTexelWidth = 0x955C, kTexelHeight = 0x955D;
@@ -148,7 +148,7 @@ bool check() {
 }
 
 // the rate image for this frame (prev_tex: last frame's finished picture); false = shade normally
-bool make(int w, int h, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, const float* proj,
+bool make(int w, int h, bool log, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, const float* proj,
           float edge_thr, float tex_thr, float depth_thr, int force, int show) {
   g.active = false;
   if (!check()) {
@@ -179,13 +179,14 @@ bool make(int w, int h, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, con
     const GLuint zeros[8] = {};
     glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(zeros), zeros, GL_DYNAMIC_READ);
   }
-  // (every 5 s: the counts since, then cleared; one small wait for the frame before)
+  // (post.vrs_log 1, every 5 s: the counts since, then cleared; it waits for the frame before, so
+  // a test switch only)
   const auto now = std::chrono::steady_clock::now();
   if (g.frames == 0) {
     g.last_report = now;
   }
   ++g.frames;
-  if (std::chrono::duration<double>(now - g.last_report).count() >= 5.0) {
+  if (log && std::chrono::duration<double>(now - g.last_report).count() >= 5.0) {
     g.last_report = now;
     GLuint c[8] = {};
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.stats);
@@ -243,6 +244,7 @@ bool make(int w, int h, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, con
   glUniform3f(glGetUniformLocation(g.prog, "thr"), edge_thr, tex_thr, depth_thr);
   glUniform1i(glGetUniformLocation(g.prog, "force"), force);
   glUniform1i(glGetUniformLocation(g.prog, "show"), show);
+  glUniform1i(glGetUniformLocation(g.prog, "stats"), log ? 1 : 0);
   glBindImageTexture(0, g.flags_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R8UI);
   glBindImageTexture(1, g.rate_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8UI);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g.stats);
@@ -947,17 +949,20 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   {
     // (variable rate shading, namespace vrs above: needs last frame's finished picture, the late
-    // TAA's history)
-    static const EnhancedTune t_vrs("post.vrs", 0.f);
+    // TAA's history. On by default: Spargus 18h at 2560x1600, composite 13.0 -> 7.5 ms, 42 -> 55
+    // fps, full-size frames equal to vrs 0 within the TAA's noise; Hellcat diving at 50 m/s: no
+    // blocks, the Hellcat stays at full rate)
+    static const EnhancedTune t_vrs("post.vrs", 1.f);
+    static const EnhancedTune t_vrs_log("post.vrs_log", 0.f);
     static const EnhancedTune t_vrs_force("post.vrs_force", -1.f);
     static const EnhancedTune t_vrs_show("post.vrs_show", 0.f);
     static const EnhancedTune t_vrs_edge("post.vrs_edge", 0.1f);
-    static const EnhancedTune t_vrs_tex("post.vrs_tex", 0.02f);
+    static const EnhancedTune t_vrs_tex("post.vrs_tex", 0.01f);
     static const EnhancedTune t_vrs_depth("post.vrs_depth", 0.f);
     vrs::g.active = false;
     if ((float)t_vrs > 0.5f && have_scene && taa && taa_mode == 1 && m_taa_history && reproject &&
         m_taa_w == w && m_taa_h == h) {
-      ENH_TIMED("enh-vrs", vrs::make(w, h, m_taa_tex[1 - m_taa_cur], m_scene_tex, m_depth_tex,
+      ENH_TIMED("enh-vrs", vrs::make(w, h, (float)t_vrs_log > 0.5f, m_taa_tex[1 - m_taa_cur], m_scene_tex, m_depth_tex,
                                      m_last_proj.data(), (float)t_vrs_edge, (float)t_vrs_tex, (float)t_vrs_depth,
                                      (int)std::round((float)t_vrs_force), (int)(float)t_vrs_show));
     }
