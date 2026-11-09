@@ -896,6 +896,89 @@ void EnhancedPost::update_rt(SharedRenderState* render_state) {
   m_rt_ready = m_rt_count > 0;
 }
 
+void EnhancedPost::update_feet_map() {
+  // a finished splat: upload it
+  if (m_feet_job.valid() &&
+      m_feet_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    const auto data = m_feet_job.get();
+    GLint prev = 0;  // (the active unit's texture kept)
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev);
+    if (!m_feet_tex) {
+      glGenTextures(1, &m_feet_tex);
+      glBindTexture(GL_TEXTURE_2D, m_feet_tex);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    glBindTexture(GL_TEXTURE_2D, m_feet_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, kFeetN, kFeetN, 0, GL_RG, GL_FLOAT, data.data());
+    glBindTexture(GL_TEXTURE_2D, (GLuint)prev);
+    m_feet_mid[0] = m_feet_job_mid[0];
+    m_feet_mid[1] = m_feet_job_mid[1];
+    m_feet_valid = true;
+  }
+  if (m_feet_job.valid()) {
+    return;
+  }
+  // a new one when the camera went 8 m from the map's middle, a level's feet changed or the tier did
+  const auto& cam = g_enhanced_camera;
+  const float cx = cam.trans[0], cz = cam.trans[2];
+  const u64 version = enhanced_vegetation_feet(0.f, 0.f, 0.f, 0.f, 0, nullptr);
+  const float moved = std::max(std::abs(cx - m_feet_mid[0]), std::abs(cz - m_feet_mid[1]));
+  if (m_feet_valid && version == m_feet_version && m_feet_tier == g_enhanced_vegetation &&
+      moved < 8.f * 4096.f) {
+    return;
+  }
+  m_feet_version = version;
+  m_feet_tier = g_enhanced_vegetation;
+  m_feet_job_mid[0] = cx;
+  m_feet_job_mid[1] = cz;
+  const int tier = g_enhanced_vegetation;
+  m_feet_job = std::async(std::launch::async, [cx, cz, tier]() {
+    constexpr float kM = 4096.f;
+    constexpr float side = kFeetN * kFeetCell;  // m
+    const float x0 = cx / kM - side * 0.5f, z0 = cz / kM - side * 0.5f;
+    std::vector<EnhancedPlantFoot> feet;
+    enhanced_vegetation_feet((x0 - 2.f) * kM, (z0 - 2.f) * kM, (x0 + side + 2.f) * kM,
+                             (z0 + side + 2.f) * kM, tier, &feet);
+    std::vector<float> shade(kFeetN * kFeetN, 0.f), wsum(kFeetN * kFeetN, 0.f),
+        wy(kFeetN * kFeetN, 0.f);
+    for (const auto& f : feet) {
+      const float fx = f.x / kM, fz = f.z / kM, r = f.r / kM, h = f.h / kM;
+      // a tuft's foot: dark under it, fading out a little past its blades (taller = wider)
+      const float s = std::clamp((h - 0.05f) / 0.3f, 0.f, 1.f);
+      if (s <= 0.f) {
+        continue;
+      }
+      const float in = r * 0.85f, reach = r + std::min(1.f + 0.8f * h, 2.5f);
+      const int i0 = std::max(0, (int)((fx - reach - x0) / kFeetCell));
+      const int i1 = std::min(kFeetN - 1, (int)((fx + reach - x0) / kFeetCell));
+      const int j0 = std::max(0, (int)((fz - reach - z0) / kFeetCell));
+      const int j1 = std::min(kFeetN - 1, (int)((fz + reach - z0) / kFeetCell));
+      for (int j = j0; j <= j1; j++) {
+        for (int i = i0; i <= i1; i++) {
+          const float d = std::hypot(x0 + (i + 0.5f) * kFeetCell - fx, z0 + (j + 0.5f) * kFeetCell - fz);
+          float t = std::clamp((d - in) / std::max(reach - in, 0.01f), 0.f, 1.f);
+          const float w = s * (1.f - t * t * (3.f - 2.f * t));
+          if (w > 0.f) {
+            const int k = j * kFeetN + i;
+            shade[k] = std::max(shade[k], w);
+            wsum[k] += w;
+            wy[k] += w * f.y / kM;
+          }
+        }
+      }
+    }
+    std::vector<float> out(kFeetN * kFeetN * 2, 0.f);
+    for (int k = 0; k < kFeetN * kFeetN; k++) {
+      out[k * 2] = shade[k];
+      out[k * 2 + 1] = wsum[k] > 0.f ? shade[k] * wy[k] / wsum[k] : 0.f;
+    }
+    return out;
+  });
+}
+
 Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w, int h) {
   auto& shader = render_state->shaders[ShaderId::ENH_COMPOSITE];
   shader.activate();
@@ -1125,8 +1208,15 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "grass_water"), gg.water);
     glUniform3f(glGetUniformLocation(id, "grass_field"), gg.field[0], gg.field[1], gg.field[2]);
     glUniform1i(glGetUniformLocation(id, "tex_T21"), 21);
+    // (no listed field drawn: the same unit has the plants' feet map for the lawns, lawn_feet)
+    update_feet_map();
+    const bool feet = !(on && gg.tex) && m_feet_valid;
+    constexpr float kFeetSide = kFeetN * kFeetCell;
+    glUniform3f(glGetUniformLocation(id, "lawn_feet"),
+                m_feet_mid[0] / 4096.f - kFeetSide * 0.5f, m_feet_mid[1] / 4096.f - kFeetSide * 0.5f,
+                feet ? kFeetSide : 0.f);
     glActiveTexture(GL_TEXTURE21);
-    glBindTexture(GL_TEXTURE_2D, on && gg.tex ? gg.tex : m_black_tex);
+    glBindTexture(GL_TEXTURE_2D, on && gg.tex ? gg.tex : feet ? m_feet_tex : m_black_tex);
     glActiveTexture(GL_TEXTURE0);
   }
   glUniform1f(glGetUniformLocation(id, "sand_set"),

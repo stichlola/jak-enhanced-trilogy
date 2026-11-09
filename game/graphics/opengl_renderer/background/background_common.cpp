@@ -269,17 +269,23 @@ std::string g_enhanced_bg_level;
 // sends its trees each frame whatever the camera sees, so turning round doesn't restart it.
 // (counted in frames, at 60 a second: a loading hitch of 0.4 s between two frames restarted a
 // fade by the clock, and a long first frame would skip it)
+namespace {
+struct FadeSeen {
+  u64 first = 0, last = 0;
+  bool any = false;
+};
+std::unordered_map<std::string, FadeSeen>& fade_seen() {
+  static std::unordered_map<std::string, FadeSeen> seen;
+  return seen;
+}
+}  // namespace
+
 static float enhanced_level_fade_in(const std::string& name, u64 frame) {
   static const EnhancedTune t_fade("bg.fade_in", 0.5f);
   if (name.empty() || t_fade <= 0.f) {
     return 1.f;
   }
-  struct Seen {
-    u64 first = 0, last = 0;
-    bool any = false;
-  };
-  static std::unordered_map<std::string, Seen> seen;
-  auto& s = seen[name];
+  auto& s = fade_seen()[name];
   if (!s.any || frame > s.last + 2) {
     s.first = frame;
     s.any = true;
@@ -287,6 +293,24 @@ static float enhanced_level_fade_in(const std::string& name, u64 frame) {
   }
   s.last = std::max(s.last, frame);
   return std::clamp(float(frame - s.first) / (t_fade * 60.f), 0.f, 1.f);
+}
+
+// Enhanced: the same fade for the level's characters and props (Merc2, fg.fade_in 1; 0 off): they
+// spawned with the level and popped in whole while its ground dithered in. Read only: a level whose
+// background hasn't been drawn (common, Jak's own models) is shown whole. The level's background
+// buckets come before its merc in the frame, so a restart is already counted here.
+float enhanced_level_fade_peek(const std::string& name, u64 frame) {
+  static const EnhancedTune t_fade("bg.fade_in", 0.5f);
+  static const EnhancedTune t_fg("fg.fade_in", 1.f);
+  if (name.empty() || t_fade <= 0.f || t_fg <= 0.f) {
+    return 1.f;
+  }
+  auto& seen = fade_seen();
+  auto it = seen.find(name);
+  if (it == seen.end() || !it->second.any || frame > it->second.last + 2) {
+    return 1.f;
+  }
+  return std::clamp(float(frame - it->second.first) / (t_fade * 60.f), 0.f, 1.f);
 }
 
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,

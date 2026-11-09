@@ -800,6 +800,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->enh_mat = glGetUniformLocation(id, "enh_mat");
   uniforms->enh_eye_lid = glGetUniformLocation(id, "enh_eye_lid");
   uniforms->enh_relief = glGetUniformLocation(id, "enh_relief");
+  uniforms->enh_fade_in = glGetUniformLocation(id, "enh_fade_in");
   glUniform1i(glGetUniformLocation(id, "tex_relief"), 1);  // (texture unit 1)
 
   uniforms->gfx_hack_no_tex = glGetUniformLocation(id, "gfx_hack_no_tex");
@@ -1264,11 +1265,17 @@ void Merc2::flush_draw_buckets(SharedRenderState* render_state,
     glBindBuffer(GL_UNIFORM_BUFFER, 0);
     enhanced_keep_casters(lev_bucket, li == 0);
 
+    // Enhanced: a level's characters and props dither in with its ground (fg.fade_in)
+    const float fade_in = lev->level ? enhanced_level_fade_peek(lev->level->level_name,
+                                                                render_state->frame_idx)
+                                     : 1.f;
     switch_to_merc2(render_state);
+    glUniform1f(m_merc_uniforms.enh_fade_in, fade_in);
     do_draws(lev_bucket.draws.data(), lev, lev_bucket.next_free_draw, m_merc_uniforms, prof, false,
              render_state);
     if (lev_bucket.next_free_envmap_draw) {
       switch_to_emerc(render_state);
+      glUniform1f(m_emerc_uniforms.enh_fade_in, fade_in);
       do_draws(lev_bucket.envmap_draws.data(), lev, lev_bucket.next_free_envmap_draw,
                m_emerc_uniforms, prof, true, render_state);
     }

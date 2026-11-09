@@ -411,6 +411,10 @@ EnhancedPost::~EnhancedPost() {
     }
   }
   glDeleteTextures(1, &m_black_tex);
+  if (m_feet_job.valid()) {
+    m_feet_job.wait();
+  }
+  glDeleteTextures(1, &m_feet_tex);
   glDeleteTextures(1, &m_no_shadow_tex);
   glDeleteTextures(1, &m_white_tex);
 }
