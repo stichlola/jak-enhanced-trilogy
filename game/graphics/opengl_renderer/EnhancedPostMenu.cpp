@@ -47,8 +47,13 @@ void EnhancedPost::draw_start_menu() {
     for (int i = 0; i < 4; i++) {
       load(i == 0 ? std::string("title.png") : fmt::format("name{}.png", i), &m_start_text[i],
            &m_start_text_w[i], &m_start_text_h[i]);
+      load(i < 3 ? fmt::format("bar{}.png", i + 1) : std::string("select.png"), &m_start_bar[i],
+           &unused_w, &unused_h);
     }
     m_start_pick = current;
+    for (int i = 0; i < 3; i++) {
+      m_start_strip[i] = i == current ? 0.5f : 0.25f;
+    }
   }
 
   // what the player picked: the game running now just closes the menu, another one (or the one
@@ -127,27 +132,31 @@ void EnhancedPost::draw_start_menu() {
                  ImVec2(x + w * 0.5f, y + height), ImVec2(0, 0), ImVec2(1, 1),
                  col(shade, shade, shade, 1.f));
   };
-  lettering(0, 96.f * unit, size.x * 0.5f, size.y * 0.07f, 1.f, "Jak Enhanced Trilogy");
-  text_centered(26.f * unit, size.x * 0.5f, size.y * 0.07f + 112.f * unit,
-                col(0.75f, 0.78f, 0.85f, 1.f), "Choose a game");
-
-  // the three cards, the one picked larger, lit and framed in gold
-  const float gap = size.x * 0.035f;
-  const float card = std::min(size.y * 0.42f, (size.x * 0.9f - 2.f * gap) / 3.f);
-  const float x0 = size.x * 0.5f - (3.f * card + 2.f * gap) * 0.5f;
-  const float y0 = size.y * 0.27f;
+  // three full-height strips side by side, the game picked on half the width (eased), the others
+  // dimmed; each portrait is square, so above and below it the strip shows a dark backdrop tinted
+  // with its game's color (until portraits drawn tall replace them)
+  static const ImVec4 kTint[3] = {ImVec4(0.16f, 0.47f, 0.27f, 1.f), ImVec4(0.16f, 0.31f, 0.63f, 1.f),
+                                  ImVec4(0.67f, 0.37f, 0.16f, 1.f)};
+  const float ease = std::min(1.f, ImGui::GetIO().DeltaTime * 10.f);
+  for (int i = 0; i < 3; i++) {
+    m_start_strip[i] += ((i == m_start_pick ? 0.5f : 0.25f) - m_start_strip[i]) * ease;
+  }
+  const float half = 26.f * unit;  // a divider is two halves, each in its own game's style
+  const float usable = size.x - 4.f * half;
   const ImGuiIO& io = ImGui::GetIO();
   int clicked = -1;
+  float x = 0.f;
+  float strip_x[3], strip_w[3];
   for (int i = 0; i < 3; i++) {
     const bool picked = i == m_start_pick;
-    const float grow = picked ? card * 0.05f : 0.f;
-    const ImVec2 a(x0 + i * (card + gap) - grow, y0 - grow);
-    const ImVec2 b(a.x + card + 2.f * grow, a.y + card + 2.f * grow);
+    const float w = usable * m_start_strip[i];
+    strip_x[i] = x;
+    strip_w[i] = w;
+    const ImVec2 a(x, 0.f), b(x + w, size.y);
     // the mouse picks too, a click plays (not in the first moment: the cursor appearing where it
     // was reads as a move)
     if (m_start_ready[i] && ImGui::GetTime() - m_start_opened_at > 0.5 && io.MousePos.x >= a.x &&
-        io.MousePos.x < b.x &&
-        io.MousePos.y >= a.y && io.MousePos.y < b.y) {
+        io.MousePos.x < b.x) {
       if (io.MouseDelta.x != 0.f || io.MouseDelta.y != 0.f) {
         m_start_pick = i;
       }
@@ -155,31 +164,65 @@ void EnhancedPost::draw_start_menu() {
         clicked = i;
       }
     }
-    const float lit = !m_start_ready[i] ? 0.22f : picked ? 1.f : 0.5f;
-    if (picked) {
-      dl->AddRectFilled(ImVec2(a.x - 14.f * unit, a.y - 14.f * unit),
-                        ImVec2(b.x + 14.f * unit, b.y + 14.f * unit),
-                        col(0.96f, 0.72f, 0.2f, 0.18f), 18.f * unit);
-    }
+    const float lit = !m_start_ready[i] ? 0.22f : picked ? 1.f : 0.45f;
+    const ImVec4& t = kTint[i];
+    const ImU32 deep = col(0.04f * lit, 0.055f * lit, 0.11f * lit, 1.f);
+    const ImU32 glow = col(t.x * 0.45f * lit, t.y * 0.45f * lit, t.z * 0.45f * lit, 1.f);
+    const float mid = size.y * 0.5f;
+    dl->AddRectFilledMultiColor(a, ImVec2(b.x, mid), deep, deep, glow, glow);
+    dl->AddRectFilledMultiColor(ImVec2(a.x, mid), b, glow, glow, deep, deep);
+    // the portrait as wide as the strip (cropped top and bottom on a very wide screen)
     if (m_start_tex[i]) {
-      dl->AddImageRounded((ImTextureID)(intptr_t)m_start_tex[i], a, b, ImVec2(0, 0), ImVec2(1, 1),
-                          col(lit, lit, lit, 1.f), 10.f * unit);
-    } else {
-      dl->AddRectFilled(a, b, col(0.15f * lit, 0.18f * lit, 0.25f * lit, 1.f), 10.f * unit);
+      const float ph = std::min(w, size.y);
+      const float crop = (1.f - ph / w) * 0.5f;
+      const float py = mid - ph * 0.5f;
+      dl->AddImage((ImTextureID)(intptr_t)m_start_tex[i], ImVec2(a.x, py), ImVec2(b.x, py + ph),
+                   ImVec2(0, crop), ImVec2(1, 1 - crop), col(lit, lit, lit, 1.f));
+      // its top and bottom edges melt into the backdrop
+      const float e = ph * 0.12f;
+      const ImU32 clear = col(t.x * 0.45f * lit, t.y * 0.45f * lit, t.z * 0.45f * lit, 0.f);
+      const ImU32 top_c = col(t.x * 0.3f * lit, t.y * 0.3f * lit, t.z * 0.3f * lit, 1.f);
+      dl->AddRectFilledMultiColor(ImVec2(a.x, py), ImVec2(b.x, py + e), top_c, top_c, clear, clear);
+      dl->AddRectFilledMultiColor(ImVec2(a.x, py + ph - e), ImVec2(b.x, py + ph), clear, clear,
+                                  top_c, top_c);
     }
-    dl->AddRect(a, b, picked ? col(0.98f, 0.8f, 0.32f, 1.f) : col(0.45f, 0.48f, 0.55f, 0.6f),
-                10.f * unit, 0, picked ? 4.f * unit : 1.5f * unit);
-    const float cx = (a.x + b.x) * 0.5f;
-    const float shade = picked ? 1.f : 0.62f;
-    lettering(i + 1, 54.f * unit, cx, b.y + 22.f * unit, shade, kTitles[i]);
+    // a dark fade at the bottom for the name
+    const ImU32 none = col(0.f, 0.f, 0.f, 0.f), dark = col(0.015f, 0.02f, 0.05f, 0.9f);
+    dl->AddRectFilledMultiColor(ImVec2(a.x, size.y - 330.f * unit), b, none, none, dark, dark);
+    const float name_h = (picked ? 96.f : 60.f) * unit;
+    const float name_w = name_h * m_start_text_w[i + 1] / m_start_text_h[i + 1];
+    const float fit = std::min(1.f, (w - 60.f * unit) / std::max(name_w, 1.f));
+    lettering(i + 1, name_h * fit, (a.x + b.x) * 0.5f, size.y - 110.f * unit - name_h * fit,
+              picked ? 1.f : 0.62f, kTitles[i]);
     if (!m_start_ready[i]) {
-      text_centered(24.f * unit, cx, (a.y + b.y) * 0.5f - 12.f * unit,
+      text_centered(24.f * unit, (a.x + b.x) * 0.5f, mid - 12.f * unit,
                     col(0.9f, 0.9f, 0.9f, 0.9f), "Not set up: its disc goes in the ISO folder");
     }
+    x += w + (i < 2 ? 2.f * half : 0.f);
   }
-  text_centered(24.f * unit, size.x * 0.5f, size.y - 70.f * unit, col(0.7f, 0.73f, 0.8f, 1.f),
-                "Left / Right: choose      Enter or A: play      C or Y: continue from the last "
-                "save      Esc or B: close");
+  // the dividers: the left half in the left game's style, the right half in the right one's
+  auto bar = [&](GLuint tex, float bx, float bw) {
+    if (tex) {
+      dl->AddImage((ImTextureID)(intptr_t)tex, ImVec2(bx, 0.f), ImVec2(bx + bw, size.y),
+                   ImVec2(0, 0), ImVec2(1, 1), col(1.f, 1.f, 1.f, 1.f));
+    }
+  };
+  for (int i = 0; i < 2; i++) {
+    const float bx = strip_x[i] + strip_w[i];
+    dl->AddRectFilled(ImVec2(bx, 0.f), ImVec2(bx + 2.f * half, size.y), col(0.02f, 0.025f, 0.05f, 1.f));
+    bar(m_start_bar[i], bx - 6.f * unit, half + 12.f * unit);
+    bar(m_start_bar[i + 1], bx + half - 6.f * unit, half + 12.f * unit);
+  }
+  // the game picked: a jagged gold bar just inside each side of its strip
+  const float sel_w = 30.f * unit;
+  bar(m_start_bar[3], strip_x[m_start_pick] + 8.f * unit, sel_w);
+  bar(m_start_bar[3], strip_x[m_start_pick] + strip_w[m_start_pick] - sel_w - 8.f * unit, sel_w);
+  // the title over a dark fade at the top
+  {
+    const ImU32 none = col(0.f, 0.f, 0.f, 0.f), dark = col(0.015f, 0.02f, 0.05f, 0.85f);
+    dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(size.x, 230.f * unit), dark, dark, none, none);
+    lettering(0, 88.f * unit, size.x * 0.5f, 44.f * unit, 1.f, "Jak Enhanced Trilogy");
+  }
   ImGui::End();
 
   if (clicked >= 0) {

@@ -434,6 +434,8 @@ class EnhancedPost {
   GLuint m_start_text[4] = {0, 0, 0, 0};  // the lettering: the title, the three names
   float m_start_text_w[4] = {1, 1, 1, 1};
   float m_start_text_h[4] = {1, 1, 1, 1};
+  GLuint m_start_bar[4] = {0, 0, 0, 0};  // the dividers (start_menu_bars.py), then the gold bar
+  float m_start_strip[3] = {0.25f, 0.5f, 0.25f};  // each game's share of the width, eased
   bool m_start_ready[3] = {false, false, false};
   bool m_start_loaded = false;
   int m_start_pick = 0;
