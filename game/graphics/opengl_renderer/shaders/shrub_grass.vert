@@ -38,6 +38,8 @@ uniform vec4 enh_crush;         // its corner (world x, z), its size (game units
 uniform vec4 enh_style;         // the painted grass's look: its height, its blades' width, the wind's bend (times the usual)
 uniform vec3 enh_grass_color;   // its green
 uniform vec3 enh_grass_dry;     // its drier tips
+uniform float tune_grass_ground_sat = 1.2;  // (tuning: the floor color's saturation for the blades)
+uniform vec4 enh_grass_ground;  // ground-class fields: a tint over the floor's color (rgb), w: how much the blades take each spot's color (the field's b, packed)
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -204,7 +206,19 @@ void main() {
   // (toned down from the painted green toward a natural, slightly warm one: it read as highlighter)
   vec3 green = mix(vec3(dot(enh_grass_color, vec3(0.3, 0.59, 0.11))), enh_grass_color, 0.6) * vec3(1.05, 0.88, 0.8);
   vec3 dry = mix(vec3(dot(enh_grass_dry, vec3(0.3, 0.59, 0.11))), enh_grass_dry, 0.7) * vec3(1.0, 0.92, 0.85);
-  vec3 tipc = mix(green, dry, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * 0.6 * t);
+  if (enh_grass_ground.w > 0.0) {
+    // (the floor's own color under the blade, as drawn: the blades come out its tone)
+    ivec2 sz = textureSize(tex_T3, 0);
+    ivec2 ti = clamp(ivec2(floor((xz - enh_field.xy) / enh_field.z * vec2(sz))), ivec2(0), sz - 1);
+    float pk = texelFetch(tex_T3, ti, 0).b;
+    if (pk > 0.5) {
+      uint u = uint(pk + 0.5);
+      vec3 c = vec3(float(u & 255u), float((u >> 8u) & 255u), float((u >> 16u) & 255u)) / 127.5;
+      c = max(mix(vec3(dot(c, vec3(0.3, 0.59, 0.11))), c, tune_grass_ground_sat), 0.0) * enh_grass_ground.rgb;
+      green = mix(green, c, enh_grass_ground.w);
+      dry = mix(dry, min(c * 1.25 + 0.04, vec3(2.0)), enh_grass_ground.w);
+    }
+  }  vec3 tipc = mix(green, dry, smoothstep(0.45, 0.85, vnoise(wm / 7.0 + 3.0)) * 0.6 * t);
   tipc *= mix(0.75, 1.2, rnd(bs, 9u));
   vec3 albedo = mix(tipc * 0.35, tipc, pow(t, 0.6));
   vec4 tod = texelFetch(tex_T10, enh_tod, 0);

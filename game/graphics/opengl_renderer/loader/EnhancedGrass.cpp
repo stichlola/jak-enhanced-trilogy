@@ -20,6 +20,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include <map>
 #include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
@@ -199,6 +200,15 @@ struct GrassField {
   float density = 1.f;
   int tod = 0;
   float base_rgb[3] = {0.5f, 0.5f, 0.5f};
+  // on the level's own grassy floors (enhanced_grass_ground_fields), not a listed zone: no zone of
+  // its own (f.zone unused), drawn under grass.ground
+  bool ground_class = false;
+  // (theirs: the blades' mean color, and each spot's (rgb 8 bits each, 0..2, packed in a float)
+  float color[3] = {0, 0, 0};
+  std::vector<float> color_packed;
+  // the ground-class fields the same shrub tree draws (kept on the tree's field; n == 0: a holder
+  // with no field of its own)
+  std::vector<std::shared_ptr<GrassField>> ground;
 
   float height_at(float x, float z) const {
     int i = (int)std::lround((x - x0) / (kStep * kMeter));
@@ -395,14 +405,16 @@ void make_gl() {
 }
 
 void upload_field(GLuint tex, const GrassField& f, const std::vector<float>& lush) {
-  // (r: the floor's height, g: how lush)
-  std::vector<float> rg(f.heights.size() * 2);
+  // (r: the floor's height, g: how lush, b: the ground-class blades' color there (packed, read
+  // with texelFetch))
+  std::vector<float> rg(f.heights.size() * 4, 0.f);
   for (size_t i = 0; i < f.heights.size(); i++) {
-    rg[i * 2] = f.heights[i];
-    rg[i * 2 + 1] = lush.empty() ? 1.f : lush[i];
+    rg[i * 4] = f.heights[i];
+    rg[i * 4 + 1] = lush.empty() ? 1.f : lush[i];
+    rg[i * 4 + 2] = i < f.color_packed.size() ? f.color_packed[i] : 0.f;
   }
   glBindTexture(GL_TEXTURE_2D, tex);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG32F, f.n, f.n, 0, GL_RG, GL_FLOAT, rg.data());
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, f.n, f.n, 0, GL_RGBA, GL_FLOAT, rg.data());
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -411,7 +423,7 @@ FieldGl& field_gl(const std::shared_ptr<const GrassField>& fp, double now) {
   auto& gl = g_gl.fields[f.id];
   gl.last_used = now;
   // repainted: baked again on a worker (holding the field), swapped in when done
-  if (!zones()[f.zone].paint.empty()) {
+  if (!f.ground_class && !zones()[f.zone].paint.empty()) {
     if (gl.job.valid() && gl.job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
       auto l = gl.job.get();
       gl.tile_lush = std::move(l.tiles);
@@ -897,6 +909,226 @@ void enhanced_prepare_grass(tfrag3::Level& level, const std::string& name, const
   }
 }
 
+void enhanced_grass_ground_fields(tfrag3::Level& level,
+                                  const std::string& name,
+                                  const float bounds[4],
+                                  const GrassGround& ground) {
+  if (level.shrub_trees.empty()) {
+    return;
+  }
+  // 1: the grassy floor on a 2 m grid (the highest floor's texture)
+  constexpr float kCell = 2.f;    // m
+  constexpr float kSquare = 64.f;  // m, a field's side
+  const float x0 = std::floor(bounds[0] / kMeter / kSquare) * kSquare;
+  const float z0 = std::floor(bounds[1] / kMeter / kSquare) * kSquare;
+  const int sq_x = std::max(0, (int)std::ceil((bounds[2] / kMeter - x0) / kSquare));
+  const int sq_z = std::max(0, (int)std::ceil((bounds[3] / kMeter - z0) / kSquare));
+  if (sq_x * sq_z == 0 || sq_x * sq_z > 4096) {
+    return;
+  }
+  const int per = (int)(kSquare / kCell);
+  const int gx = sq_x * per, gz = sq_z * per;
+  std::vector<u8> grassy(gx * gz, 0);
+  for (int k = 0; k < gz; k++) {
+    for (int i = 0; i < gx; i++) {
+      float y, rgb[3];
+      bool g = false;
+      if (ground((x0 + (i + 0.5f) * kCell) * kMeter, (z0 + (k + 0.5f) * kCell) * kMeter, &y, &g, rgb) &&
+          g) {
+        grassy[k * gx + i] = 1;
+      }
+    }
+  }
+  // 2: a field for each 64 m square with enough of it (a patch of 160 m2 or more), heights and how
+  // lush every half meter (grassy or not, softened over ~2 m so the edge thins out)
+  constexpr int kMinCells = 40;
+  int made = 0, cells_total = 0;
+  for (int sk = 0; sk < sq_z; sk++) {
+    for (int si = 0; si < sq_x; si++) {
+      int cells = 0;
+      for (int k = sk * per; k < (sk + 1) * per; k++) {
+        for (int i = si * per; i < (si + 1) * per; i++) {
+          cells += grassy[k * gx + i];
+        }
+      }
+      if (cells < kMinCells) {
+        continue;
+      }
+      const float cx = (x0 + (si + 0.5f) * kSquare) * kMeter, cz = (z0 + (sk + 0.5f) * kSquare) * kMeter;
+      const float r = kSquare * 0.5f * kMeter;
+      auto field = std::make_shared<GrassField>();
+      field->id = g_next_field++;
+      field->ground_class = true;
+      field->n = (int)std::ceil(kSquare / kStep) + 1;
+      field->x0 = cx - r;
+      field->z0 = cz - r;
+      field->heights.assign(field->n * field->n, kNoFloor);
+      std::vector<float> raw(field->n * field->n, 0.f);
+      std::vector<std::array<float, 3>> floor_rgb(field->n * field->n, {-1.f, 0.f, 0.f});
+      double rgb_sum[3] = {0, 0, 0};
+      int rgb_count = 0;
+      for (int k = 0; k < field->n; k++) {
+        for (int i = 0; i < field->n; i++) {
+          float y, rgb[3];
+          bool g = false;
+          if (ground(field->x0 + i * kStep * kMeter, field->z0 + k * kStep * kMeter, &y, &g, rgb)) {
+            field->heights[k * field->n + i] = y;
+            raw[k * field->n + i] = g ? 1.f : 0.f;
+            if (g) {
+              for (int c = 0; c < 3; c++) {
+                rgb_sum[c] += rgb[c];
+                floor_rgb[k * field->n + i][c] = rgb[c];
+              }
+              rgb_count++;
+            }
+          }
+        }
+      }
+      // (the blades the color of the grass texture under them)
+      for (int c = 0; c < 3; c++) {
+        field->color[c] = rgb_count ? (float)(rgb_sum[c] / rgb_count) : 0.3f;
+      }
+      // (a box blur 2 m wide, twice: the grass fades within a meter or two of its floor's edge)
+      const int n = field->n;
+      std::vector<float> tmp(raw.size());
+      for (int pass = 0; pass < 2; pass++) {
+        for (int k = 0; k < n; k++) {
+          for (int i = 0; i < n; i++) {
+            float s = 0;
+            int c = 0;
+            for (int d = -2; d <= 2; d++) {
+              int ii = std::clamp(i + d, 0, n - 1);
+              s += raw[k * n + ii];
+              c++;
+            }
+            tmp[k * n + i] = s / c;
+          }
+        }
+        for (int k = 0; k < n; k++) {
+          for (int i = 0; i < n; i++) {
+            float s = 0;
+            int c = 0;
+            for (int d = -2; d <= 2; d++) {
+              int kk = std::clamp(k + d, 0, n - 1);
+              s += tmp[kk * n + i];
+              c++;
+            }
+            raw[k * n + i] = s / c;
+          }
+        }
+      }
+      field->lush.resize(raw.size());
+      for (size_t q = 0; q < raw.size(); q++) {
+        float t = std::clamp((raw[q] - 0.35f) / 0.6f, 0.f, 1.f);
+        field->lush[q] = t * t * (3.f - 2.f * t);
+      }
+      field->nt = (int)std::ceil(kSquare / kTile);
+      field->tile_lush.assign(field->nt * field->nt, 0.f);
+      for (int k = 0; k < n; k++) {
+        for (int i = 0; i < n; i++) {
+          const float fx = i * kStep / kTile, fz = k * kStep / kTile;
+          for (int dz = -1; dz <= 0; dz++) {
+            for (int dx = -1; dx <= 0; dx++) {
+              int ti = (int)std::floor(fx + dx * 0.01f), tk = (int)std::floor(fz + dz * 0.01f);
+              if (ti >= 0 && tk >= 0 && ti < field->nt && tk < field->nt) {
+                auto& m = field->tile_lush[tk * field->nt + ti];
+                m = std::max(m, field->lush[k * n + i]);
+              }
+            }
+          }
+        }
+      }
+      field->cx = cx;
+      field->cz = cz;
+      field->radius = r;
+      field->water = -1e6f * kMeter;
+      field->density = 1.f;
+      // its light: the shrub tree with a vertex nearest the middle draws it, lit like one of that
+      // tree's brighter vertices near it (not the nearest's alone: it may sit in a rock's shade)
+      int best_tree = -1;
+      float best = 1e30f;
+      for (size_t t = 0; t < level.shrub_trees.size(); t++) {
+        const auto& verts = level.shrub_trees[t].unpacked.vertices;
+        for (size_t v = 0; v < verts.size(); v += 3) {
+          float d = std::hypot(verts[v].x - cx, verts[v].z - cz);
+          if (d < best) {
+            best = d;
+            best_tree = (int)t;
+          }
+        }
+      }
+      if (best_tree < 0) {
+        continue;
+      }
+      auto& tree = level.shrub_trees[best_tree];
+      {
+        const auto& verts = tree.unpacked.vertices;
+        const float reach = std::max(best + 8.f * kMeter, r);
+        std::vector<std::pair<float, size_t>> order;
+        for (size_t v = 0; v < verts.size(); v++) {
+          if (std::hypot(verts[v].x - cx, verts[v].z - cz) < reach) {
+            const auto* c = verts[v].rgba_base;
+            order.emplace_back(0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2], v);
+          }
+        }
+        if (order.empty()) {
+          continue;
+        }
+        std::sort(order.begin(), order.end());
+        const auto& vert = verts[order[order.size() * 3 / 4].second];
+        field->tod = vert.color_index;
+        for (int c = 0; c < 3; c++) {
+          field->base_rgb[c] = vert.rgba_base[c] / 255.f;
+        }
+        // each spot's blade color: the floor's as drawn, over the light the blades get (the host
+        // vertex's colors over the day, as shrub_grass.vert lights them: albedo * 2.2 * base lum *
+        // tod * 4), so they come out the floor's own tone; packed 8 bits a channel, 0..2
+        const auto& tod = tree.time_of_day_colors;
+        float light[3];
+        const float base = std::max(0.2126f * field->base_rgb[0] + 0.7152f * field->base_rgb[1] +
+                                        0.0722f * field->base_rgb[2],
+                                    0.05f);
+        for (int c = 0; c < 3; c++) {
+          float s = 0;
+          for (int p = 0; p < 8; p++) {
+            s += tod.color_count ? tod.read(vert.color_index, p, c) : 128;
+          }
+          light[c] = std::max(2.2f * base * 4.f * s / 8.f / 255.f, 0.02f);
+        }
+        field->color_packed.assign(floor_rgb.size(), 0.f);
+        for (size_t q = 0; q < floor_rgb.size(); q++) {
+          if (floor_rgb[q][0] < 0.f) {
+            continue;
+          }
+          u32 packed = 0;
+          for (int c = 0; c < 3; c++) {
+            float a = std::clamp(floor_rgb[q][c] / light[c], 0.f, 2.f);
+            packed |= (u32)std::lround(a * 127.5f) << (8 * c);
+          }
+          field->color_packed[q] = (float)packed;
+        }
+        for (int c = 0; c < 3; c++) {
+          field->color[c] = std::min(field->color[c] / light[c], 2.f);
+        }
+      }
+      if (!tree.enh_grass) {
+        auto holder = std::make_shared<GrassField>();
+        holder->ground_class = true;  // (n == 0: nothing of its own)
+        tree.enh_grass = holder;
+      }
+      std::static_pointer_cast<GrassField>(tree.enh_grass)->ground.push_back(field);
+      if (std::getenv("JAK_ENHANCED_GRASS_LOG")) {
+        lg::info("[enhanced] grass: ground field at {:.0f} {:.0f} {:.0f} m, {} m2", cx / kMeter,
+                  field->height_at(cx, cz) / kMeter, cz / kMeter, cells * kCell * kCell);
+      }
+      made++;
+      cells_total += cells;
+    }
+  }
+  lg::info("[enhanced] grass: {} grassy floor {:.0f} m2 in {} fields of {:.0f} m (ground class)", name,
+           cells_total * kCell * kCell, made, kSquare);
+}
+
 namespace {
 void draw_field(const std::shared_ptr<const GrassField>& fp,
                 int tod,
@@ -904,10 +1136,11 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
                 const tfrag3::ShrubTree& tree,
                 const TfragRenderSettings& settings,
                 SharedRenderState* render_state,
-                ScopedProfilerNode& prof) {
+                ScopedProfilerNode& prof,
+                float density_mul = 1.f) {
   const auto& f = *fp;
   const auto& cam = settings.camera.trans;
-  if (std::hypot(cam.x() - f.cx, cam.z() - f.cz) > f.radius + kReach[2] * kMeter) {
+  if (f.n == 0 || std::hypot(cam.x() - f.cx, cam.z() - f.cz) > f.radius + kReach[2] * kMeter) {
     return;
   }
   using clock = std::chrono::steady_clock;
@@ -915,20 +1148,24 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   const float now = std::chrono::duration<float>(clock::now() - start).count();
   auto& fgl = field_gl(fp, now);
   const auto& tile_lush = fgl.tile_lush.empty() ? f.tile_lush : fgl.tile_lush;
-  // (its ground darkened under it by the composite, so gaps between blades don't show bare sand)
-  auto& gg = g_enhanced_grass_ground;
-  gg.zone[0] = f.cx / kMeter;
-  gg.zone[1] = f.cz / kMeter;
-  gg.zone[2] = f.radius / kMeter;
-  gg.zone[3] = f.density * g_enhanced_grass;
-  gg.water = f.water / kMeter;
-  gg.frame = render_state->frame_idx;
-  gg.tex = fgl.tex;
   const float step = kStep * kMeter;
-  // (the texture's texels sit on the heights: its corner half a step before the first)
-  gg.field[0] = (f.x0 - step * 0.5f) / kMeter;
-  gg.field[1] = (f.z0 - step * 0.5f) / kMeter;
-  gg.field[2] = f.n * kStep;
+  // (its ground darkened under it by the composite, so gaps between blades don't show bare sand;
+  // one field a frame: not the ground-class ones, whose floor is a grass texture already and whose
+  // squares would show the one darkened)
+  if (!f.ground_class) {
+    auto& gg = g_enhanced_grass_ground;
+    gg.zone[0] = f.cx / kMeter;
+    gg.zone[1] = f.cz / kMeter;
+    gg.zone[2] = f.radius / kMeter;
+    gg.zone[3] = f.density * g_enhanced_grass;
+    gg.water = f.water / kMeter;
+    gg.frame = render_state->frame_idx;
+    gg.tex = fgl.tex;
+    // (the texture's texels sit on the heights: its corner half a step before the first)
+    gg.field[0] = (f.x0 - step * 0.5f) / kMeter;
+    gg.field[1] = (f.z0 - step * 0.5f) / kMeter;
+    gg.field[2] = f.n * kStep;
+  }
 
   // the tiles near and in view, each with its level of detail (by its nearest point)
   const float tile = kTile * kMeter;
@@ -1000,12 +1237,32 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   glUniform3f(glGetUniformLocation(id, "enh_base_rgb"), base_rgb[0], base_rgb[1], base_rgb[2]);
   {
     // (the painted grass's look: the listed fields' too, they're painted the same way)
-    const auto s = enhanced_grass_style();
+    auto s = enhanced_grass_style();
+    if (f.ground_class) {
+      // (the ground's own color, not the painted green, the tips a little paler; shorter than a
+      // meadow's, so the floor's own texture shows between them)
+      static const EnhancedTune k_height("grass.ground_height", 0.4f);
+      static const EnhancedTune k_dry("grass.ground_dry", 1.25f);
+      // (each spot's color is the floor's there, shrub_grass.vert reads it: a tint over it)
+      static const EnhancedTune k_tint("grass.ground_tint", {1.7f, 1.7f, 1.7f});
+      s.height = k_height;
+      for (int c = 0; c < 3; c++) {
+        s.color[c] = f.color[c] * k_tint[c];
+        s.dry[c] = std::min(s.color[c] * k_dry + 0.04f, 1.f);
+      }
+      s.density = 1.f;
+    }
     glUniform4f(glGetUniformLocation(id, "enh_style"), s.height, s.width, s.wind, 0.f);
+    {
+      static const EnhancedTune k_tint("grass.ground_tint", {1.7f, 1.7f, 1.7f});
+      static const EnhancedTune k_spot("grass.ground_spot", 1.f);  // 0: the field's mean color
+      glUniform4f(glGetUniformLocation(id, "enh_grass_ground"), k_tint[0], k_tint[1], k_tint[2],
+                  f.ground_class && !f.color_packed.empty() ? (float)k_spot : 0.f);
+    }
     glUniform3f(glGetUniformLocation(id, "enh_grass_color"), s.color[0], s.color[1], s.color[2]);
     glUniform3f(glGetUniformLocation(id, "enh_grass_dry"), s.dry[0], s.dry[1], s.dry[2]);
     glUniform4f(glGetUniformLocation(id, "enh_zone"), f.cx, f.cz, f.radius,
-                std::min(f.density * s.density, 1.f) * g_enhanced_grass);
+                std::min(f.density * s.density * density_mul, 1.f) * g_enhanced_grass);
   }
   glUniform1f(glGetUniformLocation(id, "enh_time"), now);
   glUniform1f(glGetUniformLocation(id, "enh_wind"),
@@ -1089,6 +1346,13 @@ void enhanced_draw_grass(const tfrag3::ShrubTree& tree,
   if (tree.enh_grass && !g_enhanced_menu.blank_world) {
     auto f = std::static_pointer_cast<const GrassField>(tree.enh_grass);
     draw_field(f, f->tod, f->base_rgb, tree, settings, render_state, prof);
+    // the ground-class fields (grass.ground: 0 off, else their density, times the zones')
+    static const EnhancedTune k_ground("grass.ground", 0.f);
+    if (k_ground > 0.f) {
+      for (const auto& g : f->ground) {
+        draw_field(g, g->tod, g->base_rgb, tree, settings, render_state, prof, k_ground);
+      }
+    }
   }
   // (the orphan fields this tree hosts; the brush's fields: drawn with the first tree drawn this
   // frame, lit by its time of day colors)

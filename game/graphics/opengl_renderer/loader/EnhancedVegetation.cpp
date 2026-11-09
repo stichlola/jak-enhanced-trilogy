@@ -1,6 +1,7 @@
 #include "EnhancedVegetation.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <memory>
@@ -9,6 +10,9 @@
 #include <unordered_set>
 
 #include "common/log/log.h"
+#include "common/versions/versions.h"
+
+#include "game/runtime.h"
 
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 
@@ -75,7 +79,7 @@ bool hfrag_height(const std::vector<float>& h, float x, float z, float* out) {
  */
 class Ground {
  public:
-  void add(const Vec3& a, const Vec3& b, const Vec3& c, u32 tex) {
+  void add(const Vec3& a, const Vec3& b, const Vec3& c, u32 tex, const u32* vc = nullptr) {
     Vec3 n = (b - a).cross(c - a);
     float len = n.length();
     if (!(len > 1.f) || std::abs(n.y()) / len < 0.7f) {
@@ -91,6 +95,9 @@ class Ground {
     m_tris.push_back(b);
     m_tris.push_back(c);
     m_tex.push_back(tex);
+    for (int k = 0; k < 3; k++) {
+      m_vc.push_back(vc ? vc[k] : 0u);
+    }
     for (int x = x0; x <= x1; x++) {
       for (int z = z0; z <= z1; z++) {
         m_cells[key(x, z)].push_back(id);
@@ -105,11 +112,29 @@ class Ground {
                 size_t first,
                 size_t end,
                 bool strips,
-                u32 tex) {
+                u32 tex,
+                const tfrag3::PackedTimeOfDay* colors = nullptr) {
     auto pos = [&](u32 i) { return Vec3(verts[i].x, verts[i].y, verts[i].z); };
+    // (a vertex's color over the day: its 8 palettes averaged, rgb packed)
+    auto vcol = [&](u32 i) {
+      u32 out = 0;
+      for (int ch = 0; ch < 3; ch++) {
+        int s = 0;
+        for (int p = 0; p < 8; p++) {
+          s += colors->read(verts[i].color_index, p, ch);
+        }
+        out |= (u32)(s / 8) << (8 * ch);
+      }
+      return out;
+    };
     auto tri = [&](u32 a, u32 b, u32 c) {
       if (a < verts.size() && b < verts.size() && c < verts.size() && a != b && b != c && a != c) {
-        add(pos(a), pos(b), pos(c), tex);
+        if (colors && colors->color_count > 0) {
+          const u32 vc[3] = {vcol(a), vcol(b), vcol(c)};
+          add(pos(a), pos(b), pos(c), tex, vc);
+        } else {
+          add(pos(a), pos(b), pos(c), tex);
+        }
       }
     };
     if (strips) {
@@ -136,7 +161,9 @@ class Ground {
               float below,
               float above,
               float* out,
-              u32* tex = nullptr) const {
+              u32* tex = nullptr,
+              bool skip_ties = false,
+              float* vc = nullptr) const {
     auto it = m_cells.find(key(cell(x), cell(z)));
     bool found = false;
     float best = 0;
@@ -156,6 +183,9 @@ class Ground {
       return found;
     }
     for (u32 id : it->second) {
+      if (skip_ties && m_tex[id] == kNoTex) {
+        continue;
+      }
       const Vec3& a = m_tris[id * 3];
       const Vec3& b = m_tris[id * 3 + 1];
       const Vec3& c = m_tris[id * 3 + 2];
@@ -179,6 +209,13 @@ class Ground {
         found = true;
         if (tex) {
           *tex = m_tex[id];
+        }
+        if (vc) {
+          // (its vertex colors there, 0..255)
+          for (int ch = 0; ch < 3; ch++) {
+            vc[ch] = l0 * ((m_vc[id * 3] >> (8 * ch)) & 0xff) + l1 * ((m_vc[id * 3 + 1] >> (8 * ch)) & 0xff) +
+                     l2 * ((m_vc[id * 3 + 2] >> (8 * ch)) & 0xff);
+          }
         }
       }
     }
@@ -229,6 +266,7 @@ class Ground {
   static u64 key(int x, int z) { return ((u64)(u32)x << 32) | (u32)z; }
   std::vector<Vec3> m_tris;
   std::vector<u32> m_tex;
+  std::vector<u32> m_vc;  // each corner's vertex color over the day (rgb packed; 0: none, ties)
   std::unordered_map<u64, std::vector<u32>> m_cells;
 };
 
@@ -1093,6 +1131,96 @@ void add_to_tree(tfrag3::ShrubTree& tree,
     }
   }
 }
+
+// Dense grass by ground class: which of the level's floor textures are grass (by name, or green on
+// average and not named as something else), then EnhancedGrass's fields on them
+void add_ground_class_grass(tfrag3::Level& level, const std::string& name, Ground& ground) {
+  const auto& textures = level.textures;
+  std::vector<double> area(textures.size(), 0.0);
+  float b[4] = {1e30f, 1e30f, -1e30f, -1e30f};
+  for (u32 id = 0; id < ground.size(); id++) {
+    const Vec3* t = ground.tri(id);
+    for (int c = 0; c < 3; c++) {
+      b[0] = std::min(b[0], t[c].x());
+      b[1] = std::min(b[1], t[c].z());
+      b[2] = std::max(b[2], t[c].x());
+      b[3] = std::max(b[3], t[c].z());
+    }
+    u32 tex = ground.tex(id);
+    if (tex < textures.size()) {
+      Vec3 n = (t[1] - t[0]).cross(t[2] - t[0]);
+      area[tex] += std::abs(n.y()) * 0.5 / (kMeter * kMeter);
+    }
+  }
+  std::vector<u8> grassy(textures.size(), 0);
+  std::vector<std::array<float, 3>> rgb(textures.size(), {0.5f, 0.5f, 0.5f});  // their mean colors
+  auto has = [](const std::string& s, std::initializer_list<const char*> words) {
+    for (const char* w : words) {
+      if (s.find(w) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  };
+  for (size_t tex = 0; tex < textures.size(); tex++) {
+    if (area[tex] < 50.0) {
+      continue;
+    }
+    std::string nm = textures[tex].debug_name;
+    std::transform(nm.begin(), nm.end(), nm.begin(), ::tolower);
+    double s[3] = {0, 0, 0};
+    double cnt = 0;
+    const auto& data = textures[tex].data;
+    const size_t stride = std::max<size_t>(1, data.size() / 4096);
+    for (size_t p = 0; p < data.size(); p += stride) {
+      u32 px = data[p];
+      if ((px >> 24) < 16) {
+        continue;
+      }
+      s[0] += px & 0xff;
+      s[1] += (px >> 8) & 0xff;
+      s[2] += (px >> 16) & 0xff;
+      cnt++;
+    }
+    for (auto& v : s) {
+      v = cnt > 0 ? v / cnt : 0.0;
+    }
+    const bool named = has(nm, {"grass", "moss", "lawn", "meadow", "turf"});
+    const bool other = has(nm, {"rock", "stone", "dirt", "path", "sand", "wood", "plank", "wall", "metal",
+                                "brick", "road", "tile", "mud", "root", "bark", "water", "cliff"});
+    const bool green = s[1] > s[0] * 1.06 && s[1] > s[2] * 1.2 && s[1] > 30.0;
+    grassy[tex] = named || (green && !other);
+    for (int c = 0; c < 3; c++) {
+      rgb[tex][c] = (float)(s[c] / 255.0);
+    }
+    lg::debug("[enhanced] grass class {}: {} {:.0f} m2 rgb {:.0f} {:.0f} {:.0f}{}{}", name,
+             textures[tex].debug_name, area[tex], s[0], s[1], s[2], green ? " green" : "",
+             grassy[tex] ? " GRASS" : "");
+  }
+  enhanced_grass_ground_fields(level, name, b, [&](float x, float z, float* y, bool* g, float* col) {
+    u32 tex = kNoTex;
+    *g = false;
+    // the highest floor of the level's own tfrag (not the height field; not a tree's canopy or a
+    // rock's top, ties)
+    auto hfrag = ground.hfrag;
+    ground.hfrag = nullptr;
+    float vc[3] = {128.f, 128.f, 128.f};
+    bool found = ground.height(x, z, 1e9f, 2e9f, 0.f, y, &tex, true, vc);
+    if (found && tex < grassy.size() && grassy[tex]) {
+      // (none where anything stands on it lower than 3 m over it: a rock, roots, a ledge)
+      float over;
+      if (!ground.height(x, z, *y + 1.575f * kMeter, 1.425f * kMeter, 1.425f * kMeter, &over)) {
+        *g = true;
+        // (the floor as drawn: its texture times its vertex colors, 128 = 1)
+        for (int c = 0; c < 3; c++) {
+          col[c] = rgb[tex][c] * vc[c] / 128.f;
+        }
+      }
+    }
+    ground.hfrag = hfrag;
+    return found;
+  });
+}
 }  // namespace
 
 void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
@@ -1117,7 +1245,7 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
                        ? tree.draws[d + 1].unpacked.idx_of_first_idx_in_full_buffer
                        : idx.size();
       ground.add_mesh(tree.unpacked.vertices, idx, first, end, tree.use_strips,
-                      tree.draws[d].tree_tex_id);
+                      tree.draws[d].tree_tex_id, &tree.colors);
       walls.add_mesh(tree.unpacked.vertices, idx, first, end, tree.use_strips);
     }
   }
@@ -1152,6 +1280,9 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
   }
   if (level.shrub_trees.empty()) {
     return;
+  }
+  if (g_game_version == GameVersion::Jak3 && ground.size() > 0) {
+    add_ground_class_grass(level, name, ground);
   }
   Stats stats;
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
