@@ -116,6 +116,7 @@ uniform vec4 grass_ground;      // a dense grass field drawn: its middle x, z, r
 uniform float grass_water;      // and its water's height (m): no grass, no darkening, below
 uniform sampler2D tex_T21;      // and how lush it is (g), lying at grass_field: corner x, z, side (m)
 uniform vec3 grass_field;
+uniform vec3 lawn_feet;         // or (no field drawn) the small plants' feet map there: corner x, z, side (m; 0 = none)
 uniform float vignette;
 
 uniform vec3 up_view;   // world up in view space
@@ -230,8 +231,8 @@ uniform float tune_pane_keep = 1.0;  // under a roof the blended window panes (o
 uniform float tune_lawn = 1.0;             // lawns' macro variation and moss at their occluded feet (0 = off)
 uniform float tune_lawn_var = 0.12;        // its light and dark
 uniform float tune_lawn_ao = 1.2;          // the moss-dark dirt where the occlusion is
-uniform float tune_lawn_foot = 0.0;        // ...and at the grass tufts' feet, which the SSAO misses (0 = off; test, not proven)
-uniform float tune_lawn_foot_r = 0.7;      // ...within this many meters of a tuft
+uniform float tune_lawn_foot = 1.0;        // ...and at the plants' feet (grass tufts, tussocks), which the SSAO misses (0 = off; 10/11/14 debug views)
+uniform float tune_lawn_foot_r = 1.0;      // ...reaching this many meters out from the plants' splatted feet
 uniform float tune_lawn_foot_k = 0.6;      // ...this much at most
 uniform float tune_lawn_foot_split = 0.0;  // (test: 1 = only on the right half of the screen)
 uniform float tune_night_win = 1.0;       // lit window panes at night: their light (0 = off)
@@ -5425,33 +5426,32 @@ void composite_unused() {
       vec3 tint = mix(vec3(0.92, 1.0, 1.06), vec3(1.1, 1.02, 0.82), smoothstep(-0.5, 0.5, h));
       vec3 lc = c * (1.0 + tune_lawn_var * v) * tint;
       lc = mix(lc, lc * vec3(0.72, 0.66, 0.5), clamp((1.0 - ao) * tune_lawn_ao, 0.0, 0.6));
-      // the grass tufts' feet (shrub.frag's 0.955-0.983 tag): the SSAO misses them, their blades
-      // stand up to a meter in front of the ground they hide. The ground with a tuft's pixels
-      // within tune_lawn_foot_r (70 cm) of it on screen, at about its own depth (so not the blades of a tuft far in
-      // front), takes the moss-dark shade (test: tune_lawn_foot >= 10 shows it)
-      // (the ground itself: the forest floor reads in the rock band, 0.75; not a tuft's own pixel)
-      if (tune_lawn_foot > 0.0 && (pix_tag < 0.955 || pix_tag > 0.983) &&
+      // the grass tufts' feet: the SSAO misses them, their blades stand up to a meter in front of
+      // the ground they hide. Where the plants stand is known (EnhancedVegetation's feet, splatted
+      // from above round the camera into lawn_feet's map: r shade, g shade x floor height): the
+      // ground near a plant's foot, at its floor's height (not its blades), takes the moss-dark
+      // shade (test: tune_lawn_foot >= 10 shows it)
+      if (tune_lawn_foot > 0.0 && lawn_feet.z > 0.0 && (pix_tag < 0.955 || pix_tag > 0.983) &&
           (tune_lawn_foot_split == 0.0 || tex_coord.x > 0.5)) {
-        vec2 rr = clamp(vec2(abs(proj.z), abs(proj.w)) * (0.5 * 1.3 * tune_lawn_foot_r * 4096.0) / z, texel * 2.0, texel * 28.0);
-        float foot = 0.0;
-        float rot = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) * 6.2832;
-        for (int i = 0; i < 8; i++) {
-          float a = rot + float(i) * 0.7854;
-          vec2 o = vec2(cos(a), sin(a)) * rr * ((i & 1) == 0 ? 1.0 : 0.55);
-          vec4 g = gbuf(tex_coord + o);
-          float t = length(g.rgb * 2.0 - 1.0);
-          if (g.a > 0.0 && t > 0.955 && t < 0.983) {
-            // (by where the blade stands from this ground point: beside it and above it, in the
-            // world, not by depth: a tall tussock's far blades are a meter behind its foot)
-            vec3 q = view_pos(tex_coord + o, texture(tex_T3, tex_coord + o).r) - p;
-            float hy = dot(q, up_view) / 4096.0;
-            float hx = length(q - up_view * dot(q, up_view)) / 4096.0;
-            foot += (1.0 - smoothstep(tune_lawn_foot_r, tune_lawn_foot_r * 1.6, hx)) * step(-0.25, hy) * (1.0 - smoothstep(1.2, 1.8, hy));
+        vec2 fuv = (wp.xz - lawn_feet.xy) / lawn_feet.z;
+        vec2 fm = texture(tex_T21, fuv).rg;
+        // (and a ring of 6 taps tune_lawn_foot_r out, at 60%: a tussock's blades lean out past its
+        // splatted foot, the shade reaches out from under them)
+        float fr = fm.r;
+        for (int i = 0; i < 6; i++) {
+          float a = float(i) * 1.0472 + 0.5;
+          vec2 t = texture(tex_T21, fuv + vec2(cos(a), sin(a)) * (tune_lawn_foot_r / lawn_feet.z)).rg;
+          if (t.r * 0.6 > fr) {
+            fr = t.r * 0.6;
+            fm = vec2(t.r, t.g);
           }
         }
-        foot = clamp(foot / 4.0, 0.0, 1.0);
+        float fy = fm.g / max(fm.r, 1e-4);
+        vec2 fe = abs(fuv - 0.5);
+        float foot = fr * (1.0 - smoothstep(0.4, 0.5, max(fe.x, fe.y))) *
+                     (1.0 - smoothstep(0.3, 0.7, wp.y - fy)) * (1.0 - smoothstep(1.5, 2.5, fy - wp.y));
         if (tune_lawn_foot > 9.0) {
-          c = vec3(foot);
+          c = tune_lawn_foot > 10.5 ? vec3(fr, 0.0, clamp((fy - wp.y) * 0.25, 0.0, 1.0)) : vec3(foot);
           green = 1.0;
           lc = c;
         } else {
@@ -5460,6 +5460,11 @@ void composite_unused() {
       }
       c = tune_lawn > 9.0 ? vec3(green * 0.1) : mix(c, lc, green);
     }
+  }
+  if (tune_lawn_foot > 13.5 && z > 0.0 && lawn_feet.z > 0.0) {  // (test: tune_lawn_foot 14 paints the feet map over everything)
+    vec3 w2 = view_to_world * p / 4096.0 + cam_pos / 4096.0;
+    vec2 m2 = texture(tex_T21, (w2.xz - lawn_feet.xy) / lawn_feet.z).rg;
+    c = mix(c, vec3(0.0, 0.3, 1.0), m2.r * 0.7);
   }
 
   // rock and cliffs (normals written 0.75 long: tfrag3.frag): the game's textures are a blur up
@@ -5842,7 +5847,8 @@ void composite_unused() {
     float gtag = pix_tag;
     if ((gtag > 0.85 && gtag < 0.95) || (gtag > 0.55 && gtag < 0.65)) {
       vec3 gw = view_to_world * p / 4096.0 + cam_pos / 4096.0;
-      float lush = texture(tex_T21, (gw.xz - grass_field.xy) / grass_field.z).g - gnoise(gw.xz / 9.0) * 0.15;
+      // (the unit has the lawns' feet map when no listed field is drawn: then no field)
+      float lush = (lawn_feet.z > 0.0 ? 0.0 : texture(tex_T21, (gw.xz - grass_field.xy) / grass_field.z).g) - gnoise(gw.xz / 9.0) * 0.15;
       float under = smoothstep(0.08, 0.45, lush) * grass_ground.w *
                     smoothstep(grass_water + 0.05, grass_water + 0.3, gw.y);
       vec3 soil = luma(c) * vec3(0.62, 0.7, 0.34) * 0.75;

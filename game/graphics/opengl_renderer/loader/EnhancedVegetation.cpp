@@ -38,6 +38,11 @@ constexpr float kHfragStep = 8.f * kMeter;
 std::mutex g_hfrag_mutex;
 std::shared_ptr<const std::vector<float>> g_hfrag;
 
+// the plants' feet per level (enhanced_vegetation_feet)
+std::mutex g_feet_mutex;
+std::unordered_map<std::string, std::vector<EnhancedPlantFoot>> g_feet;
+u64 g_feet_version = 0;
+
 void keep_hfrag(const tfrag3::Level& level) {
   const auto& verts = level.hfrag.vertices;
   if (verts.size() < kHfragEdge * kHfragEdge / 2) {
@@ -510,7 +515,8 @@ void add_to_tree(tfrag3::ShrubTree& tree,
                  float max_vines,
                  u32 tree_idx,
                  float max_tufts,
-                 Stats* stats) {
+                 Stats* stats,
+                 std::vector<EnhancedPlantFoot>* feet) {
   auto& verts = tree.unpacked.vertices;
   const auto& groups = tree.packed_vertices.instance_groups;
 
@@ -599,6 +605,15 @@ void add_to_tree(tfrag3::ShrubTree& tree,
     p.crossed = crossed;
     p.copy = p.grounded && (crossed || p.stone) && r < (p.stone ? 6.f : 2.f) * kMeter &&
              r > 0.08f * kMeter;
+    // (the feet: the big tussocks too, up to 3 m tall and 5 m round, on a floor)
+    if (!p.stone && r < 5.f * kMeter && p.height > 0.3f * kMeter && p.height < 3.f * kMeter) {
+      float base = p.base;
+      auto floor_tex = p.floor_tex;
+      if (p.grounded ||
+          ground.height(p.cx, p.cz, min_y, 0.6f * kMeter, 0.6f * kMeter, &base, &floor_tex)) {
+        feet->push_back({p.cx, base, p.cz, r, p.height, 0});
+      }
+    }
   }
 
   // the new strips: per original draw and tier
@@ -673,6 +688,9 @@ void add_to_tree(tfrag3::ShrubTree& tree,
       // (so a detailed model can stand in for the copy too)
       tree.enh_copies.push_back({p.first_vert, p.end_vert, offset, (u8)tier, p.cx, p.cz, p.base,
                                  x, y - 0.03f * kMeter, z, yaw, scale});
+      if (!p.stone) {
+        feet->push_back({x, y, z, p.radius * scale, p.height * scale, (u8)tier});
+      }
       stats->copies++;
     }
   }
@@ -784,6 +802,9 @@ void add_to_tree(tfrag3::ShrubTree& tree,
         }
         tree.enh_copies.push_back({p.first_vert, p.end_vert, offset, (u8)tier, p.cx, p.cz, p.base, x,
                                    y - 0.03f * kMeter, z, yaw, scale});
+        if (!p.stone) {
+          feet->push_back({x, y, z, p.radius * scale, p.height * scale, (u8)tier});
+        }
         stats->strewn++;
       }
     }
@@ -1087,6 +1108,15 @@ void add_to_tree(tfrag3::ShrubTree& tree,
         int tier = rnd(tree_idx, id, k * 5 + 4) < 0.35f ? 1 : 2;
         float yaw = 6.2831853f * rnd(tree_idx, id, k * 5 + 5);
         float scale = 0.7f + 0.6f * rnd(tree_idx, id, k * 5 + 6);
+        {
+          float cr = 0.f, ch = 0.f;
+          for (u32 q = card.strip.start; q < card.strip.end; q++) {
+            const auto& cv = verts[tree.indices[q]];
+            cr = std::max(cr, std::hypot(cv.x - card.cx, cv.z - card.cz));
+            ch = std::max(ch, cv.y - card.base);
+          }
+          feet->push_back({at.x(), at.y(), at.z(), cr * scale, ch * scale, (u8)tier});
+        }
         // two crossed cards
         for (int c = 0; c < 2; c++) {
           // the card's 4 vertices, copied as a block (they may not be contiguous)
@@ -1359,9 +1389,16 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
     add_ground_class_grass(level, name, ground, water, trans);
   }
   Stats stats;
+  std::vector<EnhancedPlantFoot> feet;
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
     add_to_tree(level.shrub_trees[t], level.textures, ground, walls,
-                4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats);
+                4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats,
+                &feet);
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_feet_mutex);
+    g_feet[name] = std::move(feet);
+    g_feet_version++;
   }
   lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} strewn, {} tufts on {} "
            "grassy floors, {} wall vines with {} copies{}",
@@ -1371,4 +1408,25 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
     lg::info("[vegdbg] {}: {} copies and {} strewn on the height field where the level has a floor of its own",
              name, stats.dbg1, stats.dbg2);  // DEBUG
   }
+}
+
+u64 enhanced_vegetation_feet(float x0,
+                             float z0,
+                             float x1,
+                             float z1,
+                             int max_tier,
+                             std::vector<EnhancedPlantFoot>* out) {
+  std::lock_guard<std::mutex> lock(g_feet_mutex);
+  if (out) {
+    out->clear();
+    for (const auto& [name, feet] : g_feet) {
+      for (const auto& f : feet) {
+        if (f.tier <= max_tier && f.x + f.r > x0 && f.x - f.r < x1 && f.z + f.r > z0 &&
+            f.z - f.r < z1) {
+          out->push_back(f);
+        }
+      }
+    }
+  }
+  return g_feet_version;
 }

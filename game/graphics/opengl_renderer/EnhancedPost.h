@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <future>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -403,6 +404,19 @@ class EnhancedPost {
   int m_w = 0;
   int m_h = 0;
   GLuint m_black_tex = 0;
+  // the small plants' feet around the camera seen from above, for the lawns' shade at their foot
+  // (EnhancedVegetation's feet, splatted on a worker): rg = shade, shade x floor height (m),
+  // kFeetN x 0.5 m cells around m_feet_mid (game units)
+  void update_feet_map();
+  static constexpr int kFeetN = 256;
+  static constexpr float kFeetCell = 0.5f;  // m
+  GLuint m_feet_tex = 0;
+  bool m_feet_valid = false;
+  float m_feet_mid[2] = {0.f, 0.f};
+  float m_feet_job_mid[2] = {0.f, 0.f};
+  u64 m_feet_version = 0;
+  int m_feet_tier = -1;
+  std::future<std::vector<float>> m_feet_job;
   GLuint m_rock_tex = 0;  // rock_detail.png: a tiling rock picture over rock surfaces
   float m_rock_avg = 0.5f;
   GLuint m_ground_tex = 0;  // ground_detail.png: a tiling picture of rocky ground (stone, gravel)
