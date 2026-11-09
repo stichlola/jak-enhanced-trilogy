@@ -172,10 +172,13 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
 
   enh_cpu_split("ssao-alloc");
   // copy (and for msaa, resolve) the depth buffer into a texture we can sample
+  static const EnhancedTune t_probe_depth("debug.ssao_probe", 0.f);
   glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_depth_fbo);
-  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
-                    GL_NEAREST);
+  if ((int)(float)t_probe_depth != 5) {  // (test 5: last frame's depth, for the CPU probe only)
+    glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT,
+                      GL_NEAREST);
+  }
   // and the level normals (msaa: averaged, renormalized in the shaders)
   enh_cpu_split("ssao-depth-blit");
   m_normals_ready = false;
