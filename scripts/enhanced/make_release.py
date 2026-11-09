@@ -333,7 +333,9 @@ def main():
         iscc = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Inno Setup 6/ISCC.exe"
         if not iscc.exists():
             iscc = Path(os.environ.get("ProgramFiles(x86)", "")) / "Inno Setup 6/ISCC.exe"
-        subprocess.run([str(iscc), "/Q", f"/DMyVersion={args.version or 'dev'}", f"/DSrc={dest}",
+        # (the programs' size: the installer's window adds it to the games' in "Needs N GB")
+        prog_mb = sum(f.stat().st_size for f in dest.rglob("*") if f.is_file()) // (1024 * 1024) + 1
+        subprocess.run([str(iscc), "/Q", f"/DMyVersion={args.version or 'dev'}", f"/DSrc={dest}", f"/DProgMB={prog_mb}",
                         f"/O{args.out}", str(ROOT / "scripts/enhanced/installer.iss")], check=True)
         for exe in args.out.glob("Setup-*.exe"):
             print(f"{exe} ({exe.stat().st_size / 1e6:.0f} MB)")

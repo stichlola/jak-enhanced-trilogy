@@ -7,9 +7,18 @@
 ; game (with the time they take). Then it copies the programs (no game data inside) and, in the same
 ; window, extracts each disc and compiles its game, and makes the HD textures that were picked. The
 ; launcher finds all of it done (ISO\iso-paths.txt, data\out\jakN) and just plays.
+;
+; Those pages are the fallback: a normal start shows installer_ui.ps1 instead (a dark WPF window: the
+; discs found on this PC, where, the HD textures, the build's progress, play), which runs this same
+; Setup again silently with /JEUI=<its folder> (the choices in, the progress out: see that script).
+; /CLASSIC shows the wizard pages; /SILENT and /VERYSILENT work as before.
 
 #ifndef MyVersion
   #define MyVersion "dev"
+#endif
+; the programs' size in MB, for the window's "Needs N GB" (make_release.py passes the real one)
+#ifndef ProgMB
+  #define ProgMB "1200"
 #endif
 #ifndef Src
   #define Src "..\..\out\release\Jak-Enhanced-Trilogy"
@@ -78,6 +87,81 @@ en.Donate1=1 € — a sweet
 en.Donate2=3 € — a coffee
 en.Donate3=Any amount
 en.Trust=Secure payment on PayPal's own page (paypal.me/mymusicminis), to Code & Craft Solutions, the author's account. You can change the amount before paying.
+; the installer's window (installer_ui.ps1)
+en.UiStepDiscs=Discs
+en.UiStepOptions=Options
+en.UiStepBuild=Build
+en.UiStepPlay=Play
+en.UiFound=Found on this PC
+en.UiSearching=Looking for your disc images...
+en.UiNoneFound=No Jak disc image found on this PC. Pick yours with Browse, or drop it on this window.
+en.UiBrowse=Not listed? Browse...
+en.UiDrop=or drop the file on this window
+en.UiRemove=Remove from the list
+en.UiNext=Next
+en.UiBack=Back
+en.UiOptTitle=Build your games
+en.UiOptSub=Where they go, and the optional HD textures.
+en.UiInstallTo=Install the games to
+en.UiChange=Change
+en.UiSizeNote=The programs take %1 GB; each game made from its disc goes in the same folder (about %2 GB a game).
+en.UiInstall=Build the games
+en.UiNeeds=Needs %1 GB · %2 has %3 GB free
+en.UiNeedsOnly=Needs %1 GB
+en.UiAbout=About %1
+en.UiElapsed=Elapsed %1
+en.UiBadDir=Pick a full folder path (like C:\Games\Jak Enhanced Trilogy).
+en.UiNoSpace=Not enough space: it needs %1 GB and the drive has %2 GB free. Pick another folder.
+en.UiSteps=Steps
+en.UiCopy=Copying the programs...
+en.UiCopyRow=Copy the programs
+en.UiExtractRow=%1: extract the disc and compile the game
+en.UiHdRow=%1: HD textures
+en.UiSetupFailed=The setup stopped (code %1). The details are in %2.
+en.UiCancelAsk=Stop now? What is not done, the launcher makes at its first start.
+en.UiDoneTitle=Ready to play
+en.UiDoneSub=Your games are made from your discs. Press \ in a game for the Enhanced menu.
+en.UiDoneFailTitle=Done, with problems
+en.UiDoneFailSub=Some steps failed; the launcher tries them again at its first start.
+en.UiOpenLog=Open the log
+en.UiFinish=Close
+it.UiStepDiscs=Dischi
+it.UiStepOptions=Opzioni
+it.UiStepBuild=Preparazione
+it.UiStepPlay=Gioca
+it.UiFound=Trovati su questo PC
+it.UiSearching=Cerco le immagini dei tuoi dischi...
+it.UiNoneFound=Nessuna immagine di un disco di Jak trovata su questo PC. Scegli la tua con Sfoglia, o trascinala su questa finestra.
+it.UiBrowse=Non c'è? Sfoglia...
+it.UiDrop=oppure trascina il file su questa finestra
+it.UiRemove=Togli dall'elenco
+it.UiNext=Avanti
+it.UiBack=Indietro
+it.UiOptTitle=Prepara i tuoi giochi
+it.UiOptSub=Dove vanno, e le texture HD facoltative.
+it.UiInstallTo=Installa i giochi in
+it.UiChange=Cambia
+it.UiSizeNote=I programmi occupano %1 GB; ogni gioco ricavato dal suo disco va nella stessa cartella (circa %2 GB a gioco).
+it.UiInstall=Prepara i giochi
+it.UiNeeds=Servono %1 GB · %2 ha %3 GB liberi
+it.UiNeedsOnly=Servono %1 GB
+it.UiAbout=Circa %1
+it.UiElapsed=Tempo trascorso %1
+it.UiBadDir=Scegli il percorso completo di una cartella (come C:\Giochi\Jak Enhanced Trilogy).
+it.UiNoSpace=Spazio insufficiente: servono %1 GB e il disco ha %2 GB liberi. Scegli un'altra cartella.
+it.UiSteps=Passaggi
+it.UiCopy=Copia dei programmi...
+it.UiCopyRow=Copia dei programmi
+it.UiExtractRow=%1: estrazione del disco e compilazione del gioco
+it.UiHdRow=%1: texture HD
+it.UiSetupFailed=L'installazione si è fermata (codice %1). I dettagli sono in %2.
+it.UiCancelAsk=Fermare adesso? Ciò che non è fatto lo fa il launcher al primo avvio.
+it.UiDoneTitle=Pronto per giocare
+it.UiDoneSub=I tuoi giochi sono pronti, ricavati dai tuoi dischi. Premi \ in un gioco per il menu Enhanced.
+it.UiDoneFailTitle=Fatto, con qualche problema
+it.UiDoneFailSub=Alcuni passaggi non sono riusciti; il launcher li riprova al primo avvio.
+it.UiOpenLog=Apri il log
+it.UiFinish=Chiudi
 it.DiscsTitle=I tuoi dischi
 it.DiscsSub=Scegli le immagini (.iso) dei tuoi dischi PS2.
 it.DiscsText=Uno, due o tutti e tre i giochi, in qualsiasi ordine (PAL, NTSC o NTSC-J). Jak Enhanced Trilogy non contiene dati dei giochi: tutto si ricava dai tuoi dischi, 20-40 minuti a gioco, subito dopo l'installazione.
@@ -122,6 +206,9 @@ Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs create
 Source: "{#Src}\data\scripts\enhanced\update.ps1"; Flags: dontcopy
 ; the buy-me-a-coffee buttons on the last page (drawn by ask.ps1 -ExportIcons)
 Source: "..\..\game\assets\enhanced\art\donate-*.bmp"; Flags: dontcopy
+; the installer's own window (in place of the wizard pages) and its icon
+Source: "installer_ui.ps1"; Flags: dontcopy
+Source: "..\..\game\assets\enhanced\art\jak-enhanced.ico"; Flags: dontcopy
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Flags: runminimized
@@ -152,9 +239,59 @@ var
   DonateHead, DonateTrust: TNewStaticText;
   DonatePanel: array[1..3] of TPanel;
   DonateLock: TBitmapImage;
+  // run by the installer's window (/JEUI=<its folder>): the choices from there, the progress to there
+  UiDir: String;
+  UiHd: array[1..3] of Boolean;
+  UiPct: Integer;
 
 const
   DonateUrl = 'https://paypal.me/mymusicminis';
+  AppKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{5C7E2A51-3B8F-4E0A-9D4C-8A1F6E2B7C90}_is1';
+
+// a line for the installer's window (status.txt: see installer_ui.ps1)
+procedure UiStatus(const S: String);
+begin
+  if UiDir <> '' then
+    SaveStringToFile(UiDir + '\status.txt', S + #13#10, True);
+end;
+
+procedure StepText(const Id, Text: String);
+begin
+  if UiDir <> '' then begin
+    UiPct := -1;
+    UiStatus('@@step ' + Id);
+  end else
+    WorkPage.SetText(Text, '');
+end;
+
+procedure StepProgress(Pct: Integer);
+begin
+  if UiDir <> '' then begin
+    if Pct <> UiPct then
+      UiStatus('@@pct ' + IntToStr(Pct));
+    UiPct := Pct;
+  end else
+    WorkPage.SetProgress(Pct, 100);
+end;
+
+procedure StepFailed(const Id: String; g, Code: Integer);
+begin
+  if UiDir <> '' then
+    UiStatus('@@fail ' + Id + ' ' + IntToStr(Code))
+  else
+    MsgBox(FmtMessage(CustomMessage('Failed'), [IntToStr(g), IntToStr(Code), ExpandConstant('{app}') + '\install.log']),
+           mbError, MB_OK);
+end;
+
+// the copying of the files, for the window's bar
+procedure CurInstallProgressChanged(CurProgress, MaxProgress: Integer);
+begin
+  if (UiDir <> '') and (MaxProgress > 0) then
+    if MaxProgress >= 100 then
+      StepProgress(CurProgress div (MaxProgress div 100))
+    else
+      StepProgress(CurProgress * 100 div MaxProgress);
+end;
 
 // which game a disc image is: the serial on its boot line ("cdrom0:\SCES_524.60;1") in its first
 // megabytes, as the launcher does. 0: none of the three
@@ -399,14 +536,17 @@ var
 begin
   if Trim(S) = '' then
     exit;
-  WorkPage.Msg2Label.Caption := Copy(Trim(S), 1, 110);
+  if UiDir <> '' then
+    UiStatus('@@line ' + Copy(Trim(S), 1, 200))
+  else
+    WorkPage.Msg2Label.Caption := Copy(Trim(S), 1, 110);
   SaveStringToFile(ExpandConstant('{app}\install.log'), S + #13#10, True);
   LogLines := LogLines + 1;
   At := Pos('%]', S);
   if (At > 3) and (Copy(S, 1, 1) = '[') then begin
     Pct := StrToIntDef(Trim(Copy(S, 2, At - 2)), -1);
     if (Pct >= 0) and (Pct <= 100) then
-      WorkPage.SetProgress(Pct, 100);
+      StepProgress(Pct);
   end;
 end;
 
@@ -446,11 +586,13 @@ begin
   if not Exec('powershell.exe', PsParams(Script, '-Root ' + PsQuote(App) + ' -CloseOnly'), '', SW_HIDE,
               ewWaitUntilTerminated, Code) or (Code <> 0) then
     Result := CustomMessage('GameStuck');
+  if Result <> '' then
+    UiStatus('@@fail prepare 0');
 end;
 
 function Run(const Filename, Params: String): Integer;
 begin
-  WorkPage.SetProgress(0, 100);
+  StepProgress(0);
   SaveStringToFile(ExpandConstant('{app}\install.log'), '> ' + Filename + ' ' + Params + #13#10, True);
   if not ExecAndLogOutput(Filename, Params, ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated,
                           Result, @OnLog) then
@@ -469,17 +611,28 @@ begin
     Result := 'py';
     exit;
   end;
-  WorkPage.SetText(CustomMessage('Python'), '');
+  if UiDir <> '' then
+    UiStatus('@@note python')
+  else
+    WorkPage.SetText(CustomMessage('Python'), '');
   Run('winget', 'install --id Python.Python.3.12 -e --scope user --accept-package-agreements --accept-source-agreements');
   Result := ExpandConstant('{localappdata}\Programs\Python\Launcher\py.exe');
   if not FileExists(Result) then
     Result := 'py';
 end;
 
+function WantHd(g: Integer): Boolean;
+begin
+  if UiDir <> '' then
+    Result := UiHd[g]
+  else
+    Result := HdPage.Values[g - 1];
+end;
+
 procedure MakeGames;
 var
   g, Code: Integer;
-  App, Data, Version, Paths: String;
+  App, Data, Version, Paths, Py: String;
   Ver: AnsiString;
 begin
   App := ExpandConstant('{app}');
@@ -495,17 +648,17 @@ begin
   if LoadStringFromFile(Data + '\VERSION', Ver) then
     Version := Trim(String(Ver));
 
-  WorkPage.Show;
+  if UiDir = '' then
+    WorkPage.Show;
   try
     for g := 1 to 3 do begin
       if GameIso[g] = '' then
         continue;
-      WorkPage.SetText(FmtMessage(CustomMessage('Extract'), [IntToStr(g)]), '');
+      StepText('x' + IntToStr(g), FmtMessage(CustomMessage('Extract'), [IntToStr(g)]));
       Code := Run(App + '\extractor.exe', '--game jak' + IntToStr(g) + ' --proj-path "' + Data +
                   '" -e -d -c "' + GameIso[g] + '"');
       if Code <> 0 then begin
-        MsgBox(FmtMessage(CustomMessage('Failed'), [IntToStr(g), IntToStr(Code), App + '\install.log']),
-               mbError, MB_OK);
+        StepFailed('x' + IntToStr(g), g, Code);
         continue;
       end;
       if Version <> '' then
@@ -513,19 +666,22 @@ begin
       // (this made the levels with the replacement models as they are now)
       Run('powershell.exe', PsParams(Data + '\scripts\enhanced\refresh_models.ps1', '-Proj ' + PsQuote(Data) +
           ' -Bin ' + PsQuote(App) + ' -Game jak' + IntToStr(g) + ' -MarkOnly'));
-      if HdPage.Values[g - 1] then begin
-        WorkPage.SetText(FmtMessage(CustomMessage('Hd'), [IntToStr(g)]), '');
-        Code := Run(PythonLauncher, '-3 "' + Data + '\scripts\enhanced\hd_setup.py" --games jak' +
+      if WantHd(g) then begin
+        StepText('hd' + IntToStr(g), FmtMessage(CustomMessage('Hd'), [IntToStr(g)]));
+        // (Python first: its own line while winget installs it, then the HD textures' line again)
+        Py := PythonLauncher;
+        StepText('hd' + IntToStr(g), FmtMessage(CustomMessage('Hd'), [IntToStr(g)]));
+        Code := Run(Py, '-3 "' + Data + '\scripts\enhanced\hd_setup.py" --games jak' +
                     IntToStr(g) + ' --bin "' + App + '"');
         if Code <> 0 then
-          MsgBox(FmtMessage(CustomMessage('Failed'), [IntToStr(g), IntToStr(Code), App + '\install.log']),
-                 mbError, MB_OK);
+          StepFailed('hd' + IntToStr(g), g, Code);
       end;
       // the launcher doesn't ask again (skipped ones: delete the file to be asked)
       SaveStringToFile(Data + '\out\jak' + IntToStr(g) + '\hd-textures.asked', 'asked', False);
     end;
   finally
-    WorkPage.Hide;
+    if UiDir = '' then
+      WorkPage.Hide;
   end;
 end;
 
@@ -533,12 +689,130 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var
   Code: Integer;
 begin
+  if CurStep = ssInstall then
+    StepText('copy', '');
   if CurStep <> ssPostInstall then
     exit;
   // (Steam's list of non-Steam games: add_to_steam.ps1)
   if WizardIsTaskSelected('steam') then
     Exec('powershell.exe', PsParams(ExpandConstant('{app}\data\scripts\enhanced\add_to_steam.ps1'),
          '-Root ' + PsQuote(ExpandConstant('{app}'))), '', SW_HIDE, ewWaitUntilTerminated, Code);
-  if not WizardSilent then
+  if (UiDir <> '') or not WizardSilent then
     MakeGames;
+  UiStatus('@@done');
+end;
+
+// ---- the installer's window (installer_ui.ps1) ----------------------------------------------------
+
+// the run the window started: the discs and the HD textures it chose
+procedure LoadUiChoices;
+var
+  g: Integer;
+  Ini: String;
+begin
+  Ini := UiDir + '\choices.ini';
+  for g := 1 to 3 do begin
+    GameIso[g] := GetIniString('discs', 'jak' + IntToStr(g), '', Ini);
+    UiHd[g] := GetIniInt('hd', 'jak' + IntToStr(g), 0, 0, 1, Ini) = 1;
+  end;
+end;
+
+function HasParam(const Name: String): Boolean;
+var
+  i: Integer;
+begin
+  Result := False;
+  for i := 1 to ParamCount do
+    if CompareText(ParamStr(i), Name) = 0 then
+      Result := True;
+end;
+
+// the texts the window shows: the CustomMessages, in the language picked
+procedure AddUiText(var Lines: TArrayOfString; const Line: String);
+var
+  S: String;
+begin
+  S := Line;
+  StringChangeEx(S, #13#10, '\n', True);
+  StringChangeEx(S, #10, '\n', True);
+  SetArrayLength(Lines, GetArrayLength(Lines) + 1);
+  Lines[GetArrayLength(Lines) - 1] := S;
+end;
+
+// True: the window did it all (or the player closed it); False: it could not start, the wizard instead
+function RunUi: Boolean;
+var
+  Dir, Tmp, Prev, Name: String;
+  Lines: TArrayOfString;
+  Keys: TStringList;
+  i, Code: Integer;
+begin
+  Result := False;
+  Tmp := ExpandConstant('{tmp}');
+  Dir := Tmp + '\ui';
+  ForceDirectories(Dir);
+  try
+    ExtractTemporaryFile('installer_ui.ps1');
+    ExtractTemporaryFile('update.ps1');
+    ExtractTemporaryFile('jak-enhanced.ico');
+    ExtractTemporaryFile('donate-sweet.bmp');
+    ExtractTemporaryFile('donate-coffee.bmp');
+    ExtractTemporaryFile('donate-heart.bmp');
+    ExtractTemporaryFile('donate-lock.bmp');
+  except
+    exit;
+  end;
+  // the folder of the install there is (as the wizard would propose it)
+  Prev := '';
+  if not RegQueryStringValue(HKCU, AppKey, 'Inno Setup: App Path', Prev) then
+    RegQueryStringValue(HKLM, AppKey, 'Inno Setup: App Path', Prev);
+  if Prev = '' then
+    Prev := ExpandConstant('{localappdata}\Programs\Jak Enhanced Trilogy');
+  AddUiText(Lines, 'Setup=' + ExpandConstant('{srcexe}'));
+  AddUiText(Lines, 'Lang=' + ActiveLanguage);
+  AddUiText(Lines, 'DefaultDir=' + Prev);
+  AddUiText(Lines, 'ProgMB={#ProgMB}');
+  AddUiText(Lines, 'Icon=' + Tmp + '\jak-enhanced.ico');
+  AddUiText(Lines, 'Update=' + Tmp + '\update.ps1');
+  AddUiText(Lines, 'Art=' + Tmp);
+  Keys := TStringList.Create;
+  try
+    Keys.CommaText := 'DiscsTitle,DiscsSub,DiscsText,Missing,Unknown,HdTitle,HdSub,HdText,Hd1,Hd2,Hd3,' +
+      'WorkTitle,WorkSub,Extract,Python,Hd,Failed,GameOpen,GameStays,GameStuck,PlayNow,Desktop,Steam,Free,' +
+      'DonateHead,Donate1,Donate2,Donate3,Trust,UiStepDiscs,UiStepOptions,UiStepBuild,UiStepPlay,UiFound,' +
+      'UiSearching,UiNoneFound,UiBrowse,UiDrop,UiRemove,UiNext,UiBack,UiOptTitle,UiOptSub,UiInstallTo,UiChange,' +
+      'UiSizeNote,UiInstall,UiNeeds,UiNeedsOnly,UiAbout,UiElapsed,UiBadDir,UiNoSpace,UiSteps,UiCopy,UiCopyRow,' +
+      'UiExtractRow,UiHdRow,UiSetupFailed,UiCancelAsk,UiDoneTitle,UiDoneSub,UiDoneFailTitle,UiDoneFailSub,' +
+      'UiOpenLog,UiFinish';
+    for i := 0 to Keys.Count - 1 do begin
+      Name := Keys[i];
+      AddUiText(Lines, 'S.' + Name + '=' + CustomMessage(Name));
+    end;
+  finally
+    Keys.Free;
+  end;
+  if not SaveStringsToUTF8File(Dir + '\ui.txt', Lines, False) then
+    exit;
+  if not Exec('powershell.exe', '-NoProfile -STA -WindowStyle Hidden -Command "& ([scriptblock]::Create([IO.File]::ReadAllText(' +
+              PsQuote(Tmp + '\installer_ui.ps1') + '))) -Dir ' + PsQuote(Dir) + '"', '', SW_HIDE,
+              ewWaitUntilTerminated, Code) then
+    exit;
+  // (3: the window failed; ui-error.txt says why)
+  Result := Code = 0;
+end;
+
+function InitializeSetup: Boolean;
+begin
+  Result := True;
+  UiPct := -1;
+  UiDir := ExpandConstant('{param:JEUI|}');
+  if UiDir <> '' then begin
+    LoadUiChoices;
+    exit;
+  end;
+  if WizardSilent or HasParam('/CLASSIC') then
+    exit;
+  // the window did the install: no wizard after it
+  if RunUi then
+    Result := False;
 end;

@@ -86,18 +86,32 @@ try {
   $form.FormBorderStyle = 'FixedDialog'
   $form.MaximizeBox = $false
   $form.StartPosition = 'CenterScreen'
-  $form.ClientSize = New-Object Drawing.Size 480, 118
-  $form.Font = [Drawing.SystemFonts]::MessageBoxFont
+  # (dark, as the installer's window: the title bar too, Windows 10 20H1 and later)
+  $form.ClientSize = New-Object Drawing.Size 520, 132
+  $form.BackColor = [Drawing.Color]::FromArgb(22, 23, 27)
+  $form.ForeColor = [Drawing.Color]::FromArgb(242, 243, 245)
+  $form.Font = New-Object Drawing.Font 'Segoe UI', 9.5
+  try {
+    Add-Type -Namespace JakEnhanced -Name Dwm -MemberDefinition '[DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);'
+    $form.Add_HandleCreated({ $on = 1; [void][JakEnhanced.Dwm]::DwmSetWindowAttribute($form.Handle, 20, [ref]$on, 4) })
+  } catch { }
   $stepLabel = New-Object Windows.Forms.Label
-  $stepLabel.SetBounds(14, 12, 452, 40)
+  $stepLabel.SetBounds(20, 18, 480, 44)
+  $stepLabel.Font = New-Object Drawing.Font 'Segoe UI Semibold', 11
   $stepLabel.Text = 'Starting Jak Enhanced Trilogy...'
-  $bar = New-Object Windows.Forms.ProgressBar
-  $bar.SetBounds(14, 56, 452, 18)
-  $bar.Style = 'Marquee'
-  $bar.MarqueeAnimationSpeed = 30
+  # the bar: a thin blue line on a dark track (a moving segment while there's no percent)
+  $bar = New-Object Windows.Forms.Panel
+  $bar.SetBounds(20, 68, 480, 6)
+  $bar.BackColor = [Drawing.Color]::FromArgb(42, 44, 51)
+  $barFill = New-Object Windows.Forms.Panel
+  $barFill.BackColor = [Drawing.Color]::FromArgb(61, 90, 254)
+  $barFill.SetBounds(0, 0, 0, 6)
+  $bar.Controls.Add($barFill)
+  $marquee = 0
   $detail = New-Object Windows.Forms.Label
-  $detail.SetBounds(14, 82, 452, 30)
-  $detail.ForeColor = [Drawing.SystemColors]::GrayText
+  $detail.SetBounds(20, 86, 480, 36)
+  $detail.ForeColor = [Drawing.Color]::FromArgb(126, 130, 144)
+  $detail.Font = New-Object Drawing.Font 'Consolas', 8.5
   $detail.AutoEllipsis = $true
   $form.Controls.AddRange(@($stepLabel, $bar, $detail))
   # (closing it doesn't stop the work: it only hides, the game still starts at the end)
@@ -143,10 +157,10 @@ try {
     if ($exited) { break }
     $stepLabel.Text = if ($step) { $step } else { 'Starting Jak Enhanced Trilogy...' }
     if ($percent -ge 0) {
-      $bar.Style = 'Continuous'
-      $bar.Value = $percent
+      $barFill.SetBounds(0, 0, [int]($bar.Width * $percent / 100), $bar.Height)
     } else {
-      $bar.Style = 'Marquee'
+      $marquee = ($marquee + 0.03) % 1.3
+      $barFill.SetBounds([int](($marquee - 0.25) * $bar.Width), 0, [int]($bar.Width * 0.25), $bar.Height)
     }
     $wanted = ($step -and $clock.ElapsedMilliseconds - $stepAt -gt 800) -or $clock.ElapsedMilliseconds -gt 2000
     # (in front of the other windows while the launcher works; not any more once the game starts)
@@ -162,7 +176,6 @@ try {
     # as the console launcher does it (data\ the working folder), without gk's own console window
     $stepLabel.Text = "Starting Jak $launch..."
     $detail.Text = ''
-    $bar.Style = 'Marquee'
     $form.TopMost = $false
     $gkPsi = New-Object Diagnostics.ProcessStartInfo (Join-Path $Root 'gk.exe'), "--game jak$launch -- -boot -fakeiso"
     $gkPsi.UseShellExecute = $false
