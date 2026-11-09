@@ -45,6 +45,8 @@ UninstallDisplayIcon={app}\data\game\assets\enhanced\art\jak-enhanced.ico
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; English only, no language question
+ShowLanguageDialog=no
 ; the extracted discs: about 30 GB a game
 ExtraDiskSpaceRequired=32212254720
 ArchitecturesAllowed=x64compatible
@@ -52,7 +54,6 @@ ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
-Name: "it"; MessagesFile: "compiler:Languages\Italian.isl"
 
 [CustomMessages]
 en.DiscsTitle=Your discs
@@ -125,83 +126,14 @@ en.UiDoneFailTitle=Done, with problems
 en.UiDoneFailSub=Some steps failed; the launcher tries them again at its first start.
 en.UiOpenLog=Open the log
 en.UiFinish=Close
-it.UiStepDiscs=Dischi
-it.UiStepOptions=Opzioni
-it.UiStepBuild=Preparazione
-it.UiStepPlay=Gioca
-it.UiFound=Trovati su questo PC
-it.UiSearching=Cerco le immagini dei tuoi dischi...
-it.UiNoneFound=Nessuna immagine di un disco di Jak trovata su questo PC. Scegli la tua con Sfoglia, o trascinala su questa finestra.
-it.UiBrowse=Non c'è? Sfoglia...
-it.UiDrop=oppure trascina il file su questa finestra
-it.UiRemove=Togli dall'elenco
-it.UiNext=Avanti
-it.UiBack=Indietro
-it.UiOptTitle=Prepara i tuoi giochi
-it.UiOptSub=Dove vanno, e le texture HD facoltative.
-it.UiInstallTo=Installa i giochi in
-it.UiChange=Cambia
-it.UiSizeNote=I programmi occupano %1 GB; ogni gioco ricavato dal suo disco va nella stessa cartella (circa %2 GB a gioco).
-it.UiInstall=Prepara i giochi
-it.UiNeeds=Servono %1 GB · %2 ha %3 GB liberi
-it.UiNeedsOnly=Servono %1 GB
-it.UiAbout=Circa %1
-it.UiElapsed=Tempo trascorso %1
-it.UiBadDir=Scegli il percorso completo di una cartella (come C:\Giochi\Jak Enhanced Trilogy).
-it.UiNoSpace=Spazio insufficiente: servono %1 GB e il disco ha %2 GB liberi. Scegli un'altra cartella.
-it.UiSteps=Passaggi
-it.UiCopy=Copia dei programmi...
-it.UiCopyRow=Copia dei programmi
-it.UiExtractRow=%1: estrazione del disco e compilazione del gioco
-it.UiHdRow=%1: texture HD
-it.UiSetupFailed=L'installazione si è fermata (codice %1). I dettagli sono in %2.
-it.UiCancelAsk=Fermare adesso? Ciò che non è fatto lo fa il launcher al primo avvio.
-it.UiDoneTitle=Pronto per giocare
-it.UiDoneSub=I tuoi giochi sono pronti, ricavati dai tuoi dischi. Premi \ in un gioco per il menu Enhanced.
-it.UiDoneFailTitle=Fatto, con qualche problema
-it.UiDoneFailSub=Alcuni passaggi non sono riusciti; il launcher li riprova al primo avvio.
-it.UiOpenLog=Apri il log
-it.UiFinish=Chiudi
-it.DiscsTitle=I tuoi dischi
-it.DiscsSub=Scegli le immagini (.iso) dei tuoi dischi PS2.
-it.DiscsText=Uno, due o tutti e tre i giochi, in qualsiasi ordine (PAL, NTSC o NTSC-J). Jak Enhanced Trilogy non contiene dati dei giochi: tutto si ricava dai tuoi dischi, 20-40 minuti a gioco, subito dopo l'installazione.
-it.Disc=Immagine disco:
-it.NoDisc=Scegli almeno un'immagine disco.
-it.Missing=File non trovato:
-it.Unknown=Non è un disco di Jak che l'installer conosce:
-it.Twice=Due immagini dello stesso gioco:
-it.HdTitle=Texture HD
-it.HdSub=Ogni texture ridisegnata 4x da un'IA (Real-ESRGAN) sulla tua scheda video.
-it.HdText=Facoltative: i giochi funzionano uguale senza. Si fanno su questo computer dai tuoi dischi dopo l'estrazione e richiedono tempo (dipende dalla scheda video), più 1-4 GB a gioco. Per farle dopo: cancella data\out\jakN\hd-textures.asked nella cartella d'installazione, il launcher lo richiede.
-it.Hd1=Jak 1 (circa 30 minuti)
-it.Hd2=Jak II (circa 1-2 ore)
-it.Hd3=Jak 3 (circa 1-2 ore)
-it.WorkTitle=Preparazione dei giochi dai tuoi dischi
-it.WorkSub=Richiede tempo: lascia aperta questa finestra. Quando finisce i giochi sono pronti.
-it.Extract=Jak %1: estrazione del disco e compilazione del gioco (20-40 minuti)...
-it.Python=Installazione di Python per le texture HD...
-it.Hd=Jak %1: creazione delle texture HD (la parte lunga)...
-it.Failed=Qualcosa è andato storto preparando Jak %1 (codice %2). Il launcher riprova al primo avvio; i dettagli sono in %3.
-it.GameOpen=Jak Enhanced Trilogy è aperto da questa cartella e va chiuso prima di installare.%n%nSalva prima la partita: ciò che non è salvato va perso.%n%nChiuderlo adesso?
-it.GameStays=Jak Enhanced Trilogy è ancora aperto, quindi non è stato installato nulla. Chiudilo e riavvia questa installazione.
-it.GameStuck=Non è stato possibile chiudere Jak Enhanced Trilogy, quindi non è stato installato nulla. Chiudilo a mano (o riavvia il computer) e riavvia questa installazione.
-it.PlayNow=Gioca ora
-it.Desktop=Crea un collegamento sul desktop
-it.Steam=Aggiungilo a Steam (come gioco non Steam; Steam si chiude un attimo se è aperto)
-it.Free=Jak Enhanced è gratis al 100%, e lo sarà sempre. Lo fa una persona sola nel tempo libero: se ti va, offrimi un caffè (facoltativo, non sblocca nulla).
-it.DonateHead=Jak Enhanced è gratis al 100% — il sostegno è facoltativo
-it.Donate1=1 € — una caramella
-it.Donate2=3 € — un caffè
-it.Donate3=Quanto vuoi
-it.Trust=Pagamento sicuro sulla pagina di PayPal (paypal.me/mymusicminis), a Code & Craft Solutions, il conto dell'autore. Puoi cambiare la cifra prima di pagare.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:Desktop}"
 Name: "steam"; Description: "{cm:Steam}"; Flags: unchecked
 
 [Files]
-; (the main world the player edits comes in data\shipped: the launcher puts it in place, keeping their edits)
-Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; the dontcopy files come first: with solid compression, extracting one decompresses every file
+; listed before it (the whole game when they were last: the window took ~15 s to show)
 ; run from the temporary folder before anything is copied: closes a game open from this folder
 Source: "{#Src}\data\scripts\enhanced\update.ps1"; Flags: dontcopy
 ; the buy-me-a-coffee buttons on the last page (drawn by ask.ps1 -ExportIcons)
@@ -209,6 +141,8 @@ Source: "..\..\game\assets\enhanced\art\donate-*.bmp"; Flags: dontcopy
 ; the installer's own window (in place of the wizard pages) and its icon
 Source: "installer_ui.ps1"; Flags: dontcopy
 Source: "..\..\game\assets\enhanced\art\jak-enhanced.ico"; Flags: dontcopy
+; (the main world the player edits comes in data\shipped: the launcher puts it in place, keeping their edits)
+Source: "{#Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\Jak Enhanced Trilogy"; Filename: "{app}\Jak Enhanced Trilogy.bat"; WorkingDir: "{app}"; IconFilename: "{app}\data\game\assets\enhanced\art\jak-enhanced.ico"; Flags: runminimized
