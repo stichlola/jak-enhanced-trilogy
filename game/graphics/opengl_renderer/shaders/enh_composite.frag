@@ -160,6 +160,8 @@ uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
+uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
+uniform float tune_water_foot = 1.0;  // the water's pixel footprint from a level surface at that distance (0: from the drawn surface's derivatives, which the game's near-ocean waves shrink: rougher, darker water past its edge)
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -295,7 +297,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey)
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3001,6 +3003,14 @@ void composite_unused() {
   // the water's world position and pixel footprint, here in uniform control flow (derivatives)
   vec2 water_world = vec2(dot(right_view, p) + cam_pos.x, dot(fwd_view, p) + cam_pos.z) / 4096.0;
   float water_foot = clamp(length(fwidth(water_world)), 0.0005, 50.0);
+  // (on the water: as if it were level. The game's near ocean is a wavy mesh; a wave turned toward
+  // the eye shrank the footprint up to 5x at a grazing view, so the ripples there came back at full
+  // strength: past that mesh's edge (Spargus sea, 18h) the sea went rougher, its fresnel 0.74 -> 0.5,
+  // a dark line where the 2x2 derivatives straddled the edge, then a darker sea)
+  if (wsurf > 0.0 && tune_water_foot > 0.5) {
+    float wgraze = max(abs(dot(normalize(p), up_view)), 1e-3);
+    water_foot = clamp(length(p) / 4096.0 * pixel_rad * sqrt(1.0 + 1.0 / (wgraze * wgraze)), 0.0005, 50.0);
+  }
 
   // the surface under the water: is it level (a beach) or upright (a leg, a wall)?
   vec3 seabed_p = view_pos(uv, max(seabed_d, 1e-6));
@@ -3287,6 +3297,23 @@ void composite_unused() {
           abs(tune_water_dbg - 12.0) > 0.5) {
         refl = fog_color;
         env_dbg.r = 1.0;
+        // (the game's far ocean rises a little toward the horizon, so a ray just over level still
+        // lands on the sea: lift it, a step at a time, to the first sky over the sea's edge. The fog
+        // color there drew a flat band ~10 rows tall where the near ocean starts, Spargus 18h)
+        for (int k = 1; k <= 6 && tune_water_env_lift > 0.5; k++) {
+          vec3 rk = normalize(re + up_view * (0.004 * float(k)));
+          if (rk.z <= 1e-3) {
+            break;
+          }
+          vec2 kuv = clamp(0.5 * vec2(proj.z * rk.x, proj.w * rk.y) / rk.z + 0.5, vec2(0.002), vec2(0.998));
+          float kd = textureLod(tex_T3, kuv, 0.0).r;
+          float kfd = textureLod(tex_T6, kuv, 0.0).r;
+          if (!(textureLod(tex_T5, kuv, 0.0).r > kd + 1e-7 || (kfd > 1e-7 && abs(kfd - kd) < 1e-7))) {
+            refl = textureLod(tex_T0, kuv, 0.0).rgb;
+            env_dbg.r = 0.5;
+            break;
+          }
+        }
       }
       env_dbg.b = env_uv.y;
     }
@@ -3389,6 +3416,17 @@ void composite_unused() {
     }
     if (abs(tune_water_dbg - 11.0) < 0.5) {
       wc = refl;
+    }
+    if (abs(tune_water_dbg - 13.0) < 0.5) {
+      // (test: red the pond rule, green the surface's height about 9 m (0.5 at 9 m, +-1 m), blue deep)
+      wc = vec3(pond_here ? 1.0 : 0.0, clamp(0.5 + (water_y / 4096.0 - 9.0) * 0.5, 0.0, 1.0),
+                water_deep ? 1.0 : 0.0);
+    }
+    if (abs(tune_water_dbg - 14.0) < 0.5) {
+      wc = vec3(clamp(fresnel, 0.0, 1.0));  // (test: the fresnel alone, grey: a colored view's grade bends one channel)
+    }
+    if (abs(tune_water_dbg - 15.0) < 0.5) {
+      wc = vec3(clamp(length(slope) * 0.5, 0.0, 1.0));  // (test: the ripples' slope, grey)
     }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
