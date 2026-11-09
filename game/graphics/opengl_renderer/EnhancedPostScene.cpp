@@ -3,6 +3,12 @@
 
 #include "game/graphics/opengl_renderer/EnhancedPostInternal.h"
 
+#include "common/util/FileUtil.h"
+
+#include "game/graphics/opengl_renderer/Shader.h"
+
+#include <SDL3/SDL_video.h>
+
 using namespace enh_post;
 
 namespace {
@@ -51,6 +57,230 @@ struct LagProbe {
 };
 LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"}, g_lag_taa{"taa"},
     g_lag_end{"end"};
+
+// Variable rate shading for the composite (tuning post.vrs; GL_NV_shading_rate_image, NVIDIA
+// Turing and later; elsewhere it stays off). The composite costs the same on every pixel, ~13 ms
+// at 2560x1600: where the picture is smooth (sky, shade, flat sand) one invocation for 2x1, 1x2
+// or 2x2 pixels looks the same. enh_vrs.comp picks the rate per 16x16 tile from this frame's game
+// picture and depth and last frame's finished picture (the composite's own detail). post.vrs 1:
+// adaptive; post.vrs_force n (0..6: 1x1, 2x1, 1x2, 2x2, 4x4, ...) the same rate everywhere (test);
+// post.vrs_show 1: the coarse tiles drawn 4x4, as blocks; post.vrs_edge / post.vrs_tex /
+// post.vrs_depth: the steps that need full rate (one luma step, the tile's mean luma step, a
+// relative depth step; 0 = depth not used). "[enhanced] vrs" in the log every 5 s: share of the
+// tiles at each rate.
+namespace vrs {
+constexpr GLenum kShadingRateImage = 0x9563;  // GL_SHADING_RATE_IMAGE_NV
+constexpr GLenum kTexelWidth = 0x955C, kTexelHeight = 0x955D;
+constexpr GLenum kRates[7] = {0x9565, 0x9567, 0x9566, 0x9568, 0x956B, 0x956A, 0x9569};
+// (1x1, 2 wide x 1 high, 1x2, 2x2, 4x4, 4x2, 2x4)
+using BindImage = void(APIENTRY*)(GLuint);
+using Palette = void(APIENTRY*)(GLuint, GLuint, GLsizei, const GLenum*);
+using Barrier = void(APIENTRY*)(GLboolean);
+struct State {
+  int supported = -1;  // -1 not checked yet
+  BindImage bind = nullptr;
+  Palette palette = nullptr;
+  Barrier barrier = nullptr;
+  GLuint prog = 0;
+  GLuint flags_tex = 0, rate_tex = 0, stats = 0;
+  int tw = 0, th = 0, w = 0, h = 0;
+  int frames = 0;
+  std::chrono::steady_clock::time_point last_report;
+  bool clear = false;
+  fs::file_time_type mtime{};
+  bool palette_set = false;
+  bool active = false;  // the rate image was made this frame
+};
+State g;
+
+GLuint compile() {
+  const std::string src = file_util::read_text_file(
+      file_util::get_file_path({Shader::shader_folder, "enh_vrs.comp"}));
+  GLuint s = glCreateShader(GL_COMPUTE_SHADER);
+  const char* p = src.c_str();
+  glShaderSource(s, 1, &p, nullptr);
+  glCompileShader(s);
+  GLint ok = 0;
+  glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+  if (!ok) {
+    char log[2048];
+    glGetShaderInfoLog(s, sizeof(log), nullptr, log);
+    lg::error("[enhanced] vrs: enh_vrs.comp: {}", log);
+    glDeleteShader(s);
+    return 0;
+  }
+  GLuint prog = glCreateProgram();
+  glAttachShader(prog, s);
+  glLinkProgram(prog);
+  glDeleteShader(s);
+  glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+  if (!ok) {
+    glDeleteProgram(prog);
+    return 0;
+  }
+  return prog;
+}
+
+bool check() {
+  if (g.supported >= 0) {
+    return g.supported == 1;
+  }
+  g.supported = 0;
+  if (!SDL_GL_ExtensionSupported("GL_NV_shading_rate_image")) {
+    lg::info("[enhanced] vrs: GL_NV_shading_rate_image not supported, post.vrs stays off");
+    return false;
+  }
+  g.bind = (BindImage)SDL_GL_GetProcAddress("glBindShadingRateImageNV");
+  g.palette = (Palette)SDL_GL_GetProcAddress("glShadingRateImagePaletteNV");
+  g.barrier = (Barrier)SDL_GL_GetProcAddress("glShadingRateImageBarrierNV");
+  GLint tw = 0, th = 0;
+  glGetIntegerv(kTexelWidth, &tw);
+  glGetIntegerv(kTexelHeight, &th);
+  g.prog = compile();
+  if (!g.bind || !g.palette || !g.barrier || tw != 16 || th != 16 || !g.prog) {
+    lg::info("[enhanced] vrs: unusable (texel {}x{}, program {}), post.vrs stays off", tw, th,
+             g.prog);
+    return false;
+  }
+  lg::info("[enhanced] vrs: GL_NV_shading_rate_image ready");
+  g.supported = 1;
+  return true;
+}
+
+// the rate image for this frame (prev_tex: last frame's finished picture); false = shade normally
+bool make(int w, int h, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, const float* proj,
+          float edge_thr, float tex_thr, float depth_thr, int force, int show) {
+  g.active = false;
+  if (!check()) {
+    return false;
+  }
+  if (w != g.w || h != g.h) {
+    if (g.flags_tex) {
+      glDeleteTextures(1, &g.flags_tex);
+      glDeleteTextures(1, &g.rate_tex);
+    }
+    g.w = w;
+    g.h = h;
+    g.tw = (w + 15) / 16;
+    g.th = (h + 15) / 16;
+    GLuint t[2];
+    glGenTextures(2, t);
+    g.flags_tex = t[0];
+    g.rate_tex = t[1];
+    for (GLuint tex : t) {
+      glBindTexture(GL_TEXTURE_2D, tex);
+      glTexStorage2D(GL_TEXTURE_2D, 1, GL_R8UI, g.tw, g.th);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  if (!g.stats) {
+    glGenBuffers(1, &g.stats);
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.stats);
+    const GLuint zeros[8] = {};
+    glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(zeros), zeros, GL_DYNAMIC_READ);
+  }
+  // (every 5 s: the counts since, then cleared; one small wait for the frame before)
+  const auto now = std::chrono::steady_clock::now();
+  if (g.frames == 0) {
+    g.last_report = now;
+  }
+  ++g.frames;
+  if (std::chrono::duration<double>(now - g.last_report).count() >= 5.0) {
+    g.last_report = now;
+    GLuint c[8] = {};
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.stats);
+    glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(c), c);
+    const double n = std::max(1u, c[0] + c[1] + c[2] + c[3] + c[4] + c[5] + c[6]);
+    lg::info("[enhanced] vrs: tiles 1x1 {:.0f}%, 2x1 {:.0f}%, 1x2 {:.0f}%, 2x2 {:.0f}%, other {:.0f}% "
+             "(shaded {:.0f}% of the pixels)",
+             100 * c[0] / n, 100 * c[1] / n, 100 * c[2] / n, 100 * c[3] / n,
+             100 * (c[4] + c[5] + c[6]) / n,
+             100 * (c[0] + 0.5 * (c[1] + c[2]) + 0.25 * c[3] + 0.0625 * c[4] + 0.125 * (c[5] + c[6])) / n);
+    g.clear = true;
+  }
+  // (enh_vrs.comp again when it changes, with JAK_ENHANCED_SHADER_RELOAD)
+  static const bool reload = std::getenv("JAK_ENHANCED_SHADER_RELOAD") != nullptr;
+  if (reload && (g.frames % 30) == 0) {
+    std::error_code ec;
+    const auto mt = fs::last_write_time(
+        file_util::get_file_path({Shader::shader_folder, "enh_vrs.comp"}), ec);
+    if (!ec && mt != g.mtime) {
+      if (g.mtime != fs::file_time_type{}) {
+        if (GLuint p = compile()) {
+          glDeleteProgram(g.prog);
+          g.prog = p;
+          lg::info("[enhanced] vrs: enh_vrs.comp reloaded");
+        }
+      }
+      g.mtime = mt;
+    }
+  }
+  GLint old_ssbo = 0;
+  glGetIntegeri_v(GL_SHADER_STORAGE_BUFFER_BINDING, 3, &old_ssbo);
+  GLint old_tex[3] = {};
+  for (int i = 0; i < 3; i++) {
+    glActiveTexture(GL_TEXTURE0 + i);
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_tex[i]);
+  }
+  if (g.clear) {
+    g.clear = false;
+    const GLuint zero = 0;
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, g.stats);
+    glClearBufferData(GL_SHADER_STORAGE_BUFFER, GL_R32UI, GL_RED_INTEGER, GL_UNSIGNED_INT, &zero);
+  }
+  glUseProgram(g.prog);
+  const GLuint texs[3] = {prev_tex, scene_tex, depth_tex};
+  for (int i = 0; i < 3; i++) {
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, texs[i]);
+  }
+  glUniform1i(glGetUniformLocation(g.prog, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(g.prog, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(g.prog, "tex_T2"), 2);
+  glUniform2i(glGetUniformLocation(g.prog, "size"), w, h);
+  glUniform2i(glGetUniformLocation(g.prog, "tiles"), g.tw, g.th);
+  glUniform4f(glGetUniformLocation(g.prog, "proj"), proj[0], proj[1], proj[2], proj[3]);
+  glUniform3f(glGetUniformLocation(g.prog, "thr"), edge_thr, tex_thr, depth_thr);
+  glUniform1i(glGetUniformLocation(g.prog, "force"), force);
+  glUniform1i(glGetUniformLocation(g.prog, "show"), show);
+  glBindImageTexture(0, g.flags_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R8UI);
+  glBindImageTexture(1, g.rate_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8UI);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g.stats);
+  glUniform1i(glGetUniformLocation(g.prog, "mode"), 0);
+  glDispatchCompute(g.tw, g.th, 1);
+  glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+  glUniform1i(glGetUniformLocation(g.prog, "mode"), 1);
+  glDispatchCompute((g.tw + 7) / 8, (g.th + 7) / 8, 1);
+  glMemoryBarrier(GL_ALL_BARRIER_BITS);
+  glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, old_ssbo);
+  for (int i = 2; i >= 0; i--) {
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, old_tex[i]);
+  }
+  g.active = true;
+  return true;
+}
+
+// around the composite's draw only
+void begin() {
+  if (!g.active) {
+    return;
+  }
+  if (!g.palette_set) {
+    g.palette(0, 0, 7, kRates);
+    g.palette_set = true;
+  }
+  g.barrier(GL_TRUE);
+  g.bind(g.rate_tex);
+  glEnable(kShadingRateImage);
+}
+void end() {
+  if (g.active) {
+    glDisable(kShadingRateImage);
+    g.bind(0);
+  }
+}
+}  // namespace vrs
 
 // the composite's CPU setup split in steps ("debug": {"cpu_profile": 1}): each ENH_CPU_SPLIT names
 // the stretch of code that ends there; "[enhanced] post cpu setup" in the log every 5 s
@@ -714,6 +944,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     build_hiz(screen_vao, render_state, prof);
   }
   ENH_CPU_SPLIT("hiz");
+
+  {
+    // (variable rate shading, namespace vrs above: needs last frame's finished picture, the late
+    // TAA's history)
+    static const EnhancedTune t_vrs("post.vrs", 0.f);
+    static const EnhancedTune t_vrs_force("post.vrs_force", -1.f);
+    static const EnhancedTune t_vrs_show("post.vrs_show", 0.f);
+    static const EnhancedTune t_vrs_edge("post.vrs_edge", 0.1f);
+    static const EnhancedTune t_vrs_tex("post.vrs_tex", 0.02f);
+    static const EnhancedTune t_vrs_depth("post.vrs_depth", 0.f);
+    vrs::g.active = false;
+    if ((float)t_vrs > 0.5f && have_scene && taa && taa_mode == 1 && m_taa_history && reproject &&
+        m_taa_w == w && m_taa_h == h) {
+      ENH_TIMED("enh-vrs", vrs::make(w, h, m_taa_tex[1 - m_taa_cur], m_scene_tex, m_depth_tex,
+                                     m_last_proj.data(), (float)t_vrs_edge, (float)t_vrs_tex, (float)t_vrs_depth,
+                                     (int)std::round((float)t_vrs_force), (int)(float)t_vrs_show));
+    }
+  }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
   glViewport(0, 0, w, h);
@@ -2369,6 +2617,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (lag_probes) {
     g_lag_composite.mark(pass_timer_frame());
   }
+  vrs::begin();
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   {
     // (test switch "debug": {"gpu_burn": n}: the composite drawn n more times, the same picture,
@@ -2378,6 +2627,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     }
   }
+  vrs::end();
   if (probe_group >= 0) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
@@ -2407,6 +2657,32 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taa_fbo[1 - m_taa_cur]);  // (the one just written)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    // (test switch "debug": {"dump_frame": n}: each new n saves this frame at its full size, after
+    // the TAA and before the HUD, as <JAK_ENHANCED_DUMP_DIR>/frame_<n>.png; one stall)
+    static const EnhancedTune t_dump("debug.dump_frame", 0.f);
+    static int dumped = 0;
+    const int dump_n = (int)(float)t_dump;
+    const char* dump_dir = std::getenv("JAK_ENHANCED_DUMP_DIR");
+    if (dump_n > 0 && dump_n != dumped && dump_dir) {
+      dumped = dump_n;
+      std::vector<float> px((size_t)w * h * 4);
+      glPixelStorei(GL_PACK_ALIGNMENT, 1);
+      glReadPixels(0, 0, w, h, GL_RGBA, GL_FLOAT, px.data());
+      std::vector<u32> out((size_t)w * h);
+      for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+          const float* p = &px[((size_t)(h - 1 - y) * w + x) * 4];
+          u32 v = 0xff000000;
+          for (int k = 0; k < 3; k++) {
+            v |= (u32)std::clamp((int)std::lround(p[k] * 255.f), 0, 255) << (8 * k);
+          }
+          out[(size_t)y * w + x] = v;
+        }
+      }
+      const std::string path = fmt::format("{}/frame_{}.png", dump_dir, dump_n);
+      file_util::write_rgba_png(path, out.data(), w, h);
+      lg::info("[enhanced] dump_frame: {} ({}x{})", path, w, h);
+    }
   }
 
   m_prev_camera = cam;

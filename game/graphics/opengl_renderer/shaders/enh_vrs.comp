@@ -1,0 +1,123 @@
+#version 430 core
+
+// Jak Enhanced: the composite's shading rate image (post.vrs, GL_NV_shading_rate_image). The
+// composite costs the same on every pixel (~13 ms at 2560x1600); where the picture is smooth, one
+// invocation for 2 or 4 pixels looks the same and costs half or a quarter (all 2x2: 3.7 ms).
+//
+// mode 0: one workgroup per rate-image texel (a tile of 16x16 pixels; 8x8 threads, each a 2x2
+//   quad): how much the picture changes from a pixel to the next along each axis, in this frame's
+//   game picture (tex_T1: geometry and textures; tex_T2 depth, when thr.z > 0) and in last frame's
+//   finished picture (tex_T0, the TAA's history: the composite's own detail, shadows, occlusion,
+//   sand, lights). In perceptual luma (sqrt). Full rate along an axis where one step passes thr.x
+//   (an edge: jaggies at 2 px) or the tile's mean step passes thr.y (texture: a 2x2 blur).
+//   Out (flags_img, r8ui): bits 0/1 x/y by this frame, 2/3 x/y edge by last frame, 4/5 x/y texture
+//   by last frame.
+// mode 1: one thread a tile: the rate; last frame's edges taken from the 3x3 tiles around (the
+//   picture moves a few pixels a frame). Out (rate_img): 0 = 1x1, 1 = 2 wide, 2 = 2 high, 3 = 2x2;
+//   with show = 1 the coarse tiles get 4x4 (4) instead, so they stand out as blocks (debug).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+uniform sampler2D tex_T0;  // last frame's finished picture
+uniform sampler2D tex_T1;  // this frame's game picture
+uniform sampler2D tex_T2;  // this frame's depth
+uniform int mode;
+uniform ivec2 size;        // pixels
+uniform ivec2 tiles;       // rate-image texels
+uniform vec4 proj;         // a, b, fx, fy
+uniform vec3 thr;          // edge step, mean step (luma), relative depth step (0: no depth)
+uniform int force;         // >= 0: this rate everywhere (test)
+uniform int show;
+
+layout(r8ui, binding = 0) uniform uimage2D flags_img;
+layout(r8ui, binding = 1) uniform uimage2D rate_img;
+layout(std430, binding = 3) buffer VrsStats { uint counts[8]; };
+
+// [0..1] this frame max x/y, [2..3] last frame max x/y (float bits), [4..7] the same, summed (1/1024)
+shared uint s_v[8];
+
+float pl(vec3 c) {
+  return sqrt(max(dot(min(c, vec3(4.0)), vec3(0.2126, 0.7152, 0.0722)), 0.0));
+}
+
+float view_z(float d) {
+  return d <= 1e-7 ? 1e9 : abs(proj.y / (d * 2.0 - 1.0 - proj.x));
+}
+
+// steps of the 2x2 quad at q (its pixels to their right / upper neighbours): max and sum per axis
+void quad_steps(sampler2D t, ivec2 q, ivec2 hi, out vec2 mx, out vec2 sm) {
+  float v[9];
+  for (int j = 0; j < 3; j++) {
+    for (int i = 0; i < 3; i++) {
+      v[j * 3 + i] = (i == 2 && j == 2) ? 0.0 : pl(texelFetch(t, min(q + ivec2(i, j), hi), 0).rgb);
+    }
+  }
+  vec4 sx = abs(vec4(v[1] - v[0], v[2] - v[1], v[4] - v[3], v[5] - v[4]));
+  vec4 sy = abs(vec4(v[3] - v[0], v[6] - v[3], v[4] - v[1], v[7] - v[4]));
+  mx = vec2(max(max(sx.x, sx.y), max(sx.z, sx.w)), max(max(sy.x, sy.y), max(sy.z, sy.w)));
+  sm = vec2(dot(sx, vec4(1.0)), dot(sy, vec4(1.0)));
+}
+
+void main() {
+  if (mode == 0) {
+    uint li = gl_LocalInvocationIndex;
+    if (li < 8u) {
+      s_v[li] = 0u;
+    }
+    barrier();
+    ivec2 hi = size - 1;
+    ivec2 q = min(ivec2(gl_GlobalInvocationID.xy) * 2, hi);
+    vec2 mx_now, sm_now, mx_old, sm_old;
+    quad_steps(tex_T1, q, hi, mx_now, sm_now);
+    quad_steps(tex_T0, q, hi, mx_old, sm_old);
+    if (thr.z > 0.0) {
+      float z = view_z(texelFetch(tex_T2, q, 0).r);
+      float zx = view_z(texelFetch(tex_T2, min(q + ivec2(2, 0), hi), 0).r);
+      float zy = view_z(texelFetch(tex_T2, min(q + ivec2(0, 2), hi), 0).r);
+      // (a depth step counts as an edge)
+      if (abs(zx - z) > thr.z * min(z, zx)) mx_now.x = 1.0;
+      if (abs(zy - z) > thr.z * min(z, zy)) mx_now.y = 1.0;
+    }
+    atomicMax(s_v[0], floatBitsToUint(mx_now.x));
+    atomicMax(s_v[1], floatBitsToUint(mx_now.y));
+    atomicMax(s_v[2], floatBitsToUint(mx_old.x));
+    atomicMax(s_v[3], floatBitsToUint(mx_old.y));
+    atomicAdd(s_v[4], uint(sm_now.x * 1024.0));
+    atomicAdd(s_v[5], uint(sm_now.y * 1024.0));
+    atomicAdd(s_v[6], uint(sm_old.x * 1024.0));
+    atomicAdd(s_v[7], uint(sm_old.y * 1024.0));
+    barrier();
+    if (li == 0u) {
+      const float n = 256.0 * 1024.0;  // steps a tile, per axis
+      uint f = 0u;
+      if (uintBitsToFloat(s_v[0]) > thr.x || float(s_v[4]) / n > thr.y) f |= 1u;
+      if (uintBitsToFloat(s_v[1]) > thr.x || float(s_v[5]) / n > thr.y) f |= 2u;
+      if (uintBitsToFloat(s_v[2]) > thr.x) f |= 4u;
+      if (uintBitsToFloat(s_v[3]) > thr.x) f |= 8u;
+      if (float(s_v[6]) / n > thr.y) f |= 16u;
+      if (float(s_v[7]) / n > thr.y) f |= 32u;
+      imageStore(flags_img, ivec2(gl_WorkGroupID.xy), uvec4(f));
+    }
+    return;
+  }
+  ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+  if (t.x >= tiles.x || t.y >= tiles.y) {
+    return;
+  }
+  uint f0 = imageLoad(flags_img, t).r;
+  uint need = (f0 | (f0 >> 4)) & 3u;
+  for (int dy = -1; dy <= 1; dy++) {
+    for (int dx = -1; dx <= 1; dx++) {
+      need |= (imageLoad(flags_img, clamp(t + ivec2(dx, dy), ivec2(0), tiles - 1)).r >> 2) & 3u;
+    }
+  }
+  uint rate = need == 0u ? 3u : (need == 2u ? 1u : (need == 1u ? 2u : 0u));
+  if (force >= 0) {
+    rate = uint(force);
+  }
+  atomicAdd(counts[min(rate, 7u)], 1u);
+  if (show == 1 && rate != 0u) {
+    rate = 4u;
+  }
+  imageStore(rate_img, t, uvec4(rate));
+}
