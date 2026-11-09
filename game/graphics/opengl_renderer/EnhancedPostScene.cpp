@@ -2343,9 +2343,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float match_u =
           std::max(std::clamp((float)t_still_m, 0.02f, 2.f), 0.3f) * kMeter;
       const float match2 = match_u * match_u;
-      float slot_light[EnhancedPost::kLampSlots];
+      // (per light, the slot of its map or -1; per slot, its place and far plane)
+      float light_slot[8];
       float slot_pos[EnhancedPost::kLampSlots * 4] = {};
-      for (auto& s : slot_light) {
+      for (auto& s : light_slot) {
         s = -1.f;
       }
       for (int i = 0; i < std::min(n, 8); i++) {
@@ -2361,13 +2362,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         lw.radius = pos[i * 4 + 3];
         m_lamp_want.push_back(lw);
-        for (int s = 0; m_lamp_ready && s < EnhancedPost::kLampSlots; s++) {
+        for (int s = 0; m_lamp_ready && s < m_lamp_alloc; s++) {
           const auto& sl = m_lamp_slots[s];
           const float dx = sl.pos[0] - lw.pos[0], dy = sl.pos[1] - lw.pos[1],
                       dz = sl.pos[2] - lw.pos[2];
-          if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame && slot_light[s] < 0.f &&
+          // (two lights in one place share its map)
+          if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame &&
               dx * dx + dy * dy + dz * dz < match2) {
-            slot_light[s] = (float)i;
+            light_slot[i] = (float)s;
             std::memcpy(slot_pos + s * 4, sl.pos, sizeof(float) * 3);
             slot_pos[s * 4 + 3] = sl.far_u;
             break;
@@ -2375,7 +2377,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
-      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_light"), 1, slot_light);
+      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_slot"), 2, light_slot);
       glUniform4fv(glGetUniformLocation(id, "lamp_shadow_pos"), EnhancedPost::kLampSlots, slot_pos);
       glUniform2f(glGetUniformLocation(id, "lamp_shadow_params"),
                   std::max((float)t_near, 0.05f) * kMeter, 2.f / std::max(m_lamp_res, 1));

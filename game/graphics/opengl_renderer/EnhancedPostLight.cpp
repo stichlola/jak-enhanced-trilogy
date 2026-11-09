@@ -1199,7 +1199,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   const auto& cam = g_enhanced_camera;
   const bool sun_up = g_enhanced_sun.valid && len >= 1e-6f && sun[1] / len >= 0.05f;
   // (the lamps' shadow maps draw the same casters, by night too: their list is kept up below)
-  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 4.f);
+  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 8.f);
   const bool lamp_maps = (float)t_lamp_maps > 0.5f && m_settings.light_shadow > 0.f;
   if (!cam.valid || (!sun_up && !lamp_maps)) {
     return;  // no sun, or below the horizon
@@ -2027,7 +2027,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
 // map convention, so the composite looks them up with the direction from the lamp, in world space.
 void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof) {
   m_lamp_ready = false;
-  static const EnhancedTune t_maps("lights.shadow_maps", 4.f);
+  static const EnhancedTune t_maps("lights.shadow_maps", 8.f);
   static const EnhancedTune t_res("lights.shadow_map_res", 512.f);
   static const EnhancedTune t_faces("lights.shadow_faces_per_frame", 2.f);
   static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
@@ -2042,7 +2042,8 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     return;
   }
   const int res = std::clamp((int)(float)t_res, 128, 2048);
-  if (res != m_lamp_res) {
+  // (the arrays hold as many slots as asked for: 512^2 depth, 6 MB a cube, two arrays)
+  if (res != m_lamp_res || want_n != m_lamp_alloc) {
     for (int k = 0; k < 2; k++) {
       GLuint* t = k ? &m_lamp_tex : &m_lamp_static_tex;
       if (*t) {
@@ -2050,7 +2051,7 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
       }
       glGenTextures(1, t);
       glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, *t);
-      glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT32F, res, res, 6 * kLampSlots, 0,
+      glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT32F, res, res, 6 * want_n, 0,
                    GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
       glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, k ? GL_LINEAR : GL_NEAREST);
       glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, k ? GL_LINEAR : GL_NEAREST);
@@ -2068,12 +2069,21 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
       glGenFramebuffers(1, &m_lamp_fbo);
     }
     m_lamp_res = res;
+    m_lamp_alloc = want_n;
     for (auto& s : m_lamp_slots) {
       s = LampSlot();
     }
   }
   m_lamp_frame++;
   const float near_u = std::max((float)t_near, 0.05f) * kMeter;
+  if (near_u != m_lamp_near_u) {
+    // (the kept faces' depth goes with the near plane: drawn again)
+    m_lamp_near_u = near_u;
+    for (auto& s : m_lamp_slots) {
+      s.faces = 0;
+      s.live_valid = false;
+    }
+  }
 
   auto dist2 = [](const float* a, const float* b) {
     const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
@@ -2106,6 +2116,19 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   std::vector<LampWant> wanted;
   for (size_t i = 0; i < m_lamp_want.size(); i++) {
     if (m_lamp_still[i].second >= (u32)std::max((float)t_still, 1.f)) {
+      // (two lights in one place, a Spargus lamp's two entries: one map, the larger reach; the
+      // composite gives both lights that slot)
+      bool dup = false;
+      for (auto& w : wanted) {
+        if (dist2(w.pos, m_lamp_still[i].first.data()) < match2) {
+          w.radius = std::max(w.radius, m_lamp_want[i].radius);
+          dup = true;
+          break;
+        }
+      }
+      if (dup) {
+        continue;
+      }
       wanted.push_back(m_lamp_want[i]);
       memcpy(wanted.back().pos, m_lamp_still[i].first.data(), sizeof(wanted.back().pos));
     }
@@ -2148,7 +2171,7 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   bool taken[kLampSlots] = {};
   for (int i = 0; i < n_want; i++) {
     assign[i] = -1;
-    for (int s = 0; s < kLampSlots; s++) {
+    for (int s = 0; s < m_lamp_alloc; s++) {
       if (!taken[s] && m_lamp_slots[s].used &&
           dist2(m_lamp_slots[s].pos, wanted[i].pos) < match2) {
         assign[i] = s;
@@ -2162,7 +2185,7 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
       continue;
     }
     int best = -1;
-    for (int s = 0; s < kLampSlots; s++) {
+    for (int s = 0; s < m_lamp_alloc; s++) {
       if (!taken[s] && (best < 0 || !m_lamp_slots[s].used ||
                         (m_lamp_slots[best].used && m_lamp_slots[s].seen < m_lamp_slots[best].seen))) {
         best = s;
@@ -2450,12 +2473,13 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
     lg::info("[enhanced] lamp shadows: {} wanted ({} lamps, {} still), {} live, {} static faces "
              "this frame ({} in 300 frames, {} new slots), {} character draws, {} faces copied; "
-             "slots {}",
+             "camera {:.1f},{:.1f},{:.1f}; slots {}",
              n_want, m_lamp_want.size(), wanted.size(), live, static_faces, m_lamp_static_total,
-             m_lamp_assigns, char_draws, copied,
+             m_lamp_assigns, char_draws, copied, cam.trans[0] / kMeter, cam.trans[1] / kMeter,
+             cam.trans[2] / kMeter,
              [&]() {
                std::string o;
-               for (int s = 0; s < kLampSlots; s++) {
+               for (int s = 0; s < m_lamp_alloc; s++) {
                  const auto& sl = m_lamp_slots[s];
                  o += fmt::format("[{} {:.1f},{:.1f},{:.1f} far {:.1f} m faces {}] ", sl.used ? "on" : "--",
                                   sl.pos[0] / kMeter, sl.pos[1] / kMeter, sl.pos[2] / kMeter,

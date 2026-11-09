@@ -555,16 +555,15 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
 // lamps' shadow maps (lights.shadow_maps): a cube map per slot, its faces as GL's cube maps want
 // them, depth from a 90 degree perspective with the lamp's near and far planes
 uniform samplerCubeArrayShadow tex_T35;
-uniform vec4 lamp_shadow_pos[4];  // world (game units), far plane (game units)
-uniform vec4 lamp_shadow_light;   // the light (index into light_pos) each slot is for, -1: none
+uniform vec4 lamp_shadow_pos[8];   // world (game units), far plane (game units)
+uniform vec4 lamp_shadow_slot[2];  // the slot of the first 8 lights' maps, -1: none
 uniform vec2 lamp_shadow_params;  // near plane (game units), 2 / the faces' size
 uniform float tune_lamp_map_bias = 1.5;  // pushed off the surface along its normal (texels there)
 uniform float tune_lamp_map_soft = 1.5;  // penumbra: 4 taps this many texels around (0: one tap)
 uniform float tune_lamp_map_dbg = 0.0;   // test: > 0 adds the map's shadow red, the march's green (times this)
+uniform float tune_lamp_map_dbg_slot = -1.0;  // test: only this slot's (-1: all)
 int lamp_map_slot(int i) {
-  float fi = float(i);
-  return lamp_shadow_light.x == fi ? 0 : lamp_shadow_light.y == fi ? 1
-       : lamp_shadow_light.z == fi ? 2 : lamp_shadow_light.w == fi ? 3 : -1;
+  return i < 8 ? int(lamp_shadow_slot[i >> 2][i & 3]) : -1;
 }
 float lamp_map_tap(int s, vec3 d) {
   float zf = max(abs(d.x), max(abs(d.y), abs(d.z)));
@@ -4285,7 +4284,7 @@ void composite_unused() {
           int ls = lamp_map_slot(i);
           if (ls >= 0) {
             float msh = 1.0 - lamp_map_lit(ls, view_to_world * from + cam_pos, view_to_world * nn, jitter);
-            if (tune_lamp_map_dbg > 0.0) {
+            if (tune_lamp_map_dbg > 0.0 && (tune_lamp_map_dbg_slot < 0.0 || float(ls) == tune_lamp_map_dbg_slot)) {
               // (test: red the map's shadow, green the screen-space march's, yellow both)
               added += vec3(msh, light_blocked(from, light_pos[i].xyz, jitter), 0.0) * k * k * tune_lamp_map_dbg;
             }

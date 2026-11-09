@@ -685,7 +685,7 @@ class EnhancedPost {
   // static part (the levels' geometry, as the sun map draws it) is drawn once, a few faces a frame,
   // and kept while the lamp stays wanted; each frame a copy of it gets the characters near the lamp.
   void do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof);
-  static constexpr int kLampSlots = 4;
+  static constexpr int kLampSlots = 8;  // (the arrays hold lights.shadow_maps of them)
   struct LampSlot {
     float pos[3] = {0.f, 0.f, 0.f};  // world, game units
     float far_u = 0.f;               // game units
@@ -706,6 +706,8 @@ class EnhancedPost {
   std::vector<LampWant> m_lamp_want;  // last frame's shadow-casting lamps, strongest first (world)
   GLuint m_lamp_static_tex = 0, m_lamp_tex = 0, m_lamp_fbo = 0;
   int m_lamp_res = 0;
+  int m_lamp_alloc = 0;  // slots the arrays hold
+  float m_lamp_near_u = 0.f;  // the near plane the kept faces were drawn with
   u32 m_lamp_frame = 0;
   u32 m_lamp_static_total = 0, m_lamp_assigns = 0;  // static faces drawn, slots given (log)
   bool m_lamp_ready = false;  // the live array holds this frame's maps
