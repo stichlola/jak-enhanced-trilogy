@@ -290,7 +290,8 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b)
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front)
+uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
 uniform float tune_night_pale = 0.0;       // (off: slums 22h 19% darker than main, nights must not get darker; 1 = Haven's slums only, pale_ground) night: pale up-facing ground pressed toward the walls (0: off, 2: right half)
@@ -3314,6 +3315,9 @@ void composite_unused() {
     if (abs(tune_water_dbg - 5.0) < 0.5) {
       wc = vec3(ssr_hit, z / ssr_far, fresnel);  // (test: the traced reflection's hits, distance, fresnel)
     }
+    if (abs(tune_water_dbg - 6.0) < 0.5) {
+      wc = vec3(ssr_hit * 4.0, mirror_k * 4.0, 0.0);  // (test: hits red, the far mirror's share green)
+    }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
     // column toward the eye (a harbor at night); it reaches much further than the lamp's light
@@ -6244,6 +6248,17 @@ void composite_unused() {
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
+  }
+  if (tune_raw_view > 0.0 && (tune_raw_view < 1.5 || tex_coord.x > 0.5)) {
+    c = texture(tex_T0, tex_coord).rgb;  // (test: the game's own picture, for an A/B with vanilla in one run)
+  }
+  if (abs(tune_water_dbg - 7.0) < 0.5) {
+    // (test: red where the far-sea depth copy equals the scene (the reflection march skips those as
+    // sea), green the Hi-Z's sea/sky (1e30), blue the near ocean's surface in front of the scene)
+    float d3 = texture(tex_T3, tex_coord).r, d6 = texture(tex_T6, tex_coord).r;
+    c = vec3(d6 > 1e-7 && abs(d6 - d3) < 1e-7 ? 1.0 : 0.0,
+             texelFetch(tex_T29, ivec2(tex_coord * hiz_size), 0).r > 1e29 ? 1.0 : 0.0,
+             texture(tex_T5, tex_coord).r > d3 + 1e-7 ? 1.0 : 0.0);
   }
   if (tune_shadow_dbg > 1.5) {
     c = vec3(rock_sh, sun_lit, pix_tag);  // (test: the shadow, the sun's light, the material tag)
