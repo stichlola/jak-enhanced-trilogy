@@ -111,6 +111,15 @@ struct EnhancedCasters {
   u32 alignment = 1;    // bone vectors per uniform buffer offset alignment
   std::vector<float> bones;  // 4 floats per bone vector
   std::vector<Draw> draws;
+  // each model drawn (its draws share its first_bone): found again next frame by name and place, its
+  // bones then give the TAA where each of its pixels was (EnhancedPost::do_motion)
+  struct Instance {
+    u64 hash = 0;
+    u32 first_bone = 0;  // in bone vectors, as Draw's
+    u32 bone_count = 0;
+    const char* name = "";  // the model's (the level keeps it while drawn; log only)
+  };
+  std::vector<Instance> instances;
   // copies of the vertex buffers the game modifies per model (blerc faces, mod vertices): Merc2
   // reuses its own ones within the frame, before the shadow pass replays the draws
   struct ModCopy {
@@ -200,7 +209,12 @@ class EnhancedPost {
     // screen-space ones miss (0 off, 1 on, 2 traced only, 3 the traced color alone on the water)
     int ray_traced = 0;  // off by default for now: still has artifacts
     // ambient occlusion traced through the levels' geometry (short rays from every pixel)
-    bool rt_ao = false;  // off for now: too slow
+    // Off, opt-in. Cost (post.rt_ao_temporal, 1 ray a pixel a frame accumulated): +0.06 ms at
+    // 640x360 in the open wascity-start courtyard, +0.5 ms in the Hip Hog (ceilings and benches
+    // inside the 3 m rays); the old 6 rays +0.26 ms outside. No visible win in either place: the
+    // screen-space AO already gives the same corners, and a roof is farther than 3 m. Occlusion by
+    // what is far (sky visibility under roofs) belongs to probes (tech-rt-probe-gi), not per pixel.
+    bool rt_ao = false;
     float rt_ao_length = 3.0f;     // meters
     float rt_ao_strength = 1.0f;
     float rt_ao_distance = 80.f;   // meters from the camera
@@ -420,10 +434,71 @@ class EnhancedPost {
   bool m_albedo_ready = false;
   GLuint m_ao_fbo[2] = {0, 0};
   GLuint m_ao_tex[2] = {0, 0};
+  // (ssao.temporal: the occlusion pass's own history, RG16F ping-pong, and an MRT target each that
+  // writes m_ao_tex[0] and the history)
+  GLuint m_ao_hist_fbo[2] = {0, 0};
+  GLuint m_ao_hist_tex[2] = {0, 0};
+  int m_ao_hist_cur = 0;
+  bool m_ao_hist_valid = false;
+  unsigned m_ao_frame = 0;
+  // (gi.temporal: the same for the indirect light, RGBA16F)
+  GLuint m_gi_hist_fbo[2] = {0, 0};
+  GLuint m_gi_hist_tex[2] = {0, 0};
+  int m_gi_hist_cur = 0;
+  bool m_gi_hist_valid = false;
+  unsigned m_gi_frame = 0;
+  // the traced occlusion accumulated over frames (post.rt_ao_temporal): RG16F at the occlusion's
+  // size, r the occlusion, g the view distance (m); written in turn, each fbo with m_ao_tex[0]
+  GLuint m_rt_hist_fbo[2] = {0, 0};
+  GLuint m_rt_hist_tex[2] = {0, 0};
+  int m_rt_hist_cur = 0;
+  bool m_rt_hist_valid = false;
+  bool rt_ao_on() const;
   int m_ssao_w = 0;
   int m_ssao_h = 0;
   bool m_ssao_ready = false;
   std::array<float, 4> m_last_proj = {0, 0, 1, 1};
+  // Hi-Z: the nearest view depth per tile, a mip chain over the depth copy (sky and sea = far),
+  // for the water's screen-space reflection (post.hiz)
+  void build_hiz(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_hiz_tex = 0;
+  GLuint m_hiz_fbo = 0;
+  int m_hiz_w = 0;
+  int m_hiz_h = 0;
+  int m_hiz_levels = 0;
+  bool m_hiz_ready = false;
+  bool m_hiz_surf = false;  // post.hiz_surf: puddles, metal, glass on the pyramid too
+  // the sky map (post.sky_map, tech-rt-probe-gi M1): the open sky straight up, traced through the
+  // levels' hierarchies. A grid around the camera, kSkyMapSize cells a side; each texel the heights
+  // of the first four surfaces from the top (RGBA32F, game units, -1e30: none), so a point below a
+  // roof is under cover, and the lowest one over it says how far slanted rain reaches under. Traced into the back texture a band of rows a frame, swapped in when it's complete.
+  // First user: the rain (no wet ground, puddles or splashes under roofs and awnings)
+  static constexpr int kSkyMapSize = 256;
+  static constexpr float kSkyMapCell = 0.5f;  // meters
+  bool sky_map_on() const;
+  void build_sky_map(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_skymap_tex[2] = {0, 0};
+  GLuint m_skymap_fbo[2] = {0, 0};
+  int m_sky_front = 0;           // the texture the composite reads
+  bool m_sky_valid = false;      // the front one is complete
+  int m_sky_row = -1;            // the back one's next band (-1: not tracing)
+  float m_sky_origin[2] = {0, 0};      // the front's corner (world x, z, game units)
+  float m_sky_back_origin[2] = {0, 0};
+  float m_sky_top = 0.f;         // where the back one's rays start (world y)
+  std::vector<u64> m_sky_levels;  // the levels it was traced through
+  // the light probes (post.probes, tech-rt-probe-gi M2): a grid around the camera, each probe the
+  // levels' light coming back to it from all around (one bounce, rgb) and its open sky (a), traced
+  // a few rays a frame and blended over the frames (RGBA16F, kProbeY slices side by side in x)
+  static constexpr int kProbeX = 32, kProbeY = 8, kProbeZ = 32;
+  static constexpr float kProbeCell = 2.f;  // meters
+  bool probes_on() const;
+  void build_probes(GLuint screen_vao, SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_probe_tex[2] = {0, 0};
+  GLuint m_probe_fbo[2] = {0, 0};
+  int m_probe_front = 0;
+  bool m_probe_valid = false;
+  int m_probe_cell[3] = {0, 0, 0};  // the front grid's corner, in cells
+  float m_probe_frame = 0.f;
 
   // the near ocean's surface depth, and the depth buffer from before it was drawn
   GLuint m_ocean_fbo[3] = {0, 0, 0};  // 0: before the near ocean, 1: with it, 2: far ocean
@@ -598,10 +673,47 @@ class EnhancedPost {
   };
   std::unordered_map<u64, std::vector<ShadowDraw>> m_shadow_draws;  // by level load id
   void add_wind_shadow_draws(const LevelData* lev, bool cut, std::vector<ShadowDraw>* draws);
-  void draw_shadow_casters(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  // (mvp: the sun map's m_light_mvp when null)
+  void draw_shadow_casters(SharedRenderState* render_state,
+                           ScopedProfilerNode& prof,
+                           const float* mvp = nullptr);
+  // the characters around Jak seen from below (their lowest point per column, a small depth map):
+  // their ground occlusion in the composite, by day and night (tuning shadow.chr_occ_m: half side)
+  void do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof);
+  GLuint m_chr_occ_fbo = 0;
+  GLuint m_chr_occ_tex = 0;
+  float m_chr_occ_mvp[16] = {};
+  float m_chr_occ_depth_m = 0.f;  // the map's height span (m)
+  bool m_chr_occ_ready = false;
   GLuint m_caster_bones = 0;
   size_t m_caster_bones_size = 0;
   GLuint m_caster_vao = 0;
+  // TAA motion vectors (taa.motion): where each character pixel was last frame, from its model's
+  // bones this frame and last (found again by name and place). RG16F, uv offset; (64, 0): none
+  bool do_motion(SharedRenderState* render_state,
+                 ScopedProfilerNode& prof,
+                 int w,
+                 int h,
+                 const float to_prev[3][3],
+                 const float offset[3],
+                 bool reproject);
+  struct MotionModel {
+    u64 hash = 0;
+    u32 bone_count = 0;
+    u32 first_bone = 0;
+    float center[3] = {0, 0, 0};  // its bones' mean place, in its frame's view space
+  };
+  std::vector<MotionModel> m_mv_prev;
+  GLuint m_mv_bones[2] = {0, 0};
+  size_t m_mv_bones_size[2] = {0, 0};
+  int m_mv_cur = 0;
+  bool m_mv_prev_ok = false;
+  GLuint m_mv_fbo = 0;
+  GLuint m_mv_tex = 0;
+  int m_mv_w = 0;
+  int m_mv_h = 0;
+  int m_mv_matched = 0;  // models found again this frame (the log's "motion" line)
+  int m_mv_models = 0;
   GLuint m_shadow_fbo = 0;
   GLuint m_shadow_tex = 0;
   GLuint m_shadow_vao = 0;
@@ -674,13 +786,26 @@ class EnhancedPost {
   bool m_vol_ready = false;
 
   // the clouds, a pixel for every 2x2, blended over frames (draw_clouds)
-  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof);
+  void draw_clouds(GLuint id, int w, int h, bool history, GLuint render_fbo, ScopedProfilerNode& prof,
+                   SharedRenderState* render_state);
   GLuint m_cloud_fbo[2] = {0, 0};
   GLuint m_cloud_tex[2] = {0, 0};
   int m_cloud_w = 0;
   int m_cloud_h = 0;
   int m_cloud_cur = 0;
   bool m_cloud_history = false;
+  GLuint m_rays_fbo = 0;  // the rays through the clouds at the clouds' size (enh_cloud_rays)
+  GLuint m_rays_tex = 0;
+  int m_rays_w = 0;
+  int m_rays_h = 0;
+  // the world's sun shadow looks at half size, by enh_sun_half (unit 34, sun_half_on)
+  void draw_sun_half(GLuint id, int w, int h, GLuint render_fbo, ScopedProfilerNode& prof,
+                     SharedRenderState* render_state);
+  GLuint m_sun_half_fbo = 0;
+  GLuint m_sun_half_tex = 0;
+  int m_sun_half_w = 0;
+  int m_sun_half_h = 0;
+  GLuint m_noise_tex = 0;  // gnoise as a picture (post.noise_lut, unit 20)
 
   // the area's look and weather, eased toward the current area's each frame (update_scene)
   struct Grade {
@@ -783,6 +908,7 @@ class EnhancedPost {
   double m_headlights_time = -1.0;
   bool m_enclosed = false;  // under a roof (world.json "enclosed", or an indoor zone)
   bool m_city = false;  // a lit city (Haven, Spargus): its glow on the night sky
+  bool m_pale_ground = false;  // Haven's slums (pale flagstones): the night's pale-ground press
   // cutscene autofocus: a few depth samples around the middle of the screen, read back a frame
   // later (two pixel buffers in turn, no stall)
   void read_focus(int w, int h);
@@ -796,6 +922,7 @@ class EnhancedPost {
   GLuint m_adapt_pbo[2] = {0, 0};
   int m_adapt_cur = 0;
   bool m_adapt_pending[2] = {false, false};
+  bool m_adapt_half[2] = {false, false};  // that buffer holds half floats (an RGBA16F scene)
   float m_adapt = 1.f;
   float m_jak_wet = 0.f;  // Jak out of the water: wet, drying over some seconds
   float m_chroma = 0.f;   // colors split at the screen's edges: a hit, Dark Jak
@@ -821,6 +948,7 @@ class EnhancedPost {
  public:
   float gpu_ms() const { return m_gpu_ms; }
   float gpu_post_ms() const { return m_gpu_post_ms; }
+  float gpu_lag_ms() const { return m_gpu_lag_ms; }
   int auto_level() const { return m_auto_level; }
   static std::string pass_times();
 
@@ -832,6 +960,15 @@ class EnhancedPost {
   float m_gpu_ms = 0.f;
   float m_gpu_post_ms = 0.f;
   float m_gpu_other_ms = 0.f;  // the frame's GPU time outside the post pass, when it was measurable
+  // how far the GPU is behind the CPU when a frame starts (its frame-start timestamp against the
+  // GPU clock the CPU read as it queued it), smoothed: near 0 = the GPU waited for the CPU, so it
+  // has time to spare whatever its (lowered) clock makes the passes read; several ms = it's still
+  // drawing the frame before, the graphics card is what holds the frame back
+  GLint64 m_gpu_cpu_t0[4] = {};
+  float m_gpu_lag_ms = 0.f;
+  double m_gpu_room_since = 0.0;  // since when the GPU waits for the CPU at 60 fps (0 = it doesn't)
+  double m_auto_up_at = -1e9;     // the last step back up, and how long to wait before the next
+  double m_auto_up_wait = 10.0;
   float m_frame_ms = 16.7f;    // the real frame time (the CPU's clock), smoothed
   double m_last_frame = 0.0;
   double m_slow_since = -1.0;  // when the frame rate fell under ~58 (and not as low as a loading)

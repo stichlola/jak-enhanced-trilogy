@@ -654,6 +654,9 @@ void Merc2::handle_pc_model(const DmaTransfer& setup,
   stats->num_lights++;
 
   u64 hash = fnv64(model->name);
+  if (g_enhanced_casters.capture) {
+    m_enhanced_pending.push_back({hash, first_bone, (u32)bone_count, model->name.c_str()});
+  }
 
   DrawArgs args;
   args.lev_bucket = lev_bucket;
@@ -1260,6 +1263,7 @@ void Merc2::flush_draw_buckets(SharedRenderState* render_state,
     }
   }
 
+  m_enhanced_pending.clear();
   m_next_free_light = 0;
   m_next_free_bone_vector = 0;
   m_next_free_level_bucket = 0;
@@ -1280,6 +1284,9 @@ void Merc2::enhanced_keep_casters(const LevelDrawBucket& bucket, bool copy_bones
     const float* src = &m_shader_bone_vector_buffer[0].x();
     cs.bones.insert(cs.bones.end(), src, src + m_next_free_bone_vector * 4);
     m_enhanced_bone_base = base;
+    for (const auto& m : m_enhanced_pending) {
+      cs.instances.push_back({m.hash, base + m.first_bone, m.bone_count, m.name});
+    }
   }
   const auto* lev = bucket.level;
   // the draws on modified vertices index their own buffer, which Merc2 reuses later in the frame:
@@ -1515,6 +1522,10 @@ void Merc2::do_draws(const Draw* draw_array,
       }
     } else {
       mat = enhanced_anim_slot_char_material(render_state->version, -(draw.texture + 1));
+    }
+    // (lamps: Jak 3 only until tried in the others)
+    if (mat == kCharLamp && render_state->version != GameVersion::Jak3) {
+      mat = kCharDefault;
     }
     if (mat != last_mat) {
       glUniform1i(uniforms.enh_mat, mat);

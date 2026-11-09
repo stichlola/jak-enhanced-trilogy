@@ -5,6 +5,399 @@
 
 using namespace enh_post;
 
+namespace {
+// How far the GPU runs behind the CPU at a point of the post: a timestamp query (written when the
+// GPU gets there) against the GPU's clock read by the CPU as it queues it (glGetInteger64v
+// GL_TIMESTAMP, no wait). Near 0 = the GPU was idle, waiting for these commands (starved by the
+// CPU or by commands still sitting in the driver); large = it was busy with earlier work. Read 4
+// frames later, never waited for; "debug": {"cpu_profile": 1} logs it every 5 s.
+struct LagProbe {
+  const char* name;
+  GLuint q[4] = {};
+  GLint64 cpu[4] = {};
+  bool used[4] = {};
+  double sum = 0.0;
+  int n = 0, starved = 0;
+  void mark(unsigned frame) {
+    if (!q[0]) {
+      glGenQueries(4, q);
+    }
+    const int s = frame & 3;
+    if (used[s]) {
+      GLint ready = 0;
+      glGetQueryObjectiv(q[s], GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (ready) {
+        GLuint64 g = 0;
+        glGetQueryObjectui64v(q[s], GL_QUERY_RESULT, &g);
+        const double lag = ((double)(GLint64)g - (double)cpu[s]) * 1e-6;
+        if (lag > -5.0 && lag < 100.0) {
+          sum += lag;
+          n++;
+          starved += lag < 0.05 ? 1 : 0;
+        }
+      }
+      used[s] = false;
+    }
+    glQueryCounter(q[s], GL_TIMESTAMP);
+    glGetInteger64v(GL_TIMESTAMP, &cpu[s]);
+    used[s] = true;
+  }
+  std::string report() {
+    std::string out = n ? fmt::format("{} {:.2f} ({}% idle)", name, sum / n, 100 * starved / n) : "";
+    sum = 0.0;
+    n = starved = 0;
+    return out;
+  }
+};
+LagProbe g_lag_start{"start"}, g_lag_composite{"composite"}, g_lag_blit{"blit"}, g_lag_taa{"taa"},
+    g_lag_end{"end"};
+}  // namespace
+
+// post.hiz: the depth copy's view depths (sky and the sea itself: far) and their mip chain of
+// nearest depths, R32F, at most 10 levels (a 1080p frame's tiles up to 512 pixels). ~0.05 ms.
+void EnhancedPost::build_hiz(GLuint screen_vao,
+                             SharedRenderState* render_state,
+                             ScopedProfilerNode& prof) {
+  const int w = m_ssao_w, h = m_ssao_h;
+  if (w != m_hiz_w || h != m_hiz_h || !m_hiz_tex) {
+    if (m_hiz_tex) {
+      glDeleteTextures(1, &m_hiz_tex);
+      glDeleteFramebuffers(1, &m_hiz_fbo);
+    }
+    m_hiz_w = w;
+    m_hiz_h = h;
+    m_hiz_levels = 1;
+    while (m_hiz_levels < 10 && (w >> m_hiz_levels) > 0 && (h >> m_hiz_levels) > 0) {
+      m_hiz_levels++;
+    }
+    glGenTextures(1, &m_hiz_tex);
+    glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+    // (each level half the one before, rounded down: the shaders take level L as size >> L)
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glTexImage2D(GL_TEXTURE_2D, l, GL_R32F, std::max(1, w >> l), std::max(1, h >> l), 0, GL_RED,
+                   GL_FLOAT, nullptr);
+    }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glGenFramebuffers(1, &m_hiz_fbo);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  const bool sea = m_far_ocean_ready && m_ocean_w == w && m_ocean_h == h;
+  auto& sh = render_state->shaders[ShaderId::ENH_HIZ];
+  sh.activate();
+  const auto id = sh.id();
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T1"), 1);
+  glUniform1i(glGetUniformLocation(id, "has_sea"), sea ? 1 : 0);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_hiz_fbo);
+  ENH_TIMED("enh-hiz", {
+    for (int l = 0; l < m_hiz_levels; l++) {
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_hiz_tex, l);
+      glViewport(0, 0, std::max(1, w >> l), std::max(1, h >> l));
+      if (l == 0) {
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, sea ? m_ocean_depth[2] : m_black_tex);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+        glUniform1i(glGetUniformLocation(id, "mode"), 0);
+      } else {
+        // (reads only the level before: base = max = l - 1, no feedback with the level drawn)
+        glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, l - 1);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, l - 1);
+        glUniform1i(glGetUniformLocation(id, "mode"), 1);
+        glUniform2i(glGetUniformLocation(id, "src_size"), std::max(1, w >> (l - 1)),
+                    std::max(1, h >> (l - 1)));
+      }
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+      prof.add_draw_call();
+    }
+  });
+  glBindTexture(GL_TEXTURE_2D, m_hiz_tex);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, m_hiz_levels - 1);
+  glBindTexture(GL_TEXTURE_2D, 0);
+  m_hiz_ready = true;
+}
+
+// post.sky_map (tuning.json, switches in a running game)
+bool EnhancedPost::sky_map_on() const {
+  static const EnhancedTune t_sky_map("post.sky_map", 1.f);
+  return (float)t_sky_map > 0.5f;
+}
+
+// the sky map: kSkyMapSize^2 rays straight down from high over the camera, a band of rows a frame
+// into the back texture; swapped in whole. Traced again when the camera has gone a quarter of the
+// map from its center or the levels change
+void EnhancedPost::build_sky_map(GLuint screen_vao,
+                                 SharedRenderState* render_state,
+                                 ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!sky_map_on() || !m_rt_ready || !cam.valid) {
+    if (!sky_map_on()) {
+      m_sky_valid = false;
+      m_sky_row = -1;
+    }
+    return;
+  }
+  constexpr int N = kSkyMapSize;
+  const float cell = kSkyMapCell * kMeter;
+  const float half = N * cell * 0.5f;
+  if (!m_skymap_tex[0]) {
+    glGenTextures(2, m_skymap_tex);
+    glGenFramebuffers(2, m_skymap_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_skymap_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, N, N, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_skymap_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  if (m_sky_row < 0) {
+    // start a new one? (camera a quarter of the map off the front's center, other levels, none yet)
+    const float cx = m_sky_origin[0] + half, cz = m_sky_origin[1] + half;
+    const bool moved = std::abs(cam.trans[0] - cx) > half * 0.5f ||
+                       std::abs(cam.trans[2] - cz) > half * 0.5f;
+    if (!m_sky_valid || moved || m_sky_levels != m_rt_in_use) {
+      // (the corner on a 16-cell grid: the texels fall on the same world spots each time)
+      const float snap = 16.f * cell;
+      m_sky_back_origin[0] = std::floor((cam.trans[0] - half) / snap) * snap;
+      m_sky_back_origin[1] = std::floor((cam.trans[2] - half) / snap) * snap;
+      m_sky_top = cam.trans[1] + 300.f * kMeter;
+      m_sky_levels = m_rt_in_use;
+      m_sky_row = 0;
+    }
+  }
+  if (m_sky_row < 0) {
+    return;
+  }
+  // (tuning.json "post.sky_map_rows": rows traced a frame)
+  static const EnhancedTune t_rows("post.sky_map_rows", 32.f);
+  const int band = std::clamp((int)(float)t_rows, 1, N);
+  const int back = 1 - m_sky_front;
+  GLint vp[4], sc[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_SCISSOR_BOX, sc);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& sh = render_state->shaders[ShaderId::ENH_SKY_MAP];
+  sh.activate();
+  const auto id = sh.id();
+  for (int i = 0; i < 2; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  glUniform4f(glGetUniformLocation(id, "grid"), m_sky_back_origin[0], m_sky_back_origin[1], cell,
+              m_sky_top);
+  glUniform1f(glGetUniformLocation(id, "span"), 600.f * kMeter);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_skymap_fbo[back]);
+  const int rows = std::min(band, N - m_sky_row);
+  glViewport(0, 0, N, N);
+  glEnable(GL_SCISSOR_TEST);
+  glScissor(0, m_sky_row, N, rows);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  glScissor(sc[0], sc[1], sc[2], sc[3]);
+  if (!had_scissor) {
+    glDisable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_sky_row += rows;
+  if (m_sky_row >= N) {
+    m_sky_front = back;
+    m_sky_origin[0] = m_sky_back_origin[0];
+    m_sky_origin[1] = m_sky_back_origin[1];
+    m_sky_valid = true;
+    m_sky_row = -1;
+    // (tuning.json "post.sky_map_find" 1: logs the roofed floors nearest the camera, to test at;
+    // a floor: the lowest surface, the next one over it 2.2-12 m higher, over all of a 5x5 block)
+    static const EnhancedTune t_find("post.sky_map_find", 0.f);
+    if ((float)t_find > 0.5f) {
+      std::vector<float> px((size_t)N * N * 4);
+      glReadPixels(0, 0, N, N, GL_RGBA, GL_FLOAT, px.data());
+      std::vector<float> floor_y((size_t)N * N, -1e30f), head((size_t)N * N, 0.f);
+      for (int i = 0; i < N * N; i++) {
+        const float* h = &px[(size_t)i * 4];
+        int lo = -1;
+        for (int k = 0; k < 4; k++) {
+          if (h[k] > -1e29f) {
+            lo = k;
+          }
+        }
+        if (lo >= 1) {
+          floor_y[i] = h[lo];
+          head[i] = h[lo - 1] - h[lo];
+        }
+      }
+      struct Spot {
+        float d2, x, y, z, head;
+      };
+      std::vector<Spot> spots;
+      for (int r = 2; r < N - 2; r++) {
+        for (int c = 2; c < N - 2; c++) {
+          bool ok = true;
+          const float f0 = floor_y[r * N + c];
+          for (int dr = -2; dr <= 2 && ok; dr++) {
+            for (int dc = -2; dc <= 2 && ok; dc++) {
+              const int j = (r + dr) * N + c + dc;
+              ok = floor_y[j] > -1e29f && std::abs(floor_y[j] - f0) < 0.3f * kMeter &&
+                   head[j] > 2.2f * kMeter && head[j] < 12.f * kMeter;
+            }
+          }
+          if (ok) {
+            const float x = m_sky_origin[0] + (c + 0.5f) * cell;
+            const float z = m_sky_origin[1] + (r + 0.5f) * cell;
+            const float dx = x - cam.trans[0], dz = z - cam.trans[2];
+            spots.push_back({dx * dx + dz * dz, x, f0, z, head[r * N + c]});
+          }
+        }
+      }
+      std::sort(spots.begin(), spots.end(),
+                [](const Spot& a, const Spot& b) { return a.d2 < b.d2; });
+      lg::info("[enhanced] sky map: {} roofed floor cells", spots.size());
+      int shown = 0;
+      for (size_t i = 0; i < spots.size() && shown < 8; i += std::max<size_t>(1, spots.size() / 8)) {
+        const auto& s = spots[i];
+        lg::info("[enhanced]   roofed floor at {:.1f},{:.1f},{:.1f} m, roof {:.1f} m over it, {:.0f} m off",
+                 s.x / kMeter, s.y / kMeter, s.z / kMeter, s.head / kMeter, std::sqrt(s.d2) / kMeter);
+        shown++;
+      }
+    }
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
+// post.probes (tuning.json, switches in a running game)
+bool EnhancedPost::probes_on() const {
+  static const EnhancedTune t_probes("post.probes", 0.f);
+  return (float)t_probes > 0.5f;
+}
+
+// the light probes: every probe of the grid around the camera traces post.probe_rays rays a frame
+// (a band of the grid in every post.probe_every: 8192 probes) and blends them over what it had;
+// the grid moves by whole cells
+void EnhancedPost::build_probes(GLuint screen_vao,
+                                SharedRenderState* render_state,
+                                ScopedProfilerNode& prof) {
+  const auto& cam = g_enhanced_camera;
+  if (!probes_on() || !m_rt_ready || !cam.valid || !g_enhanced_tod.valid) {
+    m_probe_valid = false;
+    return;
+  }
+  constexpr int W = kProbeX * kProbeY, H = kProbeZ;
+  const float cell = kProbeCell * kMeter;
+  if (!m_probe_tex[0]) {
+    glGenTextures(2, m_probe_tex);
+    glGenFramebuffers(2, m_probe_fbo);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_probe_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, W, H, 0, GL_RGBA, GL_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_probe_tex[i], 0);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  }
+  // the corner: the camera at the grid's middle across, a quarter up (more of it below: the ground
+  // and the characters on it), in whole cells
+  const int cc[3] = {(int)std::floor(cam.trans[0] / cell) - kProbeX / 2,
+                     (int)std::floor(cam.trans[1] / cell) - kProbeY * 3 / 4,
+                     (int)std::floor(cam.trans[2] / cell) - kProbeZ / 2};
+  const int sh[3] = {cc[0] - m_probe_cell[0], cc[1] - m_probe_cell[1], cc[2] - m_probe_cell[2]};
+  const bool keep = m_probe_valid && std::abs(sh[0]) < kProbeX && std::abs(sh[1]) < kProbeY &&
+                    std::abs(sh[2]) < kProbeZ;
+  static const EnhancedTune t_rays("post.probe_rays", 8.f);
+  static const EnhancedTune t_blend("post.probe_blend", 0.25f);
+  static const EnhancedTune t_every("post.probe_every", 8.f);
+  static const EnhancedTune t_range("post.probe_range_m", 40.f);
+  const int back = 1 - m_probe_front;
+  GLint vp[4], fbo = 0;
+  glGetIntegerv(GL_VIEWPORT, vp);
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+  auto& shd = render_state->shaders[ShaderId::ENH_PROBES];
+  shd.activate();
+  const auto id = shd.id();
+  for (int i = 0; i < 3; i++) {
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, i, m_rt_buf[i]);
+  }
+  glActiveTexture(GL_TEXTURE12);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, m_rt_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_probe_tex[m_probe_front]);
+  glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
+  glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+  glUniform1i(glGetUniformLocation(id, "rt_levels"), m_rt_count);
+  glUniform4iv(glGetUniformLocation(id, "rt_base"), m_rt_count, m_rt_base.data());
+  float tod[8 * 4];
+  for (int p = 0; p < 8; p++) {
+    for (int ch = 0; ch < 4; ch++) {
+      u32 word = (u32)g_enhanced_tod.itimes[p / 2][(p % 2) * 2 + ch / 2];
+      u32 hw = (ch % 2) ? (word >> 16) : word;
+      tod[p * 4 + ch] = (hw & 0xff) / 64.f;
+    }
+  }
+  glUniform4fv(glGetUniformLocation(id, "rt_tod"), 8, tod);
+  glUniform4f(glGetUniformLocation(id, "grid"), cc[0] * cell, cc[1] * cell, cc[2] * cell, cell);
+  glUniform4i(glGetUniformLocation(id, "shift"), sh[0], sh[1], sh[2], keep ? 1 : 0);
+  glUniform3i(glGetUniformLocation(id, "dims"), kProbeX, kProbeY, kProbeZ);
+  m_probe_frame += 1.f;
+  if (m_probe_frame > 4096.f) {
+    m_probe_frame = 0.f;
+  }
+  glUniform1f(glGetUniformLocation(id, "frame"), m_probe_frame);
+  glUniform1f(glGetUniformLocation(id, "blend"), std::clamp((float)t_blend, 0.01f, 1.f));
+  glUniform1f(glGetUniformLocation(id, "tmax"), std::max((float)t_range, 1.f) * kMeter);
+  glUniform1i(glGetUniformLocation(id, "rays"), std::clamp((int)(float)t_rays, 1, 64));
+  glUniform1i(glGetUniformLocation(id, "every"), std::clamp((int)(float)t_every, 1, kProbeZ / 4));
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  const GLboolean had_scissor = glIsEnabled(GL_SCISSOR_TEST);
+  glDisable(GL_SCISSOR_TEST);
+  glBindVertexArray(screen_vao);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_probe_fbo[back]);
+  glViewport(0, 0, W, H);
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  if (had_scissor) {
+    glEnable(GL_SCISSOR_TEST);
+  }
+  prof.add_draw_call();
+  m_probe_front = back;
+  for (int i = 0; i < 3; i++) {
+    m_probe_cell[i] = cc[i];
+  }
+  m_probe_valid = true;
+  glBindTexture(GL_TEXTURE_2D, 0);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+  glViewport(vp[0], vp[1], vp[2], vp[3]);
+}
+
 void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                   int w,
                                   int h,
@@ -51,6 +444,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   // (the whole post on the GPU, as the passes' timers see it: the log's "post" interval also holds
   // the vsync wait when the frame has time to spare)
   const auto post_cpu0 = std::chrono::steady_clock::now();
+  // (test switch "debug": {"post_flush": n}: glFlush at points of the post, so the GPU gets the
+  // queued commands before the CPU's next long stretch of setup; bits 1 before the post, 2 after
+  // prepare, 4 after the composite)
+  static const EnhancedTune t_post_flush("debug.post_flush", 0.f);
+  const int post_flush = (int)(float)t_post_flush;
+  if (post_flush & 1) {
+    glFlush();
+  }
+  static const EnhancedTune t_cpu_profile("debug.cpu_profile", 0.f);
+  const bool lag_probes = (float)t_cpu_profile > 0.5f;
+  if (lag_probes) {
+    g_lag_start.mark(pass_timer_frame());
+  }
   static enh_post::PassTimer t_post_total("enh-total");
   enh_post::PassTimerScope post_total_scope(t_post_total);
   // copy (resolving msaa) the scene so we can read it while drawing over it
@@ -60,6 +466,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
+  if (post_flush & 2) {
+    glFlush();
+  }
   const bool have_scene = m_ssao_ready;
   // (where the post's GPU time goes between the named passes: the whole interval from here to the
   // composite's draw on the GPU's clock, which counts its idle time while the CPU sets the composite
@@ -153,6 +562,25 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glBindTexture(GL_TEXTURE_2D, 0);
       m_taa_history = false;
     }
+    // the characters' own motion (tuning taa.motion, 0: the camera's reprojection only; taa.dbg 1
+    // shows where it's used). Hellcat taking off at 640x360: crisp instead of smeared, 0.09 ms at
+    // 2560x1600 (Spargus 18h, 60 models)
+    static const EnhancedTune t_motion("taa.motion", 1.f);
+    static const EnhancedTune t_taa_dbg("taa.dbg", 0.f);
+    bool motion = false;
+    if ((float)t_motion > 0.5f) {
+      ENH_TIMED("enh-motion",
+                motion = do_motion(render_state, prof, w, h, to_prev, offset, reproject));
+    } else {
+      m_mv_prev_ok = false;
+    }
+    {
+      static int frames = 0;
+      if ((float)t_motion > 0.5f && ++frames >= 300) {
+        frames = 0;
+        lg::info("[enhanced] taa motion: {} of {} models found again", m_mv_matched, m_mv_models);
+      }
+    }
     const int cur = m_taa_cur;
     glBindFramebuffer(GL_FRAMEBUFFER, m_taa_fbo[cur]);
     glViewport(0, 0, w, h);
@@ -164,6 +592,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     auto& resolve = render_state->shaders[ShaderId::ENH_TAA];
     resolve.activate();
     auto rid = resolve.id();
+    glActiveTexture(GL_TEXTURE4);
+    glBindTexture(GL_TEXTURE_2D, motion ? m_mv_tex : 0);
+    glUniform1i(glGetUniformLocation(rid, "tex_T4"), 4);
+    glUniform1i(glGetUniformLocation(rid, "has_motion"), motion ? 1 : 0);
+    glUniform1f(glGetUniformLocation(rid, "tune_taa_dbg"), (float)t_taa_dbg);
     glActiveTexture(GL_TEXTURE3);
     glBindTexture(GL_TEXTURE_2D, m_depth_tex);
     glActiveTexture(GL_TEXTURE1);
@@ -195,6 +628,23 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     scene_tex = resolve_taa(m_scene_tex);
   } else if (!taa) {
     m_taa_history = false;
+  }
+
+  // (post.hiz 1: the water's reflection walks a depth pyramid, 400 m instead of 80 m; 0: the old
+  // per-step march; on by default: same look as the march, +0.06..0.13 ms)
+  static const EnhancedTune t_hiz("post.hiz", 1.f);
+  // (post.hiz_surf 1: puddles, metal and glass reflect through it too, so it's built on every
+  // frame, water or not; on by default: the ctyport docks after rain look the same, the puddles'
+  // rays reach 150 m instead of ~25 m, +0.05 ms where there's no water)
+  static const EnhancedTune t_hiz_surf("post.hiz_surf", 1.f);
+  // (not used by the AO: the shipping one is the Alchemy taps, 0.07-0.18 ms at 640x360, nothing
+  // left for a pyramid to save, and it runs in prepare(), before the pyramid exists; contact
+  // shadows march 0.5 m, a few pixels)
+  m_hiz_ready = false;
+  m_hiz_surf = (float)t_hiz > 0.5f && (float)t_hiz_surf > 0.5f;
+  if ((float)t_hiz > 0.5f && have_scene &&
+      (m_hiz_surf || (m_settings.water_reflections && (m_ocean_ready || m_far_ocean_ready)))) {
+    build_hiz(screen_vao, render_state, prof);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
@@ -361,10 +811,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day) * m_grade.glows;
       // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
       // far beacons and the sky's glows are bigger), and staying put
+      // (Spargus palace's braziers draw only a wide halo, 8-18 m: a fire too, its flame the size
+      // of a small one, or the grade took the flame's raw yellow to a dim orange.
+      // tuning.json "lights": {"fire_big_m": 0 = off})
+      static const EnhancedTune t_fire_big("lights.fire_big_m", 20.f);
+      const bool big_halo = l.size >= 6.f * kMeter;
       const bool warm = m_settings.fire && l.color[2] < 0.25f * l.color[0] &&
                         l.color[1] > 0.1f * l.color[0] && l.color[1] < 0.9f * l.color[0] &&
-                        l.size > 0.3f * kMeter && l.size < 6.f * kMeter && dist < 60.f * kMeter;
-      if (const auto* f = warm ? note_fire_glow(l.pos, l.size) : nullptr) {
+                        l.size > 0.3f * kMeter && l.size < std::max(6.f, (float)t_fire_big) * kMeter &&
+                        dist < 60.f * kMeter;
+      const float fire_size = big_halo ? std::min(0.2f * l.size, 2.5f * kMeter) : l.size;
+      if (const auto* f = warm ? note_fire_glow(l.pos, fire_size) : nullptr) {
         // its light flickers on top of the game's own (a seed from where it stands)
         float seed = std::fmod(std::abs(f->pos[0] * 0.013f + f->pos[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -1478,23 +1935,31 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       glUniform4fv(glGetUniformLocation(id, "spot_dir"), kSpots, spot_dir);
     }
     glUniform1i(glGetUniformLocation(id, "light_count"), n);
+    // the screen tiles' masks, uploaded after the beacons: per 32x18 tile r = the lights that may
+    // reach it, g/b = the beacons 0-31/32-63 whose point and halo may show in it
+    constexpr int kTx = 32, kTy = 18;
+    uint32_t tile_bits[kTx * kTy * 4] = {};
+    int tile_flags = 0;  // 1 lights, 2 beacons (light_tiles_on)
     {
       // light tiles (clustered lights, step 1): the screen in 32x18 tiles, per tile a mask of the
       // lights whose sphere's projection may touch it, so the composite's main light loop runs only
       // those. Conservative: the hull of the projected corners of each sphere's box; a sphere
       // reaching the camera plane covers every tile. lights.tiles 0: off (every pixel, every light).
+      // Default on: the main loop, the metal highlights and the air glow/halo loops use it; at
+      // 2560x1600 Spargus 21h the composite 11.6 -> 11.0 ms, frames equal to the TAA noise
       // The composite declares the uniforms only with ENH_LIGHT_TILES defined (uniform budget): without
       // it these calls find location -1 and do nothing
-      static const EnhancedTune t_tiles("lights.tiles", 0.f);
-      constexpr int kTx = 32, kTy = 18;
-      uint32_t tiles[kTx * kTy];
+      static const EnhancedTune t_tiles("lights.tiles", 1.f);
       const bool tiles_on = t_tiles > 0.5f;
       if (tiles_on) {
-        std::fill(std::begin(tiles), std::end(tiles), 0u);
+        tile_flags |= 1;
         const float fx = m_last_proj[2], fy = m_last_proj[3];
         for (int i = 0; i < n; i++) {
           const float* lp = pos + i * 4;
-          const float r = lp[3];
+          // (grown to what every loop over the lights reaches: highlights and the air's glow 1.6
+          // radii, the halo ~2.4 x its spread of at least 0.01 rad)
+          const float r = std::max(1.6f * lp[3],
+                                   0.03f * std::sqrt(lp[0] * lp[0] + lp[1] * lp[1] + lp[2] * lp[2]));
           int x0 = 0, x1 = kTx - 1, y0 = 0, y1 = kTy - 1;
           if (lp[2] - r > 0.1f * kMeter) {
             float u0 = 1e9f, u1 = -1e9f, v0 = 1e9f, v1 = -1e9f;
@@ -1516,30 +1981,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
           for (int ty = y0; ty <= y1; ty++) {
             for (int tx = x0; tx <= x1; tx++) {
-              tiles[ty * kTx + tx] |= 1u << i;
+              tile_bits[(ty * kTx + tx) * 4] |= 1u << i;
             }
           }
         }
-        // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
-        // 1024 constant registers)
-        static GLuint tiles_tex = 0;
-        glActiveTexture(GL_TEXTURE28);
-        if (!tiles_tex) {
-          glGenTextures(1, &tiles_tex);
-          glBindTexture(GL_TEXTURE_2D, tiles_tex);
-          glTexImage2D(GL_TEXTURE_2D, 0, GL_R32UI, kTx, kTy, 0, GL_RED_INTEGER, GL_UNSIGNED_INT,
-                       nullptr);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-        }
-        glBindTexture(GL_TEXTURE_2D, tiles_tex);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RED_INTEGER, GL_UNSIGNED_INT, tiles);
-        glActiveTexture(GL_TEXTURE0);
-        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
       }
-      glUniform1f(glGetUniformLocation(id, "light_tiles_on"), tiles_on ? 1.f : 0.f);
     }
     glUniform4fv(glGetUniformLocation(id, "lantern"), 1, m_lantern);
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
@@ -1583,6 +2029,60 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (m_settings.ssao_debug && (debug_beacons++ % 300) == 0) {
         lg::info("[enhanced] beacons: {} far glows, {} shown", beacons.size(), nb);
       }
+      // beacon tiles (beacons.tiles): the composite draws a beacon only within 40 px of its point
+      // and only when that point is on screen, so each one's tiles are that square's (the same
+      // projection as the shader's, half a tile of margin); its loop then walks only those.
+      // Default on: 2560x1600 Spargus 21h composite 11.70 -> 11.17 ms in two A/B pairs of one run,
+      // frames off/on equal to two frames of one setting (the beacons' tiles checked drawn)
+      static const EnhancedTune t_btiles("beacons.tiles", 1.f);
+      if (t_btiles > 0.5f && nb > 0) {
+        tile_flags |= 2;
+        const float fx = m_last_proj[2], fy = m_last_proj[3];
+        const float ru = 40.f / std::max(w, 1), rv = 40.f / std::max(h, 1);
+        for (int i = 0; i < nb; i++) {
+          const float* bp = bpos + i * 4;
+          if (bp[2] == 0.f) {
+            continue;
+          }
+          const float u = 0.5f * fx * bp[0] / bp[2] + 0.5f, v = 0.5f * fy * bp[1] / bp[2] + 0.5f;
+          if (!(u > 0.f && u < 1.f && v > 0.f && v < 1.f)) {
+            continue;
+          }
+          const int x0 = std::max((int)std::floor((u - ru) * kTx - 0.5f), 0);
+          const int x1 = std::min((int)std::floor((u + ru) * kTx + 0.5f), kTx - 1);
+          const int y0 = std::max((int)std::floor((v - rv) * kTy - 0.5f), 0);
+          const int y1 = std::min((int)std::floor((v + rv) * kTy + 0.5f), kTy - 1);
+          for (int ty = y0; ty <= y1; ty++) {
+            for (int tx = x0; tx <= x1; tx++) {
+              tile_bits[(ty * kTx + tx) * 4 + 1 + (i >> 5)] |= 1u << (i & 31);
+            }
+          }
+        }
+      }
+    }
+    {
+      // (as a 32x18 integer texture on unit 28: as uniforms they took the composite past NVIDIA's
+      // 1024 constant registers)
+      if (tile_flags) {
+        static GLuint tiles_tex = 0;
+        glActiveTexture(GL_TEXTURE28);
+        if (!tiles_tex) {
+          glGenTextures(1, &tiles_tex);
+          glBindTexture(GL_TEXTURE_2D, tiles_tex);
+          glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32UI, kTx, kTy, 0, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                       nullptr);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        }
+        glBindTexture(GL_TEXTURE_2D, tiles_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kTx, kTy, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                        tile_bits);
+        glActiveTexture(GL_TEXTURE0);
+        glUniform1i(glGetUniformLocation(id, "tex_T28"), 28);
+      }
+      glUniform1f(glGetUniformLocation(id, "light_tiles_on"), (float)tile_flags);
     }
     static int debug_counter = 0;
     if (m_settings.ssao_debug && (debug_counter++ % 300) == 0) {
@@ -1641,10 +2141,16 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     if (reproject) {
       glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
     }
-    draw_clouds(id, w, h, reproject, render_fbo, prof);
+    draw_clouds(id, w, h, reproject, render_fbo, prof, render_state);
   } else {
     m_cloud_history = false;
     glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, 0.f, 0.f, 0.f);
+  }
+  // the world's sun shadow looks at half size (tuning "shadow.half")
+  if (have_scene) {
+    draw_sun_half(id, w, h, render_fbo, prof, render_state);
+  } else {
+    glUniform1f(glGetUniformLocation(id, "sun_half_on"), 0.f);
   }
 
   // (test switch, what each part of the composite costs, in one run:
@@ -1758,17 +2264,36 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     if (std::chrono::duration<double>(now - cpu_t).count() >= 5.0) {
       lg::info("[enhanced] post cpu: to composite {:.2f} ms, of it setup {:.2f} ms (n={})",
                cpu_total / cpu_n, cpu_setup / cpu_n, cpu_n);
+      if (lag_probes) {
+        lg::info("[enhanced] gpu lag behind cpu (ms): frame {:.2f}, {}, {}, {}, {}, {}", m_gpu_lag_ms,
+                 g_lag_start.report(), g_lag_composite.report(), g_lag_blit.report(), g_lag_taa.report(), g_lag_end.report());
+      }
       cpu_setup = cpu_total = 0.0;
       cpu_n = 0;
       cpu_t = now;
     }
-  }  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  }
+  if (lag_probes) {
+    g_lag_composite.mark(pass_timer_frame());
+  }
+  ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  {
+    // (test switch "debug": {"gpu_burn": n}: the composite drawn n more times, the same picture,
+    // to make the graphics card the bottleneck when testing the auto quality)
+    static const EnhancedTune t_gpu_burn("debug.gpu_burn", 0.f);
+    for (int i = 0; i < std::min(64, (int)(float)t_gpu_burn); i++) {
+      glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    }
+  }
   if (probe_group >= 0) {
     glEndQuery(GL_TIME_ELAPSED);
     GLuint64 ns = 0;
     glGetQueryObjectui64v(probe.query, GL_QUERY_RESULT, &ns);
     probe.sum[probe_group] += ns / 1e6;
     probe.count[probe_group]++;
+  }
+  if (post_flush & 4) {
+    glFlush();
   }
   static enh_post::PassTimer t_tail_span("enh-tail-span");
   enh_post::PassTimerScope tail_span(t_tail_span);
@@ -1779,7 +2304,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    if (lag_probes) {
+      g_lag_blit.mark(pass_timer_frame());
+    }
     resolve_taa(m_scene_tex);
+    if (lag_probes) {
+      g_lag_taa.mark(pass_timer_frame());
+    }
     glBindFramebuffer(GL_READ_FRAMEBUFFER, m_taa_fbo[1 - m_taa_cur]);  // (the one just written)
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, render_fbo);
     glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -1788,6 +2319,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
 
+  if (lag_probes) {
+    g_lag_end.mark(pass_timer_frame());
+  }
   // the end of this frame's 3D and post work, for the auto quality
   if (m_gpu_query_open) {
     glQueryCounter(m_gpu_query[m_gpu_query_slot][2], GL_TIMESTAMP);

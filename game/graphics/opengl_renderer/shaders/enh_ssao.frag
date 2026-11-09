@@ -33,9 +33,37 @@ uniform int rt_levels;       // 0: none (screen-space only)
 uniform ivec4 rt_base[16];   // per level: node, triangle base
 uniform vec3 cam_pos;        // world
 uniform vec3 rt_ao;          // ray length, strength, how far from the camera (game units, -, game units)
+uniform int rt_rays = 6;     // rays a pixel this frame
+// accumulated over frames (post.rt_ao_temporal): a ray or two a pixel, turned each frame, mixed
+// into last frame's result found where this point was then (the traced occlusion depends only on
+// the world point and its normal, so reprojecting it is exact for the levels)
+uniform int rt_temporal;
+uniform int rt_history;      // 0: none (first frame, a cut)
+uniform float rt_frame;
+uniform sampler2D tex_T13;   // last frame's: r occlusion, g view distance (m)
+uniform mat3 prev_view_to_world;
+uniform vec3 prev_cam_pos;
+uniform vec2 prev_f;         // last frame's fx, fy
+uniform float tune_rt_keep = 0.9;   // the history's weight
+uniform float tune_rt_reject = 0.03;  // a history this far off in distance (fraction) is another surface
+// 1: half the pixels traced each frame (in turn). Off: no gain (JAK_ENHANCED_AO_CYCLE=2, wascity
+// 640x360: the pass 0.11 ms with it, 0.09 ms without, 0.03 ms untraced): one ray a pixel is cheap
+// already, the reprojection and the history fetch are most of what's left
+uniform float tune_rt_checker = 0.0;
+uniform int rt_every_pixel;  // (JAK_ENHANCED_AO_CYCLE=2's middle phase: the checkerboard off)
 
 in vec2 tex_coord;
-out float ao_out;
+layout(location = 0) out float ao_out;
+// temporal (ssao.temporal): half the taps each frame, the other half the frame before, through the
+// reprojected history (r: the screen-space occlusion, g: the view distance it was found at)
+layout(location = 1) out vec2 hist_out;
+uniform int ao_temporal;      // 0 off, 1 on (history in tex_T12), 2 on, no history yet
+uniform int ao_frame;         // which half of the taps (0/1)
+uniform sampler2D tex_T12;
+uniform mat3 to_prev;         // view -> previous frame's view
+uniform vec3 to_prev_offset;
+// the traced occlusion's own history (post.rt_ao_temporal), written as a third target
+layout(location = 2) out vec2 rt_out;
 
 const int SAMPLES = 16;
 const float TURNS = 7.0;
@@ -149,7 +177,6 @@ float rt_nearest(vec3 o, vec3 d, float tmax) {
   return best;
 }
 
-const int RT_RAYS = 6;
 
 // the open sky seen from world point w with world normal n (1 open, 0 shut in): cosine-weighted
 // rays, a hit counts more the closer it is (linearly)
@@ -159,17 +186,21 @@ float rt_occlusion(vec3 w, vec3 n, float noise, float dist) {
   // off the surface: the depth buffer's position is coarser further away
   vec3 o = w + n * (0.03 * 4096.0 + 0.0015 * dist);
   float noise2 = fract(noise * 7.31 + 0.37);
+  // (each frame further along a 2D low-discrepancy sequence, R2)
+  float f1 = rt_temporal > 0 ? fract(rt_frame * 0.7548777) : 0.0;
+  float f2 = rt_temporal > 0 ? fract(rt_frame * 0.5698403) : 0.0;
   float sum = 0.0;
-  for (int i = 0; i < RT_RAYS; i++) {
-    float u1 = fract((float(i) + noise) / float(RT_RAYS));
-    float phi = 6.2831853 * fract(float(i) * 0.618034 + noise2);
+  int rays = clamp(rt_rays, 1, 8);
+  for (int i = 0; i < rays; i++) {
+    float u1 = fract((float(i) + noise) / float(rays) + f1);
+    float phi = 6.2831853 * fract(float(i) * 0.618034 + noise2 + f2);
     float r = sqrt(u1);
     vec3 d = normalize(t * (r * cos(phi)) + b * (r * sin(phi)) + n * sqrt(1.0 - u1));
     float h = rt_nearest(o, d, rt_ao.x);
     float k = 1.0 - h / rt_ao.x;
     sum += k;
   }
-  return 1.0 - rt_ao.y * sum / float(RT_RAYS);
+  return 1.0 - rt_ao.y * sum / float(rays);
 }
 
 // visibility (0..1) of the hemisphere around n at p: 2 slices x 6 steps a side, r_uv the radius on
@@ -243,7 +274,9 @@ float gtao(vec2 uv, float d, vec3 p, vec3 n, vec2 r_uv, float r_world, float noi
 
 void main() {
   vec2 uv = tex_coord;
+  rt_out = vec2(1.0, 0.0);
   float d = texture(tex_T0, uv).r;
+  hist_out = vec2(1.0, 0.0);
   if (d <= 1e-7) {
     ao_out = 1.0;  // sky / nothing drawn
     return;
@@ -254,6 +287,10 @@ void main() {
     ao_out = 1.0;
     return;
   }
+  // (temporal: every other tap, this frame's half)
+  bool tmp = ao_temporal != 0;
+  int t_step = tmp ? 2 : 1;
+  int t_first = tmp ? ao_frame : 0;
 
   // normal from the neighbor on each axis with the smaller depth jump (no halos on edges)
   vec3 pr = view_pos(uv + vec2(texel.x, 0));
@@ -309,7 +346,7 @@ void main() {
 
   float sum = 0.0;
   float r2 = radius * radius * r_scale * r_scale;
-  for (int i = 0; i < (tune_ao_gtao > 0.5 ? 0 : SAMPLES); i++) {
+  for (int i = t_first; i < (tune_ao_gtao > 0.5 ? 0 : SAMPLES); i += t_step) {
     float t = (float(i) + 0.5) / float(SAMPLES);
     float angle = t * TURNS * 6.2831853 + spin;
     vec2 suv = uv + r_uv * t * vec2(cos(angle), sin(angle));
@@ -325,7 +362,7 @@ void main() {
     sum += falloff * max(0.0, dot(v, n) - 0.12 * sqrt(vv) - 0.002 * dist) / (vv + 0.01 * r2) * sqrt(r2);
   }
 
-  float ao = max(0.0, 1.0 - 2.0 * intensity * sum / float(SAMPLES));
+  float ao = max(0.0, 1.0 - 2.0 * intensity * sum * float(t_step) / float(SAMPLES));
   if (tune_ao_gtao > 0.5) {
     float vis = gtao(uv, d, p, n, r_uv, radius * r_scale, noise, spin);
     ao = pow(vis, tune_ao_gtao_pow * intensity / 1.4);
@@ -341,7 +378,7 @@ void main() {
     w_uv *= w_scale;
     float w_r2 = r2 * wide_k * wide_k * w_scale * w_scale;
     float w_sum = 0.0;
-    for (int i = 0; i < WIDE; i++) {
+    for (int i = t_first; i < WIDE; i += t_step) {
       float t = (float(i) + 0.5) / float(WIDE);
       float angle = t * 3.0 * 6.2831853 + spin + 1.3;
       vec2 suv = uv + w_uv * sqrt(t) * vec2(cos(angle), sin(angle));
@@ -354,7 +391,24 @@ void main() {
       float falloff = 1.0 - smoothstep(0.5 * w_r2, w_r2, vv);
       w_sum += falloff * max(0.0, dot(v, n) - 0.004 * dist) / (vv + 0.02 * w_r2) * sqrt(w_r2);
     }
-    ao *= max(0.6, 1.0 - 0.9 * intensity * w_sum / float(WIDE));
+    ao *= max(0.6, 1.0 - 0.9 * intensity * w_sum * float(t_step) / float(WIDE));
+  }
+  // temporal: this half averaged with last frame's other half, found at the same world point (the
+  // occlusion of static geometry doesn't move with the camera); none where the distance there
+  // differs (something moved, or it was hidden)
+  if (tmp) {
+    float now = ao;
+    if (ao_temporal == 1) {
+      vec3 pp = to_prev * p + to_prev_offset;
+      vec2 puv = 0.5 * vec2(prev_f.x * pp.x, prev_f.y * pp.y) / pp.z + 0.5;
+      if (pp.z > 0.0 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)))) {
+        vec2 h = texture(tex_T12, puv).rg;
+        if (abs(h.y - abs(pp.z)) < 0.03 * abs(pp.z)) {
+          ao = 0.5 * (now + h.x);
+        }
+      }
+    }
+    hist_out = vec2(now, dist);
   }
 
   // traced through the levels: corners and alleys darken from what's really there, on or off the
@@ -362,7 +416,33 @@ void main() {
   if (rt_levels > 0 && dist < rt_ao.z) {
     vec3 wn = normalize(view_to_world * n);
     vec3 wp = view_to_world * p + cam_pos;
-    float rt = rt_occlusion(wp, wn, noise, dist);
+    float hist = -1.0;
+    if (rt_temporal > 0) {
+      vec3 pv = (wp - prev_cam_pos) * prev_view_to_world;  // world -> last frame's view (transpose)
+      vec2 puv = 0.5 * prev_f * pv.xy / pv.z + 0.5;
+      if (rt_history > 0 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)))) {
+        vec2 h = texture(tex_T13, puv).rg;
+        float pd = abs(pv.z) / 4096.0;
+        if (abs(h.g - pd) < tune_rt_reject * pd + 0.05) {
+          hist = h.r;
+        }
+      }
+    }
+    // (checkerboard of 8x8 tiles: half the pixels traced a frame, the others keep their history.
+    // Whole tiles, as the GPU runs pixels in groups: one traced pixel in a group costs the group)
+    ivec2 tile = ivec2(gl_FragCoord.xy) >> 3;
+    bool skip = hist >= 0.0 && tune_rt_checker > 0.5 && rt_every_pixel == 0 &&
+                ((tile.x + tile.y + int(rt_frame)) & 1) == 1;
+    float rt = hist;
+    if (!skip) {
+      rt = clamp(rt_occlusion(wp, wn, noise, dist), 0.0, 1.0);
+      if (hist >= 0.0) {
+        rt = mix(rt, hist, tune_rt_keep);
+      }
+    }
+    if (rt_temporal > 0) {
+      rt_out = vec2(rt, dist / 4096.0);
+    }
     rt = mix(rt, 1.0, smoothstep(0.7 * rt_ao.z, rt_ao.z, dist));
     ao = min(ao, max(rt, 0.0));
   }

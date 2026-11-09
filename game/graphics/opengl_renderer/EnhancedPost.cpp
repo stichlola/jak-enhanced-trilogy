@@ -381,6 +381,13 @@ EnhancedPost::~EnhancedPost() {
     glDeleteFramebuffers(2, m_cloud_fbo);
     glDeleteTextures(2, m_cloud_tex);
   }
+  if (m_rays_fbo) {
+    glDeleteFramebuffers(1, &m_rays_fbo);
+    glDeleteTextures(1, &m_rays_tex);
+  }
+  if (m_noise_tex) {
+    glDeleteTextures(1, &m_noise_tex);
+  }
   if (m_shadow_far_fbo) {
     glDeleteFramebuffers(1, &m_shadow_far_fbo);
     glDeleteTextures(1, &m_shadow_far_tex);
@@ -446,6 +453,10 @@ void EnhancedPost::update_auto_quality() {
       if (ms > 0.f && ms < 200.f) {
         m_gpu_ms = m_gpu_ms <= 0.f ? ms : m_gpu_ms * 0.95f + ms * 0.05f;
       }
+      const float lag = (float)((double)(GLint64)t0 - (double)m_gpu_cpu_t0[slot]) / 1e6f;
+      if (m_gpu_cpu_t0[slot] && lag > -5.f && lag < 200.f) {
+        m_gpu_lag_ms = m_gpu_lag_ms * 0.95f + std::max(lag, 0.f) * 0.05f;
+      }
     }
     m_gpu_query_used[slot] = false;
   }
@@ -488,20 +499,44 @@ void EnhancedPost::update_auto_quality() {
     m_level_cost[m_auto_level] = std::max(0.3f, m_level_post[m_auto_level] - m_gpu_post_ms);
     m_level_cost_pending = false;
   }
+  // (auto.lag_gate 1: which part holds the frame back is read from how far the GPU runs behind
+  // the CPU, not from its timestamps: with time to spare the driver lowers the clock and parks
+  // the slack inside the post (the TAA's last blit read ~8 ms at desert-start, 0.1 ms when
+  // busy), so "GPU 16 ms" also came from frames the CPU was late for, and the post never looked
+  // cheap enough to bring a pass back. Behind by several ms = the graphics card is the limit;
+  // under ~2 ms = it waited for the CPU, there's room. 0 = the old timestamp rule.)
+  static const EnhancedTune t_lag_gate("auto.lag_gate", 1.f);
+  const bool lag_gate = (float)t_lag_gate > 0.5f;
+  const bool gpu_bound = lag_gate ? m_gpu_lag_ms > 4.f : m_gpu_ms > 16.f;
+  if (m_gpu_lag_ms >= 2.f || m_frame_ms > 17.2f) {
+    m_gpu_room_since = 0.0;
+  } else if (m_gpu_room_since <= 0.0) {
+    m_gpu_room_since = now;
+  }
   if (!m_settings.auto_quality) {
     m_auto_level = 0;
-  } else if (slow && m_gpu_ms > 16.0f && m_auto_level < kAutoLevels - 1 &&
+  } else if (slow && gpu_bound && m_auto_level < kAutoLevels - 1 &&
              now - m_auto_changed > 1.5) {
-    // the graphics card is what holds the frame back: one more pass aside
+    // the graphics card is what holds the frame back: one more pass aside (and if a step up
+    // brought this on within 20 s, the next try waits twice as long, at most 2 minutes)
+    if (now - m_auto_up_at < 20.0) {
+      m_auto_up_wait = std::min(120.0, m_auto_up_wait * 2.0);
+    } else if (now - m_auto_up_at > 60.0) {
+      m_auto_up_wait = 10.0;
+    }
     m_auto_level++;
     m_level_post[m_auto_level] = m_gpu_post_ms;
     m_level_cost_pending = true;
     m_auto_changed = now;
-    lg::info("[enhanced] auto quality: {:.1f} fps, GPU {:.1f} ms a frame, level {}",
-             1000.f / m_frame_ms, m_gpu_ms, m_auto_level);
+    lg::info("[enhanced] auto quality: {:.1f} fps, GPU {:.1f} ms a frame, {:.1f} ms behind, level {}",
+             1000.f / m_frame_ms, m_gpu_ms, m_gpu_lag_ms, m_auto_level);
   } else if (m_auto_level > 0 && !m_level_cost_pending && now - m_auto_changed > 6.0 &&
-             (m_gpu_other_ms + m_gpu_post_ms + m_level_cost[m_auto_level] < 15.3f ||
-              (m_fast_since > 0.0 && now - m_fast_since > 60.0 && now - m_auto_changed > 60.0))) {
+             (lag_gate ? (m_gpu_room_since > 0.0 && now - m_gpu_room_since > m_auto_up_wait &&
+                          now - m_auto_changed > m_auto_up_wait)
+                       : (m_gpu_other_ms + m_gpu_post_ms + m_level_cost[m_auto_level] < 15.3f ||
+                          (m_fast_since > 0.0 && now - m_fast_since > 60.0 &&
+                           now - m_auto_changed > 60.0)))) {
+    m_auto_up_at = now;
     // the frame would still fit with that pass back (or a minute at 60 fps: worth a try, the
     // estimate may come from a heavier place)
     m_auto_level--;
@@ -538,6 +573,7 @@ void EnhancedPost::update_auto_quality() {
   g_enhanced_scenery_scale = kSceneryScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   g_enhanced_render_scale = kRenderScale[std::clamp(m_auto_level, 0, kAutoLevels - 1)];
   glQueryCounter(m_gpu_query[slot][0], GL_TIMESTAMP);
+  glGetInteger64v(GL_TIMESTAMP, &m_gpu_cpu_t0[slot]);
   m_gpu_query_open = true;
   ++pass_timer_frame();
 }
@@ -572,6 +608,17 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
   }
   g_enhanced_char_detail = m_settings.char_detail;
+  {
+    // (test switch "debug": {"cpu_burn": ms}: the renderer's thread busy that long each frame,
+    // a CPU-bound frame for testing the auto quality)
+    static const EnhancedTune t_cpu_burn("debug.cpu_burn", 0.f);
+    if ((float)t_cpu_burn > 0.f) {
+      const auto until = std::chrono::steady_clock::now() +
+                         std::chrono::microseconds((int)(std::min((float)t_cpu_burn, 50.f) * 1000.f));
+      while (std::chrono::steady_clock::now() < until) {
+      }
+    }
+  }
   update_auto_quality();
   g_enhanced_fx.detail = m_settings.enabled ? m_settings.fx_detail : 0.f;
   g_enhanced_fx.time = (float)m_time;
@@ -588,6 +635,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   // the characters of this frame add themselves (Merc2), for the sun shadow map
   g_enhanced_casters.bones.clear();
   g_enhanced_casters.draws.clear();
+  g_enhanced_casters.instances.clear();
   g_enhanced_casters.next_mod_copy = 0;
   g_enhanced_casters.capture =
       m_settings.enabled && m_settings.shadow_map && m_settings.shadow_casters;

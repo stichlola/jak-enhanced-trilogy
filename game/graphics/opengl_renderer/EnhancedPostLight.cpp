@@ -69,6 +69,9 @@ void EnhancedPost::update_scene() {
            ((m_zone > 0 && m_zone < (int)g_world.zones.size() &&
              g_world.zones[m_zone].name.rfind("haven", 0) == 0) ||
             level.rfind("was", 0) == 0);
+  // (the night's pale-ground press is for the slums' flagstones only: on every night level it took
+  // a third off the desert and the port)
+  m_pale_ground = g_game_version == GameVersion::Jak3 && level.rfind("ctyslum", 0) == 0;
   // every visit to a zone picks its weather anew: the spells start from a random point of their
   // cycle (the first visit of a session too). A district ("haven-industrial") is a visit of its
   // town: walking into it doesn't change the weather
@@ -821,19 +824,37 @@ void EnhancedPost::read_exposure(int w, int h) {
     glGenBuffers(2, m_adapt_pbo);
     for (int i = 0; i < 2; i++) {
       glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[i]);
-      glBufferData(GL_PIXEL_PACK_BUFFER, kN * 4, nullptr, GL_STREAM_READ);
+      // (8 bytes a pixel: room for half floats)
+      glBufferData(GL_PIXEL_PACK_BUFFER, kN * 8, nullptr, GL_STREAM_READ);
     }
   }
+  // (an RGBA16F scene, post.hdr_scene, is read in its own half floats: asked for as bytes, the
+  // driver converted on the CPU, waiting for the GPU at each of the 48 reads, +5 ms CPU a frame)
+  auto half_to_float = [](uint16_t v) {
+    const int e = (v >> 10) & 0x1f;
+    const int m = v & 0x3ff;
+    const float f = e == 0    ? std::ldexp((float)m, -24)
+                    : e == 31 ? 65504.f
+                              : std::ldexp((float)(m | 0x400), e - 25);
+    return (v & 0x8000) ? -f : f;
+  };
   const float dt = m_adapt_time > 0.0 ? (float)std::clamp(m_time - m_adapt_time, 0.0, 0.2) : 0.f;
   m_adapt_time = m_time;
   const int prev = 1 - m_adapt_cur;
   if (m_adapt_pending[prev]) {
     glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[prev]);
-    if (auto* d = (const uint8_t*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, kN * 4,
+    const bool half = m_adapt_half[prev];
+    if (auto* d = (const uint8_t*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, kN * (half ? 8 : 4),
                                                    GL_MAP_READ_BIT)) {
       float sum = 0.f;
       for (int i = 0; i < kN; i++) {
-        const float l = (0.3f * d[i * 4] + 0.59f * d[i * 4 + 1] + 0.11f * d[i * 4 + 2]) / 255.f;
+        float c[3];
+        for (int k = 0; k < 3; k++) {
+          // (past 1 counted as 1, as the 8-bit frame clips it)
+          c[k] = half ? std::clamp(half_to_float(((const uint16_t*)d)[i * 4 + k]), 0.f, 1.f)
+                      : d[i * 4 + k] / 255.f;
+        }
+        const float l = 0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2];
         sum += std::log(std::max(l, 0.02f));
       }
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
@@ -842,19 +863,28 @@ void EnhancedPost::read_exposure(int w, int h) {
                              ? std::pow(std::clamp(0.36f / mean, 0.8f, 1.6f), m_settings.eye_adapt * 0.6f)
                              : 1.f;
       const float tau = want < m_adapt ? 0.7f : 2.f;
-      m_adapt += (want - m_adapt) * (1.f - std::exp(-dt / tau));
+      // (not over a black frame: a level loading in, nothing drawn but a few torches. The eye
+      // opened up to +33% there, and the city's first seconds came in washed out and orange)
+      if (mean > 0.035f) {
+        m_adapt += (want - m_adapt) * (1.f - std::exp(-dt / tau));
+      }
     } else {
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
     }
     m_adapt_pending[prev] = false;
   }
   glBindFramebuffer(GL_READ_FRAMEBUFFER, m_scene_fbo);
+  GLint comp = GL_UNSIGNED_NORMALIZED;
+  glGetFramebufferAttachmentParameteriv(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                        GL_FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE, &comp);
+  const bool half = comp == GL_FLOAT;
+  m_adapt_half[m_adapt_cur] = half;
   glBindBuffer(GL_PIXEL_PACK_BUFFER, m_adapt_pbo[m_adapt_cur]);
   int i = 0;
   for (int y = 0; y < 6; y++) {
     for (int x = 0; x < 8; x++) {
-      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                   (void*)(intptr_t)(i++ * 4));
+      glReadPixels((2 * x + 1) * w / 16, (2 * y + 1) * h / 12, 1, 1, GL_RGBA,
+                   half ? GL_HALF_FLOAT : GL_UNSIGNED_BYTE, (void*)(intptr_t)(i++ * (half ? 8 : 4)));
     }
   }
   glBindBuffer(GL_PIXEL_PACK_BUFFER, 0);
@@ -968,6 +998,11 @@ void EnhancedPost::do_gi(GLuint scene_tex,
       glDeleteFramebuffers(2, m_gi_fbo);
       glDeleteTextures(2, m_gi_tex);
     }
+    if (m_gi_hist_fbo[0]) {
+      glDeleteFramebuffers(2, m_gi_hist_fbo);
+      glDeleteTextures(2, m_gi_hist_tex);
+      m_gi_hist_fbo[0] = m_gi_hist_fbo[1] = m_gi_hist_tex[0] = m_gi_hist_tex[1] = 0;
+    }
     m_gi_w = w;
     m_gi_h = h;
     glGenFramebuffers(2, m_gi_fbo);
@@ -1009,9 +1044,59 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / m_ssao_w, 1.f / m_ssao_h);
   glUniform1f(glGetUniformLocation(id, "radius"), m_settings.gi_radius * kMeter);
   glUniform1f(glGetUniformLocation(id, "max_distance"), 150.f * kMeter);
-  glBindFramebuffer(GL_FRAMEBUFFER, m_gi_fbo[0]);
+  // temporal (gi.temporal, as ssao.temporal): half the samples a frame, the other half last frame's
+  // at the same world point (own RGBA16F history, a second target)
+  // (0.53 -> 0.36 ms at 2560x1600, Spargus 18h; A/B pictures differ only by the clock's drift)
+  static const EnhancedTune kGiTemporal("gi.temporal", 1.f);
+  const bool gi_tmp = (float)kGiTemporal > 0.f;
+  if (gi_tmp && !m_gi_hist_fbo[0]) {
+    glGenFramebuffers(2, m_gi_hist_fbo);
+    glGenTextures(2, m_gi_hist_tex);
+    for (int i = 0; i < 2; i++) {
+      glBindTexture(GL_TEXTURE_2D, m_gi_hist_tex[i]);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, w, h, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_gi_hist_fbo[i]);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_gi_tex[0], 0);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_gi_hist_tex[i], 0);
+      const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+      glDrawBuffers(2, bufs);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+    m_gi_hist_valid = false;
+  }
+  if (!gi_tmp) {
+    m_gi_hist_valid = false;
+  }
+  glUniform1i(glGetUniformLocation(id, "gi_temporal"), !gi_tmp ? 0 : m_gi_hist_valid ? 1 : 2);
+  if (gi_tmp) {
+    m_gi_frame++;
+    glUniform1i(glGetUniformLocation(id, "gi_frame"), (int)(m_gi_frame & 1u));
+    float to_prev[3][3];
+    float offset[3];
+    if (!enh_post::view_to_prev(g_enhanced_camera, m_prev_camera, to_prev, offset)) {
+      glUniform1i(glGetUniformLocation(id, "gi_temporal"), 2);
+    }
+    glUniformMatrix3fv(glGetUniformLocation(id, "to_prev"), 1, GL_FALSE, &to_prev[0][0]);
+    glUniform3f(glGetUniformLocation(id, "to_prev_offset"), offset[0], offset[1], offset[2]);
+    glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+    glActiveTexture(GL_TEXTURE12);
+    glBindTexture(GL_TEXTURE_2D, m_gi_hist_tex[1 - m_gi_hist_cur]);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_gi_hist_fbo[m_gi_hist_cur]);
+  } else {
+    glBindFramebuffer(GL_FRAMEBUFFER, m_gi_fbo[0]);
+  }
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
+  if (gi_tmp) {
+    m_gi_hist_cur = 1 - m_gi_hist_cur;
+    m_gi_hist_valid = true;
+  }
 
   auto& blur = render_state->shaders[ShaderId::ENH_GI_BLUR];
   blur.activate();
@@ -1806,7 +1891,8 @@ void EnhancedPost::add_wind_shadow_draws(const LevelData* lev,
 // The characters drawn this frame (see EnhancedCasters), skinned again with their bones and drawn
 // into the shadow map. Their bones put them in camera space: back to the world with the camera.
 void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
-                                       ScopedProfilerNode& prof) {
+                                       ScopedProfilerNode& prof,
+                                       const float* mvp) {
   auto& cs = g_enhanced_casters;
   cs.capture = false;  // later merc draws (HUD) don't cast
   if (cs.draws.empty()) {
@@ -1831,7 +1917,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
   shader.activate();
   const auto id = shader.id();
   const auto& cam = g_enhanced_camera;
-  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, m_light_mvp);
+  glUniformMatrix4fv(glGetUniformLocation(id, "light_mvp"), 1, GL_TRUE, mvp ? mvp : m_light_mvp);
   // world = cam - rot * merc camera space (the view space negated; rot as stored, see EnhancedCamera)
   glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
   glUniform3f(glGetUniformLocation(id, "cam_trans"), cam.trans[0], cam.trans[1], cam.trans[2]);
@@ -1869,6 +1955,294 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
     prof.add_draw_call();
   }
   glBindVertexArray(0);
+}
+
+// TAA motion vectors: the characters of this frame (EnhancedCasters) skinned twice, with this frame's
+// bones and with last frame's bones of the same model (same name, the nearest place last frame once
+// the camera's move is taken out), into an RG16F target: the uv offset to where the pixel was. Only
+// where the model is the front surface (its depth against the scene's); the rest stays (64, 0) and
+// the TAA reprojects it with the camera, as before. Without them a running Jak or a flying Hellcat
+// took the history of whatever was behind them last frame, clipped to the colors around: smeared.
+bool EnhancedPost::do_motion(SharedRenderState* render_state,
+                             ScopedProfilerNode& prof,
+                             int w,
+                             int h,
+                             const float to_prev[3][3],
+                             const float offset[3],
+                             bool reproject) {
+  auto& cs = g_enhanced_casters;
+  m_mv_matched = 0;
+  m_mv_models = (int)cs.instances.size();
+  // this frame's models and their places (the mean of their bones' translations, view space)
+  std::vector<MotionModel> now;
+  now.reserve(cs.instances.size());
+  for (const auto& in : cs.instances) {
+    MotionModel m;
+    m.hash = in.hash;
+    m.bone_count = in.bone_count;
+    m.first_bone = in.first_bone;
+    int n = 0;
+    for (u32 b = 0; b < in.bone_count; b++) {
+      const size_t f = (size_t)(in.first_bone + 8 * b + 3) * 4;  // the matrix's 4th column
+      if (f + 2 >= cs.bones.size()) {
+        break;
+      }
+      // (a model's spare bone slots can hold garbage: NaN, or kilometers away)
+      const float* t = &cs.bones[f];
+      if (!std::isfinite(t[0]) || !std::isfinite(t[1]) || !std::isfinite(t[2]) ||
+          std::abs(t[0]) + std::abs(t[1]) + std::abs(t[2]) > 3000.f * kMeter) {
+        continue;
+      }
+      for (int k = 0; k < 3; k++) {
+        m.center[k] += t[k];
+      }
+      n++;
+    }
+    for (int k = 0; k < 3 && n; k++) {
+      m.center[k] /= n;
+    }
+    // (only models with draws here: a second copy of the Hellcat drew nothing)
+    bool drawn = false;
+    for (const auto& d : cs.draws) {
+      if (d.first_bone == in.first_bone) {
+        drawn = true;
+        break;
+      }
+    }
+    if (n == 0 || !drawn) {
+      m.hash = 0;  // matches nothing
+    }
+    now.push_back(m);
+  }
+
+  // last frame's bones of each model found again (-1: none)
+  constexpr float kMatch = 3.f * kMeter;  // 180 m/s: anything faster is a different one
+  std::unordered_map<u32, u32> prev_of;  // first bone now -> first bone last frame
+  if (reproject && m_mv_prev_ok) {
+    std::vector<bool> taken(m_mv_prev.size(), false);
+    for (const auto& m : now) {
+      if (!m.hash) {
+        continue;
+      }
+      float pc[3];
+      for (int c = 0; c < 3; c++) {
+        pc[c] = offset[c];
+        for (int k = 0; k < 3; k++) {
+          pc[c] += to_prev[k][c] * m.center[k];
+        }
+      }
+      float best = kMatch * kMatch;
+      int bi = -1;
+      for (size_t i = 0; i < m_mv_prev.size(); i++) {
+        const auto& p = m_mv_prev[i];
+        if (p.hash != m.hash || p.bone_count != m.bone_count || taken[i]) {
+          continue;
+        }
+        float d2 = 0.f;
+        for (int k = 0; k < 3; k++) {
+          d2 += (pc[k] - p.center[k]) * (pc[k] - p.center[k]);
+        }
+        if (d2 < best) {
+          best = d2;
+          bi = (int)i;
+        }
+      }
+      if (bi >= 0) {
+        prev_of[m.first_bone] = m_mv_prev[bi].first_bone;
+        taken[bi] = true;
+      }
+    }
+  }
+  m_mv_matched = (int)prev_of.size();
+  // (tuning taa.motion_log 1: each model, every 2 s: found again or not, its draws)
+  static const EnhancedTune t_log("taa.motion_log", 0.f);
+  static int log_frames = 0;
+  if ((float)t_log > 0.5f && ++log_frames >= 120) {
+    log_frames = 0;
+    for (size_t i = 0; i < cs.instances.size(); i++) {
+      const auto& in = cs.instances[i];
+      int draws = 0;
+      for (const auto& d : cs.draws) {
+        draws += d.first_bone == in.first_bone;
+      }
+      lg::info("[enhanced] taa motion model {} bones {} draws {} found {} at {:.1f} {:.1f} {:.1f} m", in.name,
+               in.bone_count, draws, prev_of.count(in.first_bone) ? 1 : 0, now[i].center[0] / kMeter,
+               now[i].center[1] / kMeter, now[i].center[2] / kMeter);
+    }
+  }
+
+  // this frame's bones into this frame's buffer (last frame's stay in the other)
+  constexpr size_t kBoneBlock = 128 * 8 * 4;  // floats: a bound range always spans 128 bones
+  const int cur = m_mv_cur;
+  if (!m_mv_bones[0]) {
+    glGenBuffers(2, m_mv_bones);
+  }
+  const size_t size = (cs.bones.size() + kBoneBlock) * sizeof(float);
+  glBindBuffer(GL_UNIFORM_BUFFER, m_mv_bones[cur]);
+  if (size > m_mv_bones_size[cur]) {
+    m_mv_bones_size[cur] = size * 3 / 2;
+    glBufferData(GL_UNIFORM_BUFFER, m_mv_bones_size[cur], nullptr, GL_DYNAMIC_DRAW);
+  }
+  if (!cs.bones.empty()) {
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, cs.bones.size() * sizeof(float), cs.bones.data());
+  }
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
+  m_mv_prev = std::move(now);
+  m_mv_prev_ok = true;
+  m_mv_cur = 1 - cur;
+
+  if (w != m_mv_w || h != m_mv_h) {
+    if (m_mv_fbo) {
+      glDeleteFramebuffers(1, &m_mv_fbo);
+      glDeleteTextures(1, &m_mv_tex);
+    }
+    m_mv_w = w;
+    m_mv_h = h;
+    glGenFramebuffers(1, &m_mv_fbo);
+    glGenTextures(1, &m_mv_tex);
+    glBindTexture(GL_TEXTURE_2D, m_mv_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, w, h, 0, GL_RG, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_mv_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  if (prev_of.empty()) {
+    return false;  // nothing moves on its own: the TAA skips the target
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, m_mv_fbo);
+  glViewport(0, 0, w, h);
+  glDisable(GL_DEPTH_TEST);
+  glDepthMask(GL_FALSE);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_SCISSOR_TEST);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(64.f, 0.f, 0.f, 0.f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  glClearColor(0.f, 0.f, 0.f, 0.f);
+
+  auto& shader = render_state->shaders[ShaderId::ENH_MOTION];
+  shader.activate();
+  const auto id = shader.id();
+  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_bones"), 1);
+  glUniformBlockBinding(id, glGetUniformBlockIndex(id, "ub_prev_bones"), 2);
+  glUniform4f(glGetUniformLocation(id, "proj"), m_last_proj[0], m_last_proj[1], m_last_proj[2],
+              m_last_proj[3]);
+  glUniform2f(glGetUniformLocation(id, "prev_f"), m_prev_camera.fx, m_prev_fy);
+  static const EnhancedTune t_tol("taa.motion_depth_tol", 0.03f);
+  glUniform1f(glGetUniformLocation(id, "depth_tol"), (float)t_tol);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, m_depth_tex);
+  glUniform1i(glGetUniformLocation(id, "tex_depth"), 3);
+  glActiveTexture(GL_TEXTURE0);
+  if (!m_caster_vao) {
+    glGenVertexArrays(1, &m_caster_vao);
+  }
+  glBindVertexArray(m_caster_vao);
+  glEnableVertexAttribArray(0);
+  glEnableVertexAttribArray(2);
+  glEnableVertexAttribArray(5);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  GLuint last_vertices = 0;
+  for (const auto& d : cs.draws) {
+    auto it = prev_of.find(d.first_bone);
+    if (it == prev_of.end()) {
+      continue;
+    }
+    if (d.vertices != last_vertices) {
+      glBindBuffer(GL_ARRAY_BUFFER, d.vertices);
+      constexpr GLsizei kStride = sizeof(tfrag3::MercVertex);
+      glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, pos));
+      glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, kStride,
+                            (void*)offsetof(tfrag3::MercVertex, weights[0]));
+      glVertexAttribIPointer(5, 4, GL_UNSIGNED_BYTE, kStride,
+                             (void*)offsetof(tfrag3::MercVertex, mats[0]));
+      last_vertices = d.vertices;
+    }
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, d.indices);
+    glBindBufferRange(GL_UNIFORM_BUFFER, 1, m_mv_bones[cur], d.first_bone * 4 * sizeof(float),
+                      kBoneBlock * sizeof(float));
+    glBindBufferRange(GL_UNIFORM_BUFFER, 2, m_mv_bones[1 - cur], it->second * 4 * sizeof(float),
+                      kBoneBlock * sizeof(float));
+    glDrawElements(d.strip ? GL_TRIANGLE_STRIP : GL_TRIANGLES, d.index_count, GL_UNSIGNED_INT,
+                   (void*)(sizeof(u32) * d.first_index));
+    prof.add_draw_call();
+  }
+  glDisable(GL_PRIMITIVE_RESTART);
+  glBindVertexArray(0);
+  return true;
+}
+
+// char-ground-occlusion: under a roof or at night there is no sun shadow, so the characters stood on
+// the floor with no contact darkening. Their lowest point per column around Jak (an orthographic map
+// looking up, 256^2): the composite darkens what lies just below them, softly by the height gap.
+void EnhancedPost::do_chr_occlusion(SharedRenderState* render_state, ScopedProfilerNode& prof) {
+  m_chr_occ_ready = false;
+  static const EnhancedTune t_half("shadow.chr_occ_m", 6.f);
+  const float half_m = std::clamp((float)t_half, 0.f, 32.f);
+  if (half_m <= 0.f || g_enhanced_casters.draws.empty() || !g_enhanced_camera.valid ||
+      !g_enhanced_player.valid) {
+    return;
+  }
+  constexpr int kRes = 256;
+  if (!m_chr_occ_fbo) {
+    glGenFramebuffers(1, &m_chr_occ_fbo);
+    glGenTextures(1, &m_chr_occ_tex);
+    glBindTexture(GL_TEXTURE_2D, m_chr_occ_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, kRes, kRes, 0, GL_DEPTH_COMPONENT,
+                 GL_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_chr_occ_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_chr_occ_tex, 0);
+    glDrawBuffer(GL_NONE);
+    glReadBuffer(GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  // x, z around Jak to -1..1; height: depth 0 at 4 m below him, 1 at 4 m above (the lowest wins)
+  constexpr float kM = 4096.f;
+  const float r = half_m * kM;
+  const float hh = 4.f * kM;
+  const auto& pl = g_enhanced_player.pos;
+  const float m[16] = {1.f / r, 0.f, 0.f, -pl[0] / r,  //
+                       0.f, 0.f, 1.f / r, -pl[2] / r,  //
+                       0.f, 1.f / hh, 0.f, -pl[1] / hh,  //
+                       0.f, 0.f, 0.f, 1.f};
+  memcpy(m_chr_occ_mvp, m, sizeof(m));
+  m_chr_occ_depth_m = 8.f;
+
+  GLfloat old_clear_depth = 0.f;
+  GLint old_depth_func = GL_GEQUAL;
+  glGetFloatv(GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+  glGetIntegerv(GL_DEPTH_FUNC, &old_depth_func);
+  glDisable(GL_BLEND);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_CULL_FACE);
+  glDisable(GL_POLYGON_OFFSET_FILL);
+  glEnable(GL_DEPTH_TEST);
+  glDepthFunc(GL_LESS);
+  glDepthMask(GL_TRUE);
+  glClearDepth(1.0);
+  glEnable(GL_PRIMITIVE_RESTART);
+  glPrimitiveRestartIndex(UINT32_MAX);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_chr_occ_fbo);
+  glViewport(0, 0, kRes, kRes);
+  glClear(GL_DEPTH_BUFFER_BIT);
+  glActiveTexture(GL_TEXTURE0);
+  draw_shadow_casters(render_state, prof, m_chr_occ_mvp);
+  glDisable(GL_PRIMITIVE_RESTART);
+  glClearDepth(old_clear_depth);
+  glDepthFunc(old_depth_func);
+  m_chr_occ_ready = true;
 }
 
 void EnhancedPost::do_volume(SharedRenderState* render_state,
@@ -1999,7 +2373,14 @@ void EnhancedPost::draw_clouds(GLuint id,
                                int h,
                                bool history,
                                GLuint render_fbo,
-                               ScopedProfilerNode& prof) {
+                               ScopedProfilerNode& prof,
+                               SharedRenderState* render_state) {
+  // (tuning "clouds.slim" 1: marched by enh_clouds, the composite's file with only the cloud march
+  // compiled in, its uniforms copied from the composite; 0: by the composite itself, as before.
+  // Measured 2560x1600, desert 16h, one run: 0.75 -> 0.51 ms, same clouds; default on)
+  static const EnhancedTune t_slim("clouds.slim", 1.f);
+  const Shader& slim = render_state->shaders[ShaderId::ENH_CLOUDS];
+  const bool use_slim = (float)t_slim > 0.5f && slim.okay();
   const int cw = std::max(1, (w + 1) / 2);
   const int ch = std::max(1, (h + 1) / 2);
   if (cw != m_cloud_w || ch != m_cloud_h) {
@@ -2034,16 +2415,116 @@ void EnhancedPost::draw_clouds(GLuint id,
   glUniform1i(glGetUniformLocation(id, "cloud_pass"), 1);
   glUniform4f(glGetUniformLocation(id, "cloud_info"), 0.f, m_cloud_history && history ? 1.f : 0.f,
               0.85f, 0.f);
-  ENH_TIMED("enh-clouds", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  if (use_slim) {
+    slim.copy_uniforms_from(render_state->shaders[ShaderId::ENH_COMPOSITE]);  // (binds it)
+    ENH_TIMED("enh-clouds-slim", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    glUseProgram(id);
+  } else {
+    ENH_TIMED("enh-clouds", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  }
   prof.add_draw_call();
   m_cloud_cur = 1 - cur;
   m_cloud_history = true;
 
-  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
-  glViewport(0, 0, w, h);
   glActiveTexture(GL_TEXTURE15);
   glBindTexture(GL_TEXTURE_2D, m_cloud_tex[cur]);
   glActiveTexture(GL_TEXTURE0);
+  // the low sun's rays through the gaps in the clouds at the clouds' size, by enh_cloud_rays (its
+  // own program: in the composite their 20 reads a pixel took 1.4 ms at 2560x1600, desert 16h),
+  // read back bilinearly on unit 33 (cloud_info.w 1). Tuning "clouds.rays_slim" 0: in the composite
+  static const EnhancedTune t_rays_slim("clouds.rays_slim", 1.f);
+  const Shader& rays = render_state->shaders[ShaderId::ENH_CLOUD_RAYS];
+  const bool use_rays = (float)t_rays_slim > 0.5f && rays.okay();
+  if (use_rays) {
+    if (cw != m_rays_w || ch != m_rays_h) {
+      if (m_rays_fbo) {
+        glDeleteFramebuffers(1, &m_rays_fbo);
+        glDeleteTextures(1, &m_rays_tex);
+      }
+      m_rays_w = cw;
+      m_rays_h = ch;
+      glGenFramebuffers(1, &m_rays_fbo);
+      glGenTextures(1, &m_rays_tex);
+      glBindTexture(GL_TEXTURE_2D, m_rays_tex);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, cw, ch, 0, GL_RED, GL_HALF_FLOAT, nullptr);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_rays_tex, 0);
+      glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
+    glViewport(0, 0, cw, ch);
+    rays.copy_uniforms_from(render_state->shaders[ShaderId::ENH_COMPOSITE]);  // (binds it)
+    ENH_TIMED("enh-cloud-rays", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    prof.add_draw_call();
+    glUseProgram(id);
+    glActiveTexture(GL_TEXTURE0 + 33);
+    glBindTexture(GL_TEXTURE_2D, m_rays_tex);
+    glActiveTexture(GL_TEXTURE0);
+    glUniform1i(glGetUniformLocation(id, "tex_T33"), 33);
+  }
+
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
   glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);
-  glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, 0.f);
+  glUniform4f(glGetUniformLocation(id, "cloud_info"), 1.f, 0.f, 0.f, use_rays ? 1.f : 0.f);
+}
+
+void EnhancedPost::draw_sun_half(GLuint id,
+                                 int w,
+                                 int h,
+                                 GLuint render_fbo,
+                                 ScopedProfilerNode& prof,
+                                 SharedRenderState* render_state) {
+  // the world's sun shadow looks (the map pushed off the surface, the rough one from 2 m toward the
+  // sun, the contact march) at one pixel per 2x2 by enh_sun_half, the composite's file with only them
+  // compiled in; the composite reads them back on unit 34 with the occlusion's texels and depth
+  // weights (sun_half_on 1). Characters keep theirs at full size. At 2560x1600: composite -0.6 ms for
+  // a 0.33-0.45 ms pass (desert 16h, Spargus 18h), the picture equal even rendered at 640x360.
+  // Tuning "shadow.half" 0: all in the composite, as before
+  static const EnhancedTune t_half("shadow.half", 1.f);
+  const Shader& half = render_state->shaders[ShaderId::ENH_SUN_HALF];
+  // (needs the occlusion's picture: the composite reuses ao_upsample's texels and weights, so the
+  // same size, (w + 1) / 2)
+  const bool use = (float)t_half > 0.5f && half.okay() && m_ssao_ready;
+  glUniform1f(glGetUniformLocation(id, "sun_half_on"), use ? 1.f : 0.f);
+  if (!use) {
+    return;
+  }
+  const int hw = (w + 1) / 2;
+  const int hh = (h + 1) / 2;
+  if (hw != m_sun_half_w || hh != m_sun_half_h) {
+    if (m_sun_half_fbo) {
+      glDeleteFramebuffers(1, &m_sun_half_fbo);
+      glDeleteTextures(1, &m_sun_half_tex);
+    }
+    m_sun_half_w = hw;
+    m_sun_half_h = hh;
+    glGenFramebuffers(1, &m_sun_half_fbo);
+    glGenTextures(1, &m_sun_half_tex);
+    glBindTexture(GL_TEXTURE_2D, m_sun_half_tex);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, hw, hh, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_sun_half_tex, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
+  glViewport(0, 0, hw, hh);
+  half.copy_uniforms_from(render_state->shaders[ShaderId::ENH_COMPOSITE]);  // (binds it)
+  ENH_TIMED("enh-sun-half", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  prof.add_draw_call();
+  glUseProgram(id);
+  glActiveTexture(GL_TEXTURE0 + 34);
+  glBindTexture(GL_TEXTURE_2D, m_sun_half_tex);
+  glActiveTexture(GL_TEXTURE0);
+  glUniform1i(glGetUniformLocation(id, "tex_T34"), 34);
+  glBindFramebuffer(GL_FRAMEBUFFER, render_fbo);
+  glViewport(0, 0, w, h);
 }

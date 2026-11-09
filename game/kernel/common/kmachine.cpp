@@ -1178,7 +1178,11 @@ static void enhanced_test_switches(const std::string& level) {
         size_t c1 = item.find(':');
         size_t c2 = c1 == std::string::npos ? std::string::npos : item.find(':', c1 + 1);
         if (c2 != std::string::npos) {
-          out.push_back({std::atof(item.c_str()), std::atoi(item.c_str() + c1 + 1), item.substr(c2 + 1)});
+          // ('/' in a value stands for ',': a teleport "3:x/y/z" late in the script, after the
+          // boot's own continue has placed Jak and would undo JAK_ENHANCED_TP)
+          std::string value = item.substr(c2 + 1);
+          std::replace(value.begin(), value.end(), '/', ',');
+          out.push_back({std::atof(item.c_str()), std::atoi(item.c_str() + c1 + 1), value});
         }
         if (end == std::string::npos) {
           break;
