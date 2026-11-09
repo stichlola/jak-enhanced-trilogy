@@ -103,6 +103,10 @@ class FramebufferCopier {
   FramebufferCopier(const FramebufferCopier&) = delete;
   FramebufferCopier& operator=(const FramebufferCopier&) = delete;
   void copy_now(int render_fb_w, int render_fb_h, GLuint render_fb);
+  // (Enhanced: copy into a texture of dst_w x dst_h, stretching the frame. The game samples the
+  // saved screen with pixel UVs in its own resolution, which the auto quality's render scale
+  // can make larger than the render buffer)
+  void copy_now(int render_fb_w, int render_fb_h, GLuint render_fb, int dst_w, int dst_h);
   void copy_back_now(int render_fb_w, int render_fb_h, GLuint render_fb);
   u64 texture() const { return m_fbo_texture; }
   int width() const { return m_fbo_width; }
@@ -111,4 +115,8 @@ class FramebufferCopier {
  private:
   GLuint m_fbo = 0, m_fbo_texture = 0;
   int m_fbo_width = 640, m_fbo_height = 480;
+  // (Enhanced: a multisampled buffer can't be resolved and scaled in one blit, so a scaled copy
+  // resolves here first)
+  GLuint m_resolve_fbo = 0, m_resolve_texture = 0;
+  int m_resolve_width = 0, m_resolve_height = 0;
 };

@@ -219,12 +219,24 @@ FramebufferCopier::FramebufferCopier() {
 FramebufferCopier::~FramebufferCopier() {
   glDeleteTextures(1, &m_fbo_texture);
   glDeleteFramebuffers(1, &m_fbo);
+  if (m_resolve_fbo) {
+    glDeleteTextures(1, &m_resolve_texture);
+    glDeleteFramebuffers(1, &m_resolve_fbo);
+  }
 }
 
 void FramebufferCopier::copy_now(int render_fb_w, int render_fb_h, GLuint render_fb) {
-  if (m_fbo_width != render_fb_w || m_fbo_height != render_fb_h) {
-    m_fbo_width = render_fb_w;
-    m_fbo_height = render_fb_h;
+  copy_now(render_fb_w, render_fb_h, render_fb, render_fb_w, render_fb_h);
+}
+
+void FramebufferCopier::copy_now(int render_fb_w,
+                                 int render_fb_h,
+                                 GLuint render_fb,
+                                 int dst_w,
+                                 int dst_h) {
+  if (m_fbo_width != dst_w || m_fbo_height != dst_h) {
+    m_fbo_width = dst_w;
+    m_fbo_height = dst_h;
 
     glBindTexture(GL_TEXTURE_2D, m_fbo_texture);
 
@@ -234,7 +246,35 @@ void FramebufferCopier::copy_now(int render_fb_w, int render_fb_h, GLuint render
     glBindTexture(GL_TEXTURE_2D, 0);
   }
 
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fb);
+  GLuint src_fb = render_fb;
+  GLenum filter = GL_NEAREST;
+  if (dst_w != render_fb_w || dst_h != render_fb_h) {
+    if (!m_resolve_fbo) {
+      glGenFramebuffers(1, &m_resolve_fbo);
+      glGenTextures(1, &m_resolve_texture);
+    }
+    if (m_resolve_width != render_fb_w || m_resolve_height != render_fb_h) {
+      m_resolve_width = render_fb_w;
+      m_resolve_height = render_fb_h;
+      glBindTexture(GL_TEXTURE_2D, m_resolve_texture);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, render_fb_w, render_fb_h, 0, GL_RGB,
+                   GL_UNSIGNED_BYTE, NULL);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+      glBindTexture(GL_TEXTURE_2D, 0);
+      glBindFramebuffer(GL_FRAMEBUFFER, m_resolve_fbo);
+      glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                             m_resolve_texture, 0);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, render_fb);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_resolve_fbo);
+    glBlitFramebuffer(0, 0, render_fb_w, render_fb_h, 0, 0, render_fb_w, render_fb_h,
+                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    src_fb = m_resolve_fbo;
+    filter = GL_LINEAR;
+  }
+
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fb);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_fbo);
 
   glBlitFramebuffer(0,                    // srcX0
@@ -246,7 +286,7 @@ void FramebufferCopier::copy_now(int render_fb_w, int render_fb_h, GLuint render
                     m_fbo_width,          // dstX1
                     m_fbo_height,         // dstY1
                     GL_COLOR_BUFFER_BIT,  // mask
-                    GL_NEAREST            // filter
+                    filter                // filter
   );
 
   glBindFramebuffer(GL_FRAMEBUFFER, render_fb);

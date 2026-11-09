@@ -2,6 +2,7 @@
 
 #include "common/log/log.h"
 
+#include "game/graphics/gfx.h"
 #include "game/graphics/opengl_renderer/Fbo.h"
 
 BlitDisplays::BlitDisplays(const std::string& name, int my_id) : BucketRenderer(name, my_id) {}
@@ -46,10 +47,22 @@ void BlitDisplays::render(DmaFollower& dma,
           u32 tbp = data.vifcode1().immediate;
           ASSERT_MSG(tbp == m_tbp, fmt::format("unexpected tbp {}", tbp));
           // copy buffer texture -> custom texture
+          // (Enhanced: the game draws the saved screen with pixel UVs in its own resolution. The
+          // auto quality's render scale (or JAK_ENHANCED_TEST_RES) makes the render buffer a
+          // different size, and the pause menu showed the left part of the frame with the last
+          // column smeared over the rest: save it at the game's resolution instead)
+          int save_w = Gfx::g_global_settings.game_res_w;
+          int save_h = Gfx::g_global_settings.game_res_h;
+          if (save_w <= 0 || save_h <= 0) {
+            save_w = render_state->render_fb_w;
+            save_h = render_state->render_fb_h;
+          }
           m_copier->copy_now(render_state->render_fb_w, render_state->render_fb_h,
-                             render_state->render_fb);
-          m_gpu_tex->w = render_state->render_fb_w;
-          m_gpu_tex->h = render_state->render_fb_h;
+                             render_state->render_fb, save_w, save_h);
+          m_saved_fb_w = render_state->render_fb_w;
+          m_saved_fb_h = render_state->render_fb_h;
+          m_gpu_tex->w = save_w;
+          m_gpu_tex->h = save_h;
           render_state->texture_pool->move_existing_to_vram(m_gpu_tex, m_tbp);
 
         } break;
@@ -110,8 +123,8 @@ void BlitDisplays::render(DmaFollower& dma,
 
 void BlitDisplays::do_copy_back(SharedRenderState* render_state, ScopedProfilerNode& prof) {
   if (m_copy_back_pending) {
-    if (render_state->render_fb_w == m_copier->width() &&
-        render_state->render_fb_h == m_copier->height()) {
+    if (render_state->render_fb_w == m_saved_fb_w &&
+        render_state->render_fb_h == m_saved_fb_h) {
       m_copier->copy_back_now(render_state->render_fb_w, render_state->render_fb_h,
                               render_state->render_fb);
     }

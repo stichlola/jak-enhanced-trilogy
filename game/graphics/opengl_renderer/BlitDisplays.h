@@ -34,6 +34,7 @@ class BlitDisplays : public BucketRenderer {
   GpuTexture* m_gpu_tex;
   u32 m_tbp;
   bool m_copy_back_pending = false;
+  int m_saved_fb_w = 0, m_saved_fb_h = 0;  // render buffer size when the screen was saved
   bool m_zoom_blur_pending = false;
   bool m_color_filter_pending = false;
   bool m_slow_time_pending = false;
