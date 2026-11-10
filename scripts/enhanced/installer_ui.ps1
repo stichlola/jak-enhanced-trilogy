@@ -492,7 +492,7 @@ $ui.DirBox.Add_TextChanged({ Update-Footer })
 # ---- the bottom row ------------------------------------------------------------------------------
 $script:needGB = 0; $script:freeGB = -1
 function Update-Footer {
-  $games = Chosen
+  $games = @(Chosen)  # (one disc: a function returns it bare, and a lone object has no Count in PS 5.1)
   $need = $ProgGB + $GameGB * $games.Count; $min = $ExtractMin * $games.Count
   foreach ($d in $games) { if (Wants-Hd $d.Info.Game) { $need += $HdGB; $min += $HdMin[$d.Info.Game] } }
   $script:needGB = [Math]::Ceiling($need)
