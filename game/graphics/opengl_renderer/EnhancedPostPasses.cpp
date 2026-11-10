@@ -1094,7 +1094,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   {
     // (Jak 3's Haven through the middle of the day: a little more contrast, the high sun's light
     // sat in a narrow band of mid greys)
-    static const EnhancedTune t_contrast("light.midday_city_contrast", 0.08f);
+    static const EnhancedTune t_contrast("light.midday_city_contrast", 0.1f);
     glUniform1f(glGetUniformLocation(id, "contrast"),
                 m_settings.contrast + m_grade.contrast + (float)t_contrast * enh_post::g_city_midday);
   }
@@ -1270,8 +1270,8 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform3fv(glGetUniformLocation(id, "ground_detail_avg"), 1, m_ground_avg);
   glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   {
-    // (...and its highlights a little higher)
-    static const EnhancedTune t_gain("light.midday_city_gain", 0.04f);
+    // (...and stopped down a little: the port's sunlit floor was a pale washed yellow)
+    static const EnhancedTune t_gain("light.midday_city_gain", -0.06f);
     const float k = 1.f + (float)t_gain * enh_post::g_city_midday;
     glUniform3f(glGetUniformLocation(id, "grade_gain"), m_grade.gain[0] * k, m_grade.gain[1] * k,
                 m_grade.gain[2] * k);
