@@ -198,7 +198,7 @@ uniform float dawn_fog;         // the morning's low fog
 uniform float cloud_rays;       // the low sun's rays through the gaps in the clouds
 uniform vec4 jak_fx;            // Jak in view space; w: how wet he is (0..1)
 uniform float eye_adapt;        // the eye's adaptation: the picture lifted in the dark, lowered in glare
-uniform vec4 brightness;        // the player's: exposure - 1 (by the hour), shadow lift, night fill, 0
+uniform vec4 brightness;        // the player's: exposure - 1 (by the hour), shadow lift, night fill; w: the desert's midday (0..1, Jak 3: the key light held to the side at 48 degrees)
 // the light effects (Jak 3: sprites, glows, generic shots, trails): the scene right before the
 // sprite buckets (T23) and right after them (T24). What they added is kept out of the day's grade
 // (the desert's stop-down, the shoulders, the eye's adaptation squeezed it into the bright ground)
@@ -5986,7 +5986,10 @@ void composite_unused() {
   // the desert under a high sun: the game lights its ground near white, the eye stops down (the
   // ground only: the sky keeps its own)
   if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0) {
-    float high = sun_haze * noon * (1.0 - clouds.w);
+    // (the desert's midday too (brightness.w): its day is the morning's look, never "noon",
+    // so its sand sat on the shoulder below all day: one pale tone, the ripples and pits squeezed out)
+    const float midday_stop = 0.5;
+    float high = sun_haze * max(noon, midday_stop * day_look * brightness.w) * (1.0 - clouds.w);
     // (by brightness: the near-white sand fully, the dark rocks little; stopped down alike they went black.
     // Not in the late afternoon's low light: there the shade stays deep)
     c *= 1.0 - high * mix(mix(0.04, 0.3, smoothstep(0.3, 0.8, luma(c))), 0.49, min(golden * 2.0, 1.0));
@@ -6136,6 +6139,9 @@ void composite_unused() {
       // (in the desert under the high sun gentler, both ways: the faces burned orange or went near black, their
       // texture lost)
       shade_k = mix(shade_k, vec3(0.95, 0.96, 1.0), noon * min(sun_haze * 1.25, 1.0));
+      // (at the desert's midday: the bright sand all around lights the faces
+      // turned from the sun, they went near black beside it)
+      shade_k = mix(shade_k, vec3(0.76, 0.7, 0.74), brightness.w * min(sun_haze * 1.25, 1.0) * sky_day);
       vec3 lit_k = mix(vec3(1.5, 1.38, 1.2), vec3(1.85, 1.45, 1.05), sky_day);
       lit_k = mix(lit_k, vec3(1.2, 1.14, 1.06), noon * min(sun_haze * 1.25, 1.0));
       vec3 rock_k = mix(shade_k, lit_k, lit);
@@ -6172,6 +6178,8 @@ void composite_unused() {
     const vec3 noon_sand = vec3(1.13, 1.0, 0.8);  // its color over its brightness: pale warm cream
     const float noon_mix = 0.3;
     const float noon_sunlit = 1.15;
+    const vec3 midday_sand = vec3(1.2, 0.99, 0.66);  // the same at midday: golden tan
+    const float midday_sand_mix = 0.15;
     if (((tag > 0.85 && tag < 0.95) || (tag > 0.55 && tag < 0.65)) && sun_haze > 0.0) {
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - weather.x);
       float k = daylight * (1.0 - golden * 2.0) * sun_haze *
@@ -6186,8 +6194,12 @@ void composite_unused() {
         float gain = clamp(noon_sand_luma * 0.95 / max(lb, 0.02), 1.0, 1.9);
         c *= mix(1.0, gain, under * sun_lit * k);
       }
+      // (the middle of the day (brightness.w; the light at 48 degrees there, 18 before and after): the
+      // sand read flat and washed out, a pale salmon from end to end: a golden tan instead)
+      float midday = brightness.w * k;
       vec3 warm = luma(c) * (tag > 0.85 ? noon_sand : noon_sand * vec3(1.02, 0.97, 0.9));
       c = mix(c, warm, k * noon_mix);
+      c = mix(c, luma(c) * midday_sand, midday * midday_sand_mix * (tag > 0.85 ? 1.0 : 0.5));
       // (the shade under a high sun: lit by the blue sky and the bright sand around, cooler and not
       // as deep)
       c *= mix(vec3(1.0), mix(vec3(0.8, 0.84, 0.95), vec3(noon_sunlit), sun_lit), k);
@@ -6424,7 +6436,7 @@ void composite_unused() {
   // the player's brightness (menu "Brightness"): neutral (all 0) skips it, the picture as before.
   // Exposure by the hour (milder on what is already bright: the sky and lamps don't clip), then a
   // toe that raises the darks and keeps black black, by night with a faint cool fill
-  if (brightness != vec4(0.0)) {
+  if (brightness.xyz != vec3(0.0)) {
     float bm = max(c.r, max(c.g, c.b));
     float bg = 1.0 + brightness.x;
     c *= bg > 1.0 ? mix(bg, 1.0 + (bg - 1.0) * 0.35, smoothstep(0.5, 1.0, bm)) : bg;
@@ -6489,6 +6501,9 @@ void composite_unused() {
   // grade, the contrast curve (it takes the small channels: blue) and the morning's peach look
   // stacked: Spargus' rock slabs at 7h went lime-orange (147,107,51 vs vanilla 125,101,60, peaks
   // 228,173,93) and the sand orange-red
+  const float midday_sat_room = 0.5;
+  const float midday_sand_contrast = 0.8;
+  const float midday_sand_mid = 0.6;  // the sunlit sand's brightness, where that contrast turns
   if (tune_morning_sat_cap > 0.0 && z > 0.0 && !(pix_tag > 0.3 && pix_tag < 0.55)) {
     float mw = max(morning, sky_morning) * (1.0 - flame_keep);
     if (mw > 0.0) {
@@ -6497,11 +6512,24 @@ void composite_unused() {
       float sg = gt > 0.02 ? (gt - min(game_c.r, min(game_c.g, game_c.b))) / gt : 0.0;
       float ct = max(c.r, max(c.g, c.b));
       float sc = ct > 0.02 ? (ct - min(c.r, min(c.g, c.b))) / ct : 0.0;
-      float cap = max(sg * tune_morning_sat_cap, 0.15);
+      // (the desert's midday: richer there, a golden tan; held to the game's
+      // pale sand the plain read washed out)
+      float mid_cap = 1.0 + midday_sat_room * brightness.w * min(sun_haze * 1.25, 1.0);
+      float cap = max(sg * tune_morning_sat_cap * mid_cap, 0.15);
       if (sc > cap) {
         c = mix(c, max(mix(vec3(luma(c)), c, cap / sc), 0.0), mw);
       }
     }
+  }
+  // the desert's midday ground, last (the picture's own brightness: before the grade and the
+  // shoulder the sand sits elsewhere): its light and dark further apart around the sunlit sand's
+  // brightness, so the ripples, the pits, the stones' feet and the cast shadows show. The plain
+  // was one even tone from end to end
+  if (sun_haze > 0.0 && day_look > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      ((pix_tag > 0.85 && pix_tag < 0.95) || (pix_tag > 0.55 && pix_tag < 0.65))) {
+    float mid = brightness.w * min(sun_haze * 1.25, 1.0) * day_look *
+                (1.0 - min(golden * 2.0, 1.0)) * (1.0 - weather.x) * (1.0 - flame_keep);
+    c *= pow(clamp(luma(c) / midday_sand_mid, 0.3, 1.12), midday_sand_contrast * mid);
   }
   // night: the dim land in the moon's hue, the game's. Jak's lantern pool (warm, x1.3 by the eye's
   // adaptation) and the shade steps before the night darkening left the moonlit desert grey-lilac

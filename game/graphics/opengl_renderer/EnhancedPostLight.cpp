@@ -482,12 +482,19 @@ void EnhancedPost::update_scene() {
     // light). At 65 the basin is in the sun with short shadows at the walls' feet, the rocks still
     // shaded; the sun in the sky goes up with it, so the shadows match it. The morning and the
     // golden hour as they were)
+    // (48 now, with the light held to one bearing through the midday (sun_world's
+    // light.midday_bearing): from the side of the gate, not from behind its walls, the basin stays
+    // in the sun. At 65 the plain had no cast shadows to speak of: flat)
     {
-      static const EnhancedTune t_light("light.midday_elev", 65.f);
+      // (Jak 3's desert; Jak 2's stays at 65, the light where it was)
+      const bool jak3 = g_game_version == GameVersion::Jak3;
+      static const EnhancedTune t_light_3("light.midday_elev", 48.f);
+      const float t_light = jak3 ? (float)t_light_3 : 65.f;
       static const EnhancedTune t_sun("light.midday_sun_elev", 58.f);
       const float midday = smooth((hour - 10.f) / 1.5f) * (1.f - smooth((hour - 14.f) / 1.5f)) * golden_area;
-      g_light_max_elev += std::max((float)t_light - g_light_max_elev, 0.f) * midday;
+      g_light_max_elev += std::max(t_light - g_light_max_elev, 0.f) * midday;
       g_sun_max_elev += std::max((float)t_sun - g_sun_max_elev, 0.f) * midday;
+      g_light_midday = jak3 ? midday : 0.f;
     }
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;

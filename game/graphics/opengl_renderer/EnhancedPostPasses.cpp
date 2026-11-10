@@ -1433,7 +1433,9 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     // (as an offset from 1: neutral sliders give exactly 0, and the shader skips the block)
     const float gain = day * (s.bright_day - 1.f) + twilight * (s.bright_dusk - 1.f) +
                        night * (s.bright_night - 1.f);
-    glUniform4f(glGetUniformLocation(id, "brightness"), gain, s.shadow_lift, s.night_vis * night, 0.f);
+    // (w: the desert's midday, its own grade: no uniform of its own, the composite has too many)
+    glUniform4f(glGetUniformLocation(id, "brightness"), gain, s.shadow_lift, s.night_vis * night,
+                m_ssao_ready ? enh_post::g_light_midday : 0.f);
     static size_t logged = 0;
     if (logged != script_next) {
       logged = script_next;

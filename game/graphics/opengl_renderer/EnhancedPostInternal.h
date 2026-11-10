@@ -1067,6 +1067,10 @@ inline float g_light_yaw = 0.f;
 // and how high that light may stand ("light_max_elev", degrees; by the late afternoon's amount as
 // the sun's): higher than a sun sitting on a mountain, so the open ground still gets its light
 inline float g_light_max_elev = 90.f;
+// the middle of the day in an area whose sun stays low (0..1, update_scene): the key light comes
+// round to one bearing ("light.midday_bearing", degrees from +z toward +x), from the side of the
+// views that matter instead of from behind them
+inline float g_light_midday = 0.f;
 
 // test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
 // (tuning in one run); tuning.json's "light": {"yaw", "max_elev", "morning_yaw"} too, over it
@@ -1126,6 +1130,19 @@ inline void sun_world(float out[3], bool sky = false) {
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
   out[2] = -std::sin(yaw) * d[0] + std::cos(yaw) * d[2];
+  if (!sky && g_light_midday > 0.f) {
+    // (the sun crosses overhead from 12 to 17: its bearing swings 120 degrees while the light stands
+    // too high to shape anything. Held to the side, lower, the rocks get a lit and a shaded face and
+    // the ground its cast shadows; the short way round, by the midday's amount)
+    static const EnhancedTune t_bearing("light.midday_bearing", 80.f);
+    const float pi = 3.14159265f;
+    float turn = (float)t_bearing * pi / 180.f - std::atan2(out[0], out[2]);
+    turn -= 2.f * pi * std::floor((turn + pi) / (2.f * pi));
+    turn *= g_light_midday;
+    const float x = out[0], z = out[2];
+    out[0] = std::cos(turn) * x + std::sin(turn) * z;
+    out[2] = -std::sin(turn) * x + std::cos(turn) * z;
+  }
   // (lowered toward the horizon, keeping its bearing)
   static const char* env_elev = std::getenv("JAK_ENHANCED_SUN_ELEV");
   const float max_elev = sky ? (env_elev ? (float)std::atof(env_elev) : g_sun_max_elev) : light_elev;
