@@ -1199,6 +1199,14 @@ static void enhanced_test_switches(const std::string& level) {
     g_enhanced_menu.ask(steps[next].kind, steps[next].value);
     next++;
   }
+  // (test: tuning debug.hour = an hour of the day asks for it once per change, -1 off: the hours
+  // compared in one run, picked from outside)
+  static const EnhancedTune t_hour("debug.hour", -1.f);
+  static float asked_hour = -1.f;
+  if ((float)t_hour >= 0.f && (float)t_hour != asked_hour) {
+    asked_hour = (float)t_hour;
+    g_enhanced_menu.ask(1, fmt::format("{}", asked_hour));
+  }
 }
 
 // Enhanced: the level Jak is in, the hour (0-24) and whether a cutscene plays
