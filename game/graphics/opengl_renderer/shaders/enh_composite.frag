@@ -256,7 +256,7 @@ uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: 
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
 uniform float sky_copy;     // 0: none, 1: compare the scene with it, 2: the scene before the sprites
-uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b), 5 no middle map
+uniform float tune_shadow_dbg = 0.0; // test: 1 no sun shadows, 2 shadow (r) sunlight (g) tag (b), 5 no middle map, -1 the shade without the sky's fill
 uniform float tune_chr_shade = 0.85;  // characters in a shadow: how much of the sun they lose
 uniform float tune_chr_gap_m = 1.6;   // ...from casters at least this far toward the sun (0: old 70 cm lookup)
 uniform float tune_chr_tint = 1.0;    // their shade's tint: 1 neutral-cool, 0 the land's (desert lilac)
@@ -1165,6 +1165,37 @@ float sky_open(vec3 w, vec3 n) {
   // (fades back to open toward the map's edge)
   vec2 e = abs(f / (sky_map.w - 1.0) * 2.0 - 1.0);
   return mix(o, 1.0, smoothstep(0.85, 1.0, max(e.x, e.y)));
+}
+
+// how much of the sky's light reaches world point w in the shade (n its world normal), 0..1: the
+// sky map straight above it and in two rings around (2.5 and 6 m, one cell each): 1 in a street's
+// or a courtyard's shade, falling off toward a wall and under a roof's edge, 0 deep under cover.
+// 0.6 with no map or off it
+const float sky_fill_none = 0.6;
+float sky_fill_at(vec3 w, vec3 n) {
+  if (sky_map.w < 1.0) {
+    return sky_fill_none;
+  }
+  vec3 q = w + n * (tune_sky_map_n * 4096.0);
+  vec2 f = (q.xz - sky_map.xy) / sky_map.z - 0.5;
+  vec2 e = abs(f / (sky_map.w - 1.0) * 2.0 - 1.0);
+  float edge = max(e.x, e.y);
+  if (edge >= 1.0) {
+    return sky_fill_none;
+  }
+  float low;
+  float o = sky_open_at(q.xz, q.y, low);
+  float over = q.y + tune_sky_map_gap * 4096.0, soft = max(tune_sky_map_soft, 0.01) * 4096.0;
+  ivec2 hi = ivec2(sky_map.w - 1.0);
+  float r1 = 0.0, r2 = 0.0;
+  for (int i = 0; i < 4; i++) {
+    vec2 d = vec2(i < 2 ? 1.0 : 0.0, i < 2 ? 0.0 : 1.0) * ((i & 1) == 0 ? 1.0 : -1.0);
+    vec2 dd = vec2(d.x - d.y, d.x + d.y) * 0.7071;  // (the outer ring's taps between the inner's)
+    r1 += 1.0 - smoothstep(over, over + soft, texelFetch(tex_T30, clamp(ivec2(floor(f + d * 5.0 + 0.5)), ivec2(0), hi), 0).x);
+    r2 += 1.0 - smoothstep(over, over + soft, texelFetch(tex_T30, clamp(ivec2(floor(f + dd * 12.0 + 0.5)), ivec2(0), hi), 0).x);
+  }
+  float vis = 0.4 * o + 0.0875 * r1 + 0.0625 * r2;
+  return mix(vis, sky_fill_none, smoothstep(0.85, 1.0, edge));
 }
 
 // the probes at world point w (game units), n its world normal: the 8 around it, trilinear, each
@@ -3822,6 +3853,8 @@ void composite_unused() {
   float sun_lit = 1.0;
   // (how much of the low sun's sky fill the ground takes, set by the shadow map's test below)
   float gold_w = 1.0;
+  // (how much of the sky's light the shade takes back, 0..~0.4, set with the shadow below)
+  float shade_fill = 0.0;
   // (how much the low sun's shade below may take at most: never under tune_dusk_floor of the game's color)
   float dusk_floor_w = 0.0;
   if (normal_debug != 0 && z > 0.0) {
@@ -4188,6 +4221,24 @@ void composite_unused() {
         // (>= 10: shows where it acts, red by its weight)
         c = mix(c, vec3(1.0, 0.0, 0.0), (1.0 - pr.a) * sh);
       }
+    }
+    // (the shade by how much of the sky it sees: under a roof, an arch or an overhang it was one
+    // flat tone from the edge to the back, and as blue as a street's. The sky's light wraps in: the
+    // open shade lighter, a gradient under the cover's edge and toward the walls, deeper at the back;
+    // faces turned up or out take more of it than ceilings. Under cover the tint goes neutral, the
+    // light there comes back off the ground and the walls, not from the blue sky. And where the
+    // occlusion has already darkened a corner the shadow takes less: the two stacked went black)
+    const float shade_fill_open = 0.42;   // of the shadow's strength given back in the open shade
+    const float shade_fill_cover = 0.14;  // ...and deep under cover
+    const float shade_ao_keep = 0.6;      // the shadow's share left where the occlusion is full
+    if (sh > 0.02 && !chr && night_dark.x < 1.0 && tune_shadow_dbg > -0.5) {
+      vec3 wn = view_to_world * surf_n;
+      float vis = sky_fill_at(view_to_world * p + cam_pos, wn);
+      float fill = mix(shade_fill_cover, shade_fill_open, vis) * mix(0.55, 1.0, wn.y * 0.5 + 0.5);
+      float day = 1.0 - night_dark.x;
+      tint = mix(tint, vec3(dot(tint, vec3(1.0 / 3.0))) * vec3(0.97, 1.0, 1.04), (1.0 - vis) * (1.0 - lilac) * day);
+      shade_fill = fill * day * sh;
+      sh *= 1.0 - (fill + (1.0 - shade_ao_keep) * (1.0 - fill) * (1.0 - ao)) * day;
     }
     c *= vec3(1.0) - shadow_strength * sh * tint;
     c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
@@ -6178,6 +6229,7 @@ void composite_unused() {
     const vec3 noon_sand = vec3(1.13, 1.0, 0.8);  // its color over its brightness: pale warm cream
     const float noon_mix = 0.3;
     const float noon_sunlit = 1.15;
+    const float sand_shade_fill = 0.7;  // of the shade's sky fill, toward the sunlit sand's lift
     const vec3 midday_sand = vec3(1.2, 0.99, 0.66);  // the same at midday: golden tan
     const float midday_sand_mix = 0.15;
     if (((tag > 0.85 && tag < 0.95) || (tag > 0.55 && tag < 0.65)) && sun_haze > 0.0) {
@@ -6192,7 +6244,9 @@ void composite_unused() {
         float lb = luma(c);
         float under = smoothstep(0.88, 0.55, lb / noon_sand_luma);
         float gain = clamp(noon_sand_luma * 0.95 / max(lb, 0.02), 1.0, 1.9);
-        c *= mix(1.0, gain, under * sun_lit * k);
+        // (and in the open shade by a part of the sky's fill: beside the sand brought up, a
+        // courtyard's shade was near black)
+        c *= mix(1.0, gain, under * max(sun_lit, shade_fill * sand_shade_fill) * k);
       }
       // (the middle of the day (brightness.w; the light at 48 degrees there, 18 before and after): the
       // sand read flat and washed out, a pale salmon from end to end: a golden tan instead)
@@ -6202,7 +6256,7 @@ void composite_unused() {
       c = mix(c, luma(c) * midday_sand, midday * midday_sand_mix * (tag > 0.85 ? 1.0 : 0.5));
       // (the shade under a high sun: lit by the blue sky and the bright sand around, cooler and not
       // as deep)
-      c *= mix(vec3(1.0), mix(vec3(0.8, 0.84, 0.95), vec3(noon_sunlit), sun_lit), k);
+      c *= mix(vec3(1.0), mix(vec3(0.8, 0.84, 0.95), vec3(noon_sunlit), max(sun_lit, shade_fill * sand_shade_fill)), k);
     }
   }
   c = mix(c, pre_relight, dust_veil);

@@ -490,11 +490,25 @@ void EnhancedPost::update_scene() {
       const bool jak3 = g_game_version == GameVersion::Jak3;
       static const EnhancedTune t_light_3("light.midday_elev", 48.f);
       const float t_light = jak3 ? (float)t_light_3 : 65.f;
-      static const EnhancedTune t_sun("light.midday_sun_elev", 58.f);
+      static const EnhancedTune t_sun_2("light.midday_sun_elev", 58.f);
+      // (Jak 3: the sun in the sky as high as the light, and turned with it (sun_world): one sun)
+      static const EnhancedTune t_sky_own("light.midday_sky_own", 0.f);
+      const float t_sun = jak3 && (float)t_sky_own < 0.5f ? t_light : (float)t_sun_2;
       const float midday = smooth((hour - 10.f) / 1.5f) * (1.f - smooth((hour - 14.f) / 1.5f)) * golden_area;
       g_light_max_elev += std::max(t_light - g_light_max_elev, 0.f) * midday;
-      g_sun_max_elev += std::max((float)t_sun - g_sun_max_elev, 0.f) * midday;
+      g_sun_max_elev += std::max(t_sun - g_sun_max_elev, 0.f) * midday;
       g_light_midday = jak3 ? midday : 0.f;
+      // (Jak 3's Haven, the areas with wall_sun: from 12 to 16 the game's sun stands at 55-70
+      // degrees, the streets had no cast shadows and both sides of a street the same light. No
+      // higher than 54 through the middle of the day, on its own bearing (at 46 the port's squares
+      // lay in their walls' shade from end to end); the sun in the sky with it. Tuning 90: off)
+      static const EnhancedTune t_city("light.midday_elev_city", 54.f);
+      const float city = jak3 ? std::min(m_grade.wall_sun * 2.f, 1.f) * (1.f - golden_area) : 0.f;
+      const float city_mid = smooth((hour - 9.5f) / 1.5f) * (1.f - smooth((hour - 15.5f) / 1.5f)) * city;
+      const float city_cap = 90.f + ((float)t_city - 90.f) * city_mid;
+      g_city_midday = city_mid * std::clamp((90.f - (float)t_city) / 36.f, 0.f, 1.f);
+      g_light_max_elev = std::min(g_light_max_elev, city_cap);
+      g_sun_max_elev = std::min(g_sun_max_elev, city_cap);
     }
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;

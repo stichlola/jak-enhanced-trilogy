@@ -262,6 +262,29 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
         m_sky_view[col] = -m_sky_view[col];
       }
     }
+    {
+      // (test: tuning debug.sun_log 1 logs every 2 s the game's sun, the key light and the sun seen
+      // in the sky as bearing (from +z toward +x) and height, degrees)
+      static const EnhancedTune t_log("debug.sun_log", 0.f);
+      static int frames = 0;
+      if ((float)t_log > 0.5f && ++frames >= 120) {
+        frames = 0;
+        float l[3], s[3];
+        sun_world(l);
+        sun_world(s, true);
+        auto deg = [](const float* v, float* bearing, float* elev) {
+          const float k = 180.f / 3.14159265f;
+          *bearing = std::atan2(v[0], v[2]) * k;
+          *elev = std::atan2(v[1], std::sqrt(v[0] * v[0] + v[2] * v[2])) * k;
+        };
+        float gb, ge, lb, le, sb, se;
+        deg(g_enhanced_sun.dir, &gb, &ge);
+        deg(l, &lb, &le);
+        deg(s, &sb, &se);
+        lg::info("[enhanced] sun log hour {:.2f} game {:.0f} {:.0f} light {:.0f} {:.0f} sky {:.0f} {:.0f}",
+                 g_enhanced_scene.hour, gb, ge, lb, le, sb, se);
+      }
+    }
     // kept with the shadow map when the characters aren't in it: these give them their shadows
     // (with them in it, a second shadow cast the game's own way: darker, doubled)
     const bool on = m_settings.sun_shadows && g_enhanced_sun.valid && !g_enhanced_casters.cast;
@@ -1068,7 +1091,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
               m_settings.bloom ? m_settings.bloom_strength : 0.f);
   // the area's grade on top of the settings (update_scene)
   glUniform1f(glGetUniformLocation(id, "saturation"), m_settings.saturation * m_grade.saturation);
-  glUniform1f(glGetUniformLocation(id, "contrast"), m_settings.contrast + m_grade.contrast);
+  {
+    // (Jak 3's Haven through the middle of the day: a little more contrast, the high sun's light
+    // sat in a narrow band of mid greys)
+    static const EnhancedTune t_contrast("light.midday_city_contrast", 0.08f);
+    glUniform1f(glGetUniformLocation(id, "contrast"),
+                m_settings.contrast + m_grade.contrast + (float)t_contrast * enh_post::g_city_midday);
+  }
   glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
@@ -1102,7 +1131,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "sky_day"),
                 ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) * sky_k);
     glUniform1f(glGetUniformLocation(id, "rock_sun"), m_ssao_ready ? m_grade.rock_sun : 0.f);
-  glUniform1f(glGetUniformLocation(id, "wall_sun"), m_ssao_ready ? m_grade.wall_sun : 0.f);
+  {
+    // (Jak 3's Haven through the middle of the day: the walls' sunlit and shaded faces further
+    // apart, the streets read flat under the high sun)
+    static const EnhancedTune t_wall("light.midday_wall_sun", 0.7f);
+    glUniform1f(glGetUniformLocation(id, "wall_sun"),
+                m_ssao_ready ? m_grade.wall_sun * (1.f + (float)t_wall * enh_post::g_city_midday) : 0.f);
+  }
     // the late afternoon (16-19, eased in from 14:30 and out by 20, with the sun down: over by 19 the plain jumped from amber to a noon white): amber light
     const float golden = ease((hr - 14.5f) / 1.5f) * (1.f - ease((hr - 19.f) / 1.f));
     glUniform1f(glGetUniformLocation(id, "golden"), golden * m_grade.golden);
@@ -1234,7 +1269,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "ground_detail"), m_ground_tex ? 1.f : 0.f);
   glUniform3fv(glGetUniformLocation(id, "ground_detail_avg"), 1, m_ground_avg);
   glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
-  glUniform3fv(glGetUniformLocation(id, "grade_gain"), 1, m_grade.gain);
+  {
+    // (...and its highlights a little higher)
+    static const EnhancedTune t_gain("light.midday_city_gain", 0.04f);
+    const float k = 1.f + (float)t_gain * enh_post::g_city_midday;
+    glUniform3f(glGetUniformLocation(id, "grade_gain"), m_grade.gain[0] * k, m_grade.gain[1] * k,
+                m_grade.gain[2] * k);
+  }
   // soft shadows: the shadow map again, read as plain depths for the blocker search
   if (!m_shadow_raw_sampler) {
     glGenSamplers(1, &m_shadow_raw_sampler);

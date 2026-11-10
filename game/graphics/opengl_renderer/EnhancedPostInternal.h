@@ -1071,6 +1071,8 @@ inline float g_light_max_elev = 90.f;
 // round to one bearing ("light.midday_bearing", degrees from +z toward +x), from the side of the
 // views that matter instead of from behind them
 inline float g_light_midday = 0.f;
+// the same hours in Jak 3's Haven (0..1, update_scene): the light kept under "light.midday_elev_city"
+inline float g_city_midday = 0.f;
 
 // test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
 // (tuning in one run); tuning.json's "light": {"yaw", "max_elev", "morning_yaw"} too, over it
@@ -1130,10 +1132,14 @@ inline void sun_world(float out[3], bool sky = false) {
   out[0] = std::cos(yaw) * d[0] + std::sin(yaw) * d[2];
   out[1] = d[1];
   out[2] = -std::sin(yaw) * d[0] + std::cos(yaw) * d[2];
-  if (!sky && g_light_midday > 0.f) {
+  // (test: tuning light.midday_sky_own 1 leaves the sun in the sky on its own path, as it was)
+  static const EnhancedTune t_sky_own("light.midday_sky_own", 0.f);
+  if (g_light_midday > 0.f && !(sky && (float)t_sky_own > 0.5f)) {
     // (the sun crosses overhead from 12 to 17: its bearing swings 120 degrees while the light stands
     // too high to shape anything. Held to the side, lower, the rocks get a lit and a shaded face and
     // the ground its cast shadows; the short way round, by the midday's amount)
+    // (the sun seen in the sky too: its glow and the clouds' lit side stood up to 85 degrees from
+    // where the shadows and the water's glints said the light came from)
     static const EnhancedTune t_bearing("light.midday_bearing", 80.f);
     const float pi = 3.14159265f;
     float turn = (float)t_bearing * pi / 180.f - std::atan2(out[0], out[2]);
