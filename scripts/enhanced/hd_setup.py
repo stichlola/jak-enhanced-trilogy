@@ -27,9 +27,36 @@ ESRGAN_URL = ("https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0
               "realesrgan-ncnn-vulkan-20220424-windows.zip")
 
 
-def run(*command):
+UPSCALED = re.compile(r"upscaled (\d+)/(\d+)")
+_shown = -1
+
+
+def progress(pct):
+    """'[ 45%]' at the start of a line: the installer's bar reads it (the compiler prints the same)."""
+    global _shown
+    pct = max(0, min(100, int(pct)))
+    if pct != _shown:
+        _shown = pct
+        print(f"[{pct:3d}%]", flush=True)
+
+
+def run(*command, span=None):
+    """Runs a command, its output passed through. span=(lo, hi): the step's bar goes from lo to hi,
+    moved by hd_textures.py's 'upscaled X/Y' lines (other commands: lo at the start, hi at the end)."""
     print(">", " ".join(str(c) for c in command[:3]), "...", flush=True)
-    subprocess.run([str(c) for c in command], cwd=ROOT, check=True)
+    if span:
+        progress(span[0])
+    with subprocess.Popen([str(c) for c in command], cwd=ROOT, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1) as proc:
+        for line in proc.stdout:
+            print(line, end="", flush=True)
+            m = UPSCALED.search(line)
+            if span and m and int(m.group(2)):
+                progress(span[0] + (span[1] - span[0]) * int(m.group(1)) / int(m.group(2)))
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, command)
+    if span:
+        progress(span[1])
 
 
 def main():
@@ -50,7 +77,10 @@ def main():
         archive.unlink()
 
     decompiler = args.bin / "decompiler.exe"
-    for game in args.games:
+    games = len(args.games)
+    for n, game in enumerate(args.games):
+        def at(f, n=n):  # a fraction of this game's share of the bar
+            return 98 * (n + f) / games
         folders = sorted(p for p in (ROOT / "iso_data").glob(f"{game}*")
                          if re.fullmatch(rf"{game}(_[a-z0-9]+)?", p.name))
         if not folders:
@@ -61,15 +91,17 @@ def main():
         config = Path("decompiler/config") / game / f"{game}_config.jsonc"
         print(f"[{game}] dumping the textures...", flush=True)
         run(decompiler, config, "iso_data", "decompiler_out", "--version", version, "--config-override",
-            json.dumps({"decompile_code": False, "levels_extract": False, "save_texture_pngs": True}))
+            json.dumps({"decompile_code": False, "levels_extract": False, "save_texture_pngs": True}),
+            span=(at(0), at(0.1)))
         print(f"[{game}] redrawing the textures 4x (the long part)...", flush=True)
-        run(sys.executable, HERE / "hd_textures.py", "--game", game)
-        run(sys.executable, HERE / "hd_textures.py", "--game", game, "--hud")
+        run(sys.executable, HERE / "hd_textures.py", "--game", game, span=(at(0.1), at(0.8)))
+        run(sys.executable, HERE / "hd_textures.py", "--game", game, "--hud", span=(at(0.8), at(0.85)))
         print(f"[{game}] extracting the levels again with the HD textures...", flush=True)
         # (Jak 3: the levels' models ripped too, *-lod0.glb: the editor makes the game's own models from them)
         run(decompiler, config, "iso_data", "decompiler_out", "--version", version, "--config-override",
-            json.dumps({"decompile_code": False, "levels_extract": True, "rip_levels": game == "jak3"}))
-    run(sys.executable, HERE / "minimap_maps.py")
+            json.dumps({"decompile_code": False, "levels_extract": True, "rip_levels": game == "jak3"}),
+            span=(at(0.85), at(1)))
+    run(sys.executable, HERE / "minimap_maps.py", span=(98, 100))
     print("HD textures done.")
 
 
