@@ -1539,6 +1539,7 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
   glUniform1f(glGetUniformLocation(id, "fx_detail"), m_settings.fx_detail);
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);
+  glUniform1f(glGetUniformLocation(id, "movie"), m_movie);
   glUniform1f(glGetUniformLocation(id, "vignette"),
               m_settings.vignette + (g_enhanced_menu.photo_active ? m_settings.photo_vignette : 0.f));
   glUniform1f(glGetUniformLocation(id, "sharpen"), m_settings.sharpen);

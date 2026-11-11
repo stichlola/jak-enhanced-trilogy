@@ -403,6 +403,8 @@ uniform float tune_backlight_cos = 0.55; // from how close to the sun's directio
 uniform float tune_backlight_split = 0.0; // test: 1 = only on the right half of the screen (A/B in one frame)
 uniform float tune_bolt_scene = 1.0;    // lightning lights the scene: a short cold light from the bolt's side of the sky (0: off)
 uniform float tune_rain_chars = 1.0;    // characters wet in the rain: darker, a cold sheen on their edges (0: off)
+uniform float tune_rain_chr_movie = 0.0; // the wet scenery's look (runs, glinting drops, puddles, splashes) on characters in cutscenes (0: none, 1: as in play)
+uniform vec2 tune_rain_chr_near = vec2(1.5, 3.0); // and in play nearer than this (m): it fades out from the second to the first
 uniform float tune_wet_deep = 0.6;      // wet level ground deeper in color at the same luma (0: off)
 uniform float tune_chr_gold_rim = 0.7; // characters at golden hour: a rim of the low sun on their sun-side edges, backlit most (0: off)
 uniform float tune_rock_dawn = 1.0;  // and in the morning's low sun (0: off)
@@ -423,6 +425,7 @@ uniform vec4 sky_kind;          // the evening's sky: stars shown (0..1), the mo
 uniform float sunny;            // a bright summer day (Jak 1's Sandover): deep blue sky, white clouds
 uniform vec4 bolt;              // lightning bolt: azimuth (rad), seed, age (s), strength
 uniform float close_up;          // cutscenes: nearer than this (game units) no sun shadow map (0 = off)
+uniform float movie;             // a cutscene plays (0..1, eased)
 uniform vec3 cine_dof;          // cutscenes: focus (view z, game units), aperture, max blur (px; 0 off)
 uniform float blast_sparks;     // explosions' sparks and hot air
 uniform float fx_detail;        // richer explosions, shots and marks (0 = off)
@@ -3983,6 +3986,15 @@ void composite_unused() {
     vec4 pr = probe_at(view_to_world * p + cam_pos, view_to_world * surf_n);
     c = tune_probe_dbg < 1.5 ? vec3(pr.a) * 0.6 : pr.rgb;
   }
+  // characters: the wet scenery's look (darker and deeper, the runs, drops glinting 3 cm apart, puddles
+  // and splashes on what faces up) is made for rocks and walls seen from a few meters. On a face that
+  // fills the screen the drops are blobs: none of it in cutscenes, nor in play with the camera right
+  // at them (their own wet look stays: merc2.frag's enh_wet, rain_chars below)
+  float rain_wet = rain_open;
+  if (pix_tag > 0.3 && pix_tag < 0.55) {
+    rain_wet *= mix(1.0, tune_rain_chr_movie, movie) *
+                smoothstep(tune_rain_chr_near.x * 4096.0, tune_rain_chr_near.y * 4096.0, z);
+  }
   if (max(weather.w, puddle_level) > 0.0 && z > 0.0 && wsurf == 0.0) {
     wet_n = surf_n;
     {
@@ -3994,7 +4006,7 @@ void composite_unused() {
     }
     // (out to the horizon: far away the ground still reads soaked, only the puddles' detail goes)
     wet_flat = smoothstep(0.5, 0.85, dot(wet_n, up_view));
-    wet = weather.w * wet_flat * rain_open;
+    wet = weather.w * wet_flat * rain_wet;
     c *= 1.0 - 0.1 * weather.x - 0.38 * wet;
     // (and deeper in color, as soaked sand and stone are: water in the pores scatters less white.
     // Same luma, only the hue richer: the desert's ground in rain went dark and grey, flat)
@@ -4005,7 +4017,7 @@ void composite_unused() {
     }
     // what isn't level ground (grass, bushes, rocks, walls): soaked too, darker and deeper in color,
     // with a wet sheen at grazing angles and drops glinting on it up close
-    float wet_side = weather.w * (1.0 - wet_flat) * rain_open;
+    float wet_side = weather.w * (1.0 - wet_flat) * rain_wet;
     if (wet_side > 0.01) {
       vec3 wq = (view_to_world * p + cam_pos) / 4096.0;
       // (streaks: noise stretched down the slope, where the rain runs off)
@@ -4746,7 +4758,7 @@ void composite_unused() {
 
   // wet ground: puddles in the dips of a world-space noise, raindrop rings in them, and the
   // surroundings reflected (strongest in the puddles and at grazing angles: the neon on a wet street)
-  if (wet > 0.01 || wet_flat * puddle_level * rain_open > 0.01) {
+  if (wet > 0.01 || wet_flat * puddle_level * rain_wet > 0.01) {
     vec3 ww = (view_to_world * p + cam_pos) / 4096.0;
     // wide puddles: low-frequency dips with a ragged rim. A thunderstorm floods them wider; as they
     // dry they draw back into the deepest dips, still water while the street around has dried
@@ -4754,14 +4766,14 @@ void composite_unused() {
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
                    (1.0 - smoothstep(350.0 * 4096.0, 700.0 * 4096.0, z)) * step(0.001, puddle_level) *
-                   rain_open;
+                   rain_wet;
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
     wet = max(wet, puddle * wet_flat * water);
     // (a damp dark rim around a drying puddle)
-    float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle) * rain_open;
+    float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle) * rain_wet;
     c *= 1.0 - 0.25 * puddle * wet - 0.3 * max(wet - soaked, 0.0) - 0.15 * max(rim - soaked, 0.0);
-    vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * rain_open * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
+    vec2 rip = rain_ripples(ww.xz, weather.z) * weather.x * rain_wet * (1.0 - smoothstep(8.0 * 4096.0, 20.0 * 4096.0, z));
     // outside the puddles the wet ground is rough: a fine noise breaks its reflection up
     vec2 rough = vec2(gnoise(ww.xz * 9.0), gnoise(ww.xz * 9.0 + 5.3)) * (1.0 - puddle) *
                  (1.0 - smoothstep(10.0 * 4096.0, 30.0 * 4096.0, z));
@@ -4805,7 +4817,7 @@ void composite_unused() {
         }
       }
       float fade = 1.0 - smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z);
-      c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * rain_open * 0.55;
+      c += (fog_color * 0.5 + 0.22) * spl * fade * weather.x * rain_wet * 0.55;
     }
     // further out: the drops as sparkles about a pixel big, on what faces up, out to 350 m
     if (weather.x > 0.0 && z > 6.0 * 4096.0 && z < 350.0 * 4096.0) {
@@ -4813,7 +4825,7 @@ void composite_unused() {
       float fade = smoothstep(6.0 * 4096.0, 15.0 * 4096.0, z) *
                    (1.0 - smoothstep(220.0 * 4096.0, 350.0 * 4096.0, z)) *
                    smoothstep(0.7, 0.9, dot(wet_n, up_view));
-      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * rain_open * 0.6;
+      c += (fog_color * 0.5 + 0.22) * min(spk, 1.0) * fade * weather.x * rain_wet * 0.6;
     }
   }
 
