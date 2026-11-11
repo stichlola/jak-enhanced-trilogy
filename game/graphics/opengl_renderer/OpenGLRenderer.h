@@ -76,6 +76,11 @@ class OpenGLRenderer {
   void render(DmaFollower dma, const RenderOptions& settings);
   // Enhanced: the trilogy's start menu, drawn every display frame (the game waits for it: no frames)
   void draw_start_menu();
+  // Enhanced: the last finished frame to the window once more, for a turn of the display loop that
+  // has no new frame from the game (it is late: a load, a hitch). The window's buffers swap, so
+  // the one about to be shown still held the frame before last: the picture stepped back a frame,
+  // and to black when that frame was the end of a load's blackout.
+  void present_last_frame();
 
  private:
   void setup_frame(const RenderOptions& settings);
@@ -134,6 +139,10 @@ class OpenGLRenderer {
   std::unique_ptr<EnhancedPost> m_enhanced_post;
 
   float m_last_pmode_alp = 1.;
+  // (the last frame's brightness and contrast, and whether it can be shown again: present_last_frame)
+  int m_last_brightness_contrast_color = 0;
+  int m_last_brightness_contrast_alpha = 0;
+  bool m_have_last_frame = false;
   bool m_enable_fast_blackout_loads = true;
   std::string m_renderer_filter = "";
 

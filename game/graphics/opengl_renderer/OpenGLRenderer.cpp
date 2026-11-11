@@ -11,6 +11,7 @@
 #include "game/graphics/opengl_renderer/DepthCue.h"
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
@@ -1103,6 +1104,16 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   {
     g_current_renderer = "pcrtc";
     auto prof = m_profiler.root()->make_scoped_child("pcrtc");
+    if (enh_probe::on()) {
+      // the finished frame before it goes to the window (not a multisampled one: no scaled blit)
+      if (!m_fbo_state.render_fbo->multisampled) {
+        enh_probe::sample(enh_probe::kFinal, m_fbo_state.render_fbo->fbo_id, 0, 0,
+                          m_fbo_state.render_fbo->width, m_fbo_state.render_fbo->height);
+      }
+      if (settings.pmode_alp_register < 1.f) {
+        enh_probe::blackout(settings.pmode_alp_register);
+      }
+    }
     do_pcrtc_effects(settings.pmode_alp_register, settings.brightness_contrast_color,
                      settings.brightness_contrast_alpha, &m_render_state, prof);
     if (settings.gpu_sync) {
@@ -1111,6 +1122,10 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   }
 
   m_last_pmode_alp = settings.pmode_alp_register;
+  // (for present_last_frame; not a screenshot's frame, drawn at its own size)
+  m_last_brightness_contrast_color = settings.brightness_contrast_color;
+  m_last_brightness_contrast_alpha = settings.brightness_contrast_alpha;
+  m_have_last_frame = !settings.save_screenshot;
 
   if (settings.save_screenshot) {
     g_current_renderer = "screenshot";
@@ -1392,6 +1407,7 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
     // doesn't match, set up a new one for these settings
     lg::info("FBO Setup: requested {}x{}, msaa {}", settings.game_res_w, settings.game_res_h,
              settings.msaa_samples);
+    enh_probe::note(fmt::format("fbo-{}x{}", settings.game_res_w, settings.game_res_h));
 
     // clear old framebuffers
     m_fbo_state.resources.render_buffer.clear();
@@ -1900,6 +1916,9 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
   glDisable(GL_BLEND);
   glViewport(render_state->draw_offset_x, render_state->draw_offset_y, render_state->draw_region_w,
              render_state->draw_region_h);
+  // (Enhanced: on unit 0, the one the shader reads: the frame was bound on whichever unit the last
+  // renderer left active, and only then was unit 0 selected for the draw)
+  glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, *window_blit_src->tex_id);
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -1939,6 +1958,34 @@ void OpenGLRenderer::do_pcrtc_effects(float alp,
     m_blackout_renderer.draw(Vector4f(0, 0, 0, 1.f - alp), render_state, prof);
   }
   glEnable(GL_DEPTH_TEST);
+}
+
+void OpenGLRenderer::present_last_frame() {
+  if (!m_have_last_frame || !m_fbo_state.render_fbo || !m_fbo_state.render_fbo->valid) {
+    return;  // nothing drawn yet (the boot), or a screenshot's frame
+  }
+  // (its own node: the frame's profiler tree is closed)
+  ProfilerNode node("present-last-frame");
+  ScopedProfilerNode prof(&node);
+  // the window as a frame's first bucket leaves it (BlitDisplays: cleared, the letterbox black),
+  // then the render buffer, which still holds the last frame with its HUD, with that frame's
+  // brightness, contrast and blackout
+  const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+  if (scissor) {
+    glDisable(GL_SCISSOR_TEST);
+  }
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glClearColor(0.0, 0.0, 0.0, 0.0);
+  glClear(GL_COLOR_BUFFER_BIT);
+  if (scissor) {
+    glEnable(GL_SCISSOR_TEST);
+  }
+  if (m_last_pmode_alp < 1.f) {
+    enh_probe::blackout(m_last_pmode_alp);
+  }
+  do_pcrtc_effects(m_last_pmode_alp, m_last_brightness_contrast_color,
+                   m_last_brightness_contrast_alpha, &m_render_state, prof);
 }
 
 void OpenGLRenderer::draw_start_menu() {

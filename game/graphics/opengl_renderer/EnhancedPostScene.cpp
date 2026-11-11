@@ -5,6 +5,7 @@
 
 #include "common/util/FileUtil.h"
 
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/Shader.h"
 
 #include <SDL3/SDL_video.h>
@@ -743,6 +744,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, m_scene_fbo);
   ENH_TIMED("enh-scene-copy", glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST));
   ENH_CPU_SPLIT("scene-copy");
+  enh_probe::sample(enh_probe::kScene, m_scene_fbo, 0, 0, w, h);
 
   const EnhancedCamera cam = g_enhanced_camera;  // prepare() clears the global
   ENH_TIMED("enh-prepare", prepare(m_scene_tex, render_fbo, w, h, screen_vao, render_state, prof));
@@ -750,6 +752,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glFlush();
   }
   const bool have_scene = m_ssao_ready;
+  if (enh_probe::on() && (!have_scene || !cam.valid)) {
+    enh_probe::state(!cam.valid ? "no-camera" : "no-scene");
+  }
   // (where the post's GPU time goes between the named passes: the whole interval from here to the
   // composite's draw on the GPU's clock, which counts its idle time while the CPU sets the composite
   // up, and the CPU's own time for it; "[enhanced] post cpu" in the log every 5 s)
@@ -2684,6 +2689,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   if (lag_probes) {
     g_lag_composite.mark(pass_timer_frame());
   }
+  // (the scene on unit 0 once more, right before the draw: the passes run since it was bound
+  // (clouds, their rays, the half-size sun shadows) make their own textures now and then, and one
+  // that left unit 0 empty cost a whole frame, the world black under the sky)
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, scene_tex);
   vrs::begin();
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   {
@@ -2754,6 +2764,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   m_prev_camera = cam;
   m_prev_fy = cam.fy * kScissorHeightScale;
+  enh_probe::sample(enh_probe::kPost, render_fbo, 0, 0, w, h);
 
   if (lag_probes) {
     g_lag_end.mark(pass_timer_frame());

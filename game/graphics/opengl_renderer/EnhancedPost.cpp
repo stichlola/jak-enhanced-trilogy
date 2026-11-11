@@ -18,6 +18,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/EnhancedParticles.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
@@ -571,6 +572,19 @@ void EnhancedPost::update_auto_quality() {
     return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : kAutoLevels - 1;
   }();
   m_auto_level = std::clamp(m_auto_level, auto_min, std::max(auto_min, auto_max));
+  {
+    // (test switch "debug": {"auto_level": n}: the level held at n from the tuning file, so a test
+    // can step through the levels (and their render scales) in one run; -1: the auto quality's own)
+    static const EnhancedTune t_force("debug.auto_level", -1.f);
+    if ((float)t_force >= 0.f) {
+      m_auto_level = std::clamp((int)(float)t_force, 0, kAutoLevels - 1);
+    }
+    static int probe_level = 0;
+    if (m_auto_level != probe_level) {
+      probe_level = m_auto_level;
+      enh_probe::note(fmt::format("auto-{}", m_auto_level));
+    }
+  }
   // the passes it sets aside or brings back fade over a second: the shade jumped in one frame
   // without the indirect light
   auto fade = [&](float& f, bool on) {
@@ -863,6 +877,9 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
 
 void EnhancedPost::ensure_ocean_buffers(int w, int h) {
   if (w != m_ocean_w || h != m_ocean_h) {
+    // (between the game's bucket renderers, which keep their textures bound, see capture_fx: the
+    // active unit's texture stays)
+    enh_post::KeepTexture2D keep;
     if (m_ocean_fbo[0]) {
       glDeleteFramebuffers(3, m_ocean_fbo);
       glDeleteTextures(3, m_ocean_depth);
@@ -885,7 +902,6 @@ void EnhancedPost::ensure_ocean_buffers(int w, int h) {
       glDrawBuffer(GL_NONE);
       glReadBuffer(GL_NONE);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
   }
 }
 

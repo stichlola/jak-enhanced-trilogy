@@ -1126,6 +1126,9 @@ void EnhancedPost::do_gi(GLuint scene_tex,
   static const EnhancedTune kGiTemporal("gi.temporal", 1.f);
   const bool gi_tmp = (float)kGiTemporal > 0.f;
   if (gi_tmp && !m_gi_hist_fbo[0]) {
+    // (made again after each resize, with the pass's depth already bound on the active unit 0: kept,
+    // as the occlusion's history in do_ssao)
+    enh_post::KeepTexture2D keep;
     glGenFramebuffers(2, m_gi_hist_fbo);
     glGenTextures(2, m_gi_hist_tex);
     for (int i = 0; i < 2; i++) {
@@ -1141,7 +1144,6 @@ void EnhancedPost::do_gi(GLuint scene_tex,
       const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
       glDrawBuffers(2, bufs);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
     m_gi_hist_valid = false;
   }
   if (!gi_tmp) {
@@ -3175,6 +3177,8 @@ void EnhancedPost::draw_clouds(GLuint id,
   const int cw = std::max(1, (w + 1) / 2);
   const int ch = std::max(1, (h + 1) / 2);
   if (cw != m_cloud_w || ch != m_cloud_h) {
+    // (the active unit is 0, where the composite has just bound the scene: kept)
+    enh_post::KeepTexture2D keep;
     if (m_cloud_fbo[0]) {
       glDeleteFramebuffers(2, m_cloud_fbo);
       glDeleteTextures(2, m_cloud_tex);
@@ -3193,7 +3197,6 @@ void EnhancedPost::draw_clouds(GLuint id,
       glBindFramebuffer(GL_FRAMEBUFFER, m_cloud_fbo[i]);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_cloud_tex[i], 0);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
     m_cloud_history = false;
   }
   const int cur = m_cloud_cur;
@@ -3228,6 +3231,7 @@ void EnhancedPost::draw_clouds(GLuint id,
   const bool use_rays = (float)t_rays_slim > 0.5f && rays.okay();
   if (use_rays) {
     if (cw != m_rays_w || ch != m_rays_h) {
+      enh_post::KeepTexture2D keep;  // (unit 0: the composite's scene)
       if (m_rays_fbo) {
         glDeleteFramebuffers(1, &m_rays_fbo);
         glDeleteTextures(1, &m_rays_tex);
@@ -3244,7 +3248,6 @@ void EnhancedPost::draw_clouds(GLuint id,
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
       glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_rays_tex, 0);
-      glBindTexture(GL_TEXTURE_2D, 0);
     }
     glBindFramebuffer(GL_FRAMEBUFFER, m_rays_fbo);
     glViewport(0, 0, cw, ch);
@@ -3288,6 +3291,7 @@ void EnhancedPost::draw_sun_half(GLuint id,
   const int hw = (w + 1) / 2;
   const int hh = (h + 1) / 2;
   if (hw != m_sun_half_w || hh != m_sun_half_h) {
+    enh_post::KeepTexture2D keep;  // (unit 0: the composite's scene)
     if (m_sun_half_fbo) {
       glDeleteFramebuffers(1, &m_sun_half_fbo);
       glDeleteTextures(1, &m_sun_half_tex);
@@ -3304,7 +3308,6 @@ void EnhancedPost::draw_sun_half(GLuint id,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_sun_half_tex, 0);
-    glBindTexture(GL_TEXTURE_2D, 0);
   }
   glBindFramebuffer(GL_FRAMEBUFFER, m_sun_half_fbo);
   glViewport(0, 0, hw, hh);
