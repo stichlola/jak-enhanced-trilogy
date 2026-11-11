@@ -3103,6 +3103,69 @@ capture exactly."
   (none)
   )
 
+;; Enhanced: feet on slopes and steps. The game's leg IK (leg-ik, leg-ik-callback) puts each foot on
+;; the ground probed under it, but only by bending the leg: a foot whose ground is lower than Jak's
+;; (downhill, the step below) can't reach it with the hips where the animation has them, and hangs in
+;; the air. So the drawn body (cspace-offset, the root joint's offset; the skins of Ashelin and Sig
+;; follow it) drops to the lower foot's ground, at most 35 cm, the IK bending the other knee; full while
+;; standing and walking, gone by 7 m/s, in the air and wherever the game turns the leg IK off.
+;; The drop is taken back before the collision step each frame (pre-collide-setup), which eases
+;; cspace-offset, so it never builds up. The menu's "Feet on slopes" / JAK_ENHANCED_FOOT_IK=0 turn it off.
+;; *enhanced-foot-hit*: x, y the ground height under each foot, z, w whether the probe found it.
+;; *enhanced-pelvis*: x the drop now, y the drop applied, z cspace-offset y right after applying it.
+(define *enhanced-foot-hit* (new 'static 'vector))
+(define *enhanced-pelvis* (new 'static 'vector))
+
+(defbehavior enhanced-foot-ik-undo target ()
+  "Take back the hip drop applied last time, unless something set cspace-offset since."
+  (let ((p *enhanced-pelvis*))
+    (when (!= (-> p y) 0.0)
+      (if (= (-> self control cspace-offset y) (-> p z))
+          (set! (-> self control cspace-offset y) (- (-> self control cspace-offset y) (-> p y)))
+          )
+      (set! (-> p y) 0.0)
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-foot-ik target ()
+  "Drop the drawn body to the lower foot's ground (see above)."
+  (enhanced-foot-ik-undo)
+  (let ((p *enhanced-pelvis*)
+        (h *enhanced-foot-hit*)
+        (want 0.0)
+        )
+    (when (and (pc-enhanced-foot-ik?)
+               (logtest? (-> self leg-ik 0 flags) (joint-mod-ik-flags enable))
+               (logtest? (-> self leg-ik 1 flags) (joint-mod-ik-flags enable))
+               (logtest? (-> self control status) (collide-status on-surface))
+               )
+      (let ((g (-> self control gspot-pos y))
+            (low 0.0)
+            )
+        (if (< 0.5 (-> h z))
+            (set! low (fmin low (- (-> h x) g)))
+            )
+        (if (< 0.5 (-> h w))
+            (set! low (fmin low (- (-> h y) g)))
+            )
+        (set! want (* (fmax low (meters -0.35))
+                      (lerp-scale 1.0 0.0 (vector-xz-length (-> self control transv)) (meters 2) (meters 7))
+                      )
+              )
+        )
+      )
+    (seek! (-> p x) want (* (meters 1.5) (seconds-per-frame)))
+    (when (!= (-> p x) 0.0)
+      (set! (-> self control cspace-offset y) (+ (-> self control cspace-offset y) (-> p x)))
+      (set! (-> p y) (-> p x))
+      (set! (-> p z) (-> self control cspace-offset y))
+      )
+    )
+  (none)
+  )
+
 (defbehavior target-update-ik target ()
   (let ((gp-0 (new 'stack-no-clear 'collide-query)))
     (let ((v1-0 (-> gp-0 bbox))
@@ -3192,11 +3255,15 @@ capture exactly."
                      )
                    )
                  (vector+*! s3-0 (-> gp-0 start-pos) (-> gp-0 move-dist) f30-0)
+                 ;; Enhanced: the ground under this foot, for enhanced-foot-ik
+                 (set! (-> *enhanced-foot-hit* data s5-0) (-> s3-0 y))
+                 (set! (-> *enhanced-foot-hit* data (+ s5-0 2)) 1.0)
                  (vector-copy! (-> self leg-ik s5-0 user-position) s3-0)
                  (vector-copy! (-> self leg-ik s5-0 user-normal) s4-0)
                  (vector-copy! (-> self foot s5-0 twist-max) s4-0)
                  )
                 (else
+                  (set! (-> *enhanced-foot-hit* data (+ s5-0 2)) 0.0)
                   (vector-copy! (-> self leg-ik s5-0 user-position) s2-0)
                   (vector-copy! (-> self leg-ik s5-0 user-normal) *y-vector*)
                   (vector-copy! (-> self foot s5-0 twist-max) *y-vector*)
@@ -3208,11 +3275,13 @@ capture exactly."
         )
       )
     )
+  (enhanced-foot-ik)
   0
   (none)
   )
 
 (defbehavior pre-collide-setup target ()
+  (enhanced-foot-ik-undo)
   (if (>= (current-time) (-> self control additional-decaying-velocity-decay-start-time))
       (vector-normalize!
         (-> self control additional-decaying-velocity)

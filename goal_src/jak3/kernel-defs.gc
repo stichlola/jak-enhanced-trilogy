@@ -312,6 +312,7 @@
 (define-extern pc-enhanced-poll-request (function string int int))
 (define-extern pc-enhanced-minimap? (function symbol))
 (define-extern pc-enhanced-desert-hellcat? (function symbol))
+(define-extern pc-enhanced-foot-ik? (function symbol))
 (define-extern pc-enhanced-smooth-anim? (function symbol))
 (define-extern pc-enhanced-balance? (function symbol))
 (define-extern pc-enhanced-menu-state (function int))

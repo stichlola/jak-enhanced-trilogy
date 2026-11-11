@@ -705,6 +705,13 @@ void EnhancedPost::draw_menu() {
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("The War Factory's Hellcat, parked by the Spargus wall: triangle to get in");
       }
+      bool feet = g_enhanced_menu.foot_ik;
+      if (menu_toggle("Feet on slopes", &feet)) {
+        g_enhanced_menu.foot_ik = feet;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Jak's hips drop to the lower foot on slopes and steps, so both feet stand on the ground");
+      }
       bool smooth = g_enhanced_menu.smooth_anim;
       if (menu_toggle("Smooth animation", &smooth)) {
         g_enhanced_menu.smooth_anim = smooth;
@@ -1000,6 +1007,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   j["desert_hellcat"] = g_enhanced_menu.desert_hellcat.load();
+  j["foot_ik"] = g_enhanced_menu.foot_ik.load();
   j["smooth_anim"] = g_enhanced_menu.smooth_anim.load();
   {
     int player = g_enhanced_menu.player.load();
@@ -1129,6 +1137,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   bool smooth = true;
   get("smooth_anim", smooth);
   g_enhanced_menu.smooth_anim = smooth;
+  bool feet = true;
+  get("foot_ik", feet);
+  g_enhanced_menu.foot_ik = feet;
   std::string player_name = "jak";
   get("player", player_name);
   g_enhanced_menu.player = std::max(0, enhanced_character_index(player_name.c_str()));
