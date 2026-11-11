@@ -548,7 +548,17 @@
 ;; against thigh plus shin) 0.77 -> 0.88 at a run (Jak's 0.74): less of a crouch at his height
 (define *enhanced-skin-run-lift* (meters 0.35))
 
+;; that weight as the run's corrections use it: eased toward it once a frame (enhanced-skin-post, in 0.17 s).
+;; Taken as it is, it went to 0 the moment Jak's state was no longer his walk (a jump, a stop, an attack):
+;; the body dropped by the run lift, 35 cm, in one frame, its feet and hands with it.
+(define *enhanced-skin-run-w* 0.0)
+
 (defun enhanced-skin-run-weight ((jak target))
+  "0-1: how much of the run's corrections (lift, narrower and lower steps) shows now."
+  *enhanced-skin-run-w*
+  )
+
+(defun enhanced-skin-run-weight-raw ((jak target))
   "0-1: Jak walking or running on the ground, from 4.5 m/s (0) to 7.5 m/s and up (1)."
   (if (and (logtest? (-> jak control status) (collide-status on-surface))
            (not (focus-test? jak in-air pilot pilot-riding edge-grab pole flut board mech tube))
@@ -836,6 +846,7 @@
 (defbehavior enhanced-skin-post enhanced-skin ()
   ;; its own attack move for Jak's attack state (enhanced-moves.gc)
   (enhanced-move-update)
+  (seek! *enhanced-skin-run-w* (enhanced-skin-run-weight-raw (-> self parent 0)) (* 6.0 (seconds-per-frame)))
   (let ((tgt (-> self parent 0)))
     (vector-copy! (-> self root trans) (-> tgt control trans))
     (quaternion-copy! (-> self root quat) (-> tgt control quat))
