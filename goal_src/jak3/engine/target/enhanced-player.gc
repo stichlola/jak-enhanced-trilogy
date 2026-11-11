@@ -101,9 +101,6 @@
 (define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
 (define-extern enhanced-skin-idle-rate (function enhanced-character float))
-;; Ashelin's front kick (enhanced-ashelin-kick.gc): kicking now, and her pose for it
-(define-extern enhanced-ashelin-kick-active? (function symbol))
-(define-extern enhanced-ashelin-kick-post (function none :behavior enhanced-skin))
 ;; Sig's streamed clips (enhanced-sig.gc): his walk and his cutscenes' poses
 (define-extern enhanced-sig-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-sig-own? (function symbol :behavior enhanced-skin))
@@ -421,10 +418,6 @@
       ((enhanced-react-animate)
        #t
        )
-      ;; Ashelin kicking: her idle under the kick's pose (enhanced-ashelin-kick.gc)
-      ((enhanced-ashelin-kick-active?)
-       (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.1))
-       )
       ;; Ashelin standing with her gun out: her aiming stance (enhanced-ashelin-gun.gc)
       ((enhanced-ashelin-gun-animate)
        #t
@@ -465,9 +458,7 @@
         (top (-> self char top-speed))
         )
     (or (enhanced-sig-own?)
-        ;; Ashelin's kick is posed on her own idle
-        (enhanced-ashelin-kick-active?)
-        ;; and so are the characters' own attack moves
+        ;; the characters' own attack moves are posed on their own idle
         (enhanced-move-active?)
         ;; hit or dying in its own clips
         (enhanced-react-active?)
@@ -979,8 +970,6 @@
     )
   ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
   (enhanced-ashelin-gun-post)
-  ;; her kick's pose over all that (enhanced-ashelin-kick.gc)
-  (enhanced-ashelin-kick-post)
   ;; the characters' own attack moves (enhanced-moves.gc), and their crossfade from the pose last drawn
   (enhanced-move-post)
   ;; riding: its hands and feet where Jak's are
