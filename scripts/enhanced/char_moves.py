@@ -3,11 +3,16 @@
     python char_moves.py [--clips <dir>] [--out <enhanced-move-tables.gc>] [--sheets <dir>] [--only name,...]
 
 Source clips: Higgsfield Kimodo motion (.npz, original generated motion, 27 joints "cskel27", Y up, 20 fps),
-in <main tree>/local/higgsfield/motion (not in git). The clips are slow, stand still for most of their length
-and often end before the strike is over, so a move here is a short list of key poses on a stylized
-timeline (a snappy anticipation, the strike with a little overshoot, an elastic recovery): each key pose is a
-clip frame, usually edited (a limb aimed, the chest turned, a hand put somewhere by two-bone IK), or a pose
-built from a clip's stance.
+in <main tree>/local/higgsfield/motion (not in git): 1.6 s takes (most stand still and end before the strike)
+and 3 s takes (*_3s_*: a guard, one strike, back). The takes are slow, so a move here is a short list of key
+poses on a stylized timeline (a snappy anticipation, the strike with a little overshoot, an elastic
+recovery): each key pose is a take's frame, sometimes edited (a limb aimed, the chest turned, a hand put
+somewhere by two-bone IK), or, where no take holds the move, a pose built on a take's stance.
+  front kick    ashelin_front_kick_3 (the 3 s kicks are lower: 0.85 m, knee 123 degrees)
+  pistol whip   ashelin_pistol_whip_3s_2
+  elbow         sig_elbow_3s_2
+  rifle butt    body sig_rifle_butt_3s_2, the two-handed hold posed
+  boxer, spin   posed (boxer 3s_1 is one right cross, no jab; spin 3s_2 turns 44 degrees)
 
 Output: goal_src/jak3/engine/target/enhanced-move-tables.gc, one float table per move, 30 samples a second.
 Per sample, vectors in the character's model space (+x left, +y up, +z forward), independent of any rig:
@@ -466,37 +471,40 @@ def ashelin_front_kick():
     ], note="ashelin_front_kick_3 frames 22-31 (chamber and strike sharpened), from and to the stance of take 1")
 
 
+def heading(name, f0, f1):
+    """The way a take travels between two frames (degrees left of the take's +z), to face a move along it."""
+    k = clip(name)
+    d = k.smooth[f1] - k.smooth[f0]
+    if math.hypot(d[0], d[2]) < 0.12:
+        d = k.G[f0, 0] @ Z
+    return math.degrees(math.atan2(d[0], d[2]))
+
+
 def ashelin_pistol_whip():
-    """The grip of her pistol brought down from over her head (square with the pistol out). No take holds the
-    strike (1 and 2 stand aiming for 1.4 s; 3 raises the arm and is cut as it comes down, the hand never under
-    1.3 m): the stance is the guard of ashelin_front_kick_1, the step in is the kind take 3 makes, the arm is
-    posed here."""
-    g = clip("ashelin_front_kick_1").rig(4)
-    a = g.copy()
-    plant(a, (0.0, -0.03, -0.05), rfoot=(0.0, 0.05, 0.08))
-    twist(a, -28)
-    lean(a, -10)
-    arm(a, "Right", (-0.35, 0.82, -0.20), (0.20, 0.80, -0.56), hand=(0.20, 0.70, -0.68), thumb=(0.0, -0.4, -0.9))
-    arm(a, "Left", (0.30, 0.02, 0.95), (0.05, 0.22, 0.97), thumb=(-0.8, 0.5, 0.0))
-    look(a)
-    s = g.copy()
-    plant(s, (0.0, -0.10, 0.22), rfoot=(0.0, 0.0, 0.36))
-    twist(s, 24)
-    lean(s, 23)
-    arm(s, "Right", (-0.08, -0.52, 0.85), (0.05, -0.68, 0.73), hand=(0.05, -0.55, 0.83), thumb=(0.0, 0.85, 0.52))
-    arm(s, "Left", (0.45, -0.55, -0.70), (0.0, 0.25, 0.97), thumb=(-0.5, 0.8, 0.0))
-    look(s)
-    r = g.copy()
-    plant(r, (0.0, -0.03, 0.10), rfoot=(0.0, 0.0, 0.18))
-    lean(r, 8)
+    """The grip of her pistol brought down from over her head (square with the pistol out). From the 3 s take
+    ashelin_pistol_whip_3s_2: the arm up over the head while she lunges in on the right foot (frames 32-40: hand
+    1.84 m up, then cocked behind the head), the chop down to waist height in front (frames 42-45, 8.9 m/s),
+    bent forward 30 degrees. (Take 3s_1 barely moves its hand: 1.8 m/s. The 1.6 s takes held no strike.)"""
+    c = "ashelin_pistol_whip_3s_2"
+    yaw = heading(c, 33, 45)
+    k = clip(c)
+    up = k.rig(34, yaw)
+    cocked = k.rig(40, yaw)
+    # the pistol a little further back over her head, her chest opened to the right: the wind-up reads at 0.1 s
+    twist(cocked, -8)
+    # (the take's lunge has her feet 1.2 m apart by now; reached in 0.1 s that is a jump: a shorter step)
+    plant(cocked, lfoot=(0.0, 0.0, 0.26), rfoot=(0.0, 0.0, -0.16))
+    hit = k.rig(45, yaw)
+    after = k.rig(50, yaw)
+    end = clip("ashelin_front_kick_1").rig(4)
     return Move("ashelin-pistol-whip", "ashelin", [
-        (0.00, g, "lin", 0),
-        (0.10, a, "out", 0),
-        (0.19, s, "snap", 0.09),
+        (0.00, up, "lin", 0),
+        (0.10, cocked, "out", 0),
+        (0.19, hit, "snap", 0.07),
         (0.28, None, "lin", 0),
-        (0.44, r, "out", 0),
-        (0.64, g, "io", 0),
-    ], note="posed on the stance of ashelin_front_kick_1 (no pistol-whip take holds the strike)")
+        (0.44, after, "out", 0),
+        (0.64, end, "io", 0),
+    ], note="ashelin_pistol_whip_3s_2 frames 34-50 (wind-up, lunge and chop), back to the stance of ashelin_front_kick_1")
 
 
 def sig_stance():
@@ -504,9 +512,33 @@ def sig_stance():
 
 
 def sig_elbow():
-    """A forward elbow strike (Sig, square). The elbow takes never bring the elbow in front (0.2 m ahead of
-    its shoulder at most, the forearm open at 80-114 degrees), so the stance is the guard of a take and the
-    coil, the step and the folded arm are posed here."""
+    """A forward elbow strike (Sig, square). From the 3 s take sig_elbow_3s_2: the coil (frames 38-40: right elbow
+    drawn back, chest 29 degrees to his right, left arm out in front, a step onto the right foot), the elbow
+    driven forward (frames 44-46: 0.58 m ahead of his hips at shoulder height, forearm folded at 52 degrees,
+    5.6 m/s, chest 49 degrees round and leaning in). (Take 3s_1 swings the elbow across instead: a hook.)"""
+    c = "sig_elbow_3s_2"
+    yaw = heading(c, 36, 46)
+    k = clip(c)
+    ready = k.rig(35, yaw)
+    coil = k.rig(39, yaw)
+    # (a shorter step than the take's, which has 0.35 s for it and not 0.09)
+    plant(coil, lfoot=(0.0, 0.0, 0.20), rfoot=(0.0, 0.0, -0.12))
+    hit = k.rig(46, yaw)
+    # the forearm folded a little tighter and the elbow a touch higher: the point of the elbow leads
+    hit.aim("RightArm", "RightForeArm", unit(hit.dir("RightArm", "RightForeArm") + np.array([0.0, 0.10, 0.05])))
+    after = k.rig(51, yaw)
+    return Move("sig-elbow", "sig", [
+        (0.00, ready, "lin", 0),
+        (0.09, coil, "out", 0),
+        (0.18, hit, "snap", 0.08),
+        (0.27, None, "lin", 0),
+        (0.43, after, "out", 0),
+        (0.64, sig_stance(), "io", 0),
+    ], note="sig_elbow_3s_2 frames 35-51 (coil, step and elbow), back to the guard of sig_boxer_punch_1")
+
+
+def sig_elbow_posed():
+    """The elbow strike as it was posed before the 3 s takes (kept to compare; not in the tables)."""
     g = sig_stance()
     a = g.copy()
     plant(a, (0.0, -0.07, -0.07))
@@ -524,14 +556,14 @@ def sig_elbow():
     r = g.copy()
     plant(r, (0.0, -0.02, 0.08), lfoot=(0.0, 0.0, 0.13))
     twist(r, -9)
-    return Move("sig-elbow", "sig", [
+    return Move("sig-elbow-posed", "sig", [
         (0.00, g, "lin", 0),
         (0.09, a, "out", 0),
         (0.18, s, "snap", 0.08),
         (0.27, None, "lin", 0),
         (0.43, r, "out", 0),
         (0.64, g, "io", 0),
-    ], note="posed on the guard of sig_boxer_punch_1 (the elbow takes never bring the elbow in front)")
+    ], note="posed on the guard of sig_boxer_punch_1")
 
 
 def sig_boxer():
@@ -609,45 +641,49 @@ def sig_spin_punch():
 
 
 def sig_rifle_butt():
-    """The butt of the Peacemaker thrust forward at head height (Sig, square with it out). The takes hold a
-    rifle pose and barely move (the hands go 6 cm forward): the hold is posed here, both hands on the gun, the
-    barrel along the line from his right hand (the grip) to his left."""
-    g = sig_stance()
+    """The butt of the Peacemaker thrust forward at face height (Sig, square with it out). The body is the 3 s
+    take sig_rifle_butt_3s_2: the lunge onto the right foot and the lean in (frames 33-53). Its hands only push
+    forward side by side at chest height (0.37 m apart, 3 m/s): held like that the gun would be shoved across
+    his body, so the hold is posed here on the take's body: right hand on the grip, left hand on the barrel, the
+    barrel along the line between them; drawn back to his right hip, then the grip hand driven up and forward
+    past the left one, so that the butt leads."""
+    c = "sig_rifle_butt_3s_2"
+    yaw = heading(c, 36, 47)
+    k = clip(c)
 
     def hold(r, right, left):
-        reach(r, "Right", right, pole=(-0.7, -0.6, -0.3))
-        reach(r, "Left", left, pole=(0.7, -0.6, 0.0))
+        """Both hands on the gun: right (grip) and left (barrel) as offsets from the base of his neck."""
+        n = r.P[J["Neck"]]
+        reach(r, "Right", n + np.asarray(right, float), pole=(-0.7, -0.6, -0.3))
+        reach(r, "Left", n + np.asarray(left, float), pole=(0.7, -0.6, 0.0))
         r.gun = unit(r.P[J["LeftHand"]] - r.P[J["RightHand"]])
         r.aim("RightHand", "RightHandEnd", r.gun)
         r.aim("LeftHand", "LeftHandEnd", unit(np.cross(r.gun, Y)) * -1.0)
         look(r)
         return r
 
-    h = hold(g.copy(), (-0.20, 1.10, 0.22), (0.10, 1.24, 0.48))
-    a = g.copy()
-    plant(a, (0.0, -0.06, -0.08))
-    twist(a, -30)
-    hold(a, (-0.36, 1.04, -0.08), (0.02, 1.28, 0.34))
-    s = g.copy()
-    plant(s, (0.0, -0.05, 0.20), lfoot=(0.0, 0.0, 0.24))
-    twist(s, 40)
-    lean(s, 12)
-    hold(s, (-0.02, 1.48, 0.66), (0.28, 1.34, 0.24))
-    r = g.copy()
-    plant(r, (0.0, -0.02, 0.08), lfoot=(0.0, 0.0, 0.12))
-    twist(r, -8)
-    hold(r, (-0.22, 1.12, 0.20), (0.10, 1.25, 0.46))
+    ready = hold(k.rig(33, yaw), (-0.20, -0.36, 0.20), (0.10, -0.22, 0.46))
+    back = k.rig(38, yaw)
+    twist(back, -24)
+    hold(back, (-0.34, -0.40, -0.10), (0.04, -0.16, 0.32))
+    hit = k.rig(47, yaw)
+    twist(hit, 14)
+    hold(hit, (0.00, 0.04, 0.44), (0.28, -0.10, -0.04))
+    after = hold(k.rig(53, yaw), (-0.21, -0.34, 0.20), (0.10, -0.21, 0.44))
+    end = hold(sig_stance(), (-0.20, -0.36, 0.20), (0.10, -0.22, 0.46))
     return Move("sig-rifle-butt", "sig", [
-        (0.00, h, "lin", 0),
-        (0.09, a, "out", 0),
-        (0.18, s, "snap", 0.08),
+        (0.00, ready, "lin", 0),
+        (0.09, back, "out", 0),
+        (0.18, hit, "snap", 0.08),
         (0.27, None, "lin", 0),
-        (0.44, r, "out", 0),
-        (0.64, h, "io", 0),
-    ], note="posed on the guard of sig_boxer_punch_1 (the rifle-butt takes barely move)", gun=True)
+        (0.44, after, "out", 0),
+        (0.64, end, "io", 0),
+    ], note="body: sig_rifle_butt_3s_2 frames 33-53 (lunge and lean); the two-handed hold is posed (the take's hands push side by side)",
+        gun=True)
 
 
 MOVES = [ashelin_front_kick, ashelin_pistol_whip, sig_elbow, sig_boxer, sig_spin_punch, sig_rifle_butt]
+EXTRA = [sig_elbow_posed]   # --sheets also draws these (not in the tables)
 
 
 # ---- output --------------------------------------------------------------------------------------
@@ -749,7 +785,7 @@ def main():
         CLIP_DIR = os.path.join(os.path.dirname(common) if common else repo, "local", "higgsfield", "motion")
     only = [s for s in args.only.split(",") if s]
     moves = [fn() for fn in MOVES]
-    for m in moves:
+    for m in moves + ([fn() for fn in EXTRA] if args.sheets else []):
         feats = m.samples()
         cl = [f.clearance() for f in feats]
         print("%-22s %-8s %.2f s, %d samples, lowest ankle 0..%.2f m over standing" % (m.name, m.who, m.length, len(feats), max(cl)))
