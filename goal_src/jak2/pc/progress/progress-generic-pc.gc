@@ -537,60 +537,100 @@
      ;; "cross" seems to be mainly a UK thing (those weirdos)
      ;; (Enhanced: the Xbox buttons, the PlayStation's in Enhanced Light)
      (cond
-       ((not (pc-enhanced-light?)) "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~26L~+1HA~Z~Y~1L>~Z~Y~23L[~Z~+29H A")
+       ((not (pc-enhanced-light?)) "~Y~1L\cc3~Z~Y~26L\cad~Z~+26H A")
        ((language? uk-english) "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Cross")
        (else "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H X")))
     (((controller-keybind square))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H S~+7Vq~-7Vuare"
-         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~27L~+1HX~Z~Y~1L>~Z~Y~23L[~Z~+29H X"))
+         "~Y~1L\cc3~Z~Y~27L\caf~Z~+26H X"))
     (((controller-keybind circle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H Circle"
-         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~25L~+3HB~Z~Y~1L>~Z~Y~23L[~Z~+29H B"))
+         "~Y~1L\cc3~Z~Y~25L\cae~Z~+26H B"))
     (((controller-keybind triangle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Trian~+7Vg~-7Vle"
-         "~+3H~Y~22L<~Z~Y~+3H~22L<~Z~Y~-3H~22L<~Z~Y~+3V~22L<~Z~Y~-3V~22L<~Z~Y~+2H~+2V~22L<~Z~Y~+2H~-2V~22L<~Z~Y~-2H~+2V~22L<~Z~Y~-2H~-2V~22L<~Z~Y~5L~+2HY~Z~Y~1L>~Z~Y~23L[~Z~+29H Y"))
+         "~Y~1L\cc3~Z~Y~5L\cb8~Z~+26H Y"))
     (((controller-keybind dpad-up))
-     "~Y~0L\ca1~Z~3L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad U~+7Vp~-7V")
+     (if (pc-enhanced-light?)
+         "~Y~0L\ca1~Z~3L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad U~+7Vp~-7V"
+         "~Y~0L~-2H\ca1~Z~3L~+8H~-8V\ca2~Z~0L~+8H~+8V\ca0~Z~0L~+17H\ca3~Z~+38H D-Pad U~+7Vp~-7V"))
     (((controller-keybind dpad-down))
-     "~Y~0L\ca1~Z~0L~+17H~-13V\ca2~Z~3L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad Down")
+     (if (pc-enhanced-light?)
+         "~Y~0L\ca1~Z~0L~+17H~-13V\ca2~Z~3L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad Down"
+         "~Y~0L~-2H\ca1~Z~0L~+8H~-8V\ca2~Z~3L~+8H~+8V\ca0~Z~0L~+17H\ca3~Z~+38H D-Pad Down"))
     (((controller-keybind dpad-right))
-     "~Y~0L\ca1~Z~0L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~3L~+32H\ca3~Z~+56H D-Pad Ri~+7Vg~-7Vht")
+     (if (pc-enhanced-light?)
+         "~Y~0L\ca1~Z~0L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~3L~+32H\ca3~Z~+56H D-Pad Ri~+7Vg~-7Vht"
+         "~Y~0L~-2H\ca1~Z~0L~+8H~-8V\ca2~Z~0L~+8H~+8V\ca0~Z~3L~+17H\ca3~Z~+38H D-Pad Ri~+7Vg~-7Vht"))
     (((controller-keybind dpad-left))
-     "~Y~3L\ca1~Z~0L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad Left")
+     (if (pc-enhanced-light?)
+         "~Y~3L\ca1~Z~0L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad Left"
+         "~Y~3L~-2H\ca1~Z~0L~+8H~-8V\ca2~Z~0L~+8H~+8V\ca0~Z~0L~+17H\ca3~Z~+38H D-Pad Left"))
     (((controller-keybind l1))
-     "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+4H~+3V\c95~Z~+38H LB")
+     (if (pc-enhanced-light?)
+         "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+4H~+3V\c95~Z~+38H L1"
+         "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+4H~+3V\c95~Z~+38H LB"))
     (((controller-keybind l2))
-     "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c97~Z~+38H LT")
+     (if (pc-enhanced-light?)
+         "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c97~Z~+38H L2"
+         "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c97~Z~+38H LT"))
     (((controller-keybind l3))
-     "\c91 L3")
+     (if (pc-enhanced-light?)
+         "\c91 L3"
+         "~Y~1L\c91~Z~+26H LS"))
     (((controller-keybind r1))
-     "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+6H~+3V\c94~Z~+38H RB")
+     (if (pc-enhanced-light?)
+         "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+6H~+3V\c94~Z~+38H R1"
+         "~Y~22L~-2H~-12V\ca6\ca7~Z~22L~-2H~+17V\cb0\cb1~Z~1L~+6H~+3V\c94~Z~+38H RB"))
     (((controller-keybind r2))
-     "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c96~Z~+38H RT")
+     (if (pc-enhanced-light?)
+         "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c96~Z~+38H R2"
+         "~Y~22L~-2H~-6V\ca8\ca9~Z~22L~-2H~+16V\cb2\cb3~Z~1L~+5H~-2V\c96~Z~+38H RT"))
     (((controller-keybind r3))
-     "\c91 R3")
+     (if (pc-enhanced-light?)
+         "\c91 R3"
+         "~Y~1L\c91~Z~+26H RS"))
     (((controller-keybind select))
-     "\c92 View")
+     (if (pc-enhanced-light?)
+         "\c92 Select"
+         "~Y~1L\cc3~Z~Y~1L\cb9~Z~+26H View"))
     (((controller-keybind start))
-     "\c92 Menu")
+     (if (pc-enhanced-light?)
+         "\c92 Start"
+         "~Y~1L\cc3~Z~Y~1L\cac~Z~+26H Menu"))
     (((controller-keybind l-analog-up))
-     "~Y~1L\c91~Z~-17V~6L\c98~Z~+26H Left Analo~+7Vg~-7V U~+7Vp~-7V")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~-17V~6L\c98~Z~+26H Left Analo~+7Vg~-7V U~+7Vp~-7V"
+         "~Y~1L\c91~Z~6L~-15V\c98~Z~+26H Left Analo~+7Vg~-7V U~+7Vp~-7V"))
     (((controller-keybind l-analog-down))
-     "~Y~1L\c91~Z~+15V~6L\c9c~Z~+26H Left Analo~+7Vg~-7V Down")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~+15V~6L\c9c~Z~+26H Left Analo~+7Vg~-7V Down"
+         "~Y~1L\c91~Z~6L~+15V\c9c~Z~+26H Left Analo~+7Vg~-7V Down"))
     (((controller-keybind l-analog-left))
-     "~Y~1L\c91~Z~-17H~6L\c9e~Z~+26H Left Analo~+7Vg~-7V Left")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~-17H~6L\c9e~Z~+26H Left Analo~+7Vg~-7V Left"
+         "~+6H~Y~1L\c91~Z~6L~-14H\c9e~Z~+26H Left Analo~+7Vg~-7V Left"))
     (((controller-keybind l-analog-right))
-     "~Y~1L\c91~Z~+17H~6L\ca4~Z~+26H Left Analo~+7Vg~-7V Ri~+7Vg~-7Vht")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~+17H~6L\ca4~Z~+26H Left Analo~+7Vg~-7V Ri~+7Vg~-7Vht"
+         "~Y~1L\c91~Z~6L~+14H\ca4~Z~+31H Left Analo~+7Vg~-7V Ri~+7Vg~-7Vht"))
     (((controller-keybind r-analog-up))
-     "~Y~1L\c91~Z~-17V~6L\c98~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V U~+7Vp~-7V")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~-17V~6L\c98~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V U~+7Vp~-7V"
+         "~Y~1L\c91~Z~6L~-15V\c98~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V U~+7Vp~-7V"))
     (((controller-keybind r-analog-down))
-     "~Y~1L\c91~Z~+15V~6L\c9c~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Down")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~+15V~6L\c9c~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Down"
+         "~Y~1L\c91~Z~6L~+15V\c9c~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Down"))
     (((controller-keybind r-analog-left))
-     "~Y~1L\c91~Z~-17H~6L\c9e~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Left")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~-17H~6L\c9e~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Left"
+         "~+6H~Y~1L\c91~Z~6L~-14H\c9e~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Left"))
     (((controller-keybind r-analog-right))
-     "~Y~1L\c91~Z~+17H~6L\ca4~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Ri~+7Vg~-7Vht")
+     (if (pc-enhanced-light?)
+         "~Y~1L\c91~Z~+17H~6L\ca4~Z~+26H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Ri~+7Vg~-7Vht"
+         "~Y~1L\c91~Z~6L~+14H\ca4~Z~+31H Ri~+7Vg~-7Vht Analo~+7Vg~-7V Ri~+7Vg~-7Vht"))
     (else
      "Unknown Bind")))

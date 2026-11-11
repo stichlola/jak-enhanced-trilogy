@@ -370,6 +370,21 @@ got no nav and crashed. `citizen-spawn` now stops while that mesh has fewer than
 citizen refuses `traffic-activate` (from the missions and the war zone too) on a full mesh, and
 nothing touches a missing nav after `go-inactive`.
 
+Fixed: black flashes, the whole world black under the sky for one frame. Each time the auto quality
+changed the render scale (levels 4 and 5, `FBO Setup` in the log: mostly in the first seconds after a
+save is loaded, then now and then) the clouds, their rays and the half-size sun shadows made their
+textures again while the composite's scene was bound on the active unit 0, and unbound it: that
+frame's composite had no scene, only its own sky, glows and fog. `enh_post::KeepTexture2D` keeps the
+unit's texture across such blocks (also the occlusion's and the indirect light's histories, which lost
+their depth the same way, and the ocean's buffers), and the scene is bound again right before the
+composite's draw. Found with the black-frame probe (`EnhancedFrameProbe`): tuning
+`"debug": {"black_probe": 1}` logs `[enhanced] probe f=.. scene=.. post=.. final=.. window=..` rows
+(mean brightness / share of black samples of the 3D scene, the post's result, the finished frame and
+the window) around every frame that flashes dark (`DARK-FRAME`, `BLACK-FRAME`), every render target
+change (`fbo-WxH`) and every frame the game sent late (`no-chain`); 2 also saves those windows as PNGs
+in `JAK_ENHANCED_DUMP_DIR`. `"debug": {"auto_level": n}` holds the auto quality level (a test steps
+the render scale with it), `"debug": {"drop_chain": n}` leaves every n-th frame undrawn.
+
 ### The nap's animations
 
 Jak lies down on his back, sleeps with a big cartoon breath, gets up and stretches: four Mixamo

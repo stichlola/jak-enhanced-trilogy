@@ -161,6 +161,9 @@ uniform vec4 cloud_info;        // the clouds texture is ready, history to blend
 uniform float tune_spill_sat = 0.45;  // the light spill's color at most this saturated (1: off)
 uniform float tune_dust_chr = 0.7;    // less sandstorm dust on characters close by (1: none)
 uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1: as on the rest)
+// (the shade's share on the water and on what it mirrors: the scene's open shade keeps 0.42 of the
+// shadow's strength as sky fill, and loses a little more to the occlusion)
+const float k_water_shade = 0.62;
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
@@ -328,7 +331,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey)
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -1044,6 +1047,26 @@ float sun_shadow_rough(vec3 w) {
               texture(tex_T9, vec3(s.xy + vec2(r, -r), s.z - NEAR_BIAS)) +
               texture(tex_T9, vec3(s.xy + vec2(-r, -r), s.z - NEAR_BIAS));
   return 1.0 - lit * 0.25;
+}
+
+// Water: how the composite will show the scene read at suv, against the game's picture the water's
+// reflection samples (tex_T0): in the sun's shade and its corners' occlusion it comes out darker,
+// and the mirror image of a shaded wall stood on the water brighter than the wall itself (Haven's
+// slums pool 18h: a pale band along the far edge, 1.7x the wall strip it mirrors). The shade as the
+// scene's faces turned from the sun take it (the rough look, from a meter toward the sun), by the
+// open shade's share; the occlusion from the half-size pass. 1: sky, or no shadow map.
+float water_scene_shade(vec2 suv) {
+  float sd = textureLod(tex_T3, suv, 0.0).r;
+  if (sd <= 1e-7) {
+    return 1.0;
+  }
+  float k = mix(1.0, textureLod(tex_T2, suv, 0.0).r, 0.8);
+  if (shadow_strength > 0.0 && sun_dir.w > 0.0) {
+    vec3 sp = view_pos(suv, sd);
+    vec3 w = view_to_world * (sp + sun_dir.xyz * (4096.0 + sp.z * 0.01)) + cam_pos;
+    k *= 1.0 - shadow_strength * k_water_shade * sun_shadow_rough(w);
+  }
+  return k;
 }
 
 float sun_shadow(vec3 w) {
@@ -3018,7 +3041,11 @@ void composite_unused() {
   }
   // (not on the sky: the sun's and moon's glows go back over our sky as the game drew them. With the
   // gain the sun was a saturated purple diamond, its quad's edge where the weight cut in)
-  if (tune_fx_sky > 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
+  // (only without the mark in the copy's alpha: with it the sky's glows zero that alpha themselves
+  // (GlowRenderer) and count as "dust" above, so a shot, a missile or a laser against the sky or the
+  // far hills keeps its weight. Dropping every sky pixel left them as the game's clipped sum over
+  // its own bright sky, graded with our sky: gone by day)
+  if (tune_fx_sky > 0.5 && fx_mark < 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
     fx_w = 0.0;
   }
   // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our
@@ -3329,6 +3356,15 @@ void composite_unused() {
     }
     vec3 n = normalize(up_view + slope.x * right_view + slope.y * fwd_view);
 
+    // the water in the sun's shade (a pool between houses, a canal under its walls, a dock's
+    // shadow on the harbour): its body dimmer, no sun glints or caustics there. Without it the
+    // water kept its sunlit color inside a courtyard the shadow map had darkened all around
+    // (tune_water_dbg 16: off, test)
+    bool water_shaded = abs(tune_water_dbg - 16.0) > 0.5;
+    float wsh = 0.0;
+    if (water_shaded && shadow_strength > 0.0 && sun_dir.w > 0.0) {
+      wsh = sun_shadow_rough(view_to_world * (p + sun_dir.xyz * (0.5 * 4096.0 + z * 0.005)) + cam_pos);
+    }
     // what's under shallow water, bent by the waves (refraction), where the bent ray still lands
     // under water (not on something above the surface); lit by caustics where the sun gets in
     if (!water_deep && clear_water > 0.02) {
@@ -3341,7 +3377,7 @@ void composite_unused() {
         vec2 bed = vec2(dot(right_view, seabed_p) + cam_pos.x, dot(fwd_view, seabed_p) + cam_pos.z) / 4096.0;
         float k = caustics(bed, t) * water_caustics * sun_dir.w * smoothstep(0.05, 0.4, depth_real) *
                   exp(-depth_real / 3.0) * (1.0 - smoothstep(0.3, 1.0, water_foot)) * (1.0 - near_fade) *
-                  0.35 * clear_water;  // (faint, and only where the bed shows: the edge)
+                  0.35 * clear_water * (1.0 - wsh);  // (faint, and only where the bed shows: the edge)
         c += c * k * vec3(0.9, 1.0, 0.95);
       }
     }
@@ -3367,7 +3403,7 @@ void composite_unused() {
       vec3 wtint = clamp(wsk / max(luma(wsk), 1e-3), vec3(0.6), vec3(1.5));
       body_col *= wk * mix(vec3(1.0), wtint, 0.4 * tune_water_hour * (1.0 - wday));
     }
-    vec3 body = night_dim(body_col * shade);
+    vec3 body = night_dim(body_col * shade) * (1.0 - shadow_strength * k_water_shade * wsh);
     // (at night no darker than a share of the game's own water there: a canal between walls in
     // Haven's slums 22h was night-dimmed to black, its walls reflected dark too, a black hole beside
     // the lit pavement, ~0.26x vanilla's luma where the open harbour keeps 0.77x)
@@ -3399,17 +3435,21 @@ void composite_unused() {
       re = normalize(re + up_view * (re_floor - re_up));
     }
     vec3 refl = fog_color;
+    vec2 refl_uv = vec2(-1.0);  // where on screen the env sample was read (x < 0: not the scene)
+    vec2 ssr_uv = vec2(-1.0);   // ...and the traced one
     vec3 env_dbg = vec3(0.0);
     if (re.z > 1e-3) {
       env_dbg.g = 1.0;
       vec2 env_uv = clamp(0.5 * vec2(proj.z * re.x, proj.w * re.y) / re.z + 0.5, vec2(0.002), vec2(0.998));
       refl = texture(tex_T0, env_uv).rgb;
+      refl_uv = env_uv;
       // (where that lands on the water, the sky's color there instead)
       float ed = texture(tex_T3, env_uv).r;
       float efd = texture(tex_T6, env_uv).r;
       if ((texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) &&
           abs(tune_water_dbg - 12.0) > 0.5) {
         refl = fog_color;
+        refl_uv = vec2(-1.0);
         env_dbg.r = 1.0;
         // (the game's far ocean rises a little toward the horizon, so a ray just over level still
         // lands on the sea: lift it, a step at a time, to the first sky over the sea's edge. The fog
@@ -3424,6 +3464,7 @@ void composite_unused() {
           float kfd = textureLod(tex_T6, kuv, 0.0).r;
           if (!(textureLod(tex_T5, kuv, 0.0).r > kd + 1e-7 || (kfd > 1e-7 && abs(kfd - kd) < 1e-7))) {
             refl = textureLod(tex_T0, kuv, 0.0).rgb;
+            refl_uv = kuv;
             env_dbg.r = 0.5;
             break;
           }
@@ -3452,6 +3493,7 @@ void composite_unused() {
         ssr_hit = smoothstep(0.0, 0.08, edge.x) * smoothstep(0.0, 0.15, edge.y) *
                   (1.0 - smoothstep(0.75 * tune_hiz_range_m * 4096.0, tune_hiz_range_m * 4096.0, z));
         ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
+        ssr_uv = huv;
       }
     }
     // (where the Hi-Z trace found nothing, the old march still looks: Haven port 18h, the near water
@@ -3506,8 +3548,18 @@ void composite_unused() {
           // (the mirror's picture wobbled by the ripples, mostly sideways)
           quv = clamp(quv + clamp(slope * vec2(0.15, 0.06), -0.015, 0.015) * mirror_k, 0.001, 0.999);
           ssr = texture(tex_T0, quv).rgb;
+          ssr_uv = quv;
           break;
         }
+      }
+    }
+    // (the reflected scene as the composite shows it there: in the sun's shade, occluded)
+    if (water_shaded) {
+      if (ssr_hit < 0.99 && refl_uv.x >= 0.0) {
+        refl *= water_scene_shade(refl_uv);
+      }
+      if (ssr_hit > 0.01 && ssr_uv.x >= 0.0) {
+        ssr *= water_scene_shade(ssr_uv);
       }
     }
     // what the screen doesn't have: traced through the levels (near water only, it's costly)
@@ -3546,6 +3598,10 @@ void composite_unused() {
     }
     if (abs(tune_water_dbg - 15.0) < 0.5) {
       wc = vec3(clamp(length(slope) * 0.5, 0.0, 1.0));  // (test: the ripples' slope, grey)
+    }
+    if (abs(tune_water_dbg - 18.0) < 0.5) {
+      // (test: the sun's shade on the water red, on the reflected scene green)
+      wc = vec3(wsh, 1.0 - water_scene_shade(ssr_hit > 0.5 ? ssr_uv : refl_uv), 0.0);
     }
 
     // the lamps on the water at night: each one's image drawn out by the waves into a shimmering
@@ -3621,7 +3677,7 @@ void composite_unused() {
         float soft = tight * glit / (1.0 + tight * glit);
         glint = mix(tight, soft, tune_water_glint_soft) + pow(sr, 80.0) * 0.25;
       }
-      wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w;
+      wc += vec3(1.0, 0.93, 0.78) * glint * sun_dir.w * (1.0 - wsh);
     }
 
     // the moon on the water at night: a path of glitter under it, broken up by the waves (as bright
@@ -3648,7 +3704,7 @@ void composite_unused() {
     }
 
     // foam where the sea meets the shore, moving with the waves (a still pond has none)
-    if (!water_deep && seabed_level && depth_m < 0.8 && !pond_here) {
+    if (!water_deep && seabed_level && depth_m < 0.8 && !pond_here && abs(tune_water_dbg - 32.0) > 0.5) {
       float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
@@ -3675,7 +3731,7 @@ void composite_unused() {
     // the very edge: the last few cm of water fade into the wet ground beside them (the color of
     // the dry ground nearby, darkened as the shore band below darkens it), no hard line where the
     // sand dips under the water
-    if (!water_deep && seabed_d > 1e-7 && depth_m < 0.35) {
+    if (!water_deep && seabed_d > 1e-7 && depth_m < 0.35 && abs(tune_water_dbg - 31.0) > 0.5) {
       float r_uv = clamp(0.8 * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 2.0 * texel.y, 0.06);
       vec3 shore_sum = vec3(0.0);
       float shore_n = 0.0;
@@ -3695,7 +3751,7 @@ void composite_unused() {
     // a puddle or a creek's edge where the game draws only the far sea (no near sea there, so no
     // bed seen through it): close by, ringed by ground, it takes that ground's color, darkened,
     // instead of the open sea's deep blue
-    if (water_deep && !pond_here && z < 30.0 * 4096.0) {
+    if (water_deep && !pond_here && z < 30.0 * 4096.0 && abs(tune_water_dbg - 30.0) > 0.5) {
       float r_uv = clamp(1.5 * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 3.0 * texel.y, 0.08);
       vec3 land_sum = vec3(0.0);
       float land_n = 0.0;
@@ -3719,7 +3775,8 @@ void composite_unused() {
     const vec3 luma = vec3(0.299, 0.587, 0.114);
     float over = dot(c, luma) - dot(wc, luma);
     c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
-  } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0) {
+    if (abs(tune_water_dbg - 34.0) < 0.5) { c = wc; }
+  } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
     // the shore: the ground just above the water is wet, darker and a little glossy, its line
     // ragged and breathing with the water (the sea's runs up and down with the waves and leaves
     // a thin line of foam). The water's height: from any water seen within a meter or two.
@@ -6717,9 +6774,22 @@ void composite_unused() {
     // an enemy's small purple shot into a saturated magenta blob with bloom, 9 -> ~300 px)
     float g_dark = mix(tune_fx_dark, 1.0, smoothstep(tune_fx_dark0, tune_fx_dark1, fx_under));
     float g = 1.0 + (tune_fx_gain - 1.0) * g_dark * (1.0 + tune_fx_bright * smoothstep(0.25, 0.75, fx_under)) * fx_day;
+    // (over water as the game drew them, no gain: a vent's steam, an added grey puff, stood out from
+    // the game's dark water, counted as a light and burned yellow-white along a pool's edge at dusk
+    // (Haven's slums 18h); and our water is not stopped down with the bright ground the gain makes up for)
+    // (tune_water_dbg 17: off, test)
+    if (wsurf > 0.0 && abs(tune_water_dbg - 17.0) > 0.5) {
+      g = 1.0;
+    }
     vec3 fa = fx_d * g;
     fa = max(mix(vec3(luma(fa)), fa, mix(1.0, tune_fx_sat, fx_day)), 0.0);
-    vec3 t = c + fa * fx_w;
+    // (over bright ground the sum has nowhere to go: sunlit sand at 0.7 plus a red shot is a pale
+    // pink at 1.0. There the effect also covers part of what is behind it, by its own strength: its
+    // color shows against the ground instead of only lifting it. Not over dark ground, not at night)
+    const float k_fx_cover = 0.6;
+    float fa_m = max(fa.r, max(fa.g, fa.b));
+    float cover = k_fx_cover * fx_day * fx_w * smoothstep(0.06, 0.6, fa_m) * smoothstep(0.3, 0.7, luma(c));
+    vec3 t = c * (1.0 - cover) + fa * fx_w;
     float m = max(t.r, max(t.g, t.b));
     float k = tune_fx_knee;
     if (m > k) {

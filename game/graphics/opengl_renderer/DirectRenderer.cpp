@@ -1,5 +1,6 @@
 #include "DirectRenderer.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMapTextures.h"
 
 #include "common/dma/gs.h"
@@ -444,6 +445,11 @@ void DirectRenderer::update_gl_texture(SharedRenderState* render_state, int unit
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                     m_debug_state.disable_mipmap ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // (Enhanced: the HD screen art (font, HUD) is drawn smooth already and shown smaller than its
+    // texels: trilinear's default blends in the half-size mip and softens it, so lean to the sharper
+    // level. Unit 0 only: m_tex_px_scale is its texture's.)
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS,
+                    unit == 0 && m_tex_px_scale > 1.f && !m_offscreen_mode ? -0.6f : 0.f);
   } else {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -477,7 +483,10 @@ void DirectRenderer::update_gl_blend() {
       // Cs * As + (1) * Cd
       // s, d
       ASSERT(state.fix == 0);
-      glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ZERO);
+      // (Enhanced: added light keeps the frame's alpha while it carries the blended dust's mark,
+      // enhanced_state.h)
+      glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, g_enhanced_fx_add_keep ? GL_ZERO : GL_ONE,
+                          g_enhanced_fx_add_keep ? GL_ONE : GL_ZERO);
       glBlendEquation(GL_FUNC_ADD);
     } else if (state.a == GsAlpha::BlendMode::ZERO_OR_FIXED &&
                state.b == GsAlpha::BlendMode::SOURCE && state.c == GsAlpha::BlendMode::SOURCE &&

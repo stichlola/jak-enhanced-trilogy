@@ -1515,6 +1515,15 @@
             ((and (< 0.0 (-> *setting-control* user-current rain)) (!= *master-mode* 'progress))
              (gen-lightning-and-thunder! this (the-as int a1-12))
              (cond
+               ;; Enhanced: the renderer's weather has its own rain loops, which follow the rain it
+               ;; draws. This hiss follows the game's own cloud and fog (both over 0.5), whatever
+               ;; the sky on screen: quiet while the renderer's weather is on
+               ((pc-enhanced-own-rain?)
+                (when (nonzero? (-> this rain-id))
+                  (sound-stop (-> this rain-id))
+                  (set! (-> this rain-id) (new 'static 'sound-id))
+                  )
+                )
                ((zero? (-> this rain-id))
                 (set! (-> this rain-id) (sound-play-by-name
                                           (static-sound-name "rain-hiss")

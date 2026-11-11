@@ -18,6 +18,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/EnhancedParticles.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
@@ -571,6 +572,19 @@ void EnhancedPost::update_auto_quality() {
     return env ? std::clamp(std::atoi(env), 0, kAutoLevels - 1) : kAutoLevels - 1;
   }();
   m_auto_level = std::clamp(m_auto_level, auto_min, std::max(auto_min, auto_max));
+  {
+    // (test switch "debug": {"auto_level": n}: the level held at n from the tuning file, so a test
+    // can step through the levels (and their render scales) in one run; -1: the auto quality's own)
+    static const EnhancedTune t_force("debug.auto_level", -1.f);
+    if ((float)t_force >= 0.f) {
+      m_auto_level = std::clamp((int)(float)t_force, 0, kAutoLevels - 1);
+    }
+    static int probe_level = 0;
+    if (m_auto_level != probe_level) {
+      probe_level = m_auto_level;
+      enh_probe::note(fmt::format("auto-{}", m_auto_level));
+    }
+  }
   // the passes it sets aside or brings back fade over a second: the shade jumped in one frame
   // without the indirect light
   auto fade = [&](float& f, bool on) {
@@ -775,6 +789,7 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   }();
   static const EnhancedTune t_off("fx.off", 0.f);
   g_enhanced_fx_blend_mark = false;
+  g_enhanced_fx_add_keep = false;
   if (which == 0) {
     m_fx_marked = false;
   }
@@ -838,6 +853,9 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   // (tuning.json "fx": {"blend_mark": 0}: off)
   static const EnhancedTune t_mark("fx.blend_mark", 1.f);
   g_enhanced_fx_blend_mark = which == 0 && t_mark > 0.5f;
+  // (and added light leaves that alpha alone, enhanced_state.h; "fx": {"add_keep": 0}: as before)
+  static const EnhancedTune t_add_keep("fx.add_keep", 1.f);
+  g_enhanced_fx_add_keep = g_enhanced_fx_blend_mark && t_add_keep > 0.5f;
   if (g_enhanced_fx_blend_mark) {
     GLboolean mask[4];
     glGetBooleani_v(GL_COLOR_WRITEMASK, 0, mask);
@@ -863,6 +881,9 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
 
 void EnhancedPost::ensure_ocean_buffers(int w, int h) {
   if (w != m_ocean_w || h != m_ocean_h) {
+    // (between the game's bucket renderers, which keep their textures bound, see capture_fx: the
+    // active unit's texture stays)
+    enh_post::KeepTexture2D keep;
     if (m_ocean_fbo[0]) {
       glDeleteFramebuffers(3, m_ocean_fbo);
       glDeleteTextures(3, m_ocean_depth);
@@ -885,7 +906,6 @@ void EnhancedPost::ensure_ocean_buffers(int w, int h) {
       glDrawBuffer(GL_NONE);
       glReadBuffer(GL_NONE);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
   }
 }
 

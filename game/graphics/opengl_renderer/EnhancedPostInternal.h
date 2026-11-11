@@ -121,6 +121,20 @@ struct PassTimerScope {
   PassTimerScope(const PassTimerScope&) = delete;
   PassTimerScope& operator=(const PassTimerScope&) = delete;
 };
+
+// Keeps the active unit's 2D texture across a block that makes a pass's own textures (first use, a
+// new size): `glBindTexture(GL_TEXTURE_2D, 0)` at the end of such a block takes away whatever the
+// pass around it had bound there. The clouds and the half-size sun shadows make theirs between the
+// composite binding the scene on unit 0 and its draw: each time the render size changed (the auto
+// quality's levels 4 and 5, a window resize) the composite drew that one frame with no scene, the
+// whole world black under the sky.
+struct KeepTexture2D {
+  GLint tex = 0;
+  KeepTexture2D() { glGetIntegerv(GL_TEXTURE_BINDING_2D, &tex); }
+  ~KeepTexture2D() { glBindTexture(GL_TEXTURE_2D, (GLuint)tex); }
+  KeepTexture2D(const KeepTexture2D&) = delete;
+  KeepTexture2D& operator=(const KeepTexture2D&) = delete;
+};
 }  // namespace enh_post
 
 // The wrapped call gets the pass's own profiler node as `prof`, so a timed pass inside a timed pass

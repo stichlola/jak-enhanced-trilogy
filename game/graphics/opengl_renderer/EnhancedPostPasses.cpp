@@ -385,6 +385,10 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   static const EnhancedTune kAoTemporal("ssao.temporal", 1.f);
   const bool ao_tmp = (float)kAoTemporal > 0.f && m_settings.ssao_intensity > 0.f;
   if (ao_tmp && !m_ao_hist_fbo[0]) {
+    // (made again after each resize, with the pass's depth already bound on the active unit 0:
+    // unbinding it there left the occlusion of that frame, and of the next through the history,
+    // made from no depth at all)
+    enh_post::KeepTexture2D keep;
     glGenFramebuffers(2, m_ao_hist_fbo);
     glGenTextures(2, m_ao_hist_tex);
     for (int i = 0; i < 2; i++) {
@@ -400,7 +404,6 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       const GLenum bufs[2] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
       glDrawBuffers(2, bufs);
     }
-    glBindTexture(GL_TEXTURE_2D, 0);
     m_ao_hist_valid = false;
   }
   if (!ao_tmp) {

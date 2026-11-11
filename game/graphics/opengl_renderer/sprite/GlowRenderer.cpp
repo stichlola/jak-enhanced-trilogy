@@ -1,5 +1,6 @@
 #include "GlowRenderer.h"
 
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 
 #include "third-party/imgui/imgui.h"
@@ -477,6 +478,7 @@ void GlowRenderer::add_sprite_pass_3(const SpriteGlowOutput& data, int sprite_id
     }
     record.size = std::max((x1 - x0) / 512.f, (y1 - y0) / 256.f);
   }
+  record.sky = data.sky;
 
   u32* idx = alloc_index(5);
   // flip first two - fan -> strip
@@ -879,6 +881,13 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
     }
   }
   bool soft_on = false;
+  // (Enhanced: the sky's glows (sun, moon, stars) zero the frame's alpha over their quad while it
+  // carries the blended dust's mark (enhanced_state.h): the post then leaves them as the game drew
+  // them, out of the day's boost for the light effects (with it the sun was a saturated diamond).
+  // That used to be "no boost on any sky pixel", which also dropped every shot, missile and laser
+  // seen against the sky)
+  const bool sky_mark = g_enhanced_fx_add_keep;
+  bool sky_on = false;
 
   glDepthMask(GL_FALSE);
 
@@ -913,15 +922,18 @@ void GlowRenderer::draw_sprites(SharedRenderState* render_state, ScopedProfilerN
 
     // (only the big quads, pools of light over a floor: a lamp's or a thruster's small glow keeps
     // the plain sum, so the effects' boost by day still finds all their light)
-    if ((record.size >= soft_min) != soft_on) {
-      soft_on = !soft_on;
+    const bool sky_now = sky_mark && record.sky;
+    if ((record.size >= soft_min) != soft_on || sky_now != sky_on) {
+      soft_on = record.size >= soft_min;
+      sky_on = sky_now;
+      // (the alpha: summed as the game does, left alone in a float frame, zeroed by a sky glow)
+      const GLenum a_src = sky_on || hdr ? GL_ZERO : GL_ONE;
+      const GLenum a_dst = sky_on ? GL_ZERO : GL_ONE;
       if (hdr) {
         glBlendColor(hdr_gain, hdr_gain, hdr_gain, hdr_gain);
-        glBlendFuncSeparate(soft_on ? GL_CONSTANT_COLOR : GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
-      } else if (soft_on) {
-        glBlendFuncSeparate(GL_ONE_MINUS_DST_COLOR, GL_ONE, GL_ONE, GL_ONE);
+        glBlendFuncSeparate(soft_on ? GL_CONSTANT_COLOR : GL_ONE, GL_ONE, a_src, a_dst);
       } else {
-        glBlendFunc(GL_ONE, GL_ONE);
+        glBlendFuncSeparate(soft_on ? GL_ONE_MINUS_DST_COLOR : GL_ONE, GL_ONE, a_src, a_dst);
       }
     }
     prof.add_draw_call();
