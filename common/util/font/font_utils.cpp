@@ -117,40 +117,47 @@ bool font_bank_exists(GameTextVersion version) {
  * are the font's own glyphs, redrawn: scripts/enhanced/xbox_font_glyphs.py). Only on the way into
  * the game: the PlayStation sequences still read back as <PAD_X> and the rest.
  */
-// The button's round body: the font has no scale code, so the disc glyph ('<', color 22) is drawn
-// nine times, around the middle and kButtonGrow units out in eight directions: their union is a
-// disc that much wider, with the letter (unchanged) well inside it. The whole button moves right
-// by kButtonGrow and takes 2 * kButtonGrow more room, so it doesn't run into the text beside it.
-constexpr int kButtonGrow = 3;
-
-static std::string xbox_button(const std::string& letter) {
-  static const std::string body = [] {
-    const int g = kButtonGrow, d = (kButtonGrow * 7 + 5) / 10;  // (the diagonals: g / sqrt(2))
-    const int offsets[][2] = {{0, 0}, {g, 0}, {-g, 0}, {0, g},  {0, -g},
-                              {d, d}, {d, -d}, {-d, d}, {-d, -d}};
-    std::string s;
-    for (const auto& o : offsets) {
-      s += "~Y";
-      if (o[0]) {
-        s += fmt::format("~{:+d}H", o[0]);
-      }
-      if (o[1]) {
-        s += fmt::format("~{:+d}V", o[1]);
-      }
-      s += "~22L<~Z";
-    }
-    return s;
-  }();
-  return fmt::format("~+{}H{}~Y{}~Z~Y~1L>~Z~Y~23L[~Z~+{}H", kButtonGrow, body, letter,
-                     26 + kButtonGrow);
+// The pad's pieces in the game's text encoding, as scripts/enhanced/xbox_font_glyphs.py --strings
+// prints them (the pens there and these move codes go together). The cells added for the Xbox pad
+// (letters 0xad 0xae 0xaf 0xb8, View 0xb9, Menu 0xac) have no <PAD_PART_...> name: their raw bytes
+// pass through encode_utf8_to_game (a lone 0x80-0xbf byte starts no UTF-8 sequence).
+static std::string xbox_dpad(int left, int up, int down, int right) {
+  // the four arms closed into a cross
+  return fmt::format(
+      "~Y~{}L~-2H\xa1~Z~{}L~+8H~-8V\xa2~Z~{}L~+8H~+8V\xa0~Z~{}L~+17H\xa3~Z~+38H", left, up, down,
+      right);
 }
 
 static std::string xbox_buttons(const std::string& str) {
   static const std::pair<std::string, std::string> kSwaps[] = {
-      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~26L~+1HA")},
-      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~25L~+3HB")},
-      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~27L~+1HX")},
-      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", xbox_button("~5L~+2HY")}};
+      // face buttons: the PlayStation button's own layout with the letter's cell and color, the
+      // letter after the shine (so the shine's shadow is under it)
+      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~26L\xad~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~25L\xae~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~27L\xaf~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~5L\xb8~Z~Y~23L[~Z~+26H"},
+      // the d-pad (<PAD_DPAD_UP>, <PAD_DPAD_DOWN>, <PAD_DPAD_ANY>)
+      {"~Y~22L<PAD_PART_DPAD_L>~Z~3L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
+       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
+       xbox_dpad(22, 3, 22, 22)},
+      {"~Y~22L<PAD_PART_DPAD_L>~Z~3L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
+       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
+       xbox_dpad(22, 3, 3, 22)},
+      {"~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
+       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
+       xbox_dpad(22, 22, 22, 22)},
+      // the stick: arrows pointing away from it (<PAD_ANALOG_ANY>, _LEFT_RIGHT, _UP_DOWN)
+      {"~1L~+8H~Y<PAD_PART_STICK>~Z~6L~-16H<PAD_PART_STICK_LEFT>~Z~+16h~6L<PAD_PART_STICK_RIGHT>~Z~"
+       "6L~-15V<PAD_PART_STICK_DOWN>~Z~+13V~6L<PAD_PART_STICK_UP>~Z~-10H~+9V~6L<PAD_PART_STICK_UP_"
+       "LEFT>~Z~+10H~+9V~6L<PAD_PART_STICK_UP_RIGHT>~Z~-10H~-11V~6L<PAD_PART_STICK_DOWN_LEFT>~Z~+10H~"
+       "-11V~6L<PAD_PART_STICK_DOWN_RIGHT>~Z~+32H",
+       "~+6H~Y~1L\x91~Z~6L~-14H\x9e~Z~6L~+14H\xa4~Z~6L~-15V\x98~Z~6L~+15V\x9c~Z~6L~-10H~-11V\x9f~Z~"
+       "6L~+10H~-11V\x99~Z~6L~-10H~+11V\x9d~Z~6L~+10H~+11V\xa5~Z~+31H"},
+      {"~Y~1L~+8H<PAD_PART_STICK>~Z~6L~-8H<PAD_PART_STICK_LEFT>~Z~+24H~6L<PAD_PART_STICK_RIGHT>~Z~+"
+       "40H",
+       "~+6H~Y~1L\x91~Z~6L~-14H\x9e~Z~6L~+14H\xa4~Z~+31H"},
+      {"~Y~1L<PAD_PART_STICK>~Z~6L~-15V<PAD_PART_STICK_DOWN>~Z~+13V~6L<PAD_PART_STICK_UP>~Z~+26H",
+       "~Y~1L\x91~Z~6L~-15V\x98~Z~6L~+15V\x9c~Z~+26H"}};
   std::string out = str;
   for (const auto& [ps, xbox] : kSwaps) {
     for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {
