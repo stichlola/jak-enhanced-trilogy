@@ -1060,6 +1060,30 @@ float sun_shadow_rough(vec3 w) {
   return 1.0 - lit * 0.25;
 }
 
+// the same look for the faces turned from the sun: only the shade of something wide counts. Four
+// taps on a ring of k_wide_shade_m around the point, turned per pixel and frame (the TAA makes the
+// edge a soft ramp), and all four must be blocked: a character's or a pole's shadow is narrower
+// than the ring and drops out. The four fixed taps above drew Jak's shadow as a hard-edged strip
+// tens of meters down a slope the low sun doesn't reach at all (tune_shadow_dbg 8: as before)
+const float k_wide_shade_m = 0.9;
+// the low sun's shade floor: the shade stays at least this share darker than the same ground in the sun
+const float k_dusk_floor_depth = 0.3;
+float sun_shadow_wide(vec3 w) {
+  if (abs(tune_shadow_dbg - 8.0) < 0.5) {
+    return sun_shadow_rough(w);
+  }
+  vec3 s = (light_mvp * vec4(w, 1.0)).xyz * 0.5 + 0.5;
+  if (any(lessThan(s, vec3(0.0))) || any(greaterThan(s, vec3(1.0)))) {
+    return sun_shadow_mid(w);
+  }
+  float a = pixel_angle();
+  vec2 d = vec2(cos(a), sin(a)) * (k_wide_shade_m / shadow_params.y);
+  vec2 e = vec2(-d.y, d.x);
+  float zr = s.z - NEAR_BIAS;
+  return (1.0 - texture(tex_T9, vec3(s.xy + d, zr))) * (1.0 - texture(tex_T9, vec3(s.xy - d, zr))) *
+         (1.0 - texture(tex_T9, vec3(s.xy + e, zr))) * (1.0 - texture(tex_T9, vec3(s.xy - e, zr)));
+}
+
 // Water: how the composite will show the scene read at suv, against the game's picture the water's
 // reflection samples (tex_T0): in the sun's shade and its corners' occlusion it comes out darker,
 // and the mirror image of a shaded wall stood on the water brighter than the wall itself (Haven's
@@ -2848,7 +2872,7 @@ void composite_unused() {
         hres.x = sun_shadow(view_to_world * (hp + hn * (0.08 * 4096.0 + hz * 0.002)) + cam_pos);
       }
       if (hndl < 0.45) {
-        hres.y = sun_shadow_rough(view_to_world * (hp + sun_dir.xyz * (2.0 * 4096.0 + hz * 0.01)) + cam_pos);
+        hres.y = sun_shadow_wide(view_to_world * (hp + sun_dir.xyz * (2.0 * 4096.0 + hz * 0.01)) + cam_pos);
       }
       if (hndl > -0.15 && hz < 30.0 * 4096.0) {
         hcs = contact_shadow(hp + hn * (0.03 * 4096.0 + hz * 0.001), sun_dir.xyz);
@@ -4025,6 +4049,9 @@ void composite_unused() {
   float shade_fill = 0.0;
   // (how much the low sun's shade below may take at most: never under tune_dusk_floor of the game's color)
   float dusk_floor_w = 0.0;
+  // (what the sun's shade left of this ground's light, against the same ground in the sun (1: none):
+  // the low sun's floors below never lift the shade past that ground itself)
+  float shade_ratio = 1.0;
   if (normal_debug != 0 && z > 0.0) {
     // the level's own normals in color, the depth-rebuilt ones in grey
     // left half: the normals used (level's own in color, depth-rebuilt in grey); right half: the
@@ -4290,7 +4317,7 @@ void composite_unused() {
       sh = max(sh, sh_hv.y * (1.0 - facing));
     } else if (facing < 1.0 && !chr) {
       vec3 w2 = view_to_world * (p + sun_dir.xyz * (2.0 * 4096.0 + z * 0.01)) + cam_pos;
-      sh = max(sh, sun_shadow_rough(w2) * (1.0 - facing));
+      sh = max(sh, sun_shadow_wide(w2) * (1.0 - facing));
     }
     // a character standing in a wall's shadow: the game lights it in full anyway (its own lights
     // know no shadows), and the faces turned from the sun skipped the map above, so Jak glowed
@@ -4417,9 +4444,11 @@ void composite_unused() {
       shade_fill = fill * day * sh;
       sh *= 1.0 - (fill + (1.0 - shade_ao_keep) * (1.0 - fill) * (1.0 - ao)) * day;
     }
+    float lit_l = luma(c) * (1.0 + smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) * 0.07);
     c *= vec3(1.0) - shadow_strength * sh * tint;
     c *= vec3(1.0) + (1.0 - sh) * smoothstep(0.0, 0.6, ndl) * sun_dir.w * (1.0 - night_dark.x) *
                      vec3(0.08, 0.07, 0.05);
+    shade_ratio = clamp(luma(c) / max(lit_l, 1e-4), 0.05, 1.0);
   }
 
   // cloud shadows: each point looks up toward the sun through the same cloud field the sky draws;
@@ -6699,7 +6728,11 @@ void composite_unused() {
   // Never darker than this share of the game's own color (sand, rocky ground, rock), warm
   if (tune_gold_fill > 0.0 && golden > 0.0 && z > 0.0 && pix_tag > 0.55 && pix_tag < 0.95) {
     vec3 fill = texture(tex_T0, tex_coord).rgb * vec3(1.0, 0.9, 0.8) * tune_gold_fill;
+    // (the same ground in the sun takes the fill too, in full: where both end on it the shade has
+    // nothing left under it, and the floor at the end leaves it alone)
+    float lit_l = luma(c) / shade_ratio;
     c = mix(c, max(c, fill), golden * gold_w);
+    shade_ratio = clamp(luma(c) / max(mix(lit_l, max(lit_l, luma(fill)), golden), 1e-4), 0.05, 1.0);
   }
   // the whole picture leveled a little: the strongest colors pulled back (the pale ones stay as they
   // are) and the near whites rolled off (above the sand, whose grain they flattened), so that nothing burns (not the flames, the game's own)
@@ -6784,10 +6817,19 @@ void composite_unused() {
   if (tune_dusk_floor_end > 0.0 && tune_dusk_floor > 0.0 && dusk_floor_w > 0.0) {
     vec3 game_c = max(texture(tex_T0, tex_coord).rgb - fx_w * fx_d, 0.0);
     vec3 fl = game_c * tune_dusk_floor;
-    float lf = luma(fl);
+    float lf0 = luma(fl);
+    float lf = lf0;
     float lc = luma(c);
+    // (and never past the same ground in the sun less the shade's least depth: where the post has
+    // the lit ground under the game's own color (the late dusk going dark, the golden hour's
+    // slopes at their fill) the floor made the shade the lighter of the two, in the game's hue: a
+    // flat lavender strip from Jak's feet down a dusk slope, big rocks' shade pale patches on dark
+    // ground. tune_shadow_dbg 8: as before)
+    if (abs(tune_shadow_dbg - 8.0) > 0.5) {
+      lf = min(lf, max(lc, lc / shade_ratio * (1.0 - k_dusk_floor_depth * rock_sh)));
+    }
     float dd = clamp((lf - lc) / max(lf, 1e-3), 0.0, 1.0);
-    c = mix(c, fl * (max(lc, lf) / max(lf, 1e-4)), dusk_floor_w * smoothstep(0.0, tune_dusk_floor_soft, dd));
+    c = mix(c, fl * (max(lc, lf) / max(lf0, 1e-4)), dusk_floor_w * smoothstep(0.0, tune_dusk_floor_soft, dd));
   }
 
   // the morning's low sun: the land never much more saturated than the game draws it. The area's
@@ -7009,7 +7051,8 @@ void composite_unused() {
              texelFetch(tex_T29, ivec2(tex_coord * hiz_size), 0).r > 1e29 ? 1.0 : 0.0,
              texture(tex_T5, tex_coord).r > d3 + 1e-7 ? 1.0 : 0.0);
   }
-  if (tune_shadow_dbg > 1.5) {
+  // (8 is no view: the low sun's shade on faces turned from it as it was, see sun_shadow_wide)
+  if (tune_shadow_dbg > 1.5 && tune_shadow_dbg < 7.5) {
     c = vec3(rock_sh, sun_lit, pix_tag);  // (test: the shadow, the sun's light, the material tag)
     if (tune_shadow_dbg > 4.5 && z > 0.0) {
       // (test: how far above this point the near map's caster is: red 0-2 m, green 2-20 m, blue 20-200 m)
