@@ -79,6 +79,67 @@
 (define *enhanced-sig-boxer-buf* (new 'global 'string 8 (the-as string #f)))
 (define *enhanced-sig-boxer* (if (pc-enhanced-getenv "JAK_ENHANCED_SIG_BOXER" *enhanced-sig-boxer-buf* 8) #t #f))
 
+;; JAK_ENHANCED_MOVE_TEST=<k|w|b|s>[:<hundredths of a second>] (test boots, for pictures): on the open sand
+;; by the desert's parked Hellcat, 12 s in, one attack: k square (Ashelin's kick, Sig's elbow or boxer), w / b
+;; the same with the gun out first (her pistol whip, his rifle butt), s circle (his spin). With a time, the
+;; move is held at that point (*enhanced-move-freeze*); the camera is turned to the side first.
+;; "[move-test] shot" in the log: when to take the picture.
+(define *enhanced-move-test-buf* (new 'global 'string 32 (the-as string #f)))
+(define *enhanced-move-test* (pc-enhanced-getenv "JAK_ENHANCED_MOVE_TEST" *enhanced-move-test-buf* 32))
+(define *enhanced-move-test-t* 0)
+(define-extern *enhanced-hellcat-spot* vector)
+
+(defun enhanced-move-test-step ((skin enhanced-skin))
+  (when (and *enhanced-move-test* *target*)
+    (let* ((t *enhanced-move-test-t*)
+           (data (-> *enhanced-move-test-buf* data))
+           (kind (-> data 0))
+           (gun? (or (= kind #x77) (= kind #x62)))
+           )
+      (+! *enhanced-move-test-t* 1)
+      (case t
+        ((1)
+         (set-ignore-controller-in-bg! *pc-settings* #t)
+         ;; the time after the colon, in hundredths of a second
+         (when (= (-> data 1) #x3a)
+           (let ((n 0)
+                 (i 2)
+                 )
+             (while (and (< i 8) (>= (-> data i) #x30) (<= (-> data i) #x39))
+               (set! n (+ (* n 10) (- (the int (-> data i)) #x30)))
+               (+! i 1)
+               )
+             (set! *enhanced-move-freeze* (* 0.01 (the float n)))
+             )
+           )
+         )
+        ((540)
+         (let ((pos (new 'stack-no-clear 'vector)))
+           (vector-copy! pos *enhanced-hellcat-spot*)
+           (+! (-> pos x) (meters -30.0))
+           (+! (-> pos z) (meters 20.0))
+           (+! (-> pos y) (meters 1.0))
+           (move-to-point! (-> *target* control) pos)
+           )
+         )
+        ((600)
+         (if gun?
+             (set! *enhanced-pad-press* (if (-> skin char big-gun) (pad-buttons right) (pad-buttons up)))
+             )
+         )
+        ((720)
+         (set! *enhanced-pad-press* (if (= kind #x73) (pad-buttons circle) (pad-buttons square)))
+         )
+        ((770)
+         (format 0 "[move-test] shot~%")
+         )
+        )
+      (set! *enhanced-pad-rightx* (if (and (>= t 630) (< t 700)) 200 -1))
+      )
+    )
+  (none)
+  )
+
 (defun enhanced-move-active? ()
   "Is one of the character's own moves showing (its pose comes from this file)?"
   (if (and *enhanced-move* (enhanced-skin-get)) #t #f)
@@ -170,6 +231,9 @@
 
 (defbehavior enhanced-move-update enhanced-skin ()
   "Each frame, before the character's animation is picked: start the move for Jak's attack, move it on, end it."
+  (if *enhanced-move-test*
+      (enhanced-move-test-step self)
+      )
   (let* ((tgt (-> self parent 0))
          (st (if (-> tgt state) (-> tgt state name) 'none))
          (want (enhanced-move-pick tgt))
