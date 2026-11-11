@@ -248,6 +248,10 @@ void BlockSoundHandler::SetVolPan(s32 vol, s32 pan) {
       auto right = m_vm.AdjustVolToGroup(volume.right, m_group);
 
       voice->SetVolume(left >> 1, right >> 1);
+      // Enhanced: the head shadow follows the sound around Jak (enhanced_spatial.h)
+      s32 sl, sr;
+      spatial::shadow_for_pan(m_group == 1 ? -1 : m_vm.LastPan(), sl, sr);
+      voice->SetShadow(sl, sr);
     }
   }
 }

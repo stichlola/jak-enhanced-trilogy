@@ -106,6 +106,9 @@
   //   crickets (at night, quiet in the rain), birds (by day, quiet in the rain), frogs (mostly at
   //   night and when wet), wind_night (at night), wind, waves, city (always). Rain, dripping after
   //   it and the storm's wind follow the weather wherever it's outdoors
+  // "reverb": the sound effects' echo (game/sound/common/enhanced_spatial): {"preset": "dry" (the
+  //   open desert), "street" (a short slap off the walls), "room" (small, under a roof), "cave" (a
+  //   long tail), "wet": times}. None: dry outdoors, cave indoors; a roof over Jak makes it a room
   "zones": {
     "other": {
       "day": {"lift": [0, 0, 0], "gain": [1, 1, 1], "saturation": 1.0, "contrast": 0.0, "warmth": 0.0, "clouds": 0.4},
@@ -118,7 +121,8 @@
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
-      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
+      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15},
+      "reverb": {"preset": "street"}
     },
     // Haven's industrial district (Jak 3): the game paints it in rust red; cooled and calmed down a
     // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
@@ -127,7 +131,8 @@
       "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
-      "ambience": {"city": 0.75}
+      "ambience": {"city": 0.75},
+      "reverb": {"preset": "street", "wet": 1.2}
     },
     // Haven's slums (Jak 2): the game paints them blue-grey and dark; warmer and lighter, so the
     // shacks read as sun-bleached wood and plaster (the same weather as the rest of Haven)
@@ -136,7 +141,8 @@
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
-      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15}
+      "ambience": {"crickets": 0.15, "city": 0.6, "birds": 0.15},
+      "reverb": {"preset": "street", "wet": 0.9}
     },
     // desert: sun-baked by day, cold blue night; sandstorms come and go, the nights are clear
     "desert": {
@@ -144,7 +150,8 @@
       "night": {"lift": [0, 0.004, 0.02], "gain": [0.98, 0.98, 1.05], "saturation": 0.95, "contrast": 0.04, "warmth": -0.03, "clouds": 0.25, "sand": 0.4, "rock_detail": 0.5},
       "weather": {"fog": {"period": 480, "clear": 0.25, "light": 0.65, "light_amount": 0.25}, "game_dust": true,
                   "spells": {"period": 360, "fair": 0.55, "overcast": 0.04, "sandstorm": 0.32, "shower": 0.02, "thunder": 0.02, "fog": 0.05}},
-      "ambience": {"wind_night": 1.0, "wind": 0.15}
+      "ambience": {"wind_night": 1.0, "wind": 0.15},
+      "reverb": {"preset": "dry"}
     },
     // forest: autumn gold, a little green in the shade
     "forest": {
@@ -152,31 +159,36 @@
       "night": {"lift": [0, 0.006, 0.022], "gain": [0.98, 1, 1.04], "saturation": 1.0, "contrast": 0.05, "warmth": -0.02, "clouds": 0.5},
       "weather": {"fog": {"period": 480, "clear": 0.55, "light": 0.3}, "morning_mist": 0.5,
                   "spells": {"period": 420, "fair": 0.32, "overcast": 0.1, "shower": 0.28, "thunder": 0.14, "fog": 0.14, "snow": 0.02}},
-      "ambience": {"crickets": 1.0, "wind_night": 0.2, "birds": 0.9, "frogs": 0.3}
+      "ambience": {"crickets": 1.0, "wind_night": 0.2, "birds": 0.9, "frogs": 0.3},
+      "reverb": {"preset": "dry", "wet": 1.4}
     },
     // Metal Heads: sickly purple shadows
     "metalhead": {
       "day": {"lift": [0.012, 0, 0.02], "gain": [1, 0.96, 1.04], "saturation": 1.08, "contrast": 0.08, "warmth": 0.0, "clouds": 0.6},
       "night": {"lift": [0.012, 0, 0.026], "gain": [1, 0.96, 1.06], "saturation": 1.1, "contrast": 0.09, "warmth": -0.01, "clouds": 0.6},
-      "weather": {"outdoors": false, "fog": 0}
+      "weather": {"outdoors": false, "fog": 0},
+      "reverb": {"preset": "cave", "wet": 1.1}
     },
     // underground (sewers, factory, mines, tower, caves, the sunken city): cool and contrasty
     "under": {
       "day": {"lift": [0.022, 0.021, 0.026], "gain": [1.24, 1.22, 1.2], "saturation": 0.96, "contrast": 0.0, "warmth": 0.01, "clouds": 0.4},
       "night": {"lift": [0.022, 0.021, 0.026], "gain": [1.24, 1.22, 1.2], "saturation": 0.96, "contrast": 0.0, "warmth": 0.01, "clouds": 0.4},
-      "weather": {"outdoors": false, "fog": 0}
+      "weather": {"outdoors": false, "fog": 0},
+      "reverb": {"preset": "cave"}
     },
     // volcano: hot, the air shimmering over the lava
     "volcano": {
       "day": {"lift": [0.015, 0, -0.005], "gain": [1.08, 0.96, 0.85], "saturation": 1.1, "contrast": 0.08, "warmth": 0.04, "clouds": 0.5},
       "night": {"lift": [0.015, 0, 0], "gain": [1.06, 0.95, 0.9], "saturation": 1.08, "contrast": 0.08, "warmth": 0.02, "clouds": 0.5},
-      "weather": {"outdoors": false, "heat": 1.0, "fog": 0}
+      "weather": {"outdoors": false, "heat": 1.0, "fog": 0},
+      "reverb": {"preset": "cave", "wet": 0.7}
     },
     // temples: golden
     "temple": {
       "day": {"lift": [0.006, 0.004, 0], "gain": [1.04, 1.02, 0.92], "saturation": 1.04, "contrast": 0.06, "warmth": 0.02, "clouds": 0.4},
       "night": {"lift": [0, 0.004, 0.018], "gain": [1, 1, 1.03], "saturation": 1.0, "contrast": 0.05, "warmth": -0.01, "clouds": 0.4},
-      "weather": {"outdoors": false, "fog": 0}
+      "weather": {"outdoors": false, "fog": 0},
+      "reverb": {"preset": "cave", "wet": 1.2}
     },
     // Jak 2's wilds outside Haven (Dead Town, the mountain, the atoll, the construction site):
     // grey-green, showers come over now and then

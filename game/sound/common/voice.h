@@ -73,7 +73,20 @@ class Voice {
 
   void Stop() { mADSR.Stop(); }
 
+  // Enhanced (enhanced_spatial.h): the head shadow per ear (Q15, 0 = clear) and the reverb send
+  void SetShadow(s32 left, s32 right) {
+    mShadowL = left;
+    mShadowR = right;
+  }
+  void SetSend(bool send) { mSend = send; }
+  bool Send() const { return mSend; }
+
  private:
+  s32 mShadowL{0};
+  s32 mShadowR{0};
+  s32 mShadowLp{0};
+  bool mSend{false};
+
   union ADPCMHeader {
     u16 bits;
     bitfield<u16, bool, 10, 1> LoopStart;

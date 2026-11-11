@@ -318,6 +318,40 @@ the game's sfx volume (group 0) and goes quiet while the sfx group is paused (th
 by `scripts/enhanced/ambient_sounds.py` (`--convert` redoes the leveling from the downloads; the
 last half second of each is faded into its start, so the seam doesn't click).
 
+3D audio and area reverb (`game/sound/common/enhanced_spatial.*`, 989snd): 989snd's pan table only
+knows left and right, so a sound behind Jak sounded like one in front. Each sound effect's voice gets a
+head shadow from its pan (0 ahead, 90 right, 180 behind): a one-pole low-pass (~2.5 kHz) blended into the
+far ear and, for what's behind, into both (`Voice::Run`; music, group 1, untouched). The voices of
+everything but the music also go to one stereo reverb (6 combs + 2 allpasses a side, a pre-delay and one
+early echo), mixed in `Player::Tick`; its preset comes from the zone (world.json `"reverb"`: desert
+`dry`, Haven `street` with a slap off the walls at 70 ms, `under`/`temple`/`metalhead`/`volcano` `cave`
+with a 2.6 s tail; no key: dry outdoors, cave indoors; a roof over Jak outdoors: `room`), the presets
+easing into each other over ~1.5 s. Menu (Sound and subtitles): "3D audio", "Area reverb";
+`JAK_ENHANCED_AUDIO3D=0|1`, `JAK_ENHANCED_REVERB=0|1` win over it. Log: `[audio] reverb <preset> (on|off)
+3d on|off sends <voices>` every 20 s and on each change (measured: desert `dry`, ctyport `street` with
+7-9 voices sending).
+
+Smooth animation (Jak 3, `process-request!` in joint.gc): the game's logic and skeletons already run
+every rendered frame at any frame rate (OpenGOAL), and a fractional frame already blends two keys; what
+stepped is the blend itself: straight lines from key to key, so a joint keeps one speed between keys and
+changes it at once on each (Jak's idle hand: the same speed for 8 frames, then another; 16 at 120 fps).
+Now Catmull-Rom over the key before and after the pair too (the two middle keys first, so the quaternion
+flip test lines the outer two up with them); it still passes through every key, and costs nothing when
+an animation sits on a whole frame. Measured on the same hand: speeds ramp (`... 4 4 3 2 1 0 1 0 2 ...`)
+instead of plateaus with jumps (`6 6 6 7 7 2 2 2 ...`). Menu "Smooth animation" (City section),
+`JAK_ENHANCED_SMOOTH_ANIM=0|1` (`pc-enhanced-smooth-anim?`).
+
+Feet on slopes (Jak 3, `enhanced-foot-ik` in logic-target.gc): the game's own leg IK (`leg-ik`,
+`target-update-ik`) probes the ground under each foot, puts the foot on it, tilts it to the ground's
+normal and blends off when the foot is lifted, but it can only bend the leg: a foot over lower ground
+(downhill, the step below) hung in the air. The drawn body (`cspace-offset`, which Ashelin's and Sig's
+skins follow too) now drops to the lower foot's ground, at most 35 cm, eased at 1.5 m/s; full standing
+and walking, gone by 7 m/s, and off wherever the game turns the leg IK off (air, ledges, vehicles, the
+board). It is taken back before the collision step (`pre-collide-setup`, which eases `cspace-offset`)
+and forgotten if a state set `cspace-offset` meanwhile, so it never builds up. Measured on Spargus'
+stairs (`wascitya-top-of-stairs`, two steps down): lower foot 22.9 cm under Jak's ground point, body
+dropped 22.9 cm. Menu "Feet on slopes", `JAK_ENHANCED_FOOT_IK=0|1` (`pc-enhanced-foot-ik?`).
+
 Subtitles: smaller than the PS2's by default (bank scale 0.65 in Jak II and 3, 0.38 in Jak 1, in
 `subtitle*-h.gc` / `pc/subtitle.gc`); the menu's "Subtitle size" (Small, Medium, Large = the PS2
 size, Extra large) multiplies it (`pc-enhanced-subtitle-size`, percent), and the Jak II/3 subtitle

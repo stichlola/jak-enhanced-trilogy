@@ -9,6 +9,7 @@
 #include "sfxblock.h"
 
 #include "game/sound/common/enhanced_ambience.h"
+#include "game/sound/common/enhanced_spatial.h"
 
 #include "fmt/format.h"
 
@@ -142,7 +143,23 @@ void Player::Tick(s16Output* stream, int samples) {
 
     stick++;
     htick++;
-    *stream++ = mSynth.Tick();
+    s16Output o = mSynth.Tick();
+    // Enhanced: the area's reverb on the sound effects' send (enhanced_spatial.h)
+    spatial::reverb_sample(o, mSynth.SendL(), mSynth.SendR());
+    *stream++ = o;
+  }
+  // a line every 20 s, and when the area's preset changes (test evidence)
+  {
+    static int log_samples = 0;
+    static int last_preset = -1;
+    log_samples += samples;
+    const int preset = spatial::current_preset();
+    if (preset != last_preset || log_samples >= 48000 * 20) {
+      lg::info("[audio] reverb {} ({}) 3d {} sends {}", spatial::preset_name(preset),
+               spatial::reverb() ? "on" : "off", spatial::audio3d() ? "on" : "off", mSynth.Sends());
+      last_preset = preset;
+      log_samples = 0;
+    }
   }
   // Enhanced: the ambient loops (rain, wind, crickets) on top
   ambience::mix(stream - samples, samples);

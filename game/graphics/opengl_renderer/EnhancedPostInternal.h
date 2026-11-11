@@ -42,6 +42,7 @@ void enh_cpu_split(const char* name);
 #include "game/kernel/common/kboot.h"
 #include "game/runtime.h"
 #include "game/sound/common/enhanced_ambience.h"
+#include "game/sound/common/enhanced_spatial.h"
 
 #include "third-party/imgui/imgui.h"
 #include "third-party/imgui/imgui_internal.h"
@@ -214,6 +215,9 @@ struct WorldZone {
   ZoneLook look[2];  // day, night
   ZoneWeather weather;
   ZoneAmbience ambience;
+  // the zone's reverb (snd::spatial::Preset, -1: dry outdoors, cave indoors) and how wet (times)
+  int reverb = -1;
+  float reverb_wet = 1.f;
 };
 struct World {
   float gi[3] = {0.6f, 0.6f, 1.f};  // Jak 1, 2, 3
@@ -828,6 +832,18 @@ inline void load_world() {
         zone.ambience.frogs = aj.value("frogs", 0.f);
         zone.ambience.waves = aj.value("waves", 0.f);
         zone.ambience.city = aj.value("city", 0.f);
+      }
+      if (z.contains("reverb")) {
+        // "reverb": {"preset": "dry" | "street" | "room" | "cave", "wet": times}
+        const auto& rj = z["reverb"];
+        static const char* kReverbNames[] = {"dry", "street", "room", "cave"};
+        const std::string preset = rj.value("preset", std::string("dry"));
+        for (int k = 0; k < 4; k++) {
+          if (preset == kReverbNames[k]) {
+            zone.reverb = k;
+          }
+        }
+        zone.reverb_wet = rj.value("wet", 1.f);
       }
       if (name == "other") {
         w.zones[0] = zone;

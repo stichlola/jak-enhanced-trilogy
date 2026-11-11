@@ -650,6 +650,21 @@ void EnhancedPost::draw_menu() {
     }
     ImGui::EndDisabled();
     if (group("Sound and subtitles")) {
+      // 3D audio (head shadow) and the area's reverb (game/sound/common/enhanced_spatial)
+      bool a3d = snd::spatial::audio3d();
+      if (menu_toggle("3D audio", &a3d)) {
+        snd::spatial::set_audio3d(a3d);
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Sounds behind Jak and on the far side of his head sound duller, as they do around a real head");
+      }
+      bool rev = snd::spatial::reverb();
+      if (menu_toggle("Area reverb", &rev)) {
+        snd::spatial::set_reverb(rev);
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("An echo that fits the place: almost none in the open desert, a short slap in the streets, a long tail underground");
+      }
       ImGui::SetNextItemWidth(200);
       menu_slider_float("Ambient sounds", &s.ambience, 0.f, 1.f, "%.2f");
       // the subtitles' size (accessibility): the default is smaller than the PS2's
@@ -704,6 +719,20 @@ void EnhancedPost::draw_menu() {
       }
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("The War Factory's Hellcat, parked by the Spargus wall: triangle to get in");
+      }
+      bool feet = g_enhanced_menu.foot_ik;
+      if (menu_toggle("Feet on slopes", &feet)) {
+        g_enhanced_menu.foot_ik = feet;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Jak's hips drop to the lower foot on slopes and steps, so both feet stand on the ground");
+      }
+      bool smooth = g_enhanced_menu.smooth_anim;
+      if (menu_toggle("Smooth animation", &smooth)) {
+        g_enhanced_menu.smooth_anim = smooth;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Characters move on curves between the animations' keys instead of straight lines");
       }
       int character = g_enhanced_menu.player;
       if (ImGui::Combo(
@@ -993,6 +1022,10 @@ std::string EnhancedPost::menu_settings_json() const {
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   j["desert_hellcat"] = g_enhanced_menu.desert_hellcat.load();
+  j["foot_ik"] = g_enhanced_menu.foot_ik.load();
+  j["smooth_anim"] = g_enhanced_menu.smooth_anim.load();
+  j["audio3d"] = snd::spatial::audio3d();
+  j["area_reverb"] = snd::spatial::reverb();
   {
     int player = g_enhanced_menu.player.load();
     j["player"] = kEnhancedCharacterTable[(player >= 0 && player < kEnhancedCharacterCount) ? player : 0].name;
@@ -1118,6 +1151,20 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   bool hellcat = true;
   get("desert_hellcat", hellcat);
   g_enhanced_menu.desert_hellcat = hellcat;
+  bool smooth = true;
+  get("smooth_anim", smooth);
+  g_enhanced_menu.smooth_anim = smooth;
+  bool feet = true;
+  get("foot_ik", feet);
+  g_enhanced_menu.foot_ik = feet;
+  {
+    // (set_audio3d / set_reverb keep JAK_ENHANCED_AUDIO3D / _REVERB when those are set)
+    bool a3d = true, rev = true;
+    get("audio3d", a3d);
+    get("area_reverb", rev);
+    snd::spatial::set_audio3d(a3d);
+    snd::spatial::set_reverb(rev);
+  }
   std::string player_name = "jak";
   get("player", player_name);
   g_enhanced_menu.player = std::max(0, enhanced_character_index(player_name.c_str()));

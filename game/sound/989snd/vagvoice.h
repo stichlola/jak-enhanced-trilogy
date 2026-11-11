@@ -7,6 +7,7 @@
 #include "common/common_types.h"
 
 #include "game/sound/common/synth.h"
+#include "game/sound/common/enhanced_spatial.h"
 #include "game/sound/common/voice.h"
 
 namespace snd {
@@ -67,6 +68,8 @@ class VoiceManager {
   void SetMasterVol(u8 group, s32 volume);
   void SetPlaybackMode(s32 mode) { mStereoOrMono = mode; }
   s16 AdjustVolToGroup(s16 involume, int group);
+  // Enhanced: the pan (degrees, 0 ahead, 90 right) MakeVolume last worked out
+  int LastPan() const { return mLastPan; }
 
  private:
   Synth& mSynth;
@@ -77,6 +80,7 @@ class VoiceManager {
   }
 
   s32 mStereoOrMono{0};
+  int mLastPan{0};
 
   std::array<s32, 32> mMasterVol;
   std::array<s32, 32> mGroupDuck;

@@ -256,6 +256,13 @@ struct EnhancedMenu {
   std::atomic<bool> minimap = true;  // the HUD's minimap (hud-map, pc-enhanced-minimap?)
   // Jak 3: the Hellcat parked in the desert (pc-enhanced-desert-hellcat?, enhanced-hellcat-update)
   std::atomic<bool> desert_hellcat = true;
+  // Jak 3: the feet on slopes and steps (pc-enhanced-foot-ik?, enhanced-foot-ik in logic-target.gc):
+  // the hips drop to the lower foot so the game's leg IK reaches the ground. JAK_ENHANCED_FOOT_IK=0|1
+  // wins over the menu
+  std::atomic<bool> foot_ik = true;
+  // Jak 3: Catmull-Rom between animation keys (pc-enhanced-smooth-anim?, process-request! in
+  // joint.gc); JAK_ENHANCED_SMOOTH_ANIM=0|1 wins over the menu
+  std::atomic<bool> smooth_anim = true;
   // Jak 3: the character drawn in Jak's place, an index in kEnhancedCharacterTable (enhanced-player.gc
   // asks JAK_ENHANCED_PLAYER_MENU for its name, live). New characters: an entry there and in
   // *enhanced-characters* (enhanced-player.gc).
