@@ -669,6 +669,37 @@
   ;; first, the fixed part
   (decomp-fixed output-frame num-joints (-> request jacc fixed) (-> request amount))
 
+  ;; Enhanced: smooth animation. The animations are keyed (a frame of data every 1/60 s of animation
+  ;; time, so a slow one, or a slowed one, has its keys several game frames apart) and the game goes
+  ;; from key to key in straight lines: each joint moves at a steady speed between keys and changes
+  ;; speed all at once on each one (measured on Jak's idle hand: the same speed for 8 frames, then
+  ;; another; 16 at 120 fps). Catmull-Rom between the keys instead (the frame before and the one after
+  ;; the pair too): speeds change smoothly, and the curve still goes through every key. The two middle
+  ;; keys are added first, so the quaternion flip test of decomp-frame lines the outer two up with them.
+  ;; The menu's "Smooth animation" / JAK_ENHANCED_SMOOTH_ANIM=0 turn it off (the game's straight lines).
+  (when (and (!= 0.0 (-> request frame-interp)) (pc-enhanced-smooth-anim?))
+    (let* ((t0 (-> request frame-interp))
+           (t2 (* t0 t0))
+           (t3 (* t2 t0))
+           (amt (-> request amount))
+           (f (-> request frame))
+           (last (+ (the int (-> request jacc num-frames)) -1))
+           (fa (max 0 (+ f -1)))
+           (fd (min last (+ f 2)))
+           (hdr (-> request jacc fixed hdr))
+           )
+      (decomp-frame output-frame num-joints (-> request jacc data f)
+                    (* amt 0.5 (+ (* 3.0 t3) (* -5.0 t2) 2.0)) hdr)
+      (decomp-frame output-frame num-joints (-> request jacc data (+ f 1))
+                    (* amt 0.5 (+ (* -3.0 t3) (* 4.0 t2) t0)) hdr)
+      (decomp-frame output-frame num-joints (-> request jacc data fa)
+                    (* amt 0.5 (+ (- t3) (* 2.0 t2) (- t0))) hdr)
+      (decomp-frame output-frame num-joints (-> request jacc data fd)
+                    (* amt 0.5 (- t3 t2)) hdr)
+      )
+    (return #f)
+    )
+
   ;; base frame
   (decomp-frame
    output-frame

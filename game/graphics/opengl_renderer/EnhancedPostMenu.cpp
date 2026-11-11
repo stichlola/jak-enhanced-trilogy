@@ -705,6 +705,13 @@ void EnhancedPost::draw_menu() {
       if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("The War Factory's Hellcat, parked by the Spargus wall: triangle to get in");
       }
+      bool smooth = g_enhanced_menu.smooth_anim;
+      if (menu_toggle("Smooth animation", &smooth)) {
+        g_enhanced_menu.smooth_anim = smooth;
+      }
+      if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Characters move on curves between the animations' keys instead of straight lines");
+      }
       int character = g_enhanced_menu.player;
       if (ImGui::Combo(
               "Character", &character,
@@ -993,6 +1000,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["show_minimap"] = g_enhanced_menu.minimap.load();
   j["minimap_size"] = g_enhanced_menu.minimap_size.load();
   j["desert_hellcat"] = g_enhanced_menu.desert_hellcat.load();
+  j["smooth_anim"] = g_enhanced_menu.smooth_anim.load();
   {
     int player = g_enhanced_menu.player.load();
     j["player"] = kEnhancedCharacterTable[(player >= 0 && player < kEnhancedCharacterCount) ? player : 0].name;
@@ -1118,6 +1126,9 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   bool hellcat = true;
   get("desert_hellcat", hellcat);
   g_enhanced_menu.desert_hellcat = hellcat;
+  bool smooth = true;
+  get("smooth_anim", smooth);
+  g_enhanced_menu.smooth_anim = smooth;
   std::string player_name = "jak";
   get("player", player_name);
   g_enhanced_menu.player = std::max(0, enhanced_character_index(player_name.c_str()));
