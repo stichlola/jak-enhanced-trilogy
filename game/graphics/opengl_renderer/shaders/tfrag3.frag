@@ -32,7 +32,7 @@ bool g_pbr_on = false;
 // per material class (enh_material, 0..13: plain, metal, glossy, sand, rock, rocky ground, wall, wood,
 // rusty, painted, tile, window, lamp, facade): how much of the map's relief, the roughness, and how
 // far the map's roughness moves it
-const float PBR_K[14] = float[14](0.6, 0.3, 0.1, 0.45, 1.0, 0.85, 0.8, 0.7, 0.7, 0.25, 0.25, 0.0, 0.0, 0.0);
+const float PBR_K[14] = float[14](0.8, 0.4, 0.15, 0.65, 1.3, 1.1, 1.0, 0.9, 0.9, 0.35, 0.35, 0.0, 0.0, 0.0);
 const float PBR_R[14] = float[14](0.7, 0.35, 0.12, 0.8, 0.5, 0.72, 0.68, 0.62, 0.78, 0.4, 0.25, 0.08, 0.6, 0.6);
 const float PBR_RR[14] = float[14](0.5, 0.5, 0.2, 0.4, 0.6, 0.5, 0.5, 0.5, 0.4, 0.4, 0.3, 0.1, 0.2, 0.2);
 

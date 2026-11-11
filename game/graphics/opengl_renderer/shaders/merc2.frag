@@ -56,10 +56,10 @@ const float BUMP_K[10] = float[10](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0, 
 // true PBR (enh_relief 3): the maps' relief on characters, the roughness per material (default, skin,
 // hair, metal, leather, cloth, fur, eye, lens, lamp) and how far the map moves it, the reflectance
 // head-on (metal: its own color)
-const float PBR_CHAR_K = 0.8;
+const float PBR_CHAR_K = 1.0;
 const float PBR_CHAR_R[10] = float[10](0.55, 0.5, 0.45, 0.3, 0.45, 0.85, 0.8, 0.1, 0.05, 0.5);
 const float PBR_CHAR_F0[10] = float[10](0.04, 0.028, 0.046, 1.0, 0.04, 0.04, 0.04, 0.025, 0.04, 0.04);
-const float PBR_CHAR_SPEC = 0.8;
+const float PBR_CHAR_SPEC = 1.1;
 
 // GGX (Trowbridge-Reitz), Smith visibility (Schlick-GGX), Schlick Fresnel: the highlight's share
 // of the light (times n.l), for the view-space n, l, v

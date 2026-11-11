@@ -47,10 +47,10 @@ uniform float materials;        // metal and glossy surfaces: reflections and hi
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
 // true PBR (EnhancedPbr.h, tfrag3.frag): constants, never uniforms here (the NVIDIA 1024 limit)
 const float PBR_F0 = 0.04;           // dielectrics' reflectance head-on
-const float PBR_SPEC = 1.0;          // the sun's GGX highlight on the plain classes
+const float PBR_SPEC = 1.4;          // the sun's GGX highlight on the plain classes
 const float PBR_SUN_SHARE = 0.7;     // of the baked light, the sun's (the rest is the sky's)
 const float PBR_DIFFUSE_LOSS = 1.0;  // the diffuse taken by the Fresnel (energy; 0: none)
-const float PBR_RELIEF = 1.0;        // the normal maps' shade against the broad facing
+const float PBR_RELIEF = 1.6;        // the normal maps' shade against the broad facing
 const float PBR_FAR = 300.0;         // m: the highlight gone by here (from 60 %)
 const float PBR_METAL_FADE = 80.0;   // m: metal and glass's reflections fade from here to twice it (was 60)
 uniform int blast_count;       // explosions: view space + radius (game units), age (s)
