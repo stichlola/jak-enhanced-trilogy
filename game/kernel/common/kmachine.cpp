@@ -1208,16 +1208,58 @@ static void enhanced_test_switches(const std::string& level) {
     g_enhanced_menu.ask(1, fmt::format("{}", asked_hour));
     return;
   }
-  // (test: tuning debug.tp = [x, y, z, yaw] (meters, degrees) moves Jak there once per change: the
-  // spots of a review visited in one run, picked from outside)
+  // (test: the menu's other requests from the tuning file too, each asked once per change, so one
+  // run visits several places: debug.travel = a place of the list below (-1 off), debug.tp = [x, y,
+  // z, yaw] (meters, degrees; in the loaded levels), debug.clock = 0 frozen / 1 running, debug.blast
+  // = a harmless explosion in front of Jak every that many frames (0 stops), debug.vehicle = into a
+  // vehicle of that type)
+  static const char* const kTravel[] = {"desert-start",   "desert-facing-wasdoors", "wascitya-start",
+                                        "ctyport-start",  "ctysluma-alley",         "ctygenb-start",
+                                        "ctyinda-start",  "mhcitya-near-ctyport",   "ctyport-hiphog",
+                                        "wasstada-start", "wascityb-start",         "ctyslumb-start"};
+  static const EnhancedTune t_travel("debug.travel", -1.f);
+  static float asked_travel = -1.f;
+  if ((float)t_travel >= 0.f && (float)t_travel != asked_travel) {
+    asked_travel = (float)t_travel;
+    const int i = std::min((int)asked_travel, (int)(sizeof(kTravel) / sizeof(kTravel[0])) - 1);
+    lg::info("[enhanced] debug.travel {} in {}", kTravel[i], level.empty() ? "none" : level);
+    g_enhanced_menu.ask(2, kTravel[i]);
+    return;
+  }
   static const EnhancedTune t_tp("debug.tp", {0.f, 0.f, 0.f, 0.f});
   static float asked_tp[4] = {0.f, 0.f, 0.f, 0.f};
-  if (t_tp.is_set() && t_tp.size() >= 3) {
-    const float want[4] = {t_tp[0], t_tp[1], t_tp[2], t_tp.size() > 3 ? t_tp[3] : 0.f};
-    if (std::memcmp(want, asked_tp, sizeof(want)) != 0) {
-      std::memcpy(asked_tp, want, sizeof(want));
-      g_enhanced_menu.ask(3, fmt::format("{},{},{},{}", want[0], want[1], want[2], want[3]));
+  if (t_tp.is_set() && t_tp.size() >= 3 &&
+      (t_tp[0] != asked_tp[0] || t_tp[1] != asked_tp[1] || t_tp[2] != asked_tp[2] ||
+       t_tp[3] != asked_tp[3])) {
+    for (int i = 0; i < 4; i++) {
+      asked_tp[i] = t_tp[i];
     }
+    lg::info("[enhanced] debug.tp {} {} {} yaw {}", asked_tp[0], asked_tp[1], asked_tp[2],
+             t_tp.size() >= 4 ? asked_tp[3] : 0.f);
+    g_enhanced_menu.ask(3, fmt::format("{},{},{},{}", asked_tp[0], asked_tp[1], asked_tp[2],
+                                       t_tp.size() >= 4 ? asked_tp[3] : 0.f));
+    return;
+  }
+  static const EnhancedTune t_clock("debug.clock", -1.f);
+  static float asked_clock = -1.f;
+  if ((float)t_clock >= 0.f && (float)t_clock != asked_clock) {
+    asked_clock = (float)t_clock;
+    g_enhanced_menu.ask(4, asked_clock > 0.5f ? "1" : "0");
+    return;
+  }
+  static const EnhancedTune t_blast("debug.blast", -1.f);
+  static float asked_blast = -1.f;
+  if ((float)t_blast >= 0.f && (float)t_blast != asked_blast) {
+    asked_blast = (float)t_blast;
+    g_enhanced_menu.ask(7, fmt::format("{}", (int)asked_blast));
+    return;
+  }
+  static const EnhancedTune t_vehicle("debug.vehicle", -1.f);
+  static float asked_vehicle = -1.f;
+  if ((float)t_vehicle >= 0.f && (float)t_vehicle != asked_vehicle) {
+    asked_vehicle = (float)t_vehicle;
+    g_enhanced_menu.ask(8, fmt::format("{}", (int)asked_vehicle));
+    return;
   }
 }
 
