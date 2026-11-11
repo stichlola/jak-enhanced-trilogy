@@ -1616,8 +1616,11 @@ capture exactly."
     (+! *enhanced-camlog-frames* 1)
     (when (and *enhanced-unlock-wanted* (= *enhanced-camlog-frames* 60))
       (set! *enhanced-unlock-wanted* #f)
-      ;; (every feature from the gun up; the low five are unnamed)
-      (logior! (-> *game-info* features) (the-as game-feature (lognot #x1f)))
+      ;; (every feature from the gun up; the low five are unnamed. Not feature19, Jak 2's carry: with it
+      ;; R1 goes to target-carry-pickup, a state Jak 3 doesn't have, and the game dies in enter-state)
+      (logior! (-> *game-info* features)
+               (the-as game-feature (logclear (lognot #x1f) (game-feature feature19)))
+               )
       (format 0 "[enhanced] everything unlocked~%")
       )
     (when (and *enhanced-hour-wanted* (= *enhanced-camlog-frames* 60) *time-of-day*)

@@ -169,7 +169,10 @@
              )
         (go target-gun-stance)
         )
-    (if (and (logtest? (game-feature feature19) (-> self game features))
+    ;; Enhanced: feature19 is Jak 2's carry. Jak 3 has no target-carry-pickup state, and a go to an undefined
+    ;; state is a divide by zero in enter-state (R1 with the feature set while Jak's own gun stays away)
+    (if (and (nonzero? target-carry-pickup)
+             (logtest? (game-feature feature19) (-> self game features))
 	     ;; og:preserve-this - High FPS Fix
              (recently-pressed? r1)
              )
@@ -280,7 +283,10 @@
       (set! (-> self control transv w) 1.0)
       (go target-turn-around)
       )
-    (if (and (logtest? (game-feature feature19) (-> self game features))
+    ;; Enhanced: feature19 is Jak 2's carry. Jak 3 has no target-carry-pickup state, and a go to an undefined
+    ;; state is a divide by zero in enter-state (R1 with the feature set while Jak's own gun stays away)
+    (if (and (nonzero? target-carry-pickup)
+             (logtest? (game-feature feature19) (-> self game features))
 	     ;; og:preserve-this - High FPS Fix
              (recently-pressed? r1)
              )

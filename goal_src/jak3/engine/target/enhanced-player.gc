@@ -112,6 +112,7 @@
 (define-extern enhanced-sig-gun-init (function none :behavior enhanced-skin))
 (define-extern enhanced-sig-gun-post (function none :behavior enhanced-skin))
 (define-extern enhanced-sig-attacking? (function target object))
+(define-extern enhanced-sig-slerp-local! (function matrix matrix matrix float matrix))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -505,6 +506,75 @@
       )
   )
 
+;; Sig's arms in Jak's attacks. Jak is bound with his arms out in a T (upper arm along x), Sig with his
+;; hanging (upper arm 0.03 -0.92 -0.37, forearm bent forward): Jak's turn from his bind pose, put on Sig's
+;; as it is, left every arm bone a quarter turn off Jak's (dot of the two bone directions 0.03 in a punch,
+;; the fists crossed in front of his chest). Per arm bone, the turn from Sig's bind direction to Jak's
+;; (model space, shortest way) goes between Sig's bind pose and Jak's skinning matrix: the bone then points
+;; exactly where Jak's does. The hand takes its forearm's.
+;; His fingers have no twin in the map (his own clips leave them open: a punch with a flat hand): with
+;; the attack arms they close toward his gun hand's grip in the wasdoors idle (enhanced-sig-gun-init
+;; captures it: joint to parent, mirrored for his left hand).
+(deftype enhanced-arm-fix (structure)
+  ((m      matrix 6 :inline)  ;; for Sig's joints 11-16: upper arm, forearm, hand, left then right
+   (finger uint8 80)          ;; per joint: a finger joint of his right hand (1) or his left (2), else 0
+   (fist   matrix 80 :inline) ;; per finger joint: joint to parent, closed
+   )
+  )
+
+(define *enhanced-sig-arm-fix* (new 'global 'enhanced-arm-fix))
+
+;; 0-1: Jak punching or kicking (enhanced-sig-gun-post seeks it): Sig's arms go from his own to Jak's by it
+(define *enhanced-sig-attack-weight* 0.0)
+
+(defbehavior enhanced-skin-arm-fix-init enhanced-skin ()
+  "Sig's arm bones' bind directions turned onto Jak's (once, when his skin is made)."
+  (let ((jn (-> self parent 0 node-list))
+        (fix *enhanced-sig-arm-fix*)
+        (a (new 'stack-no-clear 'matrix))
+        (b (new 'stack-no-clear 'matrix))
+        (from (new 'stack-no-clear 'vector))
+        (to (new 'stack-no-clear 'vector))
+        (q (new 'stack-no-clear 'quaternion))
+        )
+    (dotimes (i 6)
+      (matrix-identity! (-> fix m i))
+      )
+    (dotimes (i 80)
+      (set! (-> fix finger i) 0)
+      )
+    (when (and (< 16 (-> self node-list length)) (< 28 (-> jn length)))
+      (dotimes (side 2)
+        (dotimes (seg 2)
+          (let ((k (+ 11 (* 3 side) seg))           ;; his upper arm or forearm
+                (j (+ (if (zero? side) 17 26) seg)) ;; Jak's
+                (slot (+ (* 3 side) seg))
+                )
+            (when (and (-> jn data j joint) (-> jn data (+ j 1) joint))
+              (matrix-4x4-inverse! a (-> jn data j joint bind-pose))
+              (matrix-4x4-inverse! b (-> jn data (+ j 1) joint bind-pose))
+              (vector-! to (-> b trans) (-> a trans))
+              (vector-! from (-> self bind-world (+ k 1) trans) (-> self bind-world k trans))
+              (set! (-> to w) 0.0)
+              (set! (-> from w) 0.0)
+              (vector-normalize! to 1.0)
+              (vector-normalize! from 1.0)
+              (quaternion-from-two-vectors! q from to)
+              (quaternion->matrix (-> fix m slot) q)
+              (if (= seg 1)
+                  (matrix-copy! (-> fix m (+ slot 1)) (-> fix m slot))
+                  )
+              (format 0 "[enhanced-player] arm fix ~D: bound along ~,,2f ~,,2f ~,,2f, ~,,0f deg off Jak's~%"
+                      k (-> from x) (-> from y) (-> from z) (* 0.0054931640625 (acos (vector-dot from to))))
+              )
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior enhanced-skin-retarget enhanced-skin ((w float))
   "Pose Ashelin as Jak is, by w (0-1): each of her mapped joints turned as his is from his bind pose
    (both are bound standing the same way), placed at the end of her own parent bone (her proportions),
@@ -525,10 +595,12 @@
          ;; his bones to its own: his pose taken against his root, put on its root
          (fix (new 'stack-no-clear 'matrix))
          (jpos (new 'stack-no-clear 'vector))
-         ;; Sig's arms (11-16) keep his own walk's: Jak's arms put through his bind pose crossed both
-         ;; hands in front of his chest (measured in Jak's pose, standing and walking: each hand on the
-         ;; other side of his shoulders, above his chest). Only Jak's attacks give him Jak's arms.
-         (own-arms? (and (string= (-> ch name) "sig") (not (enhanced-sig-attacking? jak))))
+         (tmp (new 'stack-no-clear 'matrix))
+         ;; Sig's arms (11-16) keep his own walk's; only Jak's attacks give him Jak's arms, by arm-w (in
+         ;; over 0.08 s, out over 0.2 s), through *enhanced-sig-arm-fix* (his arms are bound hanging,
+         ;; Jak's out in a T)
+         (sig? (string= (-> ch name) "sig"))
+         (arm-w (if sig? *enhanced-sig-attack-weight* 0.0))
          )
     ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
     ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
@@ -555,7 +627,8 @@
                   (else -1)
                   )
                 )
-             (j (if (and (< k (-> jmap length)) (not (and own-arms? (>= k 11) (< k 17)))) (-> jmap k) -1))
+             (arm? (and sig? (>= k 11) (< k 17)))
+             (j (if (and (< k (-> jmap length)) (not (and arm? (= arm-w 0.0)))) (-> jmap k) -1))
              )
         (when (and (> k 0) (>= p 0) (< p n) (!= p k))
           ;; her own local transform: saved[k] = local * saved[p]
@@ -567,7 +640,15 @@
              ;; his skinning matrix (model to world), then her bind pose through it
              (matrix*! inv (-> jnodes data j joint bind-pose) (-> jnodes data j bone transform))
              (matrix*! skin inv fix)
-             (matrix*! rot (-> self bind-world k) skin)
+             (cond
+               (arm?
+                 (matrix*! tmp (-> self bind-world k) (-> *enhanced-sig-arm-fix* m (- k 11)))
+                 (matrix*! rot tmp skin)
+                 )
+               (else
+                 (matrix*! rot (-> self bind-world k) skin)
+                 )
+               )
              (cond
                ((not (or (= k (-> ch main)) (= k (-> ch hips))))
                 (vector-copy! (-> rot trans) (-> own trans))
@@ -592,13 +673,27 @@
                  (set! (-> rot trans w) 1.0)
                  )
                )
-             ;; its thighs take only part of his leg swing (a longer stride)
-             (enhanced-matrix-blend-rows! bone own rot
-                                          (if (or (= j 39) (= j 45)) (* w (-> ch stride)) w)
-                                          (-> self saved k)
-                                          )
+             (cond
+               (arm?
+                 ;; from his own arm to Jak's by turning (rows blended between poses this far apart
+                 ;; shear the bone), on its own parent's end
+                 (enhanced-sig-slerp-local! bone own rot arm-w)
+                 )
+               (else
+                 ;; its thighs take only part of his leg swing (a longer stride)
+                 (enhanced-matrix-blend-rows! bone own rot
+                                              (if (or (= j 39) (= j 45)) (* w (-> ch stride)) w)
+                                              (-> self saved k)
+                                              )
+                 )
+               )
              )
             (else
+              ;; Sig's fingers: fists with Jak's attack arms
+              (when (and sig? (< 0.0 arm-w) (< k 80) (nonzero? (-> *enhanced-sig-arm-fix* finger k)))
+                (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) arm-w)
+                (matrix*! own local (-> nodes data p bone transform))
+                )
               (matrix-copy! bone own)
               )
             )
@@ -755,6 +850,12 @@
       )
     )
   (enhanced-sig-post)
+  ;; Sig's arms go to Jak's in his attacks (in 0.07 s, back in 0.2 s): set before the retarget reads it
+  (when (-> self char big-gun)
+    (let ((attack? (enhanced-sig-attacking? (-> self parent 0))))
+      (seek! *enhanced-sig-attack-weight* (if attack? 1.0 0.0) (* (if attack? 15.0 5.0) (seconds-per-frame)))
+      )
+    )
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
       )
@@ -858,6 +959,9 @@
     )
   (if *enhanced-player-dump*
       (enhanced-skin-dump self)
+      )
+  (if (string= (-> ch name) "sig")
+      (enhanced-skin-arm-fix-init)
       )
   (enhanced-ashelin-gun-init)
   (enhanced-sig-gun-init)
