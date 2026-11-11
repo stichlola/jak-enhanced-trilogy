@@ -6723,7 +6723,13 @@ void composite_unused() {
     float g = 1.0 + (tune_fx_gain - 1.0) * g_dark * (1.0 + tune_fx_bright * smoothstep(0.25, 0.75, fx_under)) * fx_day;
     vec3 fa = fx_d * g;
     fa = max(mix(vec3(luma(fa)), fa, mix(1.0, tune_fx_sat, fx_day)), 0.0);
-    vec3 t = c + fa * fx_w;
+    // (over bright ground the sum has nowhere to go: sunlit sand at 0.7 plus a red shot is a pale
+    // pink at 1.0. There the effect also covers part of what is behind it, by its own strength: its
+    // color shows against the ground instead of only lifting it. Not over dark ground, not at night)
+    const float k_fx_cover = 0.6;
+    float fa_m = max(fa.r, max(fa.g, fa.b));
+    float cover = k_fx_cover * fx_day * fx_w * smoothstep(0.06, 0.6, fa_m) * smoothstep(0.3, 0.7, luma(c));
+    vec3 t = c * (1.0 - cover) + fa * fx_w;
     float m = max(t.r, max(t.g, t.b));
     float k = tune_fx_knee;
     if (m > k) {
