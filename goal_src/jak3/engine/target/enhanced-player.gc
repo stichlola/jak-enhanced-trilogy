@@ -590,6 +590,11 @@
 
 ;; 0-1: Jak punching or kicking (enhanced-sig-gun-post seeks it): Sig's arms go from his own to Jak's by it
 (define *enhanced-sig-attack-weight* 0.0)
+;; 0-1: Jak off his feet in any other way (jumping, falling, landing, ducking, in a vehicle, on a ledge...):
+;; Sig's arms take Jak's there too. Kept his own, they hung at his sides through a jump and held his idle's
+;; raised gun arm at a steering wheel (that was from before his arms could take Jak's turns at all: the bind
+;; fix above). Standing, walking and running they stay his own (enhanced-sig.gc).
+(define *enhanced-sig-jak-arms* 0.0)
 
 (defbehavior enhanced-skin-arm-fix-init enhanced-skin ()
   "Sig's arm bones' bind directions turned onto Jak's (once, when his skin is made)."
@@ -664,7 +669,9 @@
          ;; over 0.08 s, out over 0.2 s), through *enhanced-sig-arm-fix* (his arms are bound hanging,
          ;; Jak's out in a T)
          (sig? (string= (-> ch name) "sig"))
-         (arm-w (if sig? *enhanced-sig-attack-weight* 0.0))
+         (arm-w (if sig? (fmax *enhanced-sig-attack-weight* *enhanced-sig-jak-arms*) 0.0))
+         ;; his fingers close only in the attacks
+         (fist-w (if sig? *enhanced-sig-attack-weight* 0.0))
          )
     ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
     ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
@@ -754,8 +761,8 @@
              )
             (else
               ;; Sig's fingers: fists with Jak's attack arms
-              (when (and sig? (< 0.0 arm-w) (< k 80) (nonzero? (-> *enhanced-sig-arm-fix* finger k)))
-                (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) arm-w)
+              (when (and sig? (< 0.0 fist-w) (< k 80) (nonzero? (-> *enhanced-sig-arm-fix* finger k)))
+                (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) fist-w)
                 (matrix*! own local (-> nodes data p bone transform))
                 )
               (matrix-copy! bone own)
@@ -926,6 +933,23 @@
     (let ((attack? (enhanced-sig-attacking? (-> self parent 0))))
       (seek! *enhanced-sig-attack-weight* (if attack? 1.0 0.0) (* (if attack? 15.0 5.0) (seconds-per-frame)))
       )
+    )
+  ;; off his feet, Sig's arms are Jak's (in over 0.12 s, back to his own over 0.2 s)
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (afoot? (or (= st 'target-stance)
+                     (= st 'target-walk)
+                     (= st 'target-turn-around)
+                     (= st 'target-stance-ambient)
+                     (= st 'target-stance-look-around)
+                     (= st 'target-look-around)
+                     (= st 'target-startup)
+                     (= st 'target-gun-stance)
+                     (= st 'target-gun-walk)
+                     )
+                 )
+         )
+    (seek! *enhanced-sig-jak-arms* (if afoot? 0.0 1.0) (* (if afoot? 5.0 8.0) (seconds-per-frame)))
     )
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
