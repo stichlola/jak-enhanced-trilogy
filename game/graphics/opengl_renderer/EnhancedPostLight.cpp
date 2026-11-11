@@ -564,6 +564,7 @@ void EnhancedPost::update_scene() {
   g_enhanced_merc.wet = std::max(m_rain, m_wet * 0.5f);
   g_enhanced_play_weather.sand = std::clamp(std::max(m_dust, game_dust), 0.f, 1.f);
   g_enhanced_play_weather.fog = std::clamp(std::max(m_fog, m_mist), 0.f, 1.f);
+  g_enhanced_play_weather.own_rain = weather_mode != 0;
 
   // the ambient sound loops (game/sound/common/enhanced_ambience): rain, light and then heavy, the
   // dripping once it stops while the puddles are still there, the storm's (and sandstorm's) wind,

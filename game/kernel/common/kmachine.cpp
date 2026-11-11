@@ -1492,6 +1492,12 @@ u64 pc_enhanced_night() {
   return bool_to_symbol(w.enabled && !enhanced_light() && w.night.load() > 0.5f);
 }
 
+// Enhanced: the post pass has its own weather and rain sound (the ambience loops, following the
+// rain it draws): the game's rain-hiss, which follows the game's own cloud and fog, stays quiet
+u64 pc_enhanced_own_rain() {
+  return bool_to_symbol(g_enhanced_play_weather.own_rain.load());
+}
+
 // Enhanced: how much the sand in the air drags on wheels on sand and dirt, percent over the
 // ground's own (0: none, up to 75 in a full sandstorm; 0 when the weather doesn't affect play)
 u64 pc_enhanced_storm_drag() {
@@ -1876,6 +1882,7 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-minimap-size", (void*)pc_enhanced_minimap_size);
   make_func_symbol_func("pc-enhanced-storm-drag", (void*)pc_enhanced_storm_drag);
   make_func_symbol_func("pc-enhanced-night?", (void*)pc_enhanced_night);
+  make_func_symbol_func("pc-enhanced-own-rain?", (void*)pc_enhanced_own_rain);
   make_func_symbol_func("pc-enhanced-bed", (void*)pc_enhanced_bed);
   make_func_symbol_func("pc-enhanced-hint-once", (void*)pc_enhanced_hint_once);
   make_func_symbol_func("pc-enhanced-photo", (void*)pc_enhanced_photo);

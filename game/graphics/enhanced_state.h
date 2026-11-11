@@ -85,6 +85,11 @@ struct EnhancedPlayWeather {
   std::atomic<float> sand{0.f};
   std::atomic<float> fog{0.f};
   std::atomic<float> night{0.f};
+  // the post pass draws its own weather (Enhanced on, any weather but the game's own, mode 0) and
+  // plays its own rain loops (enhanced_ambience): the game's rain-hiss stays quiet then
+  // (pc-enhanced-own-rain?), or it would play under a clear sky whenever the game's hidden cloud
+  // and fog values are both high
+  std::atomic<bool> own_rain{false};
 };
 extern EnhancedPlayWeather g_enhanced_play_weather;
 
