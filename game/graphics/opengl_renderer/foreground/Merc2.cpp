@@ -1419,9 +1419,12 @@ void Merc2::do_draws(const Draw* draw_array,
   // Enhanced: the parts' materials, by their textures' names
   const auto& char_materials = enhanced_level_char_materials(lev);
   // Enhanced: and the relief maps made for them, on texture unit 1 (nearly always none)
-  const bool relief_on = enhanced_remade_has_relief();
+  const bool remade_relief = enhanced_remade_has_relief();
   static const std::vector<std::pair<GLuint, u8>> no_relief;
-  const auto& level_relief = relief_on ? enhanced_level_relief(lev) : no_relief;
+  const auto& level_relief = remade_relief ? enhanced_level_relief(lev) : no_relief;
+  // (else the HD texture's PBR map, EnhancedPbr.h: mode 3, normal and roughness)
+  const bool pbr_on = g_enhanced_pbr && !lev->enh_pbr.empty();
+  const bool relief_on = remade_relief || pbr_on;
   GLuint last_relief = 0;
   glUniform1i(uniforms.enh_relief, 0);
   bool normal_vtx_buffer_bound = true;
@@ -1555,8 +1558,12 @@ void Merc2::do_draws(const Draw* draw_array,
         if (draw.texture < (int)level_relief.size()) {
           relief = level_relief[draw.texture];
         }
-      } else if ((draw.texture & 0xffffff00) != 0xefffff00) {
+      } else if (remade_relief && (draw.texture & 0xffffff00) != 0xefffff00) {
         relief = enhanced_anim_slot_relief(render_state->version, -(draw.texture + 1));
+      }
+      if (!relief.first && pbr_on && draw.texture >= 0 && draw.texture < (int)lev->enh_pbr.size() &&
+          lev->enh_pbr[draw.texture]) {
+        relief = {lev->enh_pbr[draw.texture], 3};
       }
       if (relief.first != last_relief) {
         glUniform1i(uniforms.enh_relief, relief.second);

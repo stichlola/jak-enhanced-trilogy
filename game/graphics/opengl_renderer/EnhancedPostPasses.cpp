@@ -1317,7 +1317,9 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glBindTexture(GL_TEXTURE_2D, m_albedo_ready ? m_albedo_tex : m_black_tex);
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T27"), 27);
-  glUniform1f(glGetUniformLocation(id, "albedo_on"), m_albedo_ready ? 1.f : 0.f);
+  // (1: the lamps light it (lights.albedo); 0.25: there only for true PBR's roughness, EnhancedPbr.h)
+  static const EnhancedTune t_albedo_lamps("lights.albedo", 0.f);
+  glUniform1f(glGetUniformLocation(id, "albedo_on"), !m_albedo_ready ? 0.f : ((float)t_albedo_lamps > 0.5f ? 1.f : 0.25f));
   // the depth pyramid (unit 29, post.hiz)
   glActiveTexture(GL_TEXTURE29);
   glBindTexture(GL_TEXTURE_2D, m_hiz_ready ? m_hiz_tex : m_black_tex);

@@ -2,6 +2,7 @@
 #include "LoaderStages.h"
 
 #include "EnhancedMapTextures.h"
+#include "EnhancedPbr.h"
 #include "Loader.h"
 
 #include "common/global_profiler/GlobalProfiler.h"
@@ -77,7 +78,8 @@ class TextureLoaderStage : public LoaderStage {
       while (data.lev_data->textures.size() < data.lev_data->level->textures.size()) {
         auto& tex = data.lev_data->level->textures[data.lev_data->textures.size()];
         data.lev_data->textures.push_back(add_texture(*data.tex_pool, tex, false));
-        bytes_this_run += tex.w * tex.h * 4;
+        // (and its PBR map, if any)
+        bytes_this_run += tex.w * tex.h * 4 + enhanced_pbr_upload_next(*data.lev_data);
         tex_this_run++;
         if (tex_this_run > 20) {
           break;

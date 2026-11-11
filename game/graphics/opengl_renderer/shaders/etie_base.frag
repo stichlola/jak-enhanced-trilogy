@@ -167,7 +167,7 @@ void main() {
       T0 = texture(tex_T0, tex_coord.xy);
     }
     color = fragment_color * T0;
-    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
+    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 0.6));  // (a < 1: alpha 1 is tfrag3.frag's PBR-coded albedo)
   } else {
     color = fragment_color/2;
   }

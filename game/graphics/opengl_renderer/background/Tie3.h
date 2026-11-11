@@ -146,6 +146,7 @@ class Tie3 : public BucketRenderer {
   std::string m_level_name;
   const std::vector<GLuint>* m_textures;
   const std::vector<u8>* m_materials = nullptr;  // Enhanced: per texture
+  const std::vector<GLuint>* m_pbr = nullptr;     // Enhanced: per texture, its PBR map (EnhancedPbr.h)
   u64 m_load_id = -1;
 
   std::vector<math::Vector<u8, 4>> m_color_result;

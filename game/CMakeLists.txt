@@ -104,6 +104,7 @@ set(RUNTIME_SOURCE
         graphics/opengl_renderer/EnhancedPostPasses.cpp
         graphics/opengl_renderer/EnhancedPostScene.cpp
         graphics/opengl_renderer/loader/EnhancedMapTextures.cpp
+        graphics/opengl_renderer/loader/EnhancedPbr.cpp
         graphics/opengl_renderer/SlowTimeEffect.cpp
         graphics/opengl_renderer/sprite/GlowRenderer.cpp
         graphics/opengl_renderer/sprite/Sprite3_Distort.cpp

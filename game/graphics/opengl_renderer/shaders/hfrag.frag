@@ -50,7 +50,7 @@ void main() {
       T0.rgb *= mix(vec3(1.0), grain, sand_detail);
     }
     color = fragment_color * T0 * 2;
-    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb * 2.0, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
+    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb * 2.0, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 0.6));  // (a < 1: alpha 1 is tfrag3.frag's PBR-coded albedo)
   } else {
     color = fragment_color;
   }

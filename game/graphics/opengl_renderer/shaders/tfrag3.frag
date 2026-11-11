@@ -23,8 +23,46 @@ uniform int gfx_hack_no_tex;
 // face (curved surfaces), else the face's (hard edges a shared strip vertex would round off)
 uniform int enh_material;  // Enhanced: 0 plain, 1 metal, 2 glossy, 3 sand, 4 rock, 5 rocky ground, 6 wall, 7 wood, 8 rusty metal, 9 painted metal, 10 tile, 11 window, 12 lamp, 13 facade (see EnhancedMaterials.h)
 
+// Enhanced: true PBR (EnhancedPbr.h): the HD texture's companion map on unit 11, R G the tangent-space
+// normal (x along u, y up the picture: v runs down it), B the roughness about the class's own (0.5)
+uniform sampler2D tex_T11;
+uniform int enh_pbr;  // 1: the draw's texture has one (0: none, or PBR off)
+vec4 g_pbr = vec4(0.5, 0.5, 0.5, 0.0);
+bool g_pbr_on = false;
+// per material class (enh_material, 0..13: plain, metal, glossy, sand, rock, rocky ground, wall, wood,
+// rusty, painted, tile, window, lamp, facade): how much of the map's relief, the roughness, and how
+// far the map's roughness moves it
+const float PBR_K[14] = float[14](0.6, 0.3, 0.1, 0.45, 1.0, 0.85, 0.8, 0.7, 0.7, 0.25, 0.25, 0.0, 0.0, 0.0);
+const float PBR_R[14] = float[14](0.7, 0.35, 0.12, 0.8, 0.5, 0.72, 0.68, 0.62, 0.78, 0.4, 0.25, 0.08, 0.6, 0.6);
+const float PBR_RR[14] = float[14](0.5, 0.5, 0.2, 0.4, 0.6, 0.5, 0.5, 0.5, 0.4, 0.4, 0.3, 0.1, 0.2, 0.2);
+
+// the map's normal on the surface: the level has no tangents, so the texture's axes come from the
+// screen-space derivatives of position and uv (a cotangent frame, Schüler 2013). n is either side:
+// the frame flips with it
+vec3 enh_pbr_bump(vec3 n, vec3 dp1, vec3 dp2, vec2 duv1, vec2 duv2) {
+  int mi = clamp(enh_material, 0, 13);
+  float k = PBR_K[mi];
+  if (!g_pbr_on || k <= 0.0) {
+    return n;
+  }
+  vec3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
+  vec3 t = dp2perp * duv1.x + dp1perp * duv2.x;
+  vec3 b = dp2perp * duv1.y + dp1perp * duv2.y;
+  float tb = max(dot(t, t), dot(b, b));
+  if (!(tb > 1e-30)) {
+    return n;
+  }
+  float inv = inversesqrt(tb);
+  vec2 m = (g_pbr.xy * 2.0 - 1.0) * k;
+  float mz = sqrt(max(1.0 - dot(m, m), 0.05));
+  return normalize(t * inv * m.x - b * inv * m.y + n * mz);
+}
+
+vec3 g_dp1, g_dp2;
+vec2 g_duv1, g_duv2;
+
 vec4 enh_pack_normal(vec3 n) {
-  vec3 f = cross(dFdx(enh_pos), dFdy(enh_pos));
+  vec3 f = cross(g_dp1, g_dp2);
   float flen = length(f);
   float len = length(n);
   if (flen > 0.0) {
@@ -42,6 +80,7 @@ vec4 enh_pack_normal(vec3 n) {
   } else {
     return vec4(0.0);
   }
+  n = enh_pbr_bump(n, g_dp1, g_dp2, g_duv1, g_duv2);
   // the material in the 2-bit alpha: 1 plain, 2/3 metal, 1/3 glossy (0: no normal); sand (plain)
   // as a normal 0.9 long (the composite draws the wind's ripples on it)
   // (the rougher classes a step under 1.0, still plain scenery to the composite's tests)
@@ -153,6 +192,11 @@ uniform float enh_fade_in = 1.0;  // a level just drawn: 0 -> 1 over half a seco
 
 void main() {
   enh_albedo_out = vec4(0.0);
+  // (the derivatives first, in uniform control flow: the normal and the PBR map need them)
+  g_dp1 = dFdx(enh_pos);
+  g_dp2 = dFdy(enh_pos);
+  g_duv1 = dFdx(tex_coord.xy);
+  g_duv2 = dFdy(tex_coord.xy);
   if (enh_fade_in < 1.0 && enh_fade_in <= enh_dither()) {
     discard;
   }
@@ -160,7 +204,7 @@ void main() {
       smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) <= enh_dither()) {
     discard;
   }
-  enh_normal_out = enh_pack_normal(enh_normal);
+  vec2 uv_used = tex_coord.xy;  // (where the picture was read: the PBR map is read there too)
   if (gfx_hack_no_tex == 0) {
     //vec4 T0 = texture(tex_T0, tex_coord);
     vec4 T0;
@@ -183,6 +227,7 @@ void main() {
       // (the relief marched on the offset that shows most, so it matches the picture)
       vec2 shift = enh_parallax > 0.0 ? enh_parallax_shift(uv + (pick < 0.5 ? off_a : off_b), dx, dy, px, py) : vec2(0.0);
       T0 = textureGrad(tex_T0, uv + shift + off_a, dx, dy);
+      uv_used = uv + shift + off_a;
       if (nk > 0.0) {
         vec4 b = textureGrad(tex_T0, uv + shift + off_b, dx, dy);
         vec4 mixed = mix(T0, b, smoothstep(0.2, 0.8, pick - 0.1 * dot(T0.rgb - b.rgb, vec3(1.0))));
@@ -192,10 +237,27 @@ void main() {
       T0 = texture(tex_T0, tex_coord.xy);
     }
     color = fragment_color * T0;
-    enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
+    float baked = clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0);
+    // (a < 1: alpha 1 is the PBR-coded albedo below)
+    enh_albedo_out = vec4(T0.rgb, min(baked, 0.6));
+    if (enh_pbr != 0) {
+      g_pbr = textureGrad(tex_T11, uv_used, g_duv1, g_duv2);
+      g_pbr_on = true;
+      // the roughness for the composite, 6 bits in the albedo's spare low bits (10-bit target, 8-bit
+      // texture): code 1..63 over its three channels, alpha 1 says it's there (the other level
+      // shaders write their light under 2/3). Where the baked light is ~0 (alpha 0: no albedo for the
+      // lamps), none: the composite takes the class's own
+      int mi = clamp(enh_material, 0, 13);
+      float r = clamp(PBR_R[mi] + (g_pbr.b - 0.5) * 2.0 * PBR_RR[mi], 0.03, 1.0);
+      int code = 1 + int(r * 62.0 + 0.5);
+      vec3 a8 = floor(clamp(T0.rgb, 0.0, 1.0) * 255.0 + 0.5);
+      vec3 bits = vec3(float((code >> 4) & 3), float((code >> 2) & 3), float(code & 3));
+      enh_albedo_out = vec4((a8 * 4.0 + bits) / 1023.0, baked * 3.0 >= 0.5 ? 1.0 : 0.0);
+    }
   } else {
     color = fragment_color/2;
   }
+  enh_normal_out = enh_pack_normal(enh_normal);
 
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;

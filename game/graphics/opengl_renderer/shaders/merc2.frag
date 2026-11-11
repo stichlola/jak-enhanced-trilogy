@@ -53,6 +53,30 @@ float enh_fade_dither() {
   return (float(m) + 0.5) / 16.0;
 }
 const float BUMP_K[10] = float[10](0.0, 0.6, 1.0, 0.7, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0);
+// true PBR (enh_relief 3): the maps' relief on characters, the roughness per material (default, skin,
+// hair, metal, leather, cloth, fur, eye, lens, lamp) and how far the map moves it, the reflectance
+// head-on (metal: its own color)
+const float PBR_CHAR_K = 0.8;
+const float PBR_CHAR_R[10] = float[10](0.55, 0.5, 0.45, 0.3, 0.45, 0.85, 0.8, 0.1, 0.05, 0.5);
+const float PBR_CHAR_F0[10] = float[10](0.04, 0.028, 0.046, 1.0, 0.04, 0.04, 0.04, 0.025, 0.04, 0.04);
+const float PBR_CHAR_SPEC = 0.8;
+
+// GGX (Trowbridge-Reitz), Smith visibility (Schlick-GGX), Schlick Fresnel: the highlight's share
+// of the light (times n.l), for the view-space n, l, v
+vec3 pbr_ggx(vec3 n, vec3 l, vec3 v, float rough, vec3 f0) {
+  float ndl = max(dot(n, l), 0.0);
+  float ndv = max(abs(dot(n, v)), 1e-3);
+  vec3 h = normalize(l + v);
+  float ndh = max(dot(n, h), 0.0);
+  float a = max(rough * rough, 0.002);
+  float a2 = a * a;
+  float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+  float D = a2 / (3.14159 * dd * dd);
+  float kk = a * 0.5;
+  float vis = 0.25 / ((ndl * (1.0 - kk) + kk) * (ndv * (1.0 - kk) + kk));
+  vec3 F = f0 + (1.0 - f0) * pow(1.0 - max(dot(v, h), 0.0), 5.0);
+  return D * vis * F * ndl;
+}
 
 void main() {
   enh_albedo_out = vec4(0.0);
@@ -100,6 +124,7 @@ void main() {
   // derivative bump). World space, tilting the smooth normal by bump_g; each of the three heights is
   // its own fetch, so a pixel's slope isn't shared with its 2x2 block
   vec3 bump_g = vec3(0.0);
+  float pbr_r = -1.0;  // (the PBR map's roughness, 0.5 = the material's own; -1: none)
   float nrm_len = length(vtx_nrm);
   if (enh_char > 0.0 && (enh_mat > 0 || enh_relief != 0) && gfx_hack_no_tex == 0 && decal_enable == 0 &&
       nrm_len > 0.1) {
@@ -114,9 +139,16 @@ void main() {
       vec3 r2 = cross(N, p_dx);
       float det = dot(p_dx, r1);
       if (abs(det) > 0.01) {
-        if (enh_relief == 1) {
+        if (enh_relief == 1 || enh_relief == 3) {
           // a normal map: the picture's axes on the surface (v runs down the picture, green up it)
           vec3 m = textureGrad(tex_relief, vtx_st, st_dx, st_dy).xyz * 2.0 - 1.0;
+          if (enh_relief == 3) {
+            // (the HD texture's PBR map, EnhancedPbr.h: x, y, the roughness in b; z rebuilt, the
+            // relief scaled by the part's material)
+            pbr_r = m.z * 0.5 + 0.5;
+            m.xy *= PBR_CHAR_K * BUMP_K[enh_mat > 0 && enh_mat < 10 ? enh_mat : 0] + (enh_mat == 0 ? PBR_CHAR_K * 0.7 : 0.0);
+            m.z = sqrt(max(1.0 - dot(m.xy, m.xy), 0.05));
+          }
           vec3 axis_u = (r1 * st_dx.x + r2 * st_dy.x) * sign(det);
           vec3 axis_v = (r1 * st_dx.y + r2 * st_dy.y) * sign(det);
           float axis_k = inversesqrt(max(max(dot(axis_u, axis_u), dot(axis_v, axis_v)), 1e-12));
@@ -145,7 +177,7 @@ void main() {
         bump_g -= N * dot(bump_g, N);
         // (held back: at grazing angles a pixel spans so much that the slope explodes. A normal map
         // says outright how steep it means to be)
-        float g_max = enh_relief == 1 ? 1.5 : 0.6;
+        float g_max = enh_relief == 1 || enh_relief == 3 ? 1.5 : 0.6;
         float g_len = length(bump_g);
         if (g_len > g_max) {
           bump_g *= g_max / g_len;
@@ -248,7 +280,21 @@ void main() {
     }
     float spec = pow(max(dot(nb, normalize(l + v)), 0.0), sp_pow) * ndl_b;
     vec3 key = clamp(vtx_key_color, 0.0, 1.5);
-    color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * sp_k * sp_col);
+    if (pbr_r >= 0.0 && c > 0.0) {
+      // true PBR (the HD texture's map): GGX from the key light, the roughness the material's own
+      // moved by the map's, metal tinted by its color; the light it reflects leaves the diffuse
+      int mi = enh_mat >= 0 && enh_mat < 10 ? enh_mat : 0;
+      float rough = clamp(PBR_CHAR_R[mi] + (pbr_r - 0.5) * 0.6, 0.04, 1.0);
+      vec3 f0 = enh_mat == MAT_METAL ? albedo * 0.9 + 0.05 : vec3(PBR_CHAR_F0[mi]);
+      float fv = pow(1.0 - clamp(abs(dot(nb, v)), 0.0, 1.0), 5.0);
+      color.rgb *= 1.0 - (max(1.0 - rough, PBR_CHAR_F0[mi]) - PBR_CHAR_F0[mi]) * fv * (enh_mat == MAT_METAL ? 0.0 : 1.0) * c;
+      vec3 g = pbr_ggx(nb, l, v, rough, f0) * 3.14159 * PBR_CHAR_SPEC;
+      g /= 1.0 + max(g.r, max(g.g, g.b)) * 0.4;
+      color.rgb += key * (rim * enh_rim_spec.x * 0.5) + key * g * enh_rim_spec.y * c;
+      color.rgb += key * spec * enh_rim_spec.y * sp_k * sp_col * (1.0 - c);
+    } else {
+      color.rgb += key * (rim * enh_rim_spec.x * 0.5 + spec * enh_rim_spec.y * sp_k * sp_col);
+    }
     // soft light past the terminator, warm like light scattered under skin and cloth (the game's
     // own light stops hard where the surface turns away)
     float wrap = clamp((dot(nb, l) + 0.45) / 1.45, 0.0, 1.0) - ndl_b;

@@ -90,7 +90,7 @@ void main() {
   enh_normal_out = vec4(normalize(enh_imp_turn * n) * (enh_stone > 0.5 ? 0.75 : 0.97) * 0.5 + 0.5, 1.0);
 
   color = fragment_color * T0;
-  enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0));
+  enh_albedo_out = vec4(T0.rgb, clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 0.6));  // (a < 1: alpha 1 is tfrag3.frag's PBR-coded albedo)
   // a picture is a flat quad: none of the shade the model's blades (or a heap's stones) cast on each
   // other, deepest at its foot (the models nearer read dark, their far pictures cream puffs)
   // (less of it on a stone: its faces are in the picture, only the foot's contact shade is missing)

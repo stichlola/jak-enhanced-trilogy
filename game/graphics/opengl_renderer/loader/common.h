@@ -8,9 +8,17 @@
 
 #include "third-party/glad/include/glad/glad.h"
 
+// Enhanced: a PBR companion map read from disk, waiting for the GPU (see EnhancedPbr.h)
+struct EnhPbrPixels {
+  int w = 0, h = 0;
+  std::vector<u32> px;
+};
+
 struct LevelData {
   std::unique_ptr<tfrag3::Level> level;
   std::vector<GLuint> textures;
+  std::vector<GLuint> enh_pbr;                  // Enhanced: per texture, its PBR map (0: none)
+  std::vector<EnhPbrPixels> enh_pbr_pending;    // Enhanced: ...read, not yet uploaded
   u64 load_id = UINT64_MAX;
   mutable std::vector<u8> enh_materials;  // Enhanced: see EnhancedMaterials.h
   mutable std::vector<u8> enh_char_materials;  // Enhanced: and the characters', same place
