@@ -32,9 +32,35 @@ SEQS = {
         (120, TAG, 19), (60, END, 0),
     ],
     "idle": [(0, TAG, 1), (240, END, 0)],
+    # standing punch, a combo of three, a running punch
+    "punch": [(0, TAG, 40), (30, PRESS, SQ), (90, TAG, 41), (0, PRESS, SQ), (16, PRESS, SQ), (16, PRESS, SQ),
+              (120, TAG, 42), (0, LY, 0), (70, PRESS, SQ), (50, LY, -1), (80, TAG, 43), (30, END, 0)],
+    "kick": [(0, TAG, 44), (30, PRESS, CI), (100, TAG, 45), (0, LY, 0), (70, PRESS, CI), (50, LY, -1), (80, TAG, 46), (30, END, 0)],
     "hit": [(0, TAG, 30), (30, HOOK, 2), (150, TAG, 31), (60, END, 0)],
+    # the desert's parked Hellcat: beside it, in with triangle (it lifts off), sit, out with triangle
+    "hellcat": [(0, TAG, 70), (0, HOOK, 20), (90, TAG, 71), (0, PRESS, TR), (150, TAG, 72), (240, TAG, 73), (0, PRESS, TR), (180, TAG, 74), (30, END, 0)],
+    "board": [(0, TAG, 60), (0, HOOK, 12), (90, TAG, 61), (0, LY, 0), (180, PRESS, X), (90, LY, -1), (60, TAG, 62), (0, PRESS, TR), (120, END, 0)],
+    "jumps": [(0, TAG, 6), (30, PRESS, X), (90, TAG, 7), (0, PRESS, X), (0, HOLD, X), (20, HOLD, 0),
+              (100, TAG, 8), (0, PRESS, X), (0, HOLD, X), (14, HOLD, 0), (2, PRESS, X), (0, HOLD, X), (12, HOLD, 0),
+              (110, TAG, 13), (0, PRESS, X), (0, HOLD, X), (14, HOLD, 0), (0, PRESS, SQ),
+              (140, TAG, 14), (0, PRESS, X), (0, HOLD, X), (14, HOLD, 0), (0, PRESS, CI),
+              (120, TAG, 15), (0, HOLD, L1), (30, PRESS, SQ), (25, HOLD, 0),
+              (120, TAG, 16), (0, HOLD, L1), (90, LY, 90), (90, LY, -1), (0, HOLD, 0),
+              (60, TAG, 17), (0, LY, 0), (60, PRESS, L1), (60, LY, -1),
+              (60, TAG, 18), (0, HOLD, L1), (20, PRESS, X), (0, HOLD, L1 | X), (15, HOLD, 0),
+              (120, TAG, 19), (60, END, 0)],
+    "run": [(0, TAG, 1), (60, TAG, 2), (0, LY, 90), (150, TAG, 3), (0, LY, 0), (240, TAG, 4), (0, PRESS, X),
+            (90, TAG, 5), (0, LY, -1), (120, END, 0)],
     "death": [(0, TAG, 32), (30, HOOK, 3), (420, TAG, 33), (60, END, 0)],
 }
+
+
+def vehicle(n):
+    """Into a new vehicle of type n, sit, drive (throttle, left, right), out with triangle, in again
+    (the mount animation), out again."""
+    return [(0, TAG, 50), (0, HOOK, 100 + n), (150, TAG, 51), (120, TAG, 52), (0, HOLD, X), (60, LX, 30), (60, LX, 225),
+            (60, LX, -1), (0, HOLD, 0), (60, TAG, 53), (0, PRESS, TR), (150, TAG, 54), (0, PRESS, TR), (150, TAG, 55),
+            (60, TAG, 56), (0, PRESS, TR), (150, TAG, 57), (30, END, 0)]
 
 
 def send(req, timeout=120):
@@ -102,4 +128,7 @@ if __name__ == "__main__":
         args.remove("--load")
         load()
     for n in args[1:]:
-        run(args[0], n)
+        if n.startswith("veh:"):
+            run(args[0], n, vehicle(int(n[4:])))
+        else:
+            run(args[0], n)

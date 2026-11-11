@@ -216,7 +216,48 @@
     )
   (none))
 
+;; sequence hooks (op 8): 1 to the open sand by the desert's parked Hellcat, 2 a hit, 3 a deadly hit, 12 onto the
+;; jetboard, 20 beside the parked Hellcat, 100 + n into a new vehicle of type n
 (defun ca-hook ((k int))
+  (cond
+    ((= k 1)
+     (let ((pos (new 'stack-no-clear 'vector)))
+       (vector-copy! pos *enhanced-hellcat-spot*)
+       (+! (-> pos x) (meters -30.0))
+       (+! (-> pos z) (meters 20.0))
+       (+! (-> pos y) (meters 1.0))
+       (move-to-point! (-> *target* control) pos)))
+    ((= k 2)
+     (send-event *target* 'attack #f
+                 (static-attack-info :mask (vehicle-impulse-factor) ((id (new-attack-id)) (damage 2.0) (vehicle-damage-factor 1.0)
+                                                                     (vehicle-impulse-factor 1.0) (mode 'generic)
+                                                                     (shove-up (meters 2)) (shove-back (meters 4))))))
+    ((= k 3)
+     (set! (-> *target* fact health) 1.0)
+     (send-event *target* 'attack #f
+                 (static-attack-info :mask (vehicle-impulse-factor) ((id (new-attack-id)) (damage 4.0) (vehicle-damage-factor 1.0)
+                                                                     (vehicle-impulse-factor 1.0) (mode 'generic)
+                                                                     (shove-up (meters 2)) (shove-back (meters 4))))))
+    ((= k 20)
+     (when (and (nonzero? deshcat-hellcat) (level-get *level* 'deshcat) (deshcat-hellcat))
+       (let ((hc (the-as process-drawable (deshcat-hellcat)))
+             (pos (new 'stack-no-clear 'vector))
+             (side (new 'stack-no-clear 'vector)))
+         (vector-x-quaternion! side (-> hc root quat))
+         (vector+float*! pos (-> hc root trans) side (meters 4.5))
+         (set! (-> pos y) (+ (-> *enhanced-hellcat-spot* y) (meters 1.0)))
+         (set! (-> pos w) 1.0)
+         (move-to-point! (-> *target* control) pos)
+         (quaternion-axis-angle! (-> *target* control quat-for-control) 0.0 1.0 0.0
+                                 (atan (- (-> hc root trans x) (-> pos x)) (- (-> hc root trans z) (-> pos z))))
+         (quaternion-copy! (-> *target* control quat) (-> *target* control quat-for-control)))))
+    ((= k 12)
+     (logior! (-> *game-info* features) (game-feature board))
+     (send-event *target* 'change-mode 'board #f))
+    ((>= k 100)
+     (set! *enhanced-vehicle-wanted* (- k 100))
+     (set! *enhanced-vehicle-frames* 59))
+    )
   (format 0 "[ca] hook ~D~%" k)
   (none))
 
