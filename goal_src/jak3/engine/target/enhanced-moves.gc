@@ -705,3 +705,96 @@
     )
   (none)
   )
+
+;; ---- Ashelin's own reactions: hit and thrown back, dying ----
+;; Her art group (the oasis AI's) has its own clips for both, so she doesn't take Jak's poses for them:
+;; thrown onto her back (knocked-back0, 0.47 s), the landing and kip-up back onto her feet (knocked-back-land0,
+;; 1.13 s) or staying down (knocked-back-die0); dying where she stands (die-in-place0, 3.2 s). They chain in
+;; place: each starts on the pose the last one ends on, the kip-up ends on her idle's. Jak's target does his
+;; own hit and death states underneath (the arc through the air, the camera, the respawn).
+(defconstant ASHELIN_KNOCKED_BACK 7)
+(defconstant ASHELIN_KNOCKED_BACK_LAND 8)
+(defconstant ASHELIN_KNOCKED_BACK_DIE 9)
+(defconstant ASHELIN_DIE_IN_PLACE 26)
+
+(define *enhanced-react* 0)      ;; 0 none, 1 thrown back, 2 getting up, 3 dying where she stands, 4 down for good
+(define *enhanced-react-pid* 0)  ;; her skin process
+
+(defun enhanced-react-active? ()
+  "Is the character in one of its own hit or death clips (its pose comes from them, not from Jak)?"
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (if (and skin (nonzero? *enhanced-react*) (= (-> skin pid) *enhanced-react-pid*)) #t #f)
+    )
+  )
+
+(defbehavior enhanced-react-play enhanced-skin ((idx int) (rate float) (blend time-frame))
+  "Her clip idx once through, then held on its last frame. #t once it is there."
+  (let ((anim (the-as art-joint-anim (-> self draw art-group data idx))))
+    (when (!= idx (-> self anim))
+      (set! (-> self anim) idx)
+      (ja-channel-push! 1 blend)
+      (ja :group! anim :num! min)
+      )
+    (ja :num! (seek! max rate))
+    (>= (ja-frame-num 0) (the float (+ -1 (ja-num-frames 0))))
+    )
+  )
+
+(defbehavior enhanced-react-animate enhanced-skin ()
+  "Each frame, first thing when her animation is picked: her own clip for Jak's hit or death state. #t when
+   it picked one."
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (was (if (= (-> self pid) *enhanced-react-pid*) *enhanced-react* 0))
+         (now 0)
+         )
+    (when (and (string= (-> self char name) "ashelin")
+               (< ASHELIN_DIE_IN_PLACE (-> self draw art-group length))
+               (-> self draw art-group data ASHELIN_DIE_IN_PLACE)
+               )
+      (cond
+        ((= st 'target-death)
+         ;; thrown first: she stays down; else she dies where she stands
+         (set! now (if (or (= was 1) (= was 2) (= was 4)) 4 3))
+         )
+        ((= st 'target-hit)
+         (set! now 1)
+         )
+        ;; back on Jak's feet: she gets up (until the clip is through)
+        ((or (= was 1) (= was 2))
+         (set! now 2)
+         )
+        )
+      (case now
+        ((1)
+         (enhanced-react-play ASHELIN_KNOCKED_BACK 1.0 (seconds 0.05))
+         )
+        ((2)
+         ;; (faster than the AI's, more so when Jak already walks on)
+         (if (enhanced-react-play ASHELIN_KNOCKED_BACK_LAND
+                                  (if (< (meters 2.0) (-> tgt control ctrl-xz-vel)) 2.4 1.7)
+                                  (seconds 0.05)
+                                  )
+             (set! now 0)
+             )
+         )
+        ((3)
+         (enhanced-react-play ASHELIN_DIE_IN_PLACE 1.0 (seconds 0.1))
+         )
+        ((4)
+         (enhanced-react-play ASHELIN_KNOCKED_BACK_DIE 1.0 (seconds 0.1))
+         )
+        )
+      )
+    ;; into a reaction from Jak's pose or her own: from the pose last drawn
+    (if (and (zero? was) (nonzero? now))
+        (enhanced-move-crossfade 12.0)
+        )
+    (when (!= now was)
+      (format 0 "[enhanced-react] ~D -> ~D (~A)~%" was now st)
+      )
+    (set! *enhanced-react* now)
+    (set! *enhanced-react-pid* (-> self pid))
+    (nonzero? now)
+    )
+  )

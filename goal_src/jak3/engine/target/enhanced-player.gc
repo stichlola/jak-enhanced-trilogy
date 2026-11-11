@@ -119,6 +119,9 @@
 (define-extern enhanced-move-post (function none :behavior enhanced-skin))
 (define-extern enhanced-move-snap-post (function none :behavior enhanced-skin))
 (define-extern enhanced-ride-post (function none :behavior enhanced-skin))
+;; a character's own clips for Jak's hit and death states (enhanced-moves.gc)
+(define-extern enhanced-react-animate (function symbol :behavior enhanced-skin))
+(define-extern enhanced-react-active? (function symbol))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -414,6 +417,10 @@
       ((>= *enhanced-player-anim* 3)
        (enhanced-skin-play (min *enhanced-player-anim* (+ -1 (-> self draw art-group length))) 1.0 (seconds 0.1))
        )
+      ;; hit or dying: its own clips for that (enhanced-moves.gc)
+      ((enhanced-react-animate)
+       #t
+       )
       ;; Ashelin kicking: her idle under the kick's pose (enhanced-ashelin-kick.gc)
       ((enhanced-ashelin-kick-active?)
        (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.1))
@@ -462,6 +469,8 @@
         (enhanced-ashelin-kick-active?)
         ;; and so are the characters' own attack moves
         (enhanced-move-active?)
+        ;; hit or dying in its own clips
+        (enhanced-react-active?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
          ;; not just after an attack (Jak's recovery, or the next hit of a combo, is still coming)
@@ -890,7 +899,7 @@
          (set! (-> self pose-blend) 1.0)
          )
         ;; one of its own attack moves: on its own idle at once (the move crossfades from the pose last drawn)
-        ((enhanced-move-active?)
+        ((or (enhanced-move-active?) (enhanced-react-active?))
          (set! (-> self pose-blend) 0.0)
          )
         (own?
