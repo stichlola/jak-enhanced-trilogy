@@ -687,6 +687,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     // the ambient sounds go quiet with the rest of Enhanced
     static const float silent[snd::ambience::kLayers] = {};
     snd::ambience::set_targets(silent);
+    // and the game's own rain sound is back
+    g_enhanced_play_weather.own_rain = false;
     return;
   }
   // (the scene's copy in half floats too while the game's frame is (post.hdr_scene, OpenGLRenderer's
