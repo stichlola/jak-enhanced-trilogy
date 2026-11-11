@@ -636,6 +636,27 @@
 ;; hip width 0.85 -> 0.71 at a run
 (define *enhanced-sig-run-step* 0.45)
 
+(defun enhanced-jak-ankle! ((dst vector) (jak target) (leg int))
+  "Jak's ankle (0 left, 1 right) as his animation has it, before his own leg IK. That IK plants each foot on
+   the ground under where it was a frame ago, so in his walk and run blends, where his prejoint (and his
+   body with it) sits 2-4 m from his root for whole seconds and jumps there and back, his posed ankles lag
+   metres behind his body: taken as they are, a character's leg IK reached for them (feet popping up to
+   2.3 m, legs stretched out for a few frames at every start and stop). The IK keeps the knee's matrix from
+   before it ran; the ankle is one shin's length down its y."
+  (let ((ik (-> jak leg-ik leg)))
+    (cond
+      ((< 0.0 (-> ik blend))
+       (vector+float*! dst (-> ik elbow-matrix-no-ik trans) (-> ik elbow-matrix-no-ik uvec) (-> ik hand-dist))
+       (set! (-> dst w) 1.0)
+       )
+      (else
+        (vector-copy! dst (-> jak node-list data (if (zero? leg) 41 47) bone transform trans))
+        )
+      )
+    dst
+    )
+  )
+
 (defbehavior enhanced-sig-legs enhanced-skin ()
   "Sized, in Jak's pose: his ankles where Jak's are against his root, forward and back as far as Jak's (so
    his feet stay planted at Jak's speed: his legs are longer), sideways and up scaled by his size. His feet
@@ -659,7 +680,22 @@
                )
       (let* ((jn (-> tgt node-list))
              (nodes (-> self node-list))
-             (jroot (-> jn data 2 bone transform trans))
+             ;; Jak's body's place for his legs: his prejoint, moved by how far his thighs are from his
+             ;; hips (flat). His bones as a child process reads them come in two groups in his walk and run
+             ;; blends: prejoint, main and hips sit up to 4 m from his root for whole stretches and jump there
+             ;; and back, while his thighs and legs stay at his root (measured: hips to prejoint 0.03 m,
+             ;; left thigh to prejoint 3.94 m in the same frame; he is drawn whole). Against the prejoint
+             ;; alone his ankles were metres away on those frames and this leg IK reached for them.
+             (jroot (let ((r (vector-copy! (new 'stack-no-clear 'vector) (-> jn data 2 bone transform trans)))
+                          (hips (-> jn data 38 bone transform trans))
+                          (lt (-> jn data 39 bone transform trans))
+                          (rt (-> jn data 45 bone transform trans))
+                          )
+                      (+! (-> r x) (- (* 0.5 (+ (-> lt x) (-> rt x))) (-> hips x)))
+                      (+! (-> r z) (- (* 0.5 (+ (-> lt z) (-> rt z))) (-> hips z)))
+                      r
+                      )
+                    )
              (sroot (-> nodes data 0 bone transform trans))
              (fwd (vector-z-quaternion! (new 'stack-no-clear 'vector) (-> self root quat)))
              (o (new 'stack-no-clear 'vector))
@@ -672,6 +708,7 @@
         (vector-normalize! fwd 1.0)
         (dotimes (leg 2)
           (let* ((jank (if (zero? leg) 41 47))
+                 (jpos (enhanced-jak-ankle! (new 'stack-no-clear 'vector) tgt leg))
                  (thigh (if (zero? leg) 18 22))
                  (a (-> nodes data (+ thigh 2) bone transform trans))
                  ;; their ankles' heights in their bind poses: only the lift above it is scaled
@@ -682,7 +719,7 @@
                      )
                  (sh (-> self bind-world (+ thigh 2) trans y))
                  )
-            (vector-! o (-> jn data jank bone transform trans) jroot)
+            (vector-! o jpos jroot)
             (set! (-> o w) 0.0)
             (let ((f (vector-dot o fwd)))
               (vector-float*! t o size)
@@ -704,7 +741,7 @@
             ;; attacks slide on purpose)
             (let* ((lock (if (zero? leg) *enhanced-sig-foot-lock-l* *enhanced-sig-foot-lock-r*))
                    (was (if (zero? leg) *enhanced-sig-foot-down-l* *enhanced-sig-foot-down-r*))
-                   (down (and (< (- (-> jn data jank bone transform trans y) (-> tgt control trans y)) (+ jh (meters 0.05)))
+                   (down (and (< (- (-> jpos y) (-> jroot y)) (+ jh (meters 0.05)))
                               (logtest? (-> tgt control status) (collide-status on-surface))
                               (not (enhanced-sig-attacking? tgt))
                               )

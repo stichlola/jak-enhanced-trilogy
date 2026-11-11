@@ -101,9 +101,6 @@
 (define-extern enhanced-ashelin-gun-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-ashelin-gun-post (function none :behavior enhanced-skin))
 (define-extern enhanced-skin-idle-rate (function enhanced-character float))
-;; Ashelin's front kick (enhanced-ashelin-kick.gc): kicking now, and her pose for it
-(define-extern enhanced-ashelin-kick-active? (function symbol))
-(define-extern enhanced-ashelin-kick-post (function none :behavior enhanced-skin))
 ;; Sig's streamed clips (enhanced-sig.gc): his walk and his cutscenes' poses
 (define-extern enhanced-sig-animate (function symbol :behavior enhanced-skin))
 (define-extern enhanced-sig-own? (function symbol :behavior enhanced-skin))
@@ -113,6 +110,16 @@
 (define-extern enhanced-sig-gun-post (function none :behavior enhanced-skin))
 (define-extern enhanced-sig-attacking? (function target object))
 (define-extern enhanced-sig-slerp-local! (function matrix matrix matrix float matrix))
+;; the characters' own attack moves (enhanced-moves.gc): one showing now, its timeline, its pose
+(define-extern enhanced-move-active? (function symbol))
+(define-extern enhanced-move-update (function none :behavior enhanced-skin))
+(define-extern enhanced-move-post (function none :behavior enhanced-skin))
+(define-extern enhanced-move-snap-post (function none :behavior enhanced-skin))
+(define-extern enhanced-move-crossfade (function float none :behavior enhanced-skin))
+(define-extern enhanced-ride-post (function none :behavior enhanced-skin))
+;; a character's own clips for Jak's hit and death states (enhanced-moves.gc)
+(define-extern enhanced-react-animate (function symbol :behavior enhanced-skin))
+(define-extern enhanced-react-active? (function symbol))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -408,9 +415,9 @@
       ((>= *enhanced-player-anim* 3)
        (enhanced-skin-play (min *enhanced-player-anim* (+ -1 (-> self draw art-group length))) 1.0 (seconds 0.1))
        )
-      ;; Ashelin kicking: her idle under the kick's pose (enhanced-ashelin-kick.gc)
-      ((enhanced-ashelin-kick-active?)
-       (enhanced-skin-play (-> ch idle) 1.0 (seconds 0.1))
+      ;; hit or dying: its own clips for that (enhanced-moves.gc)
+      ((enhanced-react-animate)
+       #t
        )
       ;; Ashelin standing with her gun out: her aiming stance (enhanced-ashelin-gun.gc)
       ((enhanced-ashelin-gun-animate)
@@ -419,6 +426,10 @@
       ;; Sig's streamed clips (enhanced-sig.gc)
       ((enhanced-sig-animate)
        #t
+       )
+      ;; one of its own attack moves: its idle under the move's pose (enhanced-moves.gc)
+      ((enhanced-move-active?)
+       (enhanced-skin-play (-> ch idle) (enhanced-skin-idle-rate ch) (seconds 0.1))
        )
       ((or (focus-test? tgt pilot) (not walk?) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
        (enhanced-skin-play (-> ch idle) (enhanced-skin-idle-rate ch) (seconds 0.2))
@@ -448,8 +459,10 @@
         (top (-> self char top-speed))
         )
     (or (enhanced-sig-own?)
-        ;; Ashelin's kick is posed on her own idle
-        (enhanced-ashelin-kick-active?)
+        ;; the characters' own attack moves are posed on their own idle
+        (enhanced-move-active?)
+        ;; hit or dying in its own clips
+        (enhanced-react-active?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
          ;; not just after an attack (Jak's recovery, or the next hit of a combo, is still coming)
@@ -477,16 +490,68 @@
   )
 
 (defun enhanced-matrix-blend-rows! ((dst matrix) (a matrix) (b matrix) (w float) (len matrix))
-  "dst = a and b blended by w (rows), each turn row scaled back to len's (keeps a bone's scale)."
-  (dotimes (r 4)
-    (vector-lerp! (-> dst vector r) (-> a vector r) (-> b vector r) w)
+  "dst = a and b blended by w: a turned toward b (slerp: rows blended between two poses far apart come out
+   sheared), each turn row scaled to len's (keeps a bone's scale), the place blended. dst may be a, b or len."
+  (let ((na (new 'stack-no-clear 'matrix))
+        (nb (new 'stack-no-clear 'matrix))
+        (qa (new 'stack-no-clear 'quaternion))
+        (qb (new 'stack-no-clear 'quaternion))
+        (l (new 'stack-no-clear 'vector))
+        (tr (new 'stack-no-clear 'vector))
+        (ok #t)
+        )
+    (vector-lerp! tr (-> a trans) (-> b trans) w)
+    (dotimes (r 3)
+      (set! (-> l data r) (vector-length (-> len vector r)))
+      (vector-copy! (-> na vector r) (-> a vector r))
+      (vector-copy! (-> nb vector r) (-> b vector r))
+      (set! (-> na vector r w) 0.0)
+      (set! (-> nb vector r w) 0.0)
+      (if (or (< (vector-length (-> na vector r)) 0.001) (< (vector-length (-> nb vector r)) 0.001))
+          (set! ok #f)
+          )
+      )
+    (cond
+      ;; all of a (or a joint with an empty row): its rows as they are
+      ((or (not ok) (<= w 0.0))
+       (dotimes (r 3)
+         (vector-lerp! (-> dst vector r) (-> na vector r) (-> nb vector r) (fmax 0.0 (fmin 1.0 w)))
+         (set! (-> dst vector r w) 0.0)
+         (if (< 0.0001 (vector-length (-> dst vector r)))
+             (vector-normalize! (-> dst vector r) (-> l data r))
+             )
+         (set! (-> dst vector r w) 0.0)
+         )
+       )
+      (else
+        (dotimes (r 3)
+          (vector-normalize! (-> na vector r) 1.0)
+          (vector-normalize! (-> nb vector r) 1.0)
+          )
+        ;; (all of b goes through a quaternion as well: b is often a bone of Jak's, and the squash and
+        ;; stretch of his jumps and vehicle moves leaves its rows out of square: skew 0.36 on the skin)
+        (matrix->quaternion qb nb)
+        (cond
+          ((>= w 1.0)
+           (quaternion-copy! qa qb)
+           )
+          (else
+            (matrix->quaternion qa na)
+            (quaternion-slerp! qa qa qb w)
+            )
+          )
+        (quaternion-normalize! qa)
+        (quaternion->matrix dst qa)
+        (dotimes (r 3)
+          (vector-float*! (-> dst vector r) (-> dst vector r) (-> l data r))
+          (set! (-> dst vector r w) 0.0)
+          )
+        )
+      )
+    (vector-copy! (-> dst trans) tr)
+    (set! (-> dst trans w) 1.0)
+    dst
     )
-  (dotimes (r 3)
-    (vector-normalize! (-> dst vector r) (vector-length (-> len vector r)))
-    (set! (-> dst vector r w) 0.0)
-    )
-  (set! (-> dst trans w) 1.0)
-  dst
   )
 
 ;; a sized character on Jak's walk and run (above its own walk's speeds): how much higher its main and
@@ -494,7 +559,17 @@
 ;; against thigh plus shin) 0.77 -> 0.88 at a run (Jak's 0.74): less of a crouch at his height
 (define *enhanced-skin-run-lift* (meters 0.35))
 
+;; that weight as the run's corrections use it: eased toward it once a frame (enhanced-skin-post, in 0.17 s).
+;; Taken as it is, it went to 0 the moment Jak's state was no longer his walk (a jump, a stop, an attack):
+;; the body dropped by the run lift, 35 cm, in one frame, its feet and hands with it.
+(define *enhanced-skin-run-w* 0.0)
+
 (defun enhanced-skin-run-weight ((jak target))
+  "0-1: how much of the run's corrections (lift, narrower and lower steps) shows now."
+  *enhanced-skin-run-w*
+  )
+
+(defun enhanced-skin-run-weight-raw ((jak target))
   "0-1: Jak walking or running on the ground, from 4.5 m/s (0) to 7.5 m/s and up (1)."
   (if (and (logtest? (-> jak control status) (collide-status on-surface))
            (not (focus-test? jak in-air pilot pilot-riding edge-grab pole flut board mech tube))
@@ -526,6 +601,22 @@
 
 ;; 0-1: Jak punching or kicking (enhanced-sig-gun-post seeks it): Sig's arms go from his own to Jak's by it
 (define *enhanced-sig-attack-weight* 0.0)
+;; 0-1: Jak off his feet in any other way (jumping, falling, landing, ducking, in a vehicle, on a ledge...):
+;; Sig's arms take Jak's there too. Kept his own, they hung at his sides through a jump and held his idle's
+;; raised gun arm at a steering wheel (that was from before his arms could take Jak's turns at all: the bind
+;; fix above). Standing, walking and running they stay his own (enhanced-sig.gc).
+(define *enhanced-sig-jak-arms* 0.0)
+;; 0-1: riding with his hands on something (a vehicle, a leaper, a ledge, a pole), and with his feet on
+;; something (a vehicle, a leaper, the board, a tube): the character's hands and feet go where Jak's are
+;; (enhanced-ride-post, enhanced-moves.gc)
+(define *enhanced-ride-arms* 0.0)
+(define *enhanced-ride-legs* 0.0)
+;; 0-1: in a vehicle's seat. A sized character's body is as far from its root as Jak's there (the seat is
+;; made for him), not scaled by its size: by this weight (0.12 s), or its body jumped by the difference the
+;; frame Jak got in or out (Sig: 0.4 m). Getting in and out also crossfade from the pose last drawn
+;; (enhanced-moves.gc): Jak's pose comes and goes at once there.
+(define *enhanced-skin-seat* 0.0)
+(define *enhanced-skin-was-pilot* #f)
 
 (defbehavior enhanced-skin-arm-fix-init enhanced-skin ()
   "Sig's arm bones' bind directions turned onto Jak's (once, when his skin is made)."
@@ -600,7 +691,9 @@
          ;; over 0.08 s, out over 0.2 s), through *enhanced-sig-arm-fix* (his arms are bound hanging,
          ;; Jak's out in a T)
          (sig? (string= (-> ch name) "sig"))
-         (arm-w (if sig? *enhanced-sig-attack-weight* 0.0))
+         (arm-w (if sig? (fmax *enhanced-sig-attack-weight* *enhanced-sig-jak-arms*) 0.0))
+         ;; his fingers close in the attacks, and on a wheel, a ledge...
+         (fist-w (if sig? (fmax *enhanced-sig-attack-weight* *enhanced-ride-arms*) 0.0))
          )
     ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
     ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
@@ -661,14 +754,16 @@
                  ;; a taller one: as far from its root as Jak's are from his, scaled by its size (the root
                  ;; is his collision plus cspace-offset, the offset an animation or a landing moves him by:
                  ;; carried over as it is, never scaled, or the body slides away from the root and back)
-                 (when (and (-> ch sized) (not (focus-test? jak pilot)))
+                 (when (and (-> ch sized) (< *enhanced-skin-seat* 1.0))
                    (let ((root (-> nodes data 0 bone transform trans)))
                      (vector-! jpos (-> rot trans) root)
-                     (vector+float*! (-> rot trans) root jpos (-> self size))
+                     (vector+float*! (-> rot trans) root jpos (lerp (-> self size) 1.0 *enhanced-skin-seat*))
                      )
                    ;; running on the ground: higher, so its legs stay about as straight as Jak's (his
                    ;; stride on its longer legs bent its knees into a crouch)
-                   (+! (-> rot trans y) (* *enhanced-skin-run-lift* (enhanced-skin-run-weight jak)))
+                   (+! (-> rot trans y)
+                       (* *enhanced-skin-run-lift* (enhanced-skin-run-weight jak) (- 1.0 *enhanced-skin-seat*))
+                       )
                    )
                  (set! (-> rot trans w) 1.0)
                  )
@@ -690,8 +785,8 @@
              )
             (else
               ;; Sig's fingers: fists with Jak's attack arms
-              (when (and sig? (< 0.0 arm-w) (< k 80) (nonzero? (-> *enhanced-sig-arm-fix* finger k)))
-                (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) arm-w)
+              (when (and sig? (< 0.0 fist-w) (< k 80) (nonzero? (-> *enhanced-sig-arm-fix* finger k)))
+                (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) fist-w)
                 (matrix*! own local (-> nodes data p bone transform))
                 )
               (matrix-copy! bone own)
@@ -779,7 +874,64 @@
   (none)
   )
 
+;; how far the body is lifted now (enhanced-skin-ground), eased so it never steps: up at 8 m/s (as fast as
+;; the pose blend brings a crouch in), back down at 2 m/s
+(define *enhanced-skin-lift* 0.0)
+
+(defbehavior enhanced-skin-ground enhanced-skin ()
+  "In Jak's pose on foot: the whole body up until its lower ankle is no lower than Jak's lower ankle, each
+   taken over its own standing height. A body with longer legs put on Jak's hips (Ashelin), or blended
+   between a crouch of his and its own standing idle, had its feet under the ground (measured up to 0.4 m
+   in his duck and the crouch before his high jump). His lower ankle is on the ground when he stands on it
+   (his own leg IK puts it there); in the air the same rule keeps the body from dropping at take-off and
+   landing. Not while a sized character walks or runs in his pose: its own leg IK plants its feet there,
+   and his lower ankle is off the ground for half of each stride."
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (w (fmin 1.0 (* 4.0 (-> self pose-blend))))
+         (want 0.0)
+         )
+    (when (and (< 0.0 w)
+               (not (focus-test? tgt pilot pilot-riding edge-grab pole flut board mech tube))
+               (not (and (-> self char sized) (or (= st 'target-walk) (= st 'target-gun-walk))))
+               (not (enhanced-move-active?))
+               (not (enhanced-react-active?))
+               )
+      (let ((jn (-> tgt node-list))
+            (nodes (-> self node-list))
+            (kl (enhanced-skin-joint-of self 41))
+            (kr (enhanced-skin-joint-of self 47))
+            (m (new 'stack-no-clear 'matrix))
+            )
+        (when (and (> kl 0) (> kr 0) (< kl 80) (< kr 80) (< 47 (-> jn length)) (-> jn data 41 joint))
+          (matrix-4x4-inverse! m (-> jn data 41 joint bind-pose))
+          (let* ((ground (- (fmin (-> jn data 41 bone transform trans y) (-> jn data 47 bone transform trans y)) (-> m trans y)))
+                 (need (fmax (- (+ ground (-> self bind-world kl trans y)) (-> nodes data kl bone transform trans y))
+                             (- (+ ground (-> self bind-world kr trans y)) (-> nodes data kr bone transform trans y))
+                             )
+                       )
+                 )
+            (set! want (* w (fmax 0.0 (fmin (meters 0.6) need))))
+            )
+          )
+        )
+      )
+    (seek! *enhanced-skin-lift* want (* (if (< *enhanced-skin-lift* want) (meters 8.0) (meters 2.0)) (seconds-per-frame)))
+    (when (< 0.0 *enhanced-skin-lift*)
+      (let ((nodes (-> self node-list)))
+        (dotimes (k (-> nodes length))
+          (+! (-> nodes data k bone transform trans y) *enhanced-skin-lift*)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
 (defbehavior enhanced-skin-post enhanced-skin ()
+  ;; its own attack move for Jak's attack state (enhanced-moves.gc)
+  (enhanced-move-update)
+  (seek! *enhanced-skin-run-w* (enhanced-skin-run-weight-raw (-> self parent 0)) (* 6.0 (seconds-per-frame)))
   (let ((tgt (-> self parent 0)))
     (vector-copy! (-> self root trans) (-> tgt control trans))
     (quaternion-copy! (-> self root quat) (-> tgt control quat))
@@ -808,6 +960,10 @@
       (cond
         ((focus-test? tgt pilot)
          (set! (-> self pose-blend) 1.0)
+         )
+        ;; one of its own attack moves: on its own idle at once (the move crossfades from the pose last drawn)
+        ((or (enhanced-move-active?) (enhanced-react-active?))
+         (set! (-> self pose-blend) 0.0)
          )
         (own?
           (seek! (-> self pose-blend) 0.0 (* 5.0 (seconds-per-frame)))
@@ -856,6 +1012,33 @@
       (seek! *enhanced-sig-attack-weight* (if attack? 1.0 0.0) (* (if attack? 15.0 5.0) (seconds-per-frame)))
       )
     )
+  ;; off his feet, Sig's arms are Jak's (in over 0.12 s, back to his own over 0.2 s)
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (afoot? (or (= st 'target-stance)
+                     (= st 'target-walk)
+                     (= st 'target-turn-around)
+                     (= st 'target-stance-ambient)
+                     (= st 'target-stance-look-around)
+                     (= st 'target-look-around)
+                     (= st 'target-startup)
+                     (= st 'target-gun-stance)
+                     (= st 'target-gun-walk)
+                     )
+                 )
+         )
+    (seek! *enhanced-sig-jak-arms* (if afoot? 0.0 1.0) (* (if afoot? 5.0 8.0) (seconds-per-frame)))
+    ;; riding: hands and feet where Jak's are (enhanced-ride-post)
+    (seek! *enhanced-ride-arms* (if (focus-test? tgt pilot flut edge-grab pole) 1.0 0.0) (* 8.0 (seconds-per-frame)))
+    (seek! *enhanced-ride-legs* (if (focus-test? tgt pilot flut board tube) 1.0 0.0) (* 8.0 (seconds-per-frame)))
+    (seek! *enhanced-skin-seat* (if (focus-test? tgt pilot) 1.0 0.0) (* 8.0 (seconds-per-frame)))
+    (let ((pilot? (if (focus-test? tgt pilot) #t #f)))
+      (when (!= pilot? *enhanced-skin-was-pilot*)
+        (set! *enhanced-skin-was-pilot* pilot?)
+        (enhanced-move-crossfade 8.0)
+        )
+      )
+    )
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
       )
@@ -866,8 +1049,13 @@
     )
   ;; Ashelin's gun: her arm, the holster, the shots (enhanced-ashelin-gun.gc)
   (enhanced-ashelin-gun-post)
-  ;; her kick's pose over all that (enhanced-ashelin-kick.gc)
-  (enhanced-ashelin-kick-post)
+  ;; in Jak's pose on the ground: its feet not under it
+  (enhanced-skin-ground)
+  ;; the characters' own attack moves (enhanced-moves.gc), and their crossfade from the pose last drawn
+  (enhanced-move-post)
+  ;; riding: its hands and feet where Jak's are
+  (enhanced-ride-post)
+  (enhanced-move-snap-post)
   ;; ja-post put its draw origin (bounds, lights, shadow) on the hips of its own animation: put it on the
   ;; hips as drawn, as do-joint-math does (its bounds' centre through the origin joint)
   (let ((b (new 'stack-no-clear 'vector)))

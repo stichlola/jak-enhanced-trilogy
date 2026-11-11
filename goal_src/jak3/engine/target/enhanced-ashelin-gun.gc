@@ -304,12 +304,21 @@
 
 (defun enhanced-ashelin-gun-allowed? ((tgt target))
   "Can she have it out now? Not in vehicles, on the board, dead, hit and so on, nor where the game
-   keeps guns away (the same tests as Jak's want-to-gun?)."
-  (and (-> *setting-control* user-current gun)
-       (not (focus-test? tgt dead hit board mech dark pilot pilot-riding flut tube grabbed teleporting turret indax))
-       (not (logtest? (surface-flag gun-inactive gun-hide gun-off) (-> tgt control current-surface flags)))
-       (not (logtest? (target-flags prevent-gun invisible) (-> tgt target-flags)))
-       )
+   keeps guns away (the same tests as Jak's want-to-gun?). In Jak's attacks (his punch: her pistol whip,
+   enhanced-moves.gc) it stays in her hand, as his gun does, but doesn't fire (enhanced-ashelin-gun-idle?)."
+  (let ((flags (-> tgt control current-surface flags)))
+    (and (-> *setting-control* user-current gun)
+         (not (focus-test? tgt dead hit board mech dark pilot pilot-riding flut tube grabbed teleporting turret indax))
+         (not (logtest? (surface-flag gun-hide gun-off) flags))
+         (or (not (logtest? (surface-flag gun-inactive) flags)) (logtest? (surface-flag attack) flags))
+         (not (logtest? (target-flags prevent-gun invisible) (-> tgt target-flags)))
+         )
+    )
+  )
+
+(defun enhanced-ashelin-gun-idle? ((tgt target))
+  "Out but not to be fired now (Jak's attacks)."
+  (logtest? (surface-flag gun-inactive) (-> tgt control current-surface flags))
   )
 
 (defbehavior enhanced-ashelin-gun-find enhanced-skin ((tgt target) (fwd vector) (angle float))
@@ -861,12 +870,14 @@
                      (set! (-> mixed vector r w) w0)
                      )
                    )
-                 (enhanced-matrix-blend-rows! bone (matrix-copy! local bone) mixed rest-w local)
+                 ;; (by turning: rows blended between her clip's raised arm and Jak's sheared the bone)
+                 (enhanced-sig-slerp-local! bone (matrix-copy! local bone) mixed rest-w)
                  )
                ;; armed: the aiming stance's arm
                (when (and (< 0.0 w) (< slot 4))
                  (matrix*! mixed (-> st aim-local slot) (-> nodes data p bone transform))
-                 (enhanced-matrix-blend-rows! bone (matrix-copy! local bone) mixed w local)
+                 (vector-copy! (-> mixed trans) (-> bone trans))
+                 (enhanced-sig-slerp-local! bone (matrix-copy! local bone) mixed w)
                  )
                )
              (set! changed (logior changed (ash 1 k)))
@@ -1045,7 +1056,7 @@
       (let* ((pad (-> tgt control cpad number))
              (allowed? (enhanced-ashelin-gun-allowed? tgt))
              (busy? (focus-test? tgt edge-grab pole under-water))
-             (fire? (and allowed? (not busy?) (cpad-hold? pad r1)))
+             (fire? (and allowed? (not busy?) (not (enhanced-ashelin-gun-idle? tgt)) (cpad-hold? pad r1)))
              )
         ;; d-pad up: out or away; R1 takes it out too
         (cond

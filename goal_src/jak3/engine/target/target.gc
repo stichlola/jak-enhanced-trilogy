@@ -65,9 +65,6 @@
 
 (define-extern *enhanced-nap-wanted* int)
 (define-extern target-enhanced-nap (state target))
-;; Enhanced: Ashelin's front kick in place of the punch (enhanced-ashelin-kick.gc)
-(define-extern target-enhanced-kick (state target))
-(define-extern enhanced-player-ashelin? (function symbol))
 
 (defstate target-stance (target)
   :event target-standard-event-handler
@@ -2450,17 +2447,6 @@
              (and (= (-> self ext-anim) (target-anim dark)) (zero? (-> self darkjak latch-out-time)))
              )
         (go target-darkjak-running-attack)
-        )
-    ;; Enhanced: Ashelin (enhanced-player.gc) kicks instead, standing or running (not swimming).
-    ;; Off for now: the user wants her normal punch back (the kick stays for a later use)
-    (if (and #f
-             (-> self next-state)
-             (= (-> self next-state name) 'target-running-attack)
-             (enhanced-player-ashelin?)
-             (not (logtest? (water-flag touch-water) (-> self water flags)))
-             (not (using-gun? self))
-             )
-        (go target-enhanced-kick)
         )
     (logclear! (-> *cpad-list* cpads (-> self control cpad number) button0-abs 0) (pad-buttons square))
     (logclear! (-> *cpad-list* cpads (-> self control cpad number) button0-rel 0) (pad-buttons square))

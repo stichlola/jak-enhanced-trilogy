@@ -120,8 +120,9 @@ and the train itself, the arena's training orbs, the weather script in the deser
 menu open (log line only: the baseline compare is the picture check), a save loaded by a second boot,
 and the playable characters: `player-jak|ashelin|sig` (`JAK_ENHANCED_PLAYER_TEST=run`: walk, run,
 run-jump, jump, double jump, square, circle; the `[player-test] state <name> at <frame>` changes must
-show target-walk, target-jump, target-double-jump, target-running-attack (Ashelin:
-target-enhanced-kick + `[ashelin-kick] done`), target-attack; and `[player-test] body-jump
+show target-walk, target-jump, target-double-jump, target-running-attack, target-attack (and the
+characters' own moves over them: `[enhanced-move] ashelin-front-kick`, `sig-elbow`, `sig-spin-punch`);
+and `[player-test] body-jump
 run|jumps|attacks max <m>`: the drawn body's main joint against its root, most per frame, <= 0.4 m for
 the skins, measured 0.07-0.16; for Jak himself data only, his main joint leaves his root by up to 3 m in
 the walk/run blends) and their guns headless (`player-jak-gun`, `player-ashelin-gun`, `player-sig-gun`).
@@ -341,11 +342,18 @@ git: the Tripo icons).
 shapes; calmer palette, raised blocks with a lit bevel and a shadow on the streets, outlines, deeper
 water with a light rim; the painted maps of the desert enlarged with Real-ESRGAN).
 
-Ashelin (Jak 3, played in Jak's place): her gun holds 20 rounds, then reloads (1.1 s; the HUD shows
-`n/20`); square is a front kick (`enhanced-ashelin-kick.gc`, state `target-enhanced-kick`), its bone
-directions derived from motion capture (ACCAD's Male 2 Martial Arts Kicks, front kick: only the derived
-table is in git; the C3D stays in `local/mocap/accad`). Motion capture: ACCAD, The Ohio State University,
-CC BY 3.0.
+Ashelin and Sig (Jak 3, played in Jak's place). Ashelin's pistol holds 20 rounds, then reloads (1.1 s; the
+HUD shows `n/20`). Their attacks are their own moves (`enhanced-moves.gc`): Jak's target stays in his
+punch and spin-kick states (physics, momentum, hit spheres, sounds), the character's bones are aimed along
+a pose table instead of taking Jak's pose. Ashelin, square: a karate front snap kick; with her pistol out:
+its grip brought down from over her head. Sig, square: a forward elbow strike
+(`JAK_ENHANCED_SIG_BOXER=1`: a jab and a straight); with his Peacemaker out: its butt thrust forward;
+circle: a spinning backfist. The tables (`enhanced-move-tables.gc`) are made by
+`scripts/enhanced/char_moves.py` from generated motion clips (Higgsfield Kimodo, original motion, kept in
+`local/higgsfield/motion`, not in git): key poses on a stylized timeline, as rig-independent directions.
+Hit and dying, Ashelin plays her own clips (thrown back and kip-up, dying on the spot). In vehicles and
+on ledges the characters' hands and feet are put where Jak's are (two-bone IK).
+`scripts/enhanced/chars_review` measures their animations against Jak's in a running test game.
 
 ## Known issues
 

@@ -1,0 +1,864 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+;; name: enhanced-moves.gc
+;; name in dgo: enhanced-moves
+;; dgos: GAME
+
+;; Enhanced: the playable characters' own attack moves (enhanced-player.gc draws them in Jak's place).
+;; Jak's target (hidden) stays in his own attack states: his punch's and spin kick's physics, momentum,
+;; hit spheres, sounds and combos are untouched. Only what is drawn changes: while such a state runs (and
+;; for the move's recovery after it) the character's bones are aimed along a table of poses instead of
+;; taking Jak's pose.
+;;   Ashelin  square: a karate front snap kick; with her pistol out: steps in and strikes down with its grip
+;;   Sig      square: a forward elbow strike (*enhanced-sig-boxer*: a jab and a straight instead);
+;;            with his Peacemaker out: its butt thrust forward; circle: a spinning backfist
+;; The tables (enhanced-move-tables.gc, made by scripts/enhanced/char_moves.py from generated motion clips)
+;; hold, 30 times a second, vectors in the character's model space (+x left, +y up, +z forward): they don't
+;; depend on a rig's joint axes, bind pose or proportions. Here, per frame: the body over its root (sway),
+;; the pelvis, chest and head turned whole (up and forward), each arm and leg bone aimed (shortest turn),
+;; the hands also about their own line (thumb side), then the whole body up or down until its lowest
+;; ankle is where the table has it.
+;; *enhanced-move-freeze* (REPL, seconds into the move, -1 off): holds the move at that point once one
+;; starts (for screenshots). JAK_ENHANCED_SIG_BOXER=1: Sig's square is the jab and straight.
+
+(deftype enhanced-move (basic)
+  ((name     string)
+   (table    (pointer float))
+   (samples  int32)
+   (length   float)    ;; seconds
+   (two-hand symbol)   ;; #t: the long gun in both hands, its barrel along the table's
+   )
+  )
+
+(defun enhanced-move-new ((name string) (table (pointer float)) (samples int) (two-hand symbol))
+  (let ((mv (new 'global 'enhanced-move)))
+    (set! (-> mv name) name)
+    (set! (-> mv table) table)
+    (set! (-> mv samples) samples)
+    (set! (-> mv length) (/ (the float (+ -1 samples)) ENHANCED_MOVE_RATE))
+    (set! (-> mv two-hand) two-hand)
+    mv
+    )
+  )
+
+(define *enhanced-move-ashelin-kick*
+  (enhanced-move-new "ashelin-front-kick" *enhanced-move-table-ashelin-front-kick* ENHANCED_MOVE_ASHELIN_FRONT_KICK_SAMPLES #f))
+(define *enhanced-move-ashelin-whip*
+  (enhanced-move-new "ashelin-pistol-whip" *enhanced-move-table-ashelin-pistol-whip* ENHANCED_MOVE_ASHELIN_PISTOL_WHIP_SAMPLES #f))
+(define *enhanced-move-sig-elbow*
+  (enhanced-move-new "sig-elbow" *enhanced-move-table-sig-elbow* ENHANCED_MOVE_SIG_ELBOW_SAMPLES #f))
+(define *enhanced-move-sig-boxer*
+  (enhanced-move-new "sig-boxer" *enhanced-move-table-sig-boxer* ENHANCED_MOVE_SIG_BOXER_SAMPLES #f))
+(define *enhanced-move-sig-spin*
+  (enhanced-move-new "sig-spin-punch" *enhanced-move-table-sig-spin-punch* ENHANCED_MOVE_SIG_SPIN_PUNCH_SAMPLES #f))
+(define *enhanced-move-sig-butt*
+  (enhanced-move-new "sig-rifle-butt" *enhanced-move-table-sig-rifle-butt* ENHANCED_MOVE_SIG_RIFLE_BUTT_SAMPLES #t))
+
+;; where Sig's left hand holds the Peacemaker in a two-handed move: a point in the gun joint's own space
+;; (as in his two-handed hold, enhanced-sig.gc)
+(define *enhanced-move-sig-fore* (new 'static 'vector :x 425.0 :y 455.0 :z 2300.0 :w 1.0))
+
+;; A character's joints for the table's vectors: main, chest, neck, head; left upper arm, elbow, hand, a
+;; finger base (the hand's line), thumb base; the right ones; left thigh, knee, ankle, ball; the right ones.
+(define *enhanced-move-ashelin-joints* (new 'static 'array int32 22
+  3 4 5 6   7 8 9 30 32   10 11 12 34 36   14 15 16 17   18 19 20 21))
+(define *enhanced-move-sig-joints* (new 'static 'array int32 22
+  3 4 5 6   11 12 13 35 29   14 15 16 50 44   18 19 20 21   22 23 24 25))
+
+;; the move playing (or #f), how far into it (seconds), how much of it shows (0-1), and Jak's state-time of
+;; the attack it was started for (one move per attack)
+(define *enhanced-move* (the-as enhanced-move #f))
+(define *enhanced-move-time* 0.0)
+(define *enhanced-move-weight* 0.0)
+(define *enhanced-move-state-time* 0)
+(define *enhanced-move-freeze* -1.0)
+(define *enhanced-move-chain* (new 'static 'array uint8 80))
+
+;; Sig's square: #f the elbow strike, #t the jab and straight (JAK_ENHANCED_SIG_BOXER=1, or set from the REPL)
+(define *enhanced-sig-boxer-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-sig-boxer* (if (pc-enhanced-getenv "JAK_ENHANCED_SIG_BOXER" *enhanced-sig-boxer-buf* 8) #t #f))
+
+;; JAK_ENHANCED_MOVE_TEST=<k|w|b|s>[:<hundredths of a second>] (test boots, for pictures): on the open sand
+;; by the desert's parked Hellcat, 12 s in, one attack: k square (Ashelin's kick, Sig's elbow or boxer), w / b
+;; the same with the gun out first (her pistol whip, his rifle butt), s circle (his spin). With a time, the
+;; move is held at that point (*enhanced-move-freeze*); the camera is turned to the side first.
+;; "[move-test] shot" in the log: when to take the picture.
+(define *enhanced-move-test-buf* (new 'global 'string 32 (the-as string #f)))
+(define *enhanced-move-test* (pc-enhanced-getenv "JAK_ENHANCED_MOVE_TEST" *enhanced-move-test-buf* 32))
+(define *enhanced-move-test-t* 0)
+(define-extern *enhanced-hellcat-spot* vector)
+
+(defun enhanced-move-test-step ((skin enhanced-skin))
+  (when (and *enhanced-move-test* *target*)
+    (let* ((t *enhanced-move-test-t*)
+           (data (-> *enhanced-move-test-buf* data))
+           (kind (-> data 0))
+           (gun? (or (= kind #x77) (= kind #x62)))
+           )
+      (+! *enhanced-move-test-t* 1)
+      (case t
+        ((1)
+         (set-ignore-controller-in-bg! *pc-settings* #t)
+         ;; the time after the colon, in hundredths of a second
+         (when (= (-> data 1) #x3a)
+           (let ((n 0)
+                 (i 2)
+                 )
+             (while (and (< i 8) (>= (-> data i) #x30) (<= (-> data i) #x39))
+               (set! n (+ (* n 10) (- (the int (-> data i)) #x30)))
+               (+! i 1)
+               )
+             (set! *enhanced-move-freeze* (* 0.01 (the float n)))
+             )
+           )
+         )
+        ((540)
+         (let ((pos (new 'stack-no-clear 'vector)))
+           (vector-copy! pos *enhanced-hellcat-spot*)
+           (+! (-> pos x) (meters -30.0))
+           (+! (-> pos z) (meters 20.0))
+           (+! (-> pos y) (meters 1.0))
+           (move-to-point! (-> *target* control) pos)
+           )
+         )
+        ((600)
+         (if gun?
+             (set! *enhanced-pad-press* (if (-> skin char big-gun) (pad-buttons right) (pad-buttons up)))
+             )
+         )
+        ((720)
+         (set! *enhanced-pad-press* (if (= kind #x73) (pad-buttons circle) (pad-buttons square)))
+         )
+        ((770)
+         (format 0 "[move-test] shot~%")
+         )
+        )
+      (set! *enhanced-pad-rightx* (if (and (>= t 630) (< t 700)) 200 -1))
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-move-active? ()
+  "Is one of the character's own moves showing (its pose comes from this file)?"
+  (if (and *enhanced-move* (enhanced-skin-get)) #t #f)
+  )
+
+(defbehavior enhanced-move-pick enhanced-skin ((tgt target))
+  "The move Jak's state calls for now, or #f."
+  (let ((st (if (-> tgt state) (-> tgt state name) 'none))
+        (ch (-> self char))
+        )
+    (cond
+      ;; (swimming, his punch is a stroke)
+      ((logtest? (water-flag touch-water) (-> tgt water flags))
+       (the-as enhanced-move #f)
+       )
+      ((string= (-> ch name) "ashelin")
+       (case st
+         (('target-running-attack)
+          (if (and (= (-> self pid) (-> *enhanced-ashelin-gun* pid)) (-> *enhanced-ashelin-gun* out))
+              *enhanced-move-ashelin-whip*
+              *enhanced-move-ashelin-kick*
+              )
+          )
+         (else (the-as enhanced-move #f))
+         )
+       )
+      ((string= (-> ch name) "sig")
+       (case st
+         (('target-running-attack)
+          (cond
+            ((using-gun? tgt) *enhanced-move-sig-butt*)
+            (*enhanced-sig-boxer* *enhanced-move-sig-boxer*)
+            (else *enhanced-move-sig-elbow*)
+            )
+          )
+         (('target-attack) *enhanced-move-sig-spin*)
+         (else (the-as enhanced-move #f))
+         )
+       )
+      (else
+        (the-as enhanced-move #f)
+        )
+      )
+    )
+  )
+
+(defun enhanced-move-keeps? ((st symbol))
+  "Jak's states a move's recovery may go on in (anything else ends it at once: jumps, hits, vehicles...)."
+  (or (= st 'target-stance)
+      (= st 'target-walk)
+      (= st 'target-turn-around)
+      (= st 'target-stance-ambient)
+      (= st 'target-stance-look-around)
+      (= st 'target-gun-stance)
+      (= st 'target-gun-walk)
+      (= st 'target-running-attack)
+      (= st 'target-attack)
+      )
+  )
+
+;; A move comes in and is cut short by crossfading from the pose last drawn, whatever was under it (Jak's
+;; run pose with its leg IK, a jump...): the character's bones as drawn each frame (place taken from its
+;; root), and a copy frozen when a crossfade starts.
+(deftype enhanced-move-snap (structure)
+  ((pid   int32)              ;; the skin process they are of
+   (last  matrix 80 :inline)
+   (from  matrix 80 :inline)
+   )
+  )
+
+(define *enhanced-move-snap* (new 'global 'enhanced-move-snap))
+(set! (-> *enhanced-move-snap* pid) 0)
+(define *enhanced-move-snap-w* 0.0)     ;; how much of the frozen pose still shows (1 -> 0)
+(define *enhanced-move-snap-rate* 12.0) ;; a second
+
+(defbehavior enhanced-move-crossfade enhanced-skin ((rate float))
+  "From the pose last drawn to what the bones get from now on, over 1 / rate seconds."
+  (let ((snap *enhanced-move-snap*))
+    (when (= (-> snap pid) (-> self pid))
+      (dotimes (k 80)
+        (matrix-copy! (-> snap from k) (-> snap last k))
+        )
+      (set! *enhanced-move-snap-w* 1.0)
+      (set! *enhanced-move-snap-rate* rate)
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-update enhanced-skin ()
+  "Each frame, before the character's animation is picked: start the move for Jak's attack, move it on, end it."
+  (if *enhanced-move-test*
+      (enhanced-move-test-step self)
+      )
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (want (enhanced-move-pick tgt))
+         )
+    (cond
+      ;; a new attack: its move from the start, in over 0.08 s
+      ((and want (!= (the int (-> tgt state-time)) *enhanced-move-state-time*))
+       (set! *enhanced-move* want)
+       (set! *enhanced-move-time* 0.0)
+       (set! *enhanced-move-state-time* (the int (-> tgt state-time)))
+       (enhanced-move-crossfade 12.5)
+       (format 0 "[enhanced-move] ~S~%" (-> want name))
+       )
+      (*enhanced-move*
+        (let ((mv *enhanced-move*))
+          (cond
+            ((<= 0.0 *enhanced-move-freeze*)
+             (set! *enhanced-move-time* (fmin *enhanced-move-freeze* (-> mv length)))
+             )
+            (else
+              (+! *enhanced-move-time* (seconds-per-frame))
+              (cond
+                ((>= *enhanced-move-time* (-> mv length))
+                 (set! *enhanced-move* #f)
+                 )
+                ;; another of Jak's states (a jump, a hit, a vehicle...): off, out over 0.08 s
+                ((not (enhanced-move-keeps? st))
+                 (set! *enhanced-move* #f)
+                 (enhanced-move-crossfade 12.0)
+                 )
+                ;; Jak walking on after his attack: off, out over 0.17 s into the walk
+                ((and (not want) (= st 'target-walk) (< (meters 2.0) (-> tgt control ctrl-xz-vel)))
+                 (set! *enhanced-move* #f)
+                 (enhanced-move-crossfade 6.0)
+                 )
+                )
+              )
+            )
+          )
+        )
+      )
+    ;; all of it shows, out over its last 0.12 s (into the idle under it)
+    (let ((mv *enhanced-move*))
+      (cond
+        ((not mv)
+         (set! *enhanced-move-weight* 0.0)
+         )
+        (else
+          (let ((u (fmax 0.0 (fmin 1.0 (/ (- (-> mv length) *enhanced-move-time*) 0.12)))))
+            (set! *enhanced-move-weight* (* u u (- 3.0 (* 2.0 u))))
+            )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-snap-post enhanced-skin ()
+  "Last thing done to the character's bones each frame: the crossfade from the frozen pose, then the bones
+   kept as the pose last drawn."
+  (let* ((snap *enhanced-move-snap*)
+         (nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (root (-> self root trans))
+         (pos (new 'stack-no-clear 'vector))
+         )
+    (when (!= (-> snap pid) (-> self pid))
+      (set! (-> snap pid) (-> self pid))
+      (set! *enhanced-move-snap-w* 0.0)
+      )
+    (when (< 0.0 *enhanced-move-snap-w*)
+      (let* ((c (- 1.0 *enhanced-move-snap-w*))
+             (u (* c c (- 3.0 (* 2.0 c))))
+             )
+        (dotimes (k n)
+          (let ((m (-> nodes data k bone transform))
+                (s (-> snap from k))
+                )
+            (vector+! pos (-> s trans) root)
+            (vector-lerp! pos pos (-> m trans) u)
+            ;; (turned, not blended by rows: the two poses can be far apart; a joint with an empty
+            ;; row, e.g. one scaled away, is left as it is)
+            (if (and (>= k 3)
+                     (< 0.01 (vector-length (-> m rvec))) (< 0.01 (vector-length (-> m uvec))) (< 0.01 (vector-length (-> m fvec)))
+                     (< 0.01 (vector-length (-> s rvec))) (< 0.01 (vector-length (-> s uvec))) (< 0.01 (vector-length (-> s fvec)))
+                     )
+                (enhanced-sig-slerp-local! m s m u)
+                )
+            (vector-copy! (-> m trans) pos)
+            (set! (-> m trans w) 1.0)
+            )
+          )
+        )
+      (seek! *enhanced-move-snap-w* 0.0 (* *enhanced-move-snap-rate* (seconds-per-frame)))
+      )
+    (dotimes (k n)
+      (let ((m (-> nodes data k bone transform))
+            (s (-> snap last k))
+            )
+        (matrix-copy! s m)
+        (vector-! (-> s trans) (-> m trans) root)
+        (set! (-> s trans w) 1.0)
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-parent enhanced-skin ((k int))
+  "Joint k's parent (a gun goes with the right hand), or -1."
+  (if (-> self char big-gun)
+      (enhanced-sig-gun-parent (-> self node-list) k)
+      (enhanced-ashelin-gun-parent (-> self node-list) k)
+      )
+  )
+
+(defbehavior enhanced-move-turn! enhanced-skin ((j int) (q quaternion) (pivot vector))
+  "Joint j and all that hangs from it turned by q about pivot."
+  (let* ((nodes (-> self node-list))
+         (n (min 80 (-> nodes length)))
+         (pv (vector-copy! (new 'stack-no-clear 'vector) pivot))
+         (tmp (new 'stack-no-clear 'vector))
+         (chain *enhanced-move-chain*)
+         )
+    (set! (-> pv w) 1.0)
+    (dotimes (k n)
+      (let ((p (enhanced-move-parent k)))
+        (set! (-> chain k) (if (or (= k j) (and (> k j) (>= p 0) (< p k) (nonzero? (-> chain p)))) 1 0))
+        )
+      (when (nonzero? (-> chain k))
+        (let ((m (-> nodes data k bone transform)))
+          (dotimes (r 3)
+            (let ((w0 (-> m vector r w)))
+              (vector-orient-by-quat! (-> m vector r) (-> m vector r) q)
+              (set! (-> m vector r w) w0)
+              )
+            )
+          (vector-! tmp (-> m trans) pv)
+          (set! (-> tmp w) 0.0)
+          (vector-orient-by-quat! tmp tmp q)
+          (vector+! (-> m trans) pv tmp)
+          (set! (-> m trans w) 1.0)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-twist! enhanced-skin ((j int) (axis vector) (cur vector) (to vector) (w float))
+  "Joint j (and what hangs from it) turned about axis (world, unit, through the joint) by w of the angle that
+   brings cur onto to, both taken across the axis."
+  (let ((a (new 'stack-no-clear 'vector))
+        (b (new 'stack-no-clear 'vector))
+        (c (new 'stack-no-clear 'vector))
+        (q (new 'stack-no-clear 'quaternion))
+        )
+    (vector-flatten! a cur axis)
+    (vector-flatten! b to axis)
+    (set! (-> a w) 0.0)
+    (set! (-> b w) 0.0)
+    (when (and (< 0.02 (vector-length a)) (< 0.02 (vector-length b)))
+      (vector-normalize! a 1.0)
+      (vector-normalize! b 1.0)
+      (vector-cross! c a b)
+      (let ((ang (atan (vector-dot c axis) (vector-dot a b))))
+        ;; (whichever way round this engine's turns go: the one that brings a onto b)
+        (quaternion-vector-angle! q axis ang)
+        (vector-orient-by-quat! c a q)
+        (if (< (vector-dot c b) 0.999)
+            (set! ang (- ang))
+            )
+        (when (< 1.0 (fabs ang))
+          (quaternion-vector-angle! q axis (* w ang))
+          (enhanced-move-turn! j q (-> self node-list data j bone transform trans))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-aim! enhanced-skin ((j int) (c int) (to vector) (w float))
+  "Joint j (and what hangs from it) turned by w of the way from its line (toward joint c) to to (world, unit)."
+  (let* ((nodes (-> self node-list))
+         (from (vector-! (new 'stack-no-clear 'vector) (-> nodes data c bone transform trans) (-> nodes data j bone transform trans)))
+         (q (new 'stack-no-clear 'quaternion))
+         (perp (new 'stack-no-clear 'vector))
+         )
+    (set! (-> from w) 0.0)
+    (vector-normalize! from 1.0)
+    (let ((d (vector-dot from to)))
+      (cond
+        ((>= d 0.99995)
+         )
+        ((< d -0.999)
+         ;; the opposite way: half a turn about any line across it
+         (vector-cross! perp from (if (< (fabs (-> from y)) 0.9) *up-vector* *x-vector*))
+         (set! (-> perp w) 0.0)
+         (vector-normalize! perp 1.0)
+         (quaternion-vector-angle! q perp (* w (degrees 180)))
+         (enhanced-move-turn! j q (-> nodes data j bone transform trans))
+         )
+        (else
+          (quaternion-from-two-vectors-partial! q from to w)
+          (enhanced-move-turn! j q (-> nodes data j bone transform trans))
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-orient! enhanced-skin ((j int) (up vector) (fwd vector) (w float))
+  "Joint j (and what hangs from it) turned so that the model's up and forward, as the joint was bound, look
+   along up and fwd (world, unit): tilted first, then turned about up."
+  (let* ((cs (-> self node-list data j))
+         (m (new 'stack-no-clear 'matrix))
+         (cu (new 'stack-no-clear 'vector))
+         (cf (new 'stack-no-clear 'vector))
+         (q (new 'stack-no-clear 'quaternion))
+         )
+    (when (-> cs joint)
+      ;; its skinning matrix (model to world): the model's up is its second row, forward its third
+      (matrix*! m (-> cs joint bind-pose) (-> cs bone transform))
+      (vector-copy! cu (-> m uvec))
+      (set! (-> cu w) 0.0)
+      (vector-normalize! cu 1.0)
+      (when (and (< (vector-dot cu up) 0.99995) (< -0.999 (vector-dot cu up)))
+        (quaternion-from-two-vectors-partial! q cu up w)
+        (enhanced-move-turn! j q (-> cs bone transform trans))
+        )
+      (matrix*! m (-> cs joint bind-pose) (-> cs bone transform))
+      (vector-copy! cu (-> m uvec))
+      (set! (-> cu w) 0.0)
+      (vector-normalize! cu 1.0)
+      (vector-copy! cf (-> m fvec))
+      (set! (-> cf w) 0.0)
+      (vector-normalize! cf 1.0)
+      (enhanced-move-twist! j cu cf fwd w)
+      )
+    )
+  (none)
+  )
+
+(defun enhanced-move-sample! ((dst vector) (mv enhanced-move) (p float) (slot int))
+  "The move's vector slot at p seconds (model space), lerped between samples."
+  (let* ((f (fmax 0.0 (fmin (the float (+ -1 (-> mv samples))) (* p ENHANCED_MOVE_RATE))))
+         (i0 (max 0 (min (+ -2 (-> mv samples)) (the int f))))
+         (t (- f (the float i0)))
+         (stride (* 3 ENHANCED_MOVE_SLOTS))
+         (a (+ (* i0 stride) (* slot 3)))
+         (b (+ a stride))
+         (tab (-> mv table))
+         )
+    (set-vector! dst
+                 (lerp (-> tab a) (-> tab b) t)
+                 (lerp (-> tab (+ a 1)) (-> tab (+ b 1)) t)
+                 (lerp (-> tab (+ a 2)) (-> tab (+ b 2)) t)
+                 0.0
+                 )
+    dst
+    )
+  )
+
+(defbehavior enhanced-move-dir! enhanced-skin ((dst vector) (mv enhanced-move) (p float) (slot int))
+  "The same as a unit vector in the world."
+  (enhanced-move-sample! dst mv p slot)
+  (vector-orient-by-quat! dst dst (-> self root quat))
+  (set! (-> dst w) 0.0)
+  (vector-normalize! dst 1.0)
+  dst
+  )
+
+(defbehavior enhanced-move-post enhanced-skin ()
+  "The move's pose, after the character's bones are done (enhanced-skin-post, after its guns')."
+  (let ((mv *enhanced-move*)
+        (w *enhanced-move-weight*)
+        )
+    (when (and mv (< 0.0 w) (>= (-> self char hips) 0))
+      (let* ((p *enhanced-move-time*)
+             (sig? (-> self char big-gun))
+             (rig (if sig? *enhanced-move-sig-joints* *enhanced-move-ashelin-joints*))
+             (nodes (-> self node-list))
+             (n (min 80 (-> nodes length)))
+             (quat (-> self root quat))
+             (hip-h (-> self bind-world (-> self char hips) trans y))
+             (d (new 'stack-no-clear 'vector))
+             (e (new 'stack-no-clear 'vector))
+             (main (-> rig 0))
+             )
+        ;; the body over its root: sway (in hip heights), on the ground plane
+        (enhanced-move-sample! d mv p 21)
+        (let ((clear (* hip-h (-> d y))))
+          (set-vector! e (* hip-h (-> d x)) 0.0 (* hip-h (-> d z)) 0.0)
+          (vector-orient-by-quat! e e quat)
+          (vector+! e e (-> self root trans))
+          (vector-! e e (-> nodes data main bone transform trans))
+          (set! (-> e y) 0.0)
+          (dotimes (k n)
+            (let ((t (-> nodes data k bone transform trans)))
+              (+! (-> t x) (* w (-> e x)))
+              (+! (-> t z) (* w (-> e z)))
+              )
+            )
+          ;; pelvis, chest, neck, head
+          (enhanced-move-orient! main (enhanced-move-dir! d mv p 0) (enhanced-move-dir! e mv p 1) w)
+          (enhanced-move-orient! (-> rig 1) (enhanced-move-dir! d mv p 2) (enhanced-move-dir! e mv p 3) w)
+          (enhanced-move-aim! (-> rig 2) (-> rig 3) (enhanced-move-dir! d mv p 6) w)
+          (enhanced-move-orient! (-> rig 3) (enhanced-move-dir! d mv p 4) (enhanced-move-dir! e mv p 5) w)
+          ;; arms: upper arm, forearm, hand (its line, then its thumb side about that line)
+          (dotimes (side 2)
+            (let ((r (+ 4 (* side 5)))
+                  (s (+ 7 (* side 4)))
+                  )
+              (enhanced-move-aim! (-> rig r) (-> rig (+ r 1)) (enhanced-move-dir! d mv p s) w)
+              (enhanced-move-aim! (-> rig (+ r 1)) (-> rig (+ r 2)) (enhanced-move-dir! d mv p (+ s 1)) w)
+              (let ((hand (-> rig (+ r 2))))
+                (enhanced-move-dir! d mv p (+ s 2))
+                (enhanced-move-aim! hand (-> rig (+ r 3)) d w)
+                (vector-! e (-> nodes data (-> rig (+ r 4)) bone transform trans) (-> nodes data hand bone transform trans))
+                (set! (-> e w) 0.0)
+                (enhanced-move-twist! hand d e (enhanced-move-dir! (new 'stack-no-clear 'vector) mv p (+ s 3)) w)
+                )
+              )
+            )
+          ;; legs: thigh, shin, foot
+          (dotimes (side 2)
+            (let ((r (+ 14 (* side 4)))
+                  (s (+ 15 (* side 3)))
+                  )
+              (dotimes (i 3)
+                (enhanced-move-aim! (-> rig (+ r i)) (-> rig (+ r i 1)) (enhanced-move-dir! d mv p (+ s i)) w)
+                )
+              )
+            )
+          ;; Sig's hands closed (his clips leave them open)
+          (when sig?
+            (let ((inv (new 'stack-no-clear 'matrix))
+                  (local (new 'stack-no-clear 'matrix))
+                  )
+              (dotimes (k n)
+                (when (nonzero? (-> *enhanced-sig-arm-fix* finger k))
+                  (let ((pj (enhanced-move-parent k)))
+                    (when (and (>= pj 0) (< pj k))
+                      (matrix-4x4-inverse! inv (-> nodes data pj bone transform))
+                      (matrix*! local (-> nodes data k bone transform) inv)
+                      (enhanced-sig-slerp-local! local local (-> *enhanced-sig-arm-fix* fist k) w)
+                      (matrix*! (-> nodes data k bone transform) local (-> nodes data pj bone transform))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          ;; up or down until its lowest ankle is as high over standing as the table has it
+          (let* ((la (-> rig 16))
+                 (ra (-> rig 20))
+                 (low (fmin (- (- (-> nodes data la bone transform trans y) (-> self root trans y)) (-> self bind-world la trans y))
+                            (- (- (-> nodes data ra bone transform trans y) (-> self root trans y)) (-> self bind-world ra trans y))
+                            )
+                      )
+                 (dy (* w (- clear low)))
+                 )
+            (dotimes (k n)
+              (+! (-> nodes data k bone transform trans y) dy)
+              )
+            )
+          )
+        ;; the guns
+        (cond
+          ((and sig? (< (-> *enhanced-sig-gun* out-blend) 0.5))
+           ;; put away, his Peacemaker stays on his back (with his chest as it is now)
+           (enhanced-skin-big-gun)
+           )
+          ((and sig? (-> mv two-hand))
+           ;; both hands on it: in his right hand as he grips it, the hand turned until its barrel lies
+           ;; along the table's, then his left hand to its place on the gun
+           (let ((gun (-> nodes data SIG_GUN bone transform))
+                 (barrel (new 'stack-no-clear 'vector))
+                 (fore (new 'stack-no-clear 'vector))
+                 (q (new 'stack-no-clear 'quaternion))
+                 )
+             (enhanced-sig-grip! gun)
+             (matrix*! (-> nodes data SIG_BLAST bone transform) (-> *enhanced-sig-gun* blast-local) gun)
+             (vector-copy! barrel (-> gun fvec))
+             (set! (-> barrel w) 0.0)
+             (vector-normalize! barrel 1.0)
+             (enhanced-move-dir! d mv p 22)
+             (when (and (< (vector-dot barrel d) 0.99995) (< -0.999 (vector-dot barrel d)))
+               (quaternion-from-two-vectors-partial! q barrel d w)
+               (enhanced-move-turn! SIG_RHAND q (-> nodes data SIG_RHAND bone transform trans))
+               )
+             (vector-matrix*! fore *enhanced-move-sig-fore* gun)
+             (vector-lerp! fore (-> nodes data 13 bone transform trans) fore w)
+             (set! (-> fore w) 1.0)
+             (enhanced-sig-limb-ik! SIG_LSHOULDER SIG_LELBOW 13
+                                    (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data SIG_LSHOULDER bone transform trans))
+                                    fore
+                                    #t
+                                    )
+             )
+           )
+          (sig?
+           #f
+           )
+          ((and (= (-> self pid) (-> *enhanced-ashelin-gun* pid)) (not (-> *enhanced-ashelin-gun* out)))
+           ;; holstered, her pistol goes with her right thigh
+           (matrix*! (-> nodes data ASHELIN_GUN_JOINT bone transform)
+                     (-> *enhanced-ashelin-gun* holster)
+                     (-> nodes data ASHELIN_GUN_RTHIGH bone transform)
+                     )
+           )
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-guns-after enhanced-skin ()
+  "After this file turned arms or legs: a gun that isn't in the hand goes back where it is carried (the
+   turns take it along with the right hand)."
+  (let ((nodes (-> self node-list)))
+    (cond
+      ((-> self char big-gun)
+       ;; put away, his Peacemaker stays on his back (with his chest as it is now)
+       (if (< (-> *enhanced-sig-gun* out-blend) 0.5)
+           (enhanced-skin-big-gun)
+           )
+       )
+      ((and (= (-> self pid) (-> *enhanced-ashelin-gun* pid)) (not (-> *enhanced-ashelin-gun* out)))
+       ;; holstered, her pistol goes with her right thigh
+       (matrix*! (-> nodes data ASHELIN_GUN_JOINT bone transform)
+                 (-> *enhanced-ashelin-gun* holster)
+                 (-> nodes data ASHELIN_GUN_RTHIGH bone transform)
+                 )
+       )
+      )
+    )
+  (none)
+  )
+
+(defbehavior enhanced-move-limb-ik! enhanced-skin ((j0 int) (j1 int) (j2 int) (target vector) (w float))
+  "A limb (j0 upper, j1 middle, j2 end, each the parent of the next) bent until j2 is at target (as far as
+   it reaches; by w: from where j2 is now), bending the way it does now. j2 and what hangs from it keep
+   their turn."
+  (let* ((nodes (-> self node-list))
+         (root (vector-copy! (new 'stack-no-clear 'vector) (-> nodes data j0 bone transform trans)))
+         (s1 (-> nodes data j1 bone transform trans))
+         (s2 (-> nodes data j2 bone transform trans))
+         (tg (new 'stack-no-clear 'vector))
+         (e (new 'stack-no-clear 'vector))
+         (end (new 'stack-no-clear 'vector))
+         (from (new 'stack-no-clear 'vector))
+         (to (new 'stack-no-clear 'vector))
+         (pv (new 'stack-no-clear 'vector))
+         (q1 (new 'stack-no-clear 'quaternion))
+         (q2 (new 'stack-no-clear 'quaternion))
+         )
+    (set! (-> root w) 1.0)
+    (vector-lerp! tg s2 target w)
+    (set! (-> tg w) 1.0)
+    (let* ((l1 (vector-vector-distance root s1))
+           (l2 (vector-vector-distance s1 s2))
+           (reach (enhanced-sig-two-bone e root s1 tg l1 l2))
+           )
+      (vector-! end tg root)
+      (set! (-> end w) 0.0)
+      (vector-normalize! end reach)
+      (vector+! end end root)
+      (set! (-> end w) 1.0)
+      )
+    ;; the upper bone toward the middle joint's new place
+    (vector-! from s1 root)
+    (vector-! to e root)
+    (set! (-> from w) 0.0)
+    (set! (-> to w) 0.0)
+    (vector-normalize! from 1.0)
+    (vector-normalize! to 1.0)
+    (quaternion-from-two-vectors! q1 from to)
+    (enhanced-move-turn! j0 q1 root)
+    ;; the middle bone toward the end
+    (vector-copy! pv s1)
+    (vector-! from s2 pv)
+    (vector-! to end pv)
+    (set! (-> from w) 0.0)
+    (set! (-> to w) 0.0)
+    (vector-normalize! from 1.0)
+    (vector-normalize! to 1.0)
+    (quaternion-from-two-vectors! q2 from to)
+    (enhanced-move-turn! j1 q2 pv)
+    ;; the end turned back as it was (undone in reverse order)
+    (vector-copy! pv s2)
+    (quaternion-conjugate! q2 q2)
+    (enhanced-move-turn! j2 q2 pv)
+    (quaternion-conjugate! q1 q1)
+    (enhanced-move-turn! j2 q1 pv)
+    )
+  (none)
+  )
+
+;; Riding. In a vehicle's seat, on a leaper, on the board, hanging from a ledge or a pole the character takes
+;; Jak's pose (enhanced-skin-retarget), but the wheel, the pedals, the stirrups, the board and the ledge
+;; are where Jak's hands and feet reach, not where a taller body's longer limbs end with the same turns:
+;; hands past the wheel, feet through the floor. Each arm and leg is bent (two-bone IK) until its wrist or
+;; ankle is at Jak's; the hand or foot keeps its turn. Arms: where his hands hold something (vehicle, leaper,
+;; ledge, pole); legs: where his feet rest on something (vehicle, leaper, board, tube).
+;; (the weights are enhanced-player.gc's *enhanced-ride-arms* / *enhanced-ride-legs*, eased there)
+(defbehavior enhanced-ride-post enhanced-skin ()
+  (let ((wa (* *enhanced-ride-arms* (-> self pose-blend)))
+        (wl (* *enhanced-ride-legs* (-> self pose-blend)))
+        )
+    (when (and (or (< 0.0 wa) (< 0.0 wl)) (not *enhanced-move*))
+      (let ((rig (if (-> self char big-gun) *enhanced-move-sig-joints* *enhanced-move-ashelin-joints*))
+            (jn (-> self parent 0 node-list))
+            (n (-> self node-list length))
+            )
+        (when (and (< 48 (-> jn length)) (< (-> rig 21) n))
+          (when (< 0.0 wa)
+            (enhanced-move-limb-ik! (-> rig 4) (-> rig 5) (-> rig 6) (-> jn data 19 bone transform trans) wa)
+            (enhanced-move-limb-ik! (-> rig 9) (-> rig 10) (-> rig 11) (-> jn data 28 bone transform trans) wa)
+            )
+          (when (< 0.0 wl)
+            (enhanced-move-limb-ik! (-> rig 14) (-> rig 15) (-> rig 16) (-> jn data 41 bone transform trans) wl)
+            (enhanced-move-limb-ik! (-> rig 18) (-> rig 19) (-> rig 20) (-> jn data 47 bone transform trans) wl)
+            )
+          (enhanced-move-guns-after)
+          )
+        )
+      )
+    )
+  (none)
+  )
+
+;; ---- Ashelin's own reactions: hit and thrown back, dying ----
+;; Her art group (the oasis AI's) has its own clips for both, so she doesn't take Jak's poses for them:
+;; thrown onto her back (knocked-back0, 0.47 s), the landing and kip-up back onto her feet (knocked-back-land0,
+;; 1.13 s) or staying down (knocked-back-die0); dying where she stands (die-in-place0, 3.2 s). They chain in
+;; place: each starts on the pose the last one ends on, the kip-up ends on her idle's. Jak's target does his
+;; own hit and death states underneath (the arc through the air, the camera, the respawn).
+(defconstant ASHELIN_KNOCKED_BACK 7)
+(defconstant ASHELIN_KNOCKED_BACK_LAND 8)
+(defconstant ASHELIN_KNOCKED_BACK_DIE 9)
+(defconstant ASHELIN_DIE_IN_PLACE 26)
+
+(define *enhanced-react* 0)      ;; 0 none, 1 thrown back, 2 getting up, 3 dying where she stands, 4 down for good
+(define *enhanced-react-pid* 0)  ;; her skin process
+
+(defun enhanced-react-active? ()
+  "Is the character in one of its own hit or death clips (its pose comes from them, not from Jak)?"
+  (let ((skin (the-as enhanced-skin (enhanced-skin-get))))
+    (if (and skin (nonzero? *enhanced-react*) (= (-> skin pid) *enhanced-react-pid*)) #t #f)
+    )
+  )
+
+(defbehavior enhanced-react-play enhanced-skin ((idx int) (rate float) (blend time-frame))
+  "Her clip idx once through, then held on its last frame. #t once it is there."
+  (let ((anim (the-as art-joint-anim (-> self draw art-group data idx))))
+    (when (!= idx (-> self anim))
+      (set! (-> self anim) idx)
+      (ja-channel-push! 1 blend)
+      (ja :group! anim :num! min)
+      )
+    (ja :num! (seek! max rate))
+    (>= (ja-frame-num 0) (the float (+ -1 (ja-num-frames 0))))
+    )
+  )
+
+(defbehavior enhanced-react-animate enhanced-skin ()
+  "Each frame, first thing when her animation is picked: her own clip for Jak's hit or death state. #t when
+   it picked one."
+  (let* ((tgt (-> self parent 0))
+         (st (if (-> tgt state) (-> tgt state name) 'none))
+         (was (if (= (-> self pid) *enhanced-react-pid*) *enhanced-react* 0))
+         (now 0)
+         )
+    (when (and (string= (-> self char name) "ashelin")
+               (< ASHELIN_DIE_IN_PLACE (-> self draw art-group length))
+               (-> self draw art-group data ASHELIN_DIE_IN_PLACE)
+               )
+      (cond
+        ((= st 'target-death)
+         ;; thrown first: she stays down; else she dies where she stands
+         (set! now (if (or (= was 1) (= was 2) (= was 4)) 4 3))
+         )
+        ((= st 'target-hit)
+         (set! now 1)
+         )
+        ;; back on Jak's feet: she gets up (until the clip is through)
+        ((or (= was 1) (= was 2))
+         (set! now 2)
+         )
+        )
+      (case now
+        ((1)
+         (enhanced-react-play ASHELIN_KNOCKED_BACK 1.0 (seconds 0.05))
+         )
+        ((2)
+         ;; (faster than the AI's, more so when Jak already walks on)
+         (if (enhanced-react-play ASHELIN_KNOCKED_BACK_LAND
+                                  (if (< (meters 2.0) (-> tgt control ctrl-xz-vel)) 2.4 1.7)
+                                  (seconds 0.05)
+                                  )
+             (set! now 0)
+             )
+         )
+        ((3)
+         (enhanced-react-play ASHELIN_DIE_IN_PLACE 1.0 (seconds 0.1))
+         )
+        ((4)
+         (enhanced-react-play ASHELIN_KNOCKED_BACK_DIE 1.0 (seconds 0.1))
+         )
+        )
+      )
+    ;; into a reaction from Jak's pose or her own: from the pose last drawn
+    (if (and (zero? was) (nonzero? now))
+        (enhanced-move-crossfade 12.0)
+        )
+    (when (!= now was)
+      (format 0 "[enhanced-react] ~D -> ~D (~A)~%" was now st)
+      )
+    (set! *enhanced-react* now)
+    (set! *enhanced-react-pid* (-> self pid))
+    (nonzero? now)
+    )
+  )

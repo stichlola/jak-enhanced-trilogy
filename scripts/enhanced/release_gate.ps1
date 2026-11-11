@@ -132,10 +132,13 @@ function Run-Expect([string]$who, $bodyMax) {
     (E '\[player-test\] double-jump' 'double-jump'), (E '\[player-test\] state target-double-jump' 'double jump state'),
     (E '\[player-test\] body-jump "?jumps"? max (?<v>[\d.]+)' 'body-jump jumps m' -MaxV $bodyMax),
     (E '\[player-test\] square' 'square'))
-  # Ashelin punches again (her front kick is switched off in target.gc)
   $x += E '\[player-test\] state target-(attack|running-attack)' 'punch state'
-  $x += @((E '\[player-test\] circle' 'circle'), (E '\[player-test\] state target-attack' 'spin kick state'),
-    (E '\[player-test\] body-jump "?attacks"? max (?<v>[\d.]+)' 'body-jump attacks m' -MaxV $bodyMax))
+  # the characters' own moves over Jak's punch and spin kick (enhanced-moves.gc)
+  if ($who -eq 'ashelin') { $x += E '\[enhanced-move\] ashelin-front-kick' 'her front kick' }
+  if ($who -eq 'sig') { $x += E '\[enhanced-move\] sig-(elbow|boxer)' 'his elbow' }
+  $x += @((E '\[player-test\] circle' 'circle'), (E '\[player-test\] state target-attack' 'spin kick state'))
+  if ($who -eq 'sig') { $x += E '\[enhanced-move\] sig-spin-punch' 'his spinning backfist' }
+  $x += E '\[player-test\] body-jump "?attacks"? max (?<v>[\d.]+)' 'body-jump attacks m' -MaxV $bodyMax
   $x
 }
 $weather = '0:0,6:1,12:4,20:5,28:0'
