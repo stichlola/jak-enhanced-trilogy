@@ -247,7 +247,8 @@ class EnhancedPost {
     float eye_adapt = 1.f;         // the eye's adaptation to dark and bright (0 = off)
     float char_detail = 1.f;       // the characters' relief, materials and live eyes (0 = off)
     float parallax = 1.f;          // real relief on rock and walls near the camera (0 = off, 1 = as made)
-    bool wall_notile = true;       // walls that repeat break their repeats up, near the camera
+    bool pbr = true;               // true PBR: the HD textures' normal and roughness maps, GGX (EnhancedPbr.h)
+  bool wall_notile = true;       // walls that repeat break their repeats up, near the camera
     float fx_detail = 1.f;         // richer smoke, fire, explosions, shots and scorch marks (0 = off)
     float hit_chroma = 1.f;        // colors split on a hit and as Dark Jak (0 = off)
     float dawn_fog = 1.f;          // the morning's low fog (0 = off)

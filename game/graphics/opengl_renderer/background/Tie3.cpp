@@ -267,6 +267,7 @@ bool Tie3::try_loading_level(const std::string& level, SharedRenderState* render
   // loading was successful. Link textures/load ID.
   m_textures = &lev_data->textures;
   m_materials = &enhanced_level_materials(lev_data);
+  m_pbr = &lev_data->enh_pbr;
   m_load_id = lev_data->load_id;
 
   // see if this is the first time we've gotten the level
@@ -644,7 +645,7 @@ void Tie3::draw_matching_draws_for_tree(int idx,
     auto double_draw = setup_tfrag_shader(render_state, draw.mode,
                                           use_envmap ? ShaderId::ETIE_BASE : ShaderId::TFRAG3);
     enhanced_set_material(render_state, use_envmap ? ShaderId::ETIE_BASE : ShaderId::TFRAG3,
-                          m_materials, draw.tree_tex_id, draw.mode);
+                          m_materials, draw.tree_tex_id, draw.mode, m_pbr);
 
     glUniform1i(use_envmap ? m_etie_base_uniforms.decal : m_uniforms.decal,
                 draw.mode.get_decal() ? 1 : 0);
@@ -1053,7 +1054,7 @@ void Tie3::render_tree_wind(int idx,
       last_texture = draw.tree_tex_id;
     }
     auto double_draw = setup_tfrag_shader(render_state, draw.mode, shader_id);
-    enhanced_set_material(render_state, shader_id, m_materials, draw.tree_tex_id, draw.mode);
+    enhanced_set_material(render_state, shader_id, m_materials, draw.tree_tex_id, draw.mode, m_pbr);
     const bool leaf_draw = enh_k > 0.f && draw_idx < tree.wind_leaf.size() && tree.wind_leaf[draw_idx];
     if (!leaf_draw) {
       glUniform4f(flutter_loc, 0.f, 0.f, 0.f, 0.f);

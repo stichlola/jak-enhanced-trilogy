@@ -200,6 +200,10 @@ EnhancedPost::EnhancedPost() {
     // the relief on rock and walls near the camera, 0 = off
     m_settings.parallax = (float)std::atof(px);
   }
+  if (const char* pb = std::getenv("JAK_ENHANCED_PBR")) {
+    // true PBR (the HD textures' normal and roughness maps), 0 = off
+    m_settings.pbr = std::atof(pb) > 0.0;
+  }
   if (const char* nt = std::getenv("JAK_ENHANCED_WALL_NOTILE")) {
     // walls that repeat breaking their repeats up, 0 = off
     m_settings.wall_notile = std::atoi(nt) != 0;
@@ -665,7 +669,10 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   g_enhanced_normals.enabled = m_settings.enabled && m_settings.geometry_normals;
   // (the level's albedo as a third target: tuning lights.albedo 1; off until proven)
   static const EnhancedTune t_albedo("lights.albedo", 0.f);
-  g_enhanced_normals.albedo = g_enhanced_normals.enabled && (float)t_albedo > 0.5f;
+  // (and for true PBR: its roughness rides in the albedo's low bits, EnhancedPbr.h)
+  static const EnhancedTune t_pbr_target("pbr.on", 1.f);
+  g_enhanced_normals.albedo = g_enhanced_normals.enabled &&
+                              ((float)t_albedo > 0.5f || (m_settings.pbr && (float)t_pbr_target > 0.5f));
   if (g_enhanced_normals.enabled && g_enhanced_normals.fbo) {
     // a = 0: no normal (the post pass rebuilds one from depth there)
     GLint prev = 0;
@@ -1076,6 +1083,7 @@ void EnhancedPost::draw_debug_window() {
     ImGui::SliderFloat("Character detail", &m_settings.char_detail, 0.f, 1.f);
     ImGui::SliderFloat("Relief (parallax)", &m_settings.parallax, 0.f, 2.f);
     ImGui::Checkbox("Walls repeat less", &m_settings.wall_notile);
+    ImGui::Checkbox("True PBR", &m_settings.pbr);
     ImGui::SliderFloat("Effects detail", &m_settings.fx_detail, 0.f, 1.f);
     ImGui::SliderFloat("Split colors on a hit", &m_settings.hit_chroma, 0.f, 1.f);
     if (!kFogOff) {

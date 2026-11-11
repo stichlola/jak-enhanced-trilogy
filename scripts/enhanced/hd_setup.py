@@ -40,7 +40,7 @@ ESRGAN_URL = ("https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0
 #    lies under alpha 0: Daxter's cutscene face, every eyelid, hair and teeth drawn opaque)
 HD_VERSION = "2"
 
-UPSCALED = re.compile(r"upscaled (\d+)/(\d+)")
+UPSCALED = re.compile(r"(?:upscaled|pbr) (\d+)/(\d+)")
 _shown = -1
 
 
@@ -55,7 +55,7 @@ def progress(pct):
 
 def run(*command, span=None):
     """Runs a command, its output passed through. span=(lo, hi): the step's bar goes from lo to hi,
-    moved by hd_textures.py's 'upscaled X/Y' lines (other commands: lo at the start, hi at the end)."""
+    moved by hd_textures.py's 'upscaled X/Y' and pbr_maps.py's 'pbr X/Y' lines (other commands: lo at the start, hi at the end)."""
     print(">", " ".join(str(c) for c in command[:3]), "...", flush=True)
     if span:
         progress(span[0])
@@ -141,7 +141,10 @@ def main():
                 json.dumps({"decompile_code": False, "levels_extract": False, "save_texture_pngs": True}),
                 span=(at(0), at(0.1)))
         print(f"[{game}] redrawing the textures 4x (the long part)...", flush=True)
-        run(sys.executable, HERE / "hd_textures.py", "--game", game, span=(at(0.1), at(0.8)))
+        run(sys.executable, HERE / "hd_textures.py", "--game", game, span=(at(0.1), at(0.76)))
+        # (the normal and roughness maps from the 4x pictures, on the CPU: a few minutes)
+        print(f"[{game}] making the normal and roughness maps...", flush=True)
+        run(sys.executable, HERE / "pbr_maps.py", "--game", game, span=(at(0.76), at(0.8)))
         run(sys.executable, HERE / "hd_textures.py", "--game", game, "--hud", span=(at(0.8), at(0.85)))
         print(f"[{game}] extracting the levels again with the HD textures...", flush=True)
         # (Jak 3: the levels' models ripped too, *-lod0.glb: the editor makes the game's own models from them)

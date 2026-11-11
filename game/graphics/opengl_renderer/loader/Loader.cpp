@@ -8,6 +8,7 @@
 #include "common/util/FileUtil.h"
 #include "common/util/Timer.h"
 
+#include "game/graphics/opengl_renderer/loader/EnhancedPbr.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedSmoothMerc.h"
@@ -314,6 +315,13 @@ void Loader::loader_thread() {
         enhanced_build_rt(*result, lev);
       }
 
+      // (the HD textures' normal and roughness maps, read here off the render thread)
+      std::vector<EnhPbrPixels> pbr;
+      {
+        auto p = scoped_prof("enhanced-pbr");
+        pbr = enhanced_pbr_read(*result);
+      }
+
       fmt::print(
           "------------> Load from file: {:.3f}s, import {:.3f}s, decomp {:.3f}s unpack {:.3f}s\n",
           disk_load_time, import_time, decomp_time, unpack_timer.getSeconds());
@@ -323,6 +331,7 @@ void Loader::loader_thread() {
       // move this level to "initializing" state.
       m_initializing_tfrag3_levels[lev] = std::make_unique<LevelData>();  // reset load state
       m_initializing_tfrag3_levels[lev]->level = std::move(result);
+      m_initializing_tfrag3_levels[lev]->enh_pbr_pending = std::move(pbr);
       m_level_to_load = "";
       m_file_load_done_cv.notify_all();
     }
@@ -343,9 +352,11 @@ const tfrag3::Level& Loader::load_common(TexturePool& tex_pool, const std::strin
   m_common_level.level = std::make_unique<tfrag3::Level>();
   m_common_level.level->serialize(ser);
   enhanced_smooth_characters(*m_common_level.level, name);
+  m_common_level.enh_pbr_pending = enhanced_pbr_read(*m_common_level.level);
   for (auto& tex : m_common_level.level->textures) {
     m_common_level.textures.push_back(add_texture(tex_pool, tex, true));
   }
+  enhanced_pbr_upload_all(m_common_level);
   enhanced_hd_screen_textures_report();
 
   Timer tim;
@@ -374,7 +385,7 @@ bool Loader::upload_textures(Timer& timer, LevelData& data, TexturePool& texture
     while (data.textures.size() < data.level->textures.size()) {
       auto& tex = data.level->textures[data.textures.size()];
       data.textures.push_back(add_texture(texture_pool, tex, false));
-      bytes_this_run += tex.w * tex.h * 4;
+      bytes_this_run += tex.w * tex.h * 4 + enhanced_pbr_upload_next(data);
       tex_this_run++;
       if (tex_this_run > 20) {
         break;
@@ -593,6 +604,11 @@ void Loader::update(TexturePool& texture_pool) {
           }
           m_garbage_textures.push_back(tex);
         }
+        for (auto tex : lev->enh_pbr) {
+          if (tex) {
+            m_garbage_textures.push_back(tex);
+          }
+        }
 
         for (auto& tie_geo : lev->tie_data) {
           for (auto& tie_tree : tie_geo) {
@@ -681,6 +697,11 @@ void Loader::unload_level_data(const std::string& name, LevelData& lev, TextureP
     glDeleteTextures(1, &tex);
     enhanced_forget_texture(tex);
   }
+  for (auto tex : lev.enh_pbr) {
+    if (tex) {
+      glDeleteTextures(1, &tex);
+    }
+  }
   for (auto& tie_geo : lev.tie_data) {
     for (auto& tie_tree : tie_geo) {
       glDeleteBuffers(1, &tie_tree.vertex_buffer);
@@ -746,6 +767,11 @@ void Loader::do_reload_common(TexturePool& tex_pool) {
   for (auto tex : m_common_level.textures) {
     glDeleteTextures(1, &tex);
     enhanced_forget_texture(tex);
+  }
+  for (auto tex : m_common_level.enh_pbr) {
+    if (tex) {
+      glDeleteTextures(1, &tex);
+    }
   }
   for (auto& model : m_common_level.level->merc_data.models) {
     auto it = m_all_merc_models.find(model.name);

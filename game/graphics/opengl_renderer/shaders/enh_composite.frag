@@ -45,7 +45,15 @@ uniform vec4 puff_info[32];     // size (m), kind (0 dust, 1 spray, 2 snow, 3 sm
 uniform float relief;           // relief from the textures' shading under the sun (0 = off; 2 = left half)
 uniform float materials;        // metal and glossy surfaces: reflections and highlights (0 = off,
                                 // < 0: show them, metal red, glossy blue; 2: left half only)
-uniform int blast_count;        // explosions: view space + radius (game units), age (s)
+// true PBR (EnhancedPbr.h, tfrag3.frag): constants, never uniforms here (the NVIDIA 1024 limit)
+const float PBR_F0 = 0.04;           // dielectrics' reflectance head-on
+const float PBR_SPEC = 1.0;          // the sun's GGX highlight on the plain classes
+const float PBR_SUN_SHARE = 0.7;     // of the baked light, the sun's (the rest is the sky's)
+const float PBR_DIFFUSE_LOSS = 1.0;  // the diffuse taken by the Fresnel (energy; 0: none)
+const float PBR_RELIEF = 1.0;        // the normal maps' shade against the broad facing
+const float PBR_FAR = 300.0;         // m: the highlight gone by here (from 60 %)
+const float PBR_METAL_FADE = 80.0;   // m: metal and glass's reflections fade from here to twice it (was 60)
+uniform int blast_count;       // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 // (x age (s), y seed, z the ground under it along up from the blast (<= 0; > 0: not known): one
 // vec4 each, as three float[4] they took 12 of NVIDIA's 1024 constant registers ("C6020"))
@@ -3092,6 +3100,24 @@ void composite_unused() {
   // (this pixel's normal and the length its material wrote it at, for everything below: read once)
   vec4 pix_normal = gbuf(tex_coord);
   float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
+  // true PBR (tfrag3.frag, EnhancedPbr.h): the level's roughness, 6 bits in the albedo's low bits,
+  // there where its alpha is 1 (-1: none: no map, PBR off, characters, water, effects). Its normal
+  // map is in the normal target already. No uniforms here (constants only: the NVIDIA limit)
+  float pbr_rough = -1.0;
+  vec3 pbr_albedo = vec3(0.0);
+  // (albedo_on 0.25: the target is there for this only, the lamps don't use it)
+  if (albedo_on > 0.1) {
+    vec4 ab = texelFetch(tex_T27, ivec2(tex_coord * vec2(textureSize(tex_T27, 0))), 0);
+    if (ab.a > 0.9) {
+      ivec3 q = ivec3(ab.rgb * 1023.0 + 0.5);
+      ivec3 lo = q & 3;
+      int code = lo.r * 16 + lo.g * 4 + lo.b;
+      if (code > 0) {
+        pbr_rough = float(code - 1) / 62.0;
+        pbr_albedo = vec3(q >> 2) / 255.0;
+      }
+    }
+  }
   // (far buildings' low-res walls, EnhancedMaterials.h's kFacade: plain, 0.1 long. To everything
   // else plain scenery, as before the tag; their wall's plane in world metres (along it, up) and
   // its footprint here, in uniform control flow, for the night's windows)
@@ -4471,6 +4497,13 @@ void composite_unused() {
     float gloss = tune_dry_glints <= 0.0 || (pix_tag > 0.3 && pix_tag < 0.55) ? 0.0
                 : (gmat == 1 ? 1.0 : (gmat == 2 ? 0.6 : tune_glint_stone));
     float gexp = aa_exp(mix(24.0, 60.0, gloss), n_var);
+    // (true PBR: plain stone's lamp highlights from its own roughness, the GGX lobe's Blinn-Phong
+    // equivalent 2/a^2 - 2, and as strong as a smooth one is)
+    if (pbr_rough >= 0.0 && gmat == 0 && gloss > 0.0) {
+      float pa = max(pbr_rough * pbr_rough, 0.01);
+      gexp = aa_exp(clamp(2.0 / (pa * pa) - 2.0, 4.0, 400.0), n_var);
+      gloss = max(gloss, 0.6 * (1.0 - pbr_rough));
+    }
     float wexp = aa_exp(70.0, n_var);
     // (Jak's own shadow from a lamp on the floor right around him: the depth march blurs his body into
     // a dark box twice his width under his feet at night (the port's pier); his contact shadow is there
@@ -4682,7 +4715,7 @@ void composite_unused() {
                              : (mf == 1 ? vec3(0.45, 0.25, 0.1) : (mf == 2 ? vec3(0.2, 0.7, 0.2) : c * 0.4)));
   }
   float mk = materials > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : materials;
-  if (mk > 0.0 && z > 0.0 && z < 120.0 * 4096.0 && wsurf == 0.0) {
+  if (mk > 0.0 && z > 0.0 && z < 2.0 * PBR_METAL_FADE * 4096.0 && wsurf == 0.0) {
     float ga = pix_normal.a;
     int mat = ga > 0.83 ? 0 : (ga > 0.5 ? 1 : (ga > 0.17 ? 2 : 0));
     if (mat != 0) {
@@ -4694,12 +4727,19 @@ void composite_unused() {
       vec3 vdir = normalize(p);
       // how rough each is: bare metal the most, then tile and paint; glass stays the clearest
       float rough = (mat == 1 ? (mfine == 2 ? 0.07 : 0.13) : (mfine == 1 ? 0.08 : 0.035)) * reflect_rough;
+      // (true PBR: the map's roughness against its class's own (tfrag3.frag's PBR_R: metal 0.35,
+      // painted 0.4, glossy 0.12, tile 0.25): worn patches duller, polished ones sharper)
+      if (pbr_rough >= 0.0) {
+        float base = mat == 1 ? (mfine == 2 ? 0.4 : 0.35) : (mfine == 1 ? 0.25 : 0.12);
+        rough *= clamp(pbr_rough / base, 0.5, 2.0);
+      }
       vec3 r = rough_reflection(p, vdir, nn, z, sqrt(rough * rough + min(n_var, tune_spec_aa_max)));
       float facing = clamp(dot(-vdir, nn), 0.0, 1.0);
       float hit;
       // (rust reflects nothing: no trace)
       vec3 refl = mat == 1 && mfine == 1 ? c : trace_reflection(p, r, z, hit);
-      float fade = (1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z)) * reflect_amount;
+      float mfade = pbr_rough >= 0.0 ? PBR_METAL_FADE : 60.0;
+      float fade = (1.0 - smoothstep(mfade * 4096.0, 2.0 * mfade * 4096.0, z)) * reflect_amount;
       // specular occlusion (Lagarde): crevices and undersides kept a sky-bright reflection, plastic in
       // the shaded corners; the AO takes it away, more where the gloss is rough
       fade *= mix(1.0, clamp(pow(facing + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0), tune_spec_occ);
@@ -4832,6 +4872,14 @@ void composite_unused() {
   // relief: the texture's light and dark read as small bumps (bright = raised), lit by the sun:
   // the normal tilts along the brightness slope on the surface; near only, not across edges
   float rk = relief > 1.5 ? (tex_coord.x < 0.5 ? 1.0 : 0.0) : relief;
+  // (true PBR: the texture's own normal map is in surf_n already; the shade of its bumps against the
+  // surface's broad facing (soft_n), stronger in the sun, kept a little in the shade, out to 150 m)
+  if (pbr_rough >= 0.0 && rk > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
+    float fade = 1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z);
+    float shade = dot(surf_n, sun_dir.xyz) - dot(soft_n, sun_dir.xyz);
+    c *= 1.0 + clamp(shade, -0.5, 0.5) * PBR_RELIEF * rk * fade * ao * mix(0.35, 1.0, sun_lit);
+    rk = 0.0;
+  }
   if (rk > 0.0 && sun_dir.w > 0.0 && z > 0.0 && z < 30.0 * 4096.0 && wsurf == 0.0) {
     vec2 tx = vec2(texel.x, 0.0), ty = vec2(0.0, texel.y);
     float dr = texture(tex_T3, tex_coord + tx).r, dl = texture(tex_T3, tex_coord - tx).r;
@@ -4864,6 +4912,46 @@ void composite_unused() {
     }
     float k = relight * (1.0 - smoothstep(150.0 * 4096.0, 300.0 * 4096.0, z));
     c *= 1.0 + k * clamp(ndl, -0.6, 1.0) * 0.35;
+  }
+
+  // true PBR: the sun's highlight, GGX (Trowbridge-Reitz) with Smith's visibility and Schlick's
+  // Fresnel, on the plain classes the level coded a roughness for (stone, sand, rock, walls, wood;
+  // metal and glass keep their own below, their roughness from the map). The game's light is baked:
+  // the sun's strength here is read back from the picture (lit color over the texture's own), the
+  // diffuse loses what the Fresnel reflects (energy conserving), and it all goes where the sun
+  // reaches (shadow map, AO). Constants only (no uniforms: enh_composite.frag's limit)
+  if (pbr_rough >= 0.0 && pix_normal.a > 0.83 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0 &&
+      z < PBR_FAR * 4096.0) {
+    vec3 n = surf_n;
+    vec3 v = normalize(-p);
+    vec3 l = sun_dir.xyz;
+    float ndl = dot(n, l);
+    float ndv = max(dot(n, v), 1e-3);
+    // (specular AA: the normal's spread in the pixel widens the lobe)
+    float a = max(pbr_rough * pbr_rough, 0.002);
+    a = sqrt(a * a + min(n_var, tune_spec_aa_max));
+    // energy: what the surface reflects at this angle (roughness-aware Schlick) isn't diffuse
+    float fv = pow(1.0 - ndv, 5.0);
+    float f_view = PBR_F0 + (max(1.0 - pbr_rough, PBR_F0) - PBR_F0) * fv;
+    float fade = 1.0 - smoothstep(PBR_FAR * 0.6 * 4096.0, PBR_FAR * 4096.0, z);
+    c *= 1.0 - f_view * PBR_DIFFUSE_LOSS * fade;
+    if (ndl > 0.0 && sun_lit > 0.0) {
+      vec3 h = normalize(l + v);
+      float ndh = max(dot(n, h), 0.0);
+      float a2 = a * a;
+      float dd = ndh * ndh * (a2 - 1.0) + 1.0;
+      float D = a2 / (3.14159 * dd * dd);
+      // (Smith-GGX height-correlated, approximated: Karis' Schlick-GGX)
+      float kk = a * 0.5;
+      float vis = 0.25 / ((ndl * (1.0 - kk) + kk) * (ndv * (1.0 - kk) + kk));
+      float F = PBR_F0 + (1.0 - PBR_F0) * pow(1.0 - max(dot(v, h), 0.0), 5.0);
+      // the sun's light on it: the baked picture over the texture's own color (pi: Lambert's)
+      float e = clamp(luma(c) / max(luma(pbr_albedo), 0.08), 0.2, 2.5) * 3.14159 * PBR_SUN_SHARE;
+      float spec = D * vis * F * ndl * e * sun_lit * ao * fade;
+      vec3 sc = sun_color() * spec * PBR_SPEC;
+      // (rolled off: a near-mirror grain under the noon sun doesn't burn white)
+      c += sc / (1.0 + max(sc.r, max(sc.g, sc.b)) * 0.5);
+    }
   }
 
   // the sky: ours by day over the game's (its painted clouds go), the game's at night; the lightning

@@ -973,12 +973,14 @@ Fbo make_fbo(int w, int h, int msaa, bool make_zbuf_and_stencil, bool hdr = fals
     result.albedo_tex_id = atex;
     if (use_multisample) {
       glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, atex);
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGBA8, w, h, GL_TRUE);
+      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, msaa, GL_RGB10_A2, w, h, GL_TRUE);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D_MULTISAMPLE, atex,
                              0);
     } else {
       glBindTexture(GL_TEXTURE_2D, atex);
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+      // (10-bit: true PBR's roughness rides in the spare low bits of the 8-bit texture colors)
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB10_A2, w, h, 0, GL_RGBA, GL_UNSIGNED_INT_2_10_10_10_REV,
+                   nullptr);
       glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, atex, 0);
     }
   }

@@ -160,6 +160,7 @@ class TFragment : public BucketRenderer {
 
   const std::vector<GLuint>* m_textures = nullptr;
   const std::vector<u8>* m_materials = nullptr;  // Enhanced: per texture
+  const std::vector<GLuint>* m_pbr = nullptr;     // Enhanced: per texture, its PBR map (EnhancedPbr.h)
   std::array<std::vector<TreeCache>, GEOM_MAX> m_cached_trees;
 
   std::vector<math::Vector<u8, 4>> m_color_result;

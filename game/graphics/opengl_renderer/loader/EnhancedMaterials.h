@@ -8,6 +8,7 @@
 #include "common/log/log.h"
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedPbr.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
 // Enhanced: a material for each level texture, from its name: the post pass gives metal and glossy
@@ -402,7 +403,8 @@ inline void enhanced_set_material(SharedRenderState* render_state,
                                   ShaderId shader,
                                   const std::vector<u8>* materials,
                                   int tex,
-                                  const DrawMode& mode) {
+                                  const DrawMode& mode,
+                                  const std::vector<GLuint>* pbr = nullptr) {
   GLuint program = render_state->shaders[shader].id();
   static GLuint cached_program[2] = {0, 0};
   static GLint cached_loc[2] = {-1, -1};
@@ -439,4 +441,20 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   }
   glUniform1f(cached_parallax[slot], relief * 4096.f * g_enhanced_parallax);
   glUniform2f(cached_notile[slot], notile_u, notile_v);
+  // true PBR (EnhancedPbr.h): the texture's normal and roughness map on unit 11 (tfrag3.frag's tex_T11)
+  static GLint cached_pbr[2] = {-1, -1};
+  static GLuint cached_pbr_program[2] = {0, 0};
+  if (cached_pbr_program[slot] != program) {
+    cached_pbr_program[slot] = program;
+    cached_pbr[slot] = glGetUniformLocation(program, "enh_pbr");
+  }
+  if (cached_pbr[slot] >= 0) {
+    const GLuint map = g_enhanced_pbr && pbr && tex >= 0 && tex < (int)pbr->size() ? (*pbr)[tex] : 0;
+    glUniform1i(cached_pbr[slot], map ? 1 : 0);
+    if (map) {
+      glActiveTexture(GL_TEXTURE11);
+      glBindTexture(GL_TEXTURE_2D, map);
+      glActiveTexture(GL_TEXTURE0);
+    }
+  }
 }
