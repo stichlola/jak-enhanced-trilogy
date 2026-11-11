@@ -6,11 +6,11 @@ The big font (gamefont, font.24lo) has the pad's pieces as glyphs: the round but
 and rim, the d-pad's four arms, the shoulder and trigger bodies (four cells each) with their names,
 the stick and its arrows, the select pill. The game texts put them together with move codes
 (common/util/font/dbs/font_db_jak3.cpp, <PAD_...>). This draws them all again, by hand (lines, arcs
-and polygons below: no game art, no font file), four times finer than the game's texture, plus what
+and polygons below: no game art, no font file), eight times finer than the game's texture, plus what
 an Xbox pad needs and the font has not: the letters A B X Y, the names LB RB LT RT, the View and
 Menu signs.
 
-It writes game/assets/enhanced/hud/<game>/gamefont/font.24lo.png, 4x the game's size: see-through
+It writes game/assets/enhanced/hud/<game>/gamefont/font.24lo.png, 8x the game's size: see-through
 magenta everywhere (the game's own texel there, EnhancedMapTextures.cpp) but the cells drawn here,
 so it can be in git.
 
@@ -38,8 +38,10 @@ ROOT = Path(__file__).resolve().parents[2]
 GAMES = {"jak2": "gamefont", "jak3": "gamefont"}
 TEX = "font.24lo"
 TEX_W, TEX_H = 256, 1024
-SCALE = 4  # texels here per game texel
+SCALE = 8  # texels here per game texel (a 4K screen shows a glyph at ~6x: 8x is never magnified)
 SS = 6  # drawn this much finer again, then averaged down
+TOP = round(0.75 * SCALE)  # a cell's first rows: in the window of the cell above (its window ends 0.67 texel
+# into this cell, this cell's own starts 0.92 texel down)
 MAGENTA = (255, 0, 255, 0)
 
 QUAD_W, QUAD_H = 24.0, 29.714  # a glyph's quad, screen units
@@ -57,13 +59,16 @@ TR_TL, TR_TR, TR_BL, TR_BR = 0xA8, 0xA9, 0xB2, 0xB3
 # cells the game's font leaves empty
 LET_A, LET_B, LET_X, LET_Y = 0xAD, 0xAE, 0xAF, 0xB8
 SIGN_VIEW, SIGN_MENU = 0xB9, 0xAC
+# the Xbox round button's body in its own colors (drawn white, ~1L): disc, rim and shine in one glyph,
+# so they cast one shadow (as separate glyphs each one's shadow drew dark rings inside the button)
+BODY = 0xC3
 
 # --- one look for all ---------------------------------------------------------------------------
 CAP_MID = 12.9  # the middle of the font's capitals, units down from the pen: every button sits on it
 BTN_C = (13.0, CAP_MID)  # the round button's center (square units) and radius
 BTN_R = 12.6
 LINE = 1.3  # outlines: the rim, the stick's ring, the signs
-FACE_H, FACE_S = 14.4, 2.9  # the face letters: height and stroke
+FACE_H, FACE_S = 15.4, 3.15  # the face letters: height and stroke (big and bold: hints show them small)
 NAME_H, NAME_S = 9.6, 1.95  # the shoulder names: the same weight for their size
 BODY_CX = 17.5 * UX  # shoulder and trigger: their middle
 SHOULDER = (36.4, 18.6, 6.2)  # width, height, corner radius
@@ -73,7 +78,7 @@ DPAD_ARM = (18.5, 13.2)  # an arm's length (outer end to tip) and width; the tip
 STICK_C = (11.5 * UX, 14.0)  # in its cell
 STICK_R, STICK_CAP = 9.75, 5.2
 ARROW_C = (11.5 * UX, 14.0)  # every arrow's middle, in its cell
-ARROW_SIZE = (8.0, 6.4)  # base, height
+ARROW_SIZE = (10.0, 8.0)  # base, height
 
 # --- where the cells of a button go: pen offsets (screen units), as in the texts' move codes ------
 SHOULDER_PENS = {SH_TL: (-2, -12), SH_TR: (14, -12), SH_BL: (-2, 17), SH_BR: (14, 17)}
@@ -111,7 +116,7 @@ class Cell:
         self.kx = ST_W / QUAD_W * k / UX
         self.ky = ST_H / QUAD_H * k
         self.ox = (tx0 - 24 * self.col) * k - pen[0] * UX * self.kx
-        self.oy = (ty0 - 32 * self.row) * k - 3 * SS - pen[1] * self.ky
+        self.oy = (ty0 - 32 * self.row) * k - TOP * SS - pen[1] * self.ky
 
     def pt(self, p):
         return (p[0] * self.kx + self.ox, p[1] * self.ky + self.oy)
@@ -165,7 +170,7 @@ def minus(a, b):
 
 
 # --- letters: plain bold strokes, flat ends, one weight ---------------------------------------------
-LETTER_W = {"A": 0.96, "X": 0.9, "Y": 0.92, "B": 0.7, "R": 0.7, "L": 0.58, "T": 0.72}  # over the height
+LETTER_W = {"A": 0.96, "X": 0.86, "Y": 0.92, "B": 0.7, "R": 0.7, "L": 0.58, "T": 0.72}  # over the height
 NAME_GAP = {"LB": 1.25, "RB": 1.25, "LT": 0.45, "RT": 0.9}
 
 
@@ -263,6 +268,39 @@ def shine(c):
     return both(m.filter(ImageFilter.GaussianBlur(0.45 * c.ky)), c.disc(BTN_C, r))
 
 
+def smooth(e0, e1, x):
+    import numpy as np
+
+    t = np.clip((x - e0) / (e1 - e0), 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
+def body(c):
+    """The Xbox round button, colored here (drawn white): a dark disc lit from above, a soft lighter rim
+    inside a thin dark edge (seen on dark and light grounds alike), a soft shine at the upper left.
+    Returns (mask, rgb): the disc's coverage and its colors, at the fine grid."""
+    import numpy as np
+
+    h, w = c.size[1], c.size[0]
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32) + 0.5
+    ux, uy = (xs - c.ox) / c.kx, (ys - c.oy) / c.ky  # square units
+    (cx, cy), r = BTN_C, BTN_R
+    d = np.hypot(ux - cx, uy - cy)
+    t = (uy - cy) / r  # -1 top .. 1 bottom
+    v = 64.0 - 12.0 * t  # the disc: lighter at the top
+    # the bevel: its edge lit at the top, shaded at the bottom (no even ring: that read as a grey halo)
+    band = smooth(r - 2.0, r - 0.7, d) * (1 - smooth(r - 0.5, r - 0.15, d))
+    lit = np.clip(-(uy - cy) / r * 1.3 + 0.15, 0, 1)
+    v = v + (122.0 - v) * band * lit
+    v = v * (1 - 0.4 * band * np.clip((uy - cy) / r * 1.3, 0, 1))
+    # the shine: a soft glow at the upper left, no hard edge
+    glow = np.exp(-((ux - cx + 4.2) ** 2 + (uy - cy + 4.8) ** 2) / (2 * 4.2 ** 2))
+    v = v + (200.0 - v) * 0.32 * glow * (1 - smooth(r - 2.5, r - 0.8, d))
+    v = v + (24.0 - v) * smooth(r - 0.5, r - 0.1, d)  # a thin dark edge: the button on a light ground
+    rgb = np.repeat(np.clip(v, 0, 255)[..., None], 3, axis=2)
+    return c.disc(BTN_C, r), rgb
+
+
 def dpad_arm(c, code):
     """An arm of the d-pad: a bar with a right-angled tip, at its place in its own cell. The tip goes
     half a unit past where the four meet, so the Xbox cross has no hairlines between its arms."""
@@ -315,6 +353,7 @@ def cells():
     add(DISC, (0, 0), lambda c: c.disc(BTN_C, BTN_R))
     add(RIM, (0, 0), lambda c: c.ring(BTN_C, BTN_R, LINE))
     add(SHINE, (0, 0), shine, 0.6)
+    add(BODY, (0, 0), body)
     for code, ch in ((LET_A, "A"), (LET_B, "B"), (LET_X, "X"), (LET_Y, "Y")):
         # (B's heavy side is its stem: a touch right of center)
         add(code, (0, 0), lambda c, ch=ch: letter(c, ch, BTN_C[0] + (0.25 if ch == "B" else 0.0), BTN_C[1], FACE_H, FACE_S))
@@ -341,18 +380,54 @@ def cells():
     return out
 
 
+def down(rgb, mask):
+    """A colored shape from the fine grid to the texture's: colors averaged by coverage, and the
+    transparent texels around it given the colors of its edge (filtering and mipmaps blend a texel's
+    color with its neighbours' whatever their alpha: no fringe of another color)."""
+    import numpy as np
+
+    a = np.asarray(mask, np.float32) / 255.0
+    h, w = a.shape[0] // SS, a.shape[1] // SS
+    box = lambda x: x.reshape(h, SS, w, SS, *x.shape[2:]).mean(axis=(1, 3))
+    alpha = box(a)
+    pre = box(rgb * a[..., None])
+    col = np.where(alpha[..., None] > 0, pre / np.maximum(alpha[..., None], 1e-6), 0)
+    known = alpha > 0
+    for _ in range(64):  # grow the edge's colors outward, a texel a step
+        if known.all():
+            break
+        acc, n = np.zeros_like(col), np.zeros(alpha.shape, np.float32)
+        for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+            k = np.roll(known, (dy, dx), (0, 1))
+            acc += np.roll(col, (dy, dx), (0, 1)) * k[..., None]
+            n += k
+        grow = ~known & (n > 0)
+        col[grow] = acc[grow] / n[grow][:, None]
+        known = known | grow
+    return np.clip(col + 0.5, 0, 255).astype(np.uint8), alpha
+
+
 def draw():
     """The texture: (image, the codes of the cells drawn)."""
+    import numpy as np
+
     im = Image.new("RGBA", (TEX_W * SCALE, TEX_H * SCALE), MAGENTA)
     drawn = cells()
-    clear = Image.new("RGBA", (24 * SCALE, 3), (255, 255, 255, 0))
+    clear = Image.new("RGBA", (24 * SCALE, TOP), (255, 255, 255, 0))
     for c, _, _ in drawn:  # (a cell's first rows show under the cell above it: emptied)
         im.paste(clear, (c.col * 24 * SCALE, c.row * 32 * SCALE))
-    for c, mask, opacity in drawn:
+    for c, shape, opacity in drawn:
+        at = (c.col * 24 * SCALE, c.row * 32 * SCALE + TOP)
+        if isinstance(shape, tuple):  # (mask, rgb): its own colors
+            col, alpha = down(shape[1], shape[0])
+            a = Image.fromarray(np.clip(alpha * opacity * 128 + 0.5, 0, 255).astype(np.uint8), "L")
+            r, g, b = (Image.fromarray(col[..., k], "L") for k in range(3))
+            im.paste(Image.merge("RGBA", (r, g, b, a)), at)
+            continue
         # (opaque is 128 in the PS2's alpha)
-        a = mask.resize((24 * SCALE, 32 * SCALE), Image.BOX).point(lambda v: int(v * opacity * 128 / 255 + 0.5))
+        a = shape.resize((24 * SCALE, 32 * SCALE), Image.BOX).point(lambda v: int(v * opacity * 128 / 255 + 0.5))
         white = Image.new("L", a.size, 255)
-        im.paste(Image.merge("RGBA", (white, white, white, a)), (c.col * 24 * SCALE, c.row * 32 * SCALE + 3))
+        im.paste(Image.merge("RGBA", (white, white, white, a)), at)
     return im, [c.code for c, _, _ in drawn]
 
 
@@ -369,12 +444,12 @@ def xbox_strings(style="raw"):
     """The Xbox buttons, in the game's text encoding."""
     e = lambda code: esc(code, style)
     out = {}
-    # (the PlayStation button's own layout, with the letter's cell and color; the letter after the
-    # shine, so the shine's shadow is under it)
+    # (the button's body in its own colors, white, then the letter in its color: two glyphs, two
+    # shadows, the letter's on the body; the PlayStation button's advance)
     for label, code, color in (("A", LET_A, 26), ("B", LET_B, 25), ("X", LET_X, 27), ("Y", LET_Y, 5)):
-        out[label] = f"~Y~22L<~Z~Y~1L>~Z~Y~{color}L{e(code)}~Z~Y~23L[~Z~+26H"
+        out[label] = f"~Y~1L{e(BODY)}~Z~Y~{color}L{e(code)}~Z~+26H"
     for label, code in (("VIEW", SIGN_VIEW), ("MENU", SIGN_MENU)):
-        out[label] = f"~Y~22L<~Z~Y~1L{e(code)}~Z~Y~23L[~Z~+26H"
+        out[label] = f"~Y~1L{e(BODY)}~Z~Y~1L{e(code)}~Z~+26H"
     # the d-pad: the four arms closed into a cross ({0} {1} {2} {3}: the colors of left, up, down, right)
     pens = {code: (DPAD_CENTER[0] - DPAD_TIP[code][0], DPAD_CENTER[1] - DPAD_TIP[code][1]) for code in DPAD_TIP}
     out["DPAD"] = "~Y" + "~Z".join(
@@ -479,8 +554,8 @@ class Sim:
                     base = Image.open(p).convert("RGBA")
         if base is None:
             raise FileNotFoundError(f"decompiler_out/{game}*/textures/{GAMES[game]}/{TEX}.png")
-        b = np.asarray(base).astype(np.float32)[..., 3]
-        o = np.asarray(overlay.convert("RGBA")).astype(np.float32)
+        b = np.asarray(base).astype(np.float32)
+        o = np.asarray(overlay.convert("RGBA"))
         s = self.s = o.shape[1] // TEX_W
         # as EnhancedMapTextures.cpp: magenta = the game's texel, enlarged bilinearly
         fx = np.clip((np.arange(o.shape[1]) + 0.5) / s - 0.5, 0, TEX_W - 1)
@@ -488,9 +563,13 @@ class Sim:
         x0, y0 = fx.astype(int), fy.astype(int)
         x1, y1 = np.minimum(x0 + 1, TEX_W - 1), np.minimum(y0 + 1, TEX_H - 1)
         tx, ty = (fx - x0)[None, :], (fy - y0)[:, None]
-        up = (b[y0][:, x0] * (1 - tx) + b[y0][:, x1] * tx) * (1 - ty) + (b[y1][:, x0] * (1 - tx) + b[y1][:, x1] * tx) * ty
         keep = (o[..., 0] == 255) & (o[..., 1] == 0) & (o[..., 2] == 255) & (o[..., 3] == 0)
-        self.tex = Image.fromarray(np.clip(np.where(keep, up, o[..., 3]) / 128.0, 0, 1).astype(np.float32), "F")
+        self.tex = []  # r, g, b, a: 8 bits (a: 128 opaque)
+        for k in range(4):
+            bk = b[..., k]
+            up = (bk[y0][:, x0] * (1 - tx) + bk[y0][:, x1] * tx) * (1 - ty) + (bk[y1][:, x0] * (1 - tx) + bk[y1][:, x1] * tx) * ty
+            self.tex.append(Image.fromarray(np.where(keep, (up + 0.5).astype(np.uint8), o[..., k]), "L"))
+            del up
 
     def text(self, canvas, text, x, y, height, scale=1.0, color=1):
         """canvas: RGB byte array; x, y: pixels; height: the screen's (416 units). Returns the pen's x."""
@@ -519,12 +598,19 @@ class Sim:
             tx, ty, adv = self.table[b[i] - 6]
             w, h = max(1, round(QUAD_W * scale * ux)), max(1, round(QUAD_H * scale * uy))
             s = self.s
-            a = self.np.asarray(self.tex.resize((w, h), Image.BILINEAR, box=(tx * s, ty * s, (tx + ST_W) * s, (ty + ST_H) * s)))
+            # (minified: averaged, as mipmaps; enlarged: bilinear)
+            box = (tx * s, ty * s, (tx + ST_W) * s, (ty + ST_H) * s)
+            cx0, cy0 = int(box[0]), int(box[1])
+            part = (cx0, cy0, int(box[2]) + 2, int(box[3]) + 2)
+            rel = (box[0] - cx0, box[1] - cy0, box[2] - cx0, box[3] - cy0)
+            tr, tg, tb, a = (self.np.asarray(ch.crop(part).resize((w, h), Image.BILINEAR, box=rel, reducing_gap=2.0),
+                                             self.np.float32) / d for ch, d in zip(self.tex, (255.0, 255.0, 255.0, 128.0)))
             r, g, bl, al = self.colors[color]
             a = self.np.clip(a * (al / 128.0), 0, 1)
             x0, y0 = round(px * ux), round(py * uy)
-            self._blend(canvas, a, (0, 0, 0), x0 + round(2 * ux), y0 + round(uy))  # the shadow
-            self._blend(canvas, a, (min(r / 128, 1), min(g / 128, 1), min(bl / 128, 1)), x0, y0)
+            self._blend(canvas, a, self.np.zeros(3, self.np.float32), x0 + round(2 * ux), y0 + round(uy))  # the shadow
+            col = self.np.stack([tr * min(r / 128, 1), tg * min(g / 128, 1), tb * min(bl / 128, 1)], axis=2)
+            self._blend(canvas, a, col, x0, y0)
             px += adv * scale
             i += 1
         return px * ux
@@ -535,7 +621,9 @@ class Sim:
         cx0, cy0, cx1, cy1 = max(x0, 0), max(y0, 0), min(x0 + w, W), min(y0 + h, H)
         if cx1 > cx0 and cy1 > cy0:
             aa = a[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0, None]
-            mixed = canvas[cy0:cy1, cx0:cx1] * (1 - aa) + self.np.array(col, self.np.float32) * 255 * aa
+            if col.ndim == 3:
+                col = col[cy0 - y0:cy1 - y0, cx0 - x0:cx1 - x0]
+            mixed = canvas[cy0:cy1, cx0:cx1] * (1 - aa) + col * 255 * aa
             canvas[cy0:cy1, cx0:cx1] = (mixed + 0.5).astype(self.np.uint8)
 
 

@@ -444,6 +444,11 @@ void DirectRenderer::update_gl_texture(SharedRenderState* render_state, int unit
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
                     m_debug_state.disable_mipmap ? GL_LINEAR : GL_LINEAR_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    // (Enhanced: the HD screen art (font, HUD) is drawn smooth already and shown smaller than its
+    // texels: trilinear's default blends in the half-size mip and softens it, so lean to the sharper
+    // level. Unit 0 only: m_tex_px_scale is its texture's.)
+    glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_LOD_BIAS,
+                    unit == 0 && m_tex_px_scale > 1.f && !m_offscreen_mode ? -0.6f : 0.f);
   } else {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

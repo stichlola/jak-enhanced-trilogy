@@ -537,21 +537,21 @@
      ;; "cross" seems to be mainly a UK thing (those weirdos)
      ;; (Enhanced: the Xbox buttons, the PlayStation's in Enhanced Light)
      (cond
-       ((not (pc-enhanced-light?)) "~Y~22L<~Z~Y~1L>~Z~Y~26L\cad~Z~Y~23L[~Z~+26H A")
+       ((not (pc-enhanced-light?)) "~Y~1L\cc3~Z~Y~26L\cad~Z~+26H A")
        ((language? uk-english) "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H Cross")
        (else "~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H X")))
     (((controller-keybind square))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H S~+7Vq~-7Vuare"
-         "~Y~22L<~Z~Y~1L>~Z~Y~27L\caf~Z~Y~23L[~Z~+26H X"))
+         "~Y~1L\cc3~Z~Y~27L\caf~Z~+26H X"))
     (((controller-keybind circle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H Circle"
-         "~Y~22L<~Z~Y~1L>~Z~Y~25L\cae~Z~Y~23L[~Z~+26H B"))
+         "~Y~1L\cc3~Z~Y~25L\cae~Z~+26H B"))
     (((controller-keybind triangle))
      (if (pc-enhanced-light?)
          "~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H Trian~+7Vg~-7Vle"
-         "~Y~22L<~Z~Y~1L>~Z~Y~5L\cb8~Z~Y~23L[~Z~+26H Y"))
+         "~Y~1L\cc3~Z~Y~5L\cb8~Z~+26H Y"))
     (((controller-keybind dpad-up))
      (if (pc-enhanced-light?)
          "~Y~0L\ca1~Z~3L~+17H~-13V\ca2~Z~0L~+17H~+14V\ca0~Z~0L~+32H\ca3~Z~+56H D-Pad U~+7Vp~-7V"
@@ -595,11 +595,11 @@
     (((controller-keybind select))
      (if (pc-enhanced-light?)
          "\c92 Select"
-         "~Y~22L<~Z~Y~1L\cb9~Z~Y~23L[~Z~+26H View"))
+         "~Y~1L\cc3~Z~Y~1L\cb9~Z~+26H View"))
     (((controller-keybind start))
      (if (pc-enhanced-light?)
          "\c92 Start"
-         "~Y~22L<~Z~Y~1L\cac~Z~Y~23L[~Z~+26H Menu"))
+         "~Y~1L\cc3~Z~Y~1L\cac~Z~+26H Menu"))
     (((controller-keybind l-analog-up))
      (if (pc-enhanced-light?)
          "~Y~1L\c91~Z~-17V~6L\c98~Z~+26H Left Analo~+7Vg~-7V U~+7Vp~-7V"

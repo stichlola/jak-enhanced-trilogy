@@ -133,10 +133,10 @@ static std::string xbox_buttons(const std::string& str) {
   static const std::pair<std::string, std::string> kSwaps[] = {
       // face buttons: the PlayStation button's own layout with the letter's cell and color, the
       // letter after the shine (so the shine's shadow is under it)
-      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~26L\xad~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~25L\xae~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~27L\xaf~Z~Y~23L[~Z~+26H"},
-      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~5L\xb8~Z~Y~23L[~Z~+26H"},
+      {"~Y~22L<~Z~Y~27L*~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~1L\xc3~Z~Y~26L\xad~Z~+26H"},
+      {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~1L\xc3~Z~Y~25L\xae~Z~+26H"},
+      {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~1L\xc3~Z~Y~27L\xaf~Z~+26H"},
+      {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~1L\xc3~Z~Y~5L\xb8~Z~+26H"},
       // the stick: arrows pointing away from it (<PAD_ANALOG_ANY>, _LEFT_RIGHT, _UP_DOWN)
       {"~1L~+8H~Y<PAD_PART_STICK>~Z~6L~-16H<PAD_PART_STICK_LEFT>~Z~+16h~6L<PAD_PART_STICK_RIGHT>~Z~"
        "6L~-15V<PAD_PART_STICK_DOWN>~Z~+13V~6L<PAD_PART_STICK_UP>~Z~-10H~+9V~6L<PAD_PART_STICK_UP_"
