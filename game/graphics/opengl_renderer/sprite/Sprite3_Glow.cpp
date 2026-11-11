@@ -68,7 +68,10 @@ bool glow_math(const SpriteGlowConsts* consts,
   out->flare_draw_color = rgba;
   // (Enhanced: the sky's own glows, as below: GlowRenderer keeps them out of the day's boost for
   // the light effects)
-  out->sky = std::max(in->size_x, in->size_y) >= 1000.f * 4096.f;
+  // (and the desert's far beacons: glows 450-900 m wide placed 4-8 km away, a purple-blue one
+  // turned into a saturated diamond in the evening sky with the boost. Beyond 2.8 km, the distance
+  // the post already treats as the far backdrop, no glow is a shot or a nearby lamp)
+  out->sky = std::max(in->size_x, in->size_y) >= 400.f * 4096.f || p0.z() > 2800.f * 4096.f;
   // Enhanced: every glow is a light source for the post pass's dynamic lights
   // (not the sky's: the sun, the moon and the stars are kilometers wide and placed 1 m from the camera,
   // a light there burned the ground around Jak white at night)
