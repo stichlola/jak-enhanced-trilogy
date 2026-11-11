@@ -658,6 +658,19 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
                                  mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_FIX_DST);
     if (mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST) {
       m_enhanced_fx.mark_blended(render_state, tbp, *tex);
+    } else if (g_enhanced_fx_add_keep && mode.get_ab_enable()) {
+      // (added light keeps the frame's alpha, the blended dust's mark: enhanced_state.h)
+      switch (mode.get_alpha_blend()) {
+        case DrawMode::AlphaBlend::SRC_0_SRC_DST:
+        case DrawMode::AlphaBlend::ZERO_SRC_SRC_DST:
+          glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE);
+          break;
+        case DrawMode::AlphaBlend::SRC_0_FIX_DST:
+          glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+          break;
+        default:
+          break;
+      }
     }
 
     prof.add_draw_call();

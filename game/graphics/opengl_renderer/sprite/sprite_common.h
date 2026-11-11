@@ -224,6 +224,7 @@ struct SpriteGlowOutput {
   AdGifData adgif;                  // 68, 69, 70, 71, 72
   math::Vector4f flare_draw_color;  // 75
   float perspective_q;
+  bool sky = false;  // (Enhanced) the sun's, the moon's or a star's glow: kilometers wide
 };
 
 struct SpriteGlowConsts {

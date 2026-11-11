@@ -3018,7 +3018,11 @@ void composite_unused() {
   }
   // (not on the sky: the sun's and moon's glows go back over our sky as the game drew them. With the
   // gain the sun was a saturated purple diamond, its quad's edge where the weight cut in)
-  if (tune_fx_sky > 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
+  // (only without the mark in the copy's alpha: with it the sky's glows zero that alpha themselves
+  // (GlowRenderer) and count as "dust" above, so a shot, a missile or a laser against the sky or the
+  // far hills keeps its weight. Dropping every sky pixel left them as the game's clipped sum over
+  // its own bright sky, graded with our sky: gone by day)
+  if (tune_fx_sky > 0.5 && fx_mark < 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
     fx_w = 0.0;
   }
   // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our

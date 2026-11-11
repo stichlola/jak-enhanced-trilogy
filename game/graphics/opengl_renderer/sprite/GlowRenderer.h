@@ -126,6 +126,7 @@ class GlowRenderer {
     DrawMode draw_mode;
     u32 idx;
     float size = 0.f;  // (Enhanced) the quad's larger side, as a share of the screen
+    bool sky = false;  // (Enhanced) the sun's, the moon's or a star's glow
   };
 
   std::array<SpriteRecord, kMaxSprites> m_sprite_records;

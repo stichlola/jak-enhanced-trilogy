@@ -66,6 +66,9 @@ bool glow_math(const SpriteGlowConsts* consts,
   rgba.y() *= rgba.w() * fade / 128.f;
   rgba.z() *= rgba.w() * fade / 128.f;
   out->flare_draw_color = rgba;
+  // (Enhanced: the sky's own glows, as below: GlowRenderer keeps them out of the day's boost for
+  // the light effects)
+  out->sky = std::max(in->size_x, in->size_y) >= 1000.f * 4096.f;
   // Enhanced: every glow is a light source for the post pass's dynamic lights
   // (not the sky's: the sun, the moon and the stars are kilometers wide and placed 1 m from the camera,
   // a light there burned the ground around Jak white at night)
