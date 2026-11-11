@@ -1658,7 +1658,9 @@
              )
         (go target-gun-stance)
         )
-    (if (and (logtest? (game-feature feature19) (-> self game features))
+    ;; Enhanced: no target-carry-pickup state in Jak 3 (see target-stance in target.gc)
+    (if (and (nonzero? target-carry-pickup)
+             (logtest? (game-feature feature19) (-> self game features))
              ;; og:preserve-this - High FPS Fix
              (recently-pressed? r1)
              )
