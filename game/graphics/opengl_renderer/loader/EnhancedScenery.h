@@ -125,6 +125,10 @@ void enhanced_set_placed(const std::vector<EnhancedPlaced>& placed);
 // a model's bounds around its foot (game units, unscaled): false while it's still loading
 bool enhanced_model_bounds(const std::string& model, float lo[3], float hi[3]);
 
+// in the sun's shadow pass (ENH_SHADOW active, its light matrix set, attribute 0 on, no cutout):
+// the placed objects' far versions, depth only; false when there's nothing to draw
+bool enhanced_placed_shadow_draw();
+
 // called by the shrub renderer after a tree's draws: the placed objects, once a frame (lit by the
 // first tree drawn near them)
 void enhanced_draw_placed(const tfrag3::ShrubTree& tree,

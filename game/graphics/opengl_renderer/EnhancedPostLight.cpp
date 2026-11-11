@@ -1826,6 +1826,15 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
         prof.add_draw_call();
       }
     }
+    // the objects placed by hand (trees, rocks, carts: EnhancedScenery), as the terrain: not in the
+    // far map alone
+    if (part != 2 && (!far_map || mid_map)) {
+      glUniform1i(u_cut, 0);
+      glUniform1f(u_alpha, -1.f);
+      if (enhanced_placed_shadow_draw()) {
+        prof.add_draw_call();
+      }
+    }
   };
   // (the far one every other frame: the sun barely moves. Its matrix changes only along with the
   // map: the new one over last frame's map made the far shadows jump while the camera moved)
