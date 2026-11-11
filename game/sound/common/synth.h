@@ -28,8 +28,15 @@ class Synth {
   s16Output Tick();
   void AddVoice(std::shared_ptr<Voice> voice);
   void SetMasterVol(u32 volume);
+  // Enhanced: the last sample's reverb send (after the master volume) and how many voices sent
+  s32 SendL() const { return mSendL; }
+  s32 SendR() const { return mSendR; }
+  int Sends() const { return mSends; }
 
  private:
+  s32 mSendL{0};
+  s32 mSendR{0};
+  int mSends{0};
   std::forward_list<std::shared_ptr<Voice>> mVoices;
 
   VolumePair mVolume{};

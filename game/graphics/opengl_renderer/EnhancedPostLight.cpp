@@ -597,6 +597,16 @@ void EnhancedPost::update_scene() {
     set_targets(g);
     set_volume(s.ambience);
   }
+  // the area's reverb (game/sound/common/enhanced_spatial): the zone's preset (world.json "reverb"),
+  // else dry outdoors and a long tail indoors; a roof over Jak outdoors makes it a small room
+  {
+    using namespace snd::spatial;
+    int preset = zone.reverb >= 0 ? zone.reverb : (outdoors ? (int)Dry : (int)Cave);
+    if (outdoors && m_cover > 0.5f && preset < (int)Room) {
+      preset = Room;
+    }
+    set_area(preset, zone.reverb_wet);
+  }
 
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
   const float wa = 0.7f + 0.5f * (float)std::sin(m_time * 0.013);

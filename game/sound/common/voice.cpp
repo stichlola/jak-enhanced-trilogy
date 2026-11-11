@@ -126,8 +126,17 @@ s16Output Voice::Run() {
   }
 
   sample = ApplyVolume(sample, mADSR.Level());
-  s16 left = ApplyVolume(sample, mVolume.left.GetCurrent());
-  s16 right = ApplyVolume(sample, mVolume.right.GetCurrent());
+  s16 sl = sample, sr = sample;
+  if (mShadowL | mShadowR) {
+    // Enhanced: head shadow (enhanced_spatial.h): a one-pole low-pass at ~2.5 kHz, blended in per ear
+    mShadowLp += ((sample - mShadowLp) * 9175) >> 15;
+    sl = static_cast<s16>(sample + (((mShadowLp - sample) * mShadowL) >> 15));
+    sr = static_cast<s16>(sample + (((mShadowLp - sample) * mShadowR) >> 15));
+  } else {
+    mShadowLp = sample;
+  }
+  s16 left = ApplyVolume(sl, mVolume.left.GetCurrent());
+  s16 right = ApplyVolume(sr, mVolume.right.GetCurrent());
 
   mADSR.Run();
   mVolume.Run();

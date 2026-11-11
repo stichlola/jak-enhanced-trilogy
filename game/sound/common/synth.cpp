@@ -14,12 +14,24 @@ s16Output Synth::Tick() {
   s16Output out{};
 
   mVoices.remove_if([](std::shared_ptr<Voice>& v) { return v->Dead(); });
+  s32 send_l = 0, send_r = 0;
+  int sends = 0;
   for (auto& v : mVoices) {
-    out += v->Run();
+    const s16Output o = v->Run();
+    out += o;
+    // Enhanced: the reverb's send (enhanced_spatial.h)
+    if (v->Send()) {
+      send_l += o.left;
+      send_r += o.right;
+      sends++;
+    }
   }
+  mSends = sends;
 
   out.left = ApplyVolume(out.left, mVolume.left.Get());
   out.right = ApplyVolume(out.right, mVolume.right.Get());
+  mSendL = (send_l * mVolume.left.Get()) >> 15;
+  mSendR = (send_r * mVolume.right.Get()) >> 15;
 
   mVolume.Run();
 

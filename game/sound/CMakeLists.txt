@@ -16,6 +16,7 @@ set(SOUND_SOURCES
   common/voice.cpp
   common/envelope.cpp
   common/enhanced_ambience.cpp
+  common/enhanced_spatial.cpp
   sndshim.cpp
   sdshim.cpp
   )

@@ -20,6 +20,8 @@ void VoiceManager::StartTone(std::shared_ptr<VagVoice> voice) {
   s16 right = AdjustVolToGroup(voice->basevol.right, voice->group);
 
   voice->SetVolume(left >> 1, right >> 1);
+  // Enhanced: everything but the music (group 1) goes to the area's reverb (enhanced_spatial.h)
+  voice->SetSend(voice->group != 1);
 
   if ((voice->tone.Flags & 0x10) != 0x0) {
     throw std::runtime_error("reverb only voice not handler");
@@ -68,6 +70,7 @@ VolPair VoiceManager::MakeVolume(int vol1, int pan1, int vol2, int pan2, int vol
   while (total_pan < 0) {
     total_pan += 360;
   }
+  mLastPan = total_pan;  // Enhanced: for the head shadow (enhanced_spatial.h)
 
   if (total_pan >= 270) {
     total_pan -= 270;

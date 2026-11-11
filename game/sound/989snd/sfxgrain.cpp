@@ -72,6 +72,12 @@ s32 Grain::snd_SFX_GRAIN_TYPE_TONE(BlockSoundHandler& handler) {
 
   voice->basevol =
       handler.m_vm.MakeVolume(127, 0, handler.m_cur_volume, handler.m_cur_pan, vol, pan);
+  {
+    // Enhanced: the head shadow for where the sound is (enhanced_spatial.h; not the music)
+    s32 sl, sr;
+    spatial::shadow_for_pan(handler.m_group == 1 ? -1 : handler.m_vm.LastPan(), sl, sr);
+    voice->SetShadow(sl, sr);
+  }
 
   handler.m_vm.StartTone(voice);
   handler.m_voices.emplace_front(voice);
