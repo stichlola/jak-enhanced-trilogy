@@ -84,8 +84,25 @@ def export(obj: bpy.types.Object, path: Path) -> None:
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
     bpy.context.view_layer.objects.active = obj
-    bpy.ops.export_scene.gltf(filepath=str(path), use_selection=True, export_format="GLB",
-                              export_apply=True, export_yup=True)
+    kw = dict(filepath=str(path), use_selection=True, export_format="GLB", export_apply=True, export_yup=True)
+    # (a model's own vertex colors, as the wind weight in COLOR_0's alpha (desert_props.py), kept)
+    colors = [a for a in obj.data.color_attributes if a.name != "imp_normal"]
+    if colors:
+        # (only the one the model came with: the importer adds a white one of its own)
+        varied = [a for a in colors if len({round(c.color[3], 2) for c in a.data}) > 1]
+        keep = varied[0] if varied else colors[0]
+        for a in colors:
+            if a.name != keep.name:
+                obj.data.color_attributes.remove(a)
+        keep = obj.data.color_attributes[keep.name]
+        obj.data.color_attributes.active_color = keep
+        obj.data.color_attributes.render_color_index = obj.data.color_attributes.find(keep.name)
+        try:
+            bpy.ops.export_scene.gltf(**kw, export_vertex_color="ACTIVE")
+            return
+        except TypeError:
+            pass
+    bpy.ops.export_scene.gltf(**kw)
 
 
 def hemi_oct_dir(u: float, v: float) -> Vector:
