@@ -3100,6 +3100,11 @@ void composite_unused() {
   // (this pixel's normal and the length its material wrote it at, for everything below: read once)
   vec4 pix_normal = gbuf(tex_coord);
   float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
+  // rock lying on the dunes (tfrag3.frag's enh_on_sand: the rock's 0.75 lengthened up to 0.82 where
+  // it lies on the sand, the desert mounds' flat skirts): how much of the sand's light it takes
+  // instead of the rock's (the rock's tests read 0.7-0.85, then fade by this)
+  float rock_tag = step(0.7, pix_tag) * step(pix_tag, 0.845);
+  float on_sand = rock_tag * clamp((pix_tag - 0.756) / 0.06, 0.0, 1.0);
   // true PBR (tfrag3.frag, EnhancedPbr.h): the level's roughness, 6 bits in the albedo's low bits,
   // there where its alpha is 1 (-1: none: no map, PBR off, characters, water, effects). Its normal
   // map is in the normal target already. No uniforms here (constants only: the NVIDIA limit)
@@ -5804,7 +5809,8 @@ void composite_unused() {
   // too small for the pixels, a size averages out by itself
   if (rock_detail > 0.0 && z > 0.0) {
     float nl = pix_tag;
-    if (nl > 0.55 && nl < 0.8) {
+    if (nl > 0.55 && nl < 0.845) {
+      vec3 c_rock_in = c;  // (rock on the dunes: none of the picture, as the sand around: on_sand)
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
       // (sharp: the view from above, its strata lines, stays off steep faces, where they ran down
@@ -5940,6 +5946,7 @@ void composite_unused() {
         // only partly)
         c = mix(c, c_far, max(smoothstep(30.0, 60.0, dist), smoothstep(0.605, 0.645, nl)));
       }
+      c = mix(c, c_rock_in, on_sand);
     }
   }
 
@@ -5956,7 +5963,7 @@ void composite_unused() {
     // (the land only, by the normals' tag lengths: sand, rocky ground, rock. The palms' leaves,
     // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
     float land_tag = pix_tag;
-    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.8) ||
+    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.845) ||
                  (land_tag > 0.85 && land_tag < 0.95) ? 1.0 - flame_keep : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
@@ -5990,7 +5997,7 @@ void composite_unused() {
     // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
     // By the mark only, not the color: the warm haze turns the far sand orange
     float nl = pix_tag;
-    float dune = step(0.85, nl) * step(nl, 0.95) * (1.0 - flame_keep);
+    float dune = max(step(0.85, nl) * step(nl, 0.95), on_sand) * (1.0 - flame_keep);
     float level = dot(surf_n, up_view);
     float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
     float rip = dune * smoothstep(0.4, 0.75, level);
@@ -6214,20 +6221,24 @@ void composite_unused() {
     // (the sand stopped down; the mountains lifted, the low sun lights them face on. By the
     // normals' tag lengths, tfrag3.frag / hfrag.frag)
     float rock_expo = mix(1.0, 1.12, smoothstep(15.0, 60.0, length(p) / 4096.0));
-    float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
+    // (rock lying on the dunes stopped down as the sand: on_sand)
+    float expo = tag > 0.85 && tag < 0.95 ? 0.82 : rock_tag > 0.0 ? mix(rock_expo, 0.82, on_sand) : 1.0;
+    vec3 c_rock_in = c;
     // (the grey rock slabs in the sand: warm sandstone in this light, not ash)
-    if (tag > 0.7 && tag < 0.8) {
+    if (rock_tag > 0.0) {
       float mxr = max(c.r, max(c.g, c.b));
       float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
       float grey = (1.0 - smoothstep(0.3, 0.6, satr)) * (1.0 - smoothstep(40.0, 120.0, length(p) / 4096.0));
       // (and lit: the game bakes them near black; the low sun catches their tops)
       float lift = mix(1.55, 1.2, smoothstep(20.0, 80.0, length(p) / 4096.0));
       c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
+      c = mix(c, c_rock_in, on_sand);
     }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
     c *= 1.0 - 0.22 * gk;  // (and all of it stopped down a little: low light, deeper)
     // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
-    if (tag > 0.7 && tag < 0.8) {
+    if (rock_tag > 0.0) {
+      c_rock_in = c;
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
       // (by the low sun where its glow is: the faces toward it lit, the ones toward us backlit)
       vec2 brg = normalize(world_dir(sun_dir.xyz).xz + 1e-4);
@@ -6243,6 +6254,7 @@ void composite_unused() {
       vec2 shz = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
       float toward = max(dot(normalize(world_dir(ray).xz + 1e-4), shz), 0.0);
       c += vec3(0.24, 0.12, 0.035) * pow(toward, 5.0) * golden * far;
+      c = mix(c, c_rock_in, on_sand);
     }
     c *= 1.0 - 0.4 * gk * (1.0 - smoothstep(0.2, 0.55, lg));
 
@@ -6330,7 +6342,7 @@ void composite_unused() {
   vec3 pre_relight = c;
   if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
     float tag = pix_tag;
-    if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
+    if (rock_tag > 0.0 && rock_sun > 0.0) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - sky_day)) * (1.0 - weather.x);
       float rndl = dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0)));
@@ -6360,7 +6372,8 @@ void composite_unused() {
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
-      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun);
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun *
+                            (1.0 - on_sand));
     }
     if (tag > 0.985 && wsurf == 0.0 && sun_haze > 0.0) {
       // (under the desert's high sun the walls' pale plaster: the patches of sun near white, the rest
@@ -6486,11 +6499,11 @@ void composite_unused() {
   // the desert's rock by day never past a sandstone's saturation: the relight's warmth, the grade's
   // and the morning look's stacked up and the far mountains went the most saturated orange in the
   // frame (the low sun keeps its own, richer)
-  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0 && tune_rock_sat > 0.0 && pix_tag > 0.7 && pix_tag < 0.8) {
+  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0 && tune_rock_sat > 0.0 && rock_tag > 0.0) {
     float mxr = max(c.r, max(c.g, c.b));
     float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
     if (satr > tune_rock_sat) {
-      float k = mix(1.0, tune_rock_sat / satr, (1.0 - min(golden * 2.0, 1.0)) * (1.0 - flame_keep));
+      float k = mix(1.0, tune_rock_sat / satr, (1.0 - min(golden * 2.0, 1.0)) * (1.0 - flame_keep) * (1.0 - on_sand));
       c = max(mix(vec3(luma(c)), c, k), 0.0);
     }
   }

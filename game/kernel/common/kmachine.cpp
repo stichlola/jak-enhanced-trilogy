@@ -1206,6 +1206,18 @@ static void enhanced_test_switches(const std::string& level) {
   if ((float)t_hour >= 0.f && (float)t_hour != asked_hour) {
     asked_hour = (float)t_hour;
     g_enhanced_menu.ask(1, fmt::format("{}", asked_hour));
+    return;
+  }
+  // (test: tuning debug.tp = [x, y, z, yaw] (meters, degrees) moves Jak there once per change: the
+  // spots of a review visited in one run, picked from outside)
+  static const EnhancedTune t_tp("debug.tp", {0.f, 0.f, 0.f, 0.f});
+  static float asked_tp[4] = {0.f, 0.f, 0.f, 0.f};
+  if (t_tp.is_set() && t_tp.size() >= 3) {
+    const float want[4] = {t_tp[0], t_tp[1], t_tp[2], t_tp.size() > 3 ? t_tp[3] : 0.f};
+    if (std::memcmp(want, asked_tp, sizeof(want)) != 0) {
+      std::memcpy(asked_tp, want, sizeof(want));
+      g_enhanced_menu.ask(3, fmt::format("{},{},{},{}", want[0], want[1], want[2], want[3]));
+    }
   }
 }
 

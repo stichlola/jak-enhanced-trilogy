@@ -49,6 +49,12 @@ extern std::string g_enhanced_bg_level;
 // Enhanced: how far that level's fade-in has come (1 = whole, or not faded: no background drawn)
 float enhanced_level_fade_peek(const std::string& name, u64 frame);
 
+// Enhanced: the dunes' heights on their 8 m grid (Hfrag.cpp's R32F texture, 1e30 where none), set
+// each frame the hfrag is drawn (before the tfrag): tfrag3.frag gives rock lying on the sand (the
+// desert's flat rock patches, their rims painted as the sand) the sand's light. 0 when no hfrag
+// was drawn this frame. light: its time of day colors' mean brightness now (0..1)
+void enhanced_set_hfrag_ground(unsigned int tex, u64 frame, float light);
+
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
                             ShaderId shader);
