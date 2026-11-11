@@ -113,6 +113,11 @@
 (define-extern enhanced-sig-gun-post (function none :behavior enhanced-skin))
 (define-extern enhanced-sig-attacking? (function target object))
 (define-extern enhanced-sig-slerp-local! (function matrix matrix matrix float matrix))
+;; the characters' own attack moves (enhanced-moves.gc): one showing now, its timeline, its pose
+(define-extern enhanced-move-active? (function symbol))
+(define-extern enhanced-move-update (function none :behavior enhanced-skin))
+(define-extern enhanced-move-post (function none :behavior enhanced-skin))
+(define-extern enhanced-move-snap-post (function none :behavior enhanced-skin))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -420,6 +425,10 @@
       ((enhanced-sig-animate)
        #t
        )
+      ;; one of its own attack moves: its idle under the move's pose (enhanced-moves.gc)
+      ((enhanced-move-active?)
+       (enhanced-skin-play (-> ch idle) (enhanced-skin-idle-rate ch) (seconds 0.1))
+       )
       ((or (focus-test? tgt pilot) (not walk?) (< speed (if (= cur (-> ch idle)) (meters 0.6) (meters 0.3))))
        (enhanced-skin-play (-> ch idle) (enhanced-skin-idle-rate ch) (seconds 0.2))
        )
@@ -450,6 +459,8 @@
     (or (enhanced-sig-own?)
         ;; Ashelin's kick is posed on her own idle
         (enhanced-ashelin-kick-active?)
+        ;; and so are the characters' own attack moves
+        (enhanced-move-active?)
     (and (not (= *enhanced-player-retarget* 'all))
          (not (focus-test? tgt in-air pilot pilot-riding edge-grab pole flut board mech tube))
          ;; not just after an attack (Jak's recovery, or the next hit of a combo, is still coming)
@@ -780,6 +791,8 @@
   )
 
 (defbehavior enhanced-skin-post enhanced-skin ()
+  ;; its own attack move for Jak's attack state (enhanced-moves.gc)
+  (enhanced-move-update)
   (let ((tgt (-> self parent 0)))
     (vector-copy! (-> self root trans) (-> tgt control trans))
     (quaternion-copy! (-> self root quat) (-> tgt control quat))
@@ -808,6 +821,10 @@
       (cond
         ((focus-test? tgt pilot)
          (set! (-> self pose-blend) 1.0)
+         )
+        ;; one of its own attack moves: on its own idle at once (the move crossfades from the pose last drawn)
+        ((enhanced-move-active?)
+         (set! (-> self pose-blend) 0.0)
          )
         (own?
           (seek! (-> self pose-blend) 0.0 (* 5.0 (seconds-per-frame)))
@@ -868,6 +885,9 @@
   (enhanced-ashelin-gun-post)
   ;; her kick's pose over all that (enhanced-ashelin-kick.gc)
   (enhanced-ashelin-kick-post)
+  ;; the characters' own attack moves (enhanced-moves.gc), and their crossfade from the pose last drawn
+  (enhanced-move-post)
+  (enhanced-move-snap-post)
   ;; ja-post put its draw origin (bounds, lights, shadow) on the hips of its own animation: put it on the
   ;; hips as drawn, as do-joint-math does (its bounds' centre through the origin joint)
   (let ((b (new 'stack-no-clear 'vector)))

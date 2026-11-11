@@ -368,19 +368,74 @@ class Move:
 
 # ---- the moves -----------------------------------------------------------------------------------
 
-def guard(c, f, face=None):
-    return clip(c).rig(f, face).ground()
+def plant(rig, d=(0.0, 0.0, 0.0), lfoot=(0.0, 0.0, 0.0), rfoot=(0.0, 0.0, 0.0)):
+    """The body moved by d with the feet staying where they are (or moved by lfoot / rfoot): the knees bend."""
+    L = rig.P[J["LeftFoot"]] + np.asarray(lfoot, float)
+    R = rig.P[J["RightFoot"]] + np.asarray(rfoot, float)
+    rig.move(d)
+    rig.ik("LeftUpLeg", "LeftLeg", "LeftFoot", L, pole=rig.frames["Hips"] @ np.array([0.2, 0.0, 1.0]))
+    rig.ik("RightUpLeg", "RightLeg", "RightFoot", R, pole=rig.frames["Hips"] @ np.array([-0.2, 0.0, 1.0]))
+    return rig
+
+
+def twist(rig, degrees):
+    """The chest (arms and head with it) about the vertical: + to the left."""
+    return rig.turn("Spine1", Y, degrees)
+
+
+def lean(rig, degrees):
+    """The chest forward (+) or back, about the left-right line of the hips."""
+    return rig.turn("Spine1", rig.frames["Hips"] @ X, degrees)
+
+
+def look(rig, yaw=0.0):
+    """The head facing yaw degrees left of the model's forward."""
+    f = rig.frames["Head"] @ Z
+    return rig.turn("Neck", Y, yaw - math.degrees(math.atan2(f[0], f[2])))
+
+
+def roll(rig, joint, child, ref, to):
+    """A bone turned about its own line until its side (toward joint ref) looks along to."""
+    axis = rig.dir(joint, child)
+    cur = rig.P[J[ref]] - rig.P[J[joint]]
+    cur = cur - axis * np.dot(cur, axis)
+    t = np.asarray(to, float)
+    t = t - axis * np.dot(t, axis)
+    if np.linalg.norm(cur) < 1e-6 or np.linalg.norm(t) < 1e-6:
+        return rig
+    cur, t = unit(cur), unit(t)
+    return rig.rot(joint, rot_axis(axis, math.atan2(float(np.dot(np.cross(cur, t), axis)), float(np.dot(cur, t)))))
+
+
+def arm(rig, side, upper, fore, hand=None, thumb=None):
+    """An arm by directions (model space): upper arm, forearm, the line of the hand (default: the forearm's)
+    and the way its thumb side looks."""
+    rig.aim(side + "Arm", side + "ForeArm", upper)
+    rig.aim(side + "ForeArm", side + "Hand", fore)
+    rig.aim(side + "Hand", side + "HandEnd", fore if hand is None else hand)
+    if thumb is not None:
+        roll(rig, side + "Hand", side + "HandEnd", side + "HandThumb1", thumb)
+    return rig
+
+
+def reach(rig, side, target, pole, hand=None, thumb=None):
+    """A hand put at target (two-bone IK, the elbow toward pole)."""
+    rig.ik(side + "Arm", side + "ForeArm", side + "Hand", target, pole=pole)
+    rig.aim(side + "Hand", side + "HandEnd", rig.dir(side + "ForeArm", side + "Hand") if hand is None else hand)
+    if thumb is not None:
+        roll(rig, side + "Hand", side + "HandEnd", side + "HandThumb1", thumb)
+    return rig
 
 
 def ashelin_front_kick():
-    """Karate front snap kick (Ashelin's square). From ashelin_front_kick_3: the only take that chambers the knee
+    """Karate front snap kick (Ashelin, square). From ashelin_front_kick_3: the only take that chambers the knee
     and snaps the shin out at chest height with the leg straight (foot 1.29 m up, knee 169 degrees; take 1 is
-    cleaner but hip high, take 2 never straightens: 129). Frames 20-31, faced along the kick."""
-    c = "ashelin_front_kick_3"
-    k = clip(c)
+    cleaner but only hip high, take 2 never straightens: 129). Frames 22-31, faced along the kick."""
+    k = clip("ashelin_front_kick_3")
     d = k.P[26, J["RightFoot"]] - k.P[26, J["Hips"]]
     yaw = math.degrees(math.atan2(d[0], d[2]))
-    ready = k.rig(20, yaw)
+    # from her stance (the guard of take 1), the weight going onto the left leg
+    ready = clip("ashelin_front_kick_1").rig(4)
     chamber = k.rig(22, yaw)
     # a tighter, higher chamber: the knee up to the chest, the heel under the thigh, leaning back a little
     chamber.aim("RightUpLeg", "RightLeg", [-0.10, 0.45, 0.89])
@@ -389,7 +444,7 @@ def ashelin_front_kick():
     strike = k.rig(26, yaw)
     # the leg straight along the kick, toes pulled back (ball of the foot), hips pushed in
     leg = unit(strike.P[J["RightFoot"]] - strike.P[J["RightUpLeg"]])
-    leg = unit(np.array([0.0, leg[1] + 0.05, math.hypot(leg[0], leg[2])]))
+    leg = unit(np.array([0.0, leg[1] - 0.04, math.hypot(leg[0], leg[2])]))
     strike.aim("RightUpLeg", "RightLeg", leg)
     strike.aim("RightLeg", "RightFoot", leg)
     strike.aim("RightFoot", "RightToeBase", unit(leg + np.array([0.0, 0.9, 0.0])))
@@ -407,11 +462,192 @@ def ashelin_front_kick():
         (0.27, None, "lin", 0),
         (0.36, back, "out", 0),
         (0.47, down, "io", 0),
-        (0.62, end, "io", 0),
-    ], note="ashelin_front_kick_3 frames 20-31 (chamber and strike sharpened), ending on take 1's stance")
+        (0.64, end, "io", 0),
+    ], note="ashelin_front_kick_3 frames 22-31 (chamber and strike sharpened), from and to the stance of take 1")
 
 
-MOVES = [ashelin_front_kick]
+def ashelin_pistol_whip():
+    """The grip of her pistol brought down from over her head (square with the pistol out). No take holds the
+    strike (1 and 2 stand aiming for 1.4 s; 3 raises the arm and is cut as it comes down, the hand never under
+    1.3 m): the stance is the guard of ashelin_front_kick_1, the step in is the kind take 3 makes, the arm is
+    posed here."""
+    g = clip("ashelin_front_kick_1").rig(4)
+    a = g.copy()
+    plant(a, (0.0, -0.03, -0.05), rfoot=(0.0, 0.05, 0.08))
+    twist(a, -28)
+    lean(a, -10)
+    arm(a, "Right", (-0.35, 0.82, -0.20), (0.20, 0.80, -0.56), hand=(0.20, 0.70, -0.68), thumb=(0.0, -0.4, -0.9))
+    arm(a, "Left", (0.30, 0.02, 0.95), (0.05, 0.22, 0.97), thumb=(-0.8, 0.5, 0.0))
+    look(a)
+    s = g.copy()
+    plant(s, (0.0, -0.10, 0.22), rfoot=(0.0, 0.0, 0.36))
+    twist(s, 24)
+    lean(s, 23)
+    arm(s, "Right", (-0.08, -0.52, 0.85), (0.05, -0.68, 0.73), hand=(0.05, -0.55, 0.83), thumb=(0.0, 0.85, 0.52))
+    arm(s, "Left", (0.45, -0.55, -0.70), (0.0, 0.25, 0.97), thumb=(-0.5, 0.8, 0.0))
+    look(s)
+    r = g.copy()
+    plant(r, (0.0, -0.03, 0.10), rfoot=(0.0, 0.0, 0.18))
+    lean(r, 8)
+    return Move("ashelin-pistol-whip", "ashelin", [
+        (0.00, g, "lin", 0),
+        (0.10, a, "out", 0),
+        (0.19, s, "snap", 0.09),
+        (0.28, None, "lin", 0),
+        (0.44, r, "out", 0),
+        (0.64, g, "io", 0),
+    ], note="posed on the stance of ashelin_front_kick_1 (no pistol-whip take holds the strike)")
+
+
+def sig_stance():
+    return clip("sig_boxer_punch_1").rig(10)
+
+
+def sig_elbow():
+    """A forward elbow strike (Sig, square). The elbow takes never bring the elbow in front (0.2 m ahead of
+    its shoulder at most, the forearm open at 80-114 degrees), so the stance is the guard of a take and the
+    coil, the step and the folded arm are posed here."""
+    g = sig_stance()
+    a = g.copy()
+    plant(a, (0.0, -0.07, -0.07))
+    twist(a, -34)
+    arm(a, "Right", (-0.52, -0.30, -0.80), (0.25, 0.62, 0.74), thumb=(0.4, 0.9, 0.0))
+    arm(a, "Left", (0.25, -0.45, 0.86), (-0.25, 0.80, 0.55), thumb=(-0.6, 0.6, 0.5))
+    look(a)
+    s = g.copy()
+    plant(s, (0.0, -0.06, 0.20), lfoot=(0.0, 0.0, 0.26))
+    twist(s, 44)
+    lean(s, 16)
+    arm(s, "Right", (0.14, 0.24, 0.96), (0.66, 0.26, -0.70), thumb=(0.2, 0.95, 0.25))
+    arm(s, "Left", (0.42, -0.62, -0.66), (-0.15, 0.40, 0.90), thumb=(-0.5, 0.8, 0.0))
+    look(s)
+    r = g.copy()
+    plant(r, (0.0, -0.02, 0.08), lfoot=(0.0, 0.0, 0.13))
+    twist(r, -9)
+    return Move("sig-elbow", "sig", [
+        (0.00, g, "lin", 0),
+        (0.09, a, "out", 0),
+        (0.18, s, "snap", 0.08),
+        (0.27, None, "lin", 0),
+        (0.43, r, "out", 0),
+        (0.64, g, "io", 0),
+    ], note="posed on the guard of sig_boxer_punch_1 (the elbow takes never bring the elbow in front)")
+
+
+def sig_boxer():
+    """A jab and a straight (the other choice for the square of Sig). Take 1 only throws a late right overhand
+    and take 2 a small jab and a left hook: the two punches are posed on the guard of take 1."""
+    g = sig_stance()
+    jab = g.copy()
+    plant(jab, (0.0, -0.02, 0.07))
+    twist(jab, -24)
+    arm(jab, "Left", (0.06, 0.04, 1.0), (0.0, 0.05, 1.0), thumb=(-0.9, 0.4, 0.0))
+    look(jab)
+    mid = g.copy()
+    plant(mid, (0.0, -0.03, 0.08))
+    twist(mid, 6)
+    st = g.copy()
+    plant(st, (0.0, -0.05, 0.17), lfoot=(0.0, 0.0, 0.12))
+    twist(st, 40)
+    lean(st, 9)
+    arm(st, "Right", (-0.06, 0.04, 1.0), (0.0, 0.06, 1.0), thumb=(0.9, 0.4, 0.0))
+    look(st)
+    r = g.copy()
+    plant(r, (0.0, -0.02, 0.06), lfoot=(0.0, 0.0, 0.06))
+    twist(r, -8)
+    return Move("sig-boxer", "sig", [
+        (0.00, g, "lin", 0),
+        (0.08, jab, "in", 0),
+        (0.15, mid, "out", 0),
+        (0.22, st, "snap", 0.07),
+        (0.30, None, "lin", 0),
+        (0.45, r, "out", 0),
+        (0.64, g, "io", 0),
+    ], note="posed on the guard of sig_boxer_punch_1 (take 1: one late overhand; take 2: a small jab and a hook)")
+
+
+def sig_spin_punch():
+    """A spinning backfist (Sig, circle): a full turn to his left on his left foot, the left arm whipping out
+    as he comes round. Only take 2 turns at all (280 degrees, arms tucked, cut before the fist goes out), takes
+    1 and 3 swing the arms standing: the turn and the arm are posed on the guard of a take."""
+    g = sig_stance()
+    low = g.copy()
+    plant(low, (0.0, -0.07, 0.0))
+    # (about a point a third of the way to his left foot: on the foot itself his body swung 0.4 m out and back)
+    pivot = 0.35 * np.array([low.P[J["LeftFoot"], 0], 0.0, low.P[J["LeftFoot"], 2]])
+
+    def pose(psi, ext, lift=0.0, crouch=0.0):
+        r = low.copy()
+        if crouch:
+            plant(r, (0.0, -crouch, 0.0))
+        if lift:
+            plant(r, rfoot=(0.0, lift, 0.0))
+        # the left arm: folded across his chest (0) to straight out to his left at shoulder height (1)
+        fold_u, fold_f = np.array([-0.30, -0.50, 0.81]), np.array([-0.80, 0.50, 0.33])
+        out_u, out_f = np.array([0.98, 0.10, -0.15]), np.array([1.0, 0.06, 0.05])
+        arm(r, "Left", interp_dir(unit(fold_u), unit(out_u), ext), interp_dir(unit(fold_f), unit(out_f), ext),
+            thumb=(0.0, 1.0, 0.0))
+        twist(r, -30 * ext + 12)
+        look(r, 35 if ext > 0.5 else 0)
+        r.move(-pivot)
+        r.yaw(psi)
+        r.move(pivot)
+        return r
+
+    return Move("sig-spin-punch", "sig", [
+        (0.00, pose(0, 0.0), "lin", 0),
+        (0.05, pose(-26, 0.0, crouch=0.05), "out", 0),
+        (0.10, pose(55, 0.0, lift=0.05), "in", 0),
+        (0.145, pose(145, 0.1, lift=0.07), "lin", 0),
+        (0.185, pose(222, 0.6, lift=0.06), "lin", 0),
+        (0.22, pose(282, 1.0, lift=0.03), "lin", 0),
+        (0.26, pose(328, 1.0), "out", 0),
+        (0.32, pose(371, 0.5), "out", 0),
+        (0.44, pose(357, 0.1), "io", 0),
+        (0.64, g.copy().yaw(360), "io", 0),
+    ], note="posed on the guard of sig_boxer_punch_1 (only take 2 turns, 280 degrees, with no fist)")
+
+
+def sig_rifle_butt():
+    """The butt of the Peacemaker thrust forward at head height (Sig, square with it out). The takes hold a
+    rifle pose and barely move (the hands go 6 cm forward): the hold is posed here, both hands on the gun, the
+    barrel along the line from his right hand (the grip) to his left."""
+    g = sig_stance()
+
+    def hold(r, right, left):
+        reach(r, "Right", right, pole=(-0.7, -0.6, -0.3))
+        reach(r, "Left", left, pole=(0.7, -0.6, 0.0))
+        r.gun = unit(r.P[J["LeftHand"]] - r.P[J["RightHand"]])
+        r.aim("RightHand", "RightHandEnd", r.gun)
+        r.aim("LeftHand", "LeftHandEnd", unit(np.cross(r.gun, Y)) * -1.0)
+        look(r)
+        return r
+
+    h = hold(g.copy(), (-0.20, 1.10, 0.22), (0.10, 1.24, 0.48))
+    a = g.copy()
+    plant(a, (0.0, -0.06, -0.08))
+    twist(a, -30)
+    hold(a, (-0.36, 1.04, -0.08), (0.02, 1.28, 0.34))
+    s = g.copy()
+    plant(s, (0.0, -0.05, 0.20), lfoot=(0.0, 0.0, 0.24))
+    twist(s, 40)
+    lean(s, 12)
+    hold(s, (-0.02, 1.48, 0.66), (0.28, 1.34, 0.24))
+    r = g.copy()
+    plant(r, (0.0, -0.02, 0.08), lfoot=(0.0, 0.0, 0.12))
+    twist(r, -8)
+    hold(r, (-0.22, 1.12, 0.20), (0.10, 1.25, 0.46))
+    return Move("sig-rifle-butt", "sig", [
+        (0.00, h, "lin", 0),
+        (0.09, a, "out", 0),
+        (0.18, s, "snap", 0.08),
+        (0.27, None, "lin", 0),
+        (0.44, r, "out", 0),
+        (0.64, h, "io", 0),
+    ], note="posed on the guard of sig_boxer_punch_1 (the rifle-butt takes barely move)", gun=True)
+
+
+MOVES = [ashelin_front_kick, ashelin_pistol_whip, sig_elbow, sig_boxer, sig_spin_punch, sig_rifle_butt]
 
 
 # ---- output --------------------------------------------------------------------------------------
@@ -460,7 +696,7 @@ def sheet(move, path, views=("side", "front"), step=2):
 
 
 def gc_name(name):
-    return "*enhanced-move-" + name + "*"
+    return "*enhanced-move-table-" + name + "*"
 
 
 def write_gc(moves, path):
@@ -519,7 +755,8 @@ def main():
         print("%-22s %-8s %.2f s, %d samples, lowest ankle 0..%.2f m over standing" % (m.name, m.who, m.length, len(feats), max(cl)))
         if args.sheets and (not only or m.name in only):
             os.makedirs(args.sheets, exist_ok=True)
-            print("  ", sheet(m, os.path.join(args.sheets, m.name + ".png")))
+            views = ("side", "top") if "spin" in m.name else ("side", "front")
+            print("  ", sheet(m, os.path.join(args.sheets, m.name + ".png"), views=views, step=1 if "spin" in m.name else 2))
     if args.out != "-":
         print("wrote", write_gc(moves, args.out))
 
