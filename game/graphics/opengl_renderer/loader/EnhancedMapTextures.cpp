@@ -8,6 +8,7 @@
 
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
+#include "common/util/enhanced_light.h"
 #include "common/versions/versions.h"
 
 #include "game/runtime.h"
@@ -130,6 +131,10 @@ bool enhanced_upscale_map(const tfrag3::Texture& tex, std::vector<u32>& out) {
 
 bool enhanced_hd_screen_texture(const tfrag3::Texture& tex, std::vector<u32>& out, int& scale) {
   if (tex.w <= 0 || tex.h <= 0) {
+    return false;
+  }
+  // Enhanced Light keeps the stock font (the PlayStation buttons: its texts don't use the Xbox cells)
+  if (tex.debug_tpage_name == "gamefont" && enhanced_light()) {
     return false;
   }
   {
