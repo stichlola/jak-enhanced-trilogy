@@ -3041,7 +3041,11 @@ void composite_unused() {
   }
   // (not on the sky: the sun's and moon's glows go back over our sky as the game drew them. With the
   // gain the sun was a saturated purple diamond, its quad's edge where the weight cut in)
-  if (tune_fx_sky > 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
+  // (only without the mark in the copy's alpha: with it the sky's glows zero that alpha themselves
+  // (GlowRenderer) and count as "dust" above, so a shot, a missile or a laser against the sky or the
+  // far hills keeps its weight. Dropping every sky pixel left them as the game's clipped sum over
+  // its own bright sky, graded with our sky: gone by day)
+  if (tune_fx_sky > 0.5 && fx_mark < 0.5 && (z == 0.0 || z > 2800.0 * 4096.0)) {
     fx_w = 0.0;
   }
   // (what the sprites did that stays in the scene: smoke darkening the sky, washes of light. Our
@@ -6779,7 +6783,13 @@ void composite_unused() {
     }
     vec3 fa = fx_d * g;
     fa = max(mix(vec3(luma(fa)), fa, mix(1.0, tune_fx_sat, fx_day)), 0.0);
-    vec3 t = c + fa * fx_w;
+    // (over bright ground the sum has nowhere to go: sunlit sand at 0.7 plus a red shot is a pale
+    // pink at 1.0. There the effect also covers part of what is behind it, by its own strength: its
+    // color shows against the ground instead of only lifting it. Not over dark ground, not at night)
+    const float k_fx_cover = 0.6;
+    float fa_m = max(fa.r, max(fa.g, fa.b));
+    float cover = k_fx_cover * fx_day * fx_w * smoothstep(0.06, 0.6, fa_m) * smoothstep(0.3, 0.7, luma(c));
+    vec3 t = c * (1.0 - cover) + fa * fx_w;
     float m = max(t.r, max(t.g, t.b));
     float k = tune_fx_knee;
     if (m > k) {

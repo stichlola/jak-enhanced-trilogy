@@ -789,6 +789,7 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   }();
   static const EnhancedTune t_off("fx.off", 0.f);
   g_enhanced_fx_blend_mark = false;
+  g_enhanced_fx_add_keep = false;
   if (which == 0) {
     m_fx_marked = false;
   }
@@ -852,6 +853,9 @@ void EnhancedPost::capture_fx(GLuint render_fbo, int w, int h, int which) {
   // (tuning.json "fx": {"blend_mark": 0}: off)
   static const EnhancedTune t_mark("fx.blend_mark", 1.f);
   g_enhanced_fx_blend_mark = which == 0 && t_mark > 0.5f;
+  // (and added light leaves that alpha alone, enhanced_state.h; "fx": {"add_keep": 0}: as before)
+  static const EnhancedTune t_add_keep("fx.add_keep", 1.f);
+  g_enhanced_fx_add_keep = g_enhanced_fx_blend_mark && t_add_keep > 0.5f;
   if (g_enhanced_fx_blend_mark) {
     GLboolean mask[4];
     glGetBooleani_v(GL_COLOR_WRITEMASK, 0, mask);

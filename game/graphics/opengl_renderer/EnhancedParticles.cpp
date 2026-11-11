@@ -152,6 +152,7 @@ int EnhancedSpriteFx::classify(SharedRenderState* render_state,
 }
 
 bool g_enhanced_fx_blend_mark = false;
+bool g_enhanced_fx_add_keep = false;
 
 void EnhancedSpriteFx::mark_blended(SharedRenderState* render_state, u32 tbp, u64 gl_texture) {
   if (!g_enhanced_fx_blend_mark) {

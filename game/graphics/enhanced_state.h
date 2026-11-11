@@ -410,6 +410,17 @@ struct EnhancedFires {
 };
 extern EnhancedFires g_enhanced_fires;
 
+// True between the two copies of the light effects (EnhancedPost::capture_fx, Jak 3: the sprite,
+// particle and generic sprite buckets): the frame's alpha was cleared to 1 and now carries
+// 1 - the coverage of blended dust and smoke, which the post keeps out of the day's boost for the
+// light effects. Light that is added must leave that alpha alone: the game's additive blends
+// replace it with the sprite's own alpha (GL_ONE, GL_ZERO), which read as dust wherever a shot, a
+// flame or a thruster was fainter than fully opaque, and the boost dropped them by day.
+// Additive draws in those buckets use (GL_ZERO, GL_ONE) for the alpha while g_enhanced_fx_add_keep
+// is set (the mark is on; tuning.json "fx": {"add_keep": 0} for the old blends, to compare).
+extern bool g_enhanced_fx_blend_mark;
+extern bool g_enhanced_fx_add_keep;
+
 // Is the Jak 2 plaza (Jak 3's custom level piazza) built? It's made from a Jak 2 disc by hand
 // (local/blender/piazza_jak2.blend), so most installs don't have it: then no passages are cut
 // into Haven and nothing tries to load it.

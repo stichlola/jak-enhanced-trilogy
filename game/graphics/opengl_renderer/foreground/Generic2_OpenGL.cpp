@@ -2,6 +2,7 @@
 
 #include "Generic2.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/gfx.h"
 
 void Generic2::opengl_setup(ShaderLibrary& shaders) {
@@ -142,6 +143,10 @@ void Generic2::setup_opengl_for_draw_mode(const DrawMode& draw_mode,
       // fix is ignored. it's usually 0, except for lightning, which sets it to 0x80.
       glBlendFunc(GL_SRC_ALPHA, GL_ONE);
       glBlendEquation(GL_FUNC_ADD);
+      if (g_enhanced_fx_add_keep) {
+        // (added light keeps the frame's alpha, the blended dust's mark: enhanced_state.h)
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ZERO, GL_ONE);
+      }
     } else if (draw_mode.get_alpha_blend() == DrawMode::AlphaBlend::ZERO_SRC_SRC_DST) {
       // (0 - Cs) * As + Cd
       // Cd - Cs * As
@@ -166,7 +171,8 @@ void Generic2::setup_opengl_for_draw_mode(const DrawMode& draw_mode,
       color_mult = 1.0f;
     } else if (draw_mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_0_FIX_DST) {
       glBlendEquation(GL_FUNC_ADD);
-      glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ONE, GL_ZERO);
+      glBlendFuncSeparate(GL_ONE, GL_ONE, g_enhanced_fx_add_keep ? GL_ZERO : GL_ONE,
+                          g_enhanced_fx_add_keep ? GL_ONE : GL_ZERO);
     } else {
       ASSERT(false);
     }
