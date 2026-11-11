@@ -10,6 +10,7 @@ layout (location = 3) in vec4 inst_c0;  // the copy's model-to-world columns; c0
 layout (location = 4) in vec4 inst_c1;  // c1.w, c2.w: a swap (shrub.frag's enh_xfade)
 layout (location = 5) in vec4 inst_c2;
 layout (location = 6) in vec4 inst_c3;
+layout (location = 7) in float wind_in;  // the model's own wind weight (0..1), -1: none (by height)
 
 uniform vec4 hvdf_offset;
 uniform float fog_constant;
@@ -41,7 +42,17 @@ void main() {
   mat3 turn = mat3(inst_c0.xyz, inst_c1.xyz, inst_c2.xyz);
   vec3 world = turn * position_in + inst_c3.xyz;
   float tip = clamp((position_in.y - enh_tip.x) / enh_tip.y, 0.0, 1.0);
-  if (enh_wind > 0.0) {
+  if (enh_wind > 0.0 && wind_in >= 0.0) {
+    // a model with its own weights (a tree's leaves, a bush): a slow sway of a few cm at the
+    // weight's full (kWindSway m a unit of wind: 0.5 calm to 3 in a sandstorm), a light flutter on top
+    const float kWindSway = 0.035;
+    vec2 wp = inst_c3.xz / 4096.0;
+    float sway = sin(enh_time * 0.9 + wp.x * 0.11 + wp.y * 0.07) * 0.7 +
+                 sin(enh_time * 1.6 + wp.x * 0.05 - wp.y * 0.13) * 0.3;
+    float flutter = sin(enh_time * 4.0 + dot(position_in.xz, vec2(0.0011, 0.0009))) * 0.2 * wind_in;
+    world.xz += vec2(0.8, 0.6) * (sway + flutter) * enh_wind * wind_in * kWindSway * 4096.0;
+    world.y -= abs(sway) * enh_wind * wind_in * kWindSway * 0.3 * 4096.0;
+  } else if (enh_wind > 0.0) {
     vec2 wp = inst_c3.xz / 4096.0;
     float gust = sin(enh_time * 1.3 + wp.x * 0.11 + wp.y * 0.07) * 0.6 +
                  sin(enh_time * 2.1 + wp.x * 0.05 - wp.y * 0.13) * 0.4;

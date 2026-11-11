@@ -62,6 +62,7 @@ struct Mesh {
     float x, y, z;  // game units
     float s, t;
     u32 normal;  // GL_INT_2_10_10_10_REV
+    float wind = -1.f;  // how much the wind sways it (COLOR_0's gray, 0..1); -1: none given (by height)
   };
   std::string file;
   bool ok = false;
@@ -74,7 +75,8 @@ struct Mesh {
   float foot_y = 0;  // where it meets the ground: the bottom of its middle, not of drooping tips
   u64 tex_key = 0;   // the texture's content (models sharing it share one GL texture)
   bool cutout = false;  // its texture has holes (blades, leaves): swayed by the wind, pushed aside
-  int far_lod = -1;      // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
+  bool has_wind = false;  // its vertices carry their own wind weight (a tree: the leaves, not the trunk)
+  int far_lod = -1;     // its far version (<file>_lod1.glb, fewer faces), drawn past the detailed distance
   // a much simpler version made here from its last far version (make_coarse): for the tilted copies
   // past where an upright one is a picture (theirs would show the part the ground hides)
   int coarse = -1;
@@ -187,6 +189,54 @@ fs::path scenery_file(const std::string& name) {
   return fs::exists(kit) ? kit : shipped;
 }
 
+// a primitive's COLOR_0 as one value a vertex (its red: the wind weight, written gray by
+// scripts/enhanced/desert_props.py), empty when it has none or it doesn't fit
+std::vector<float> color0_gray(const tinygltf::Model& model,
+                               const std::map<std::string, int>& attributes,
+                               size_t count) {
+  std::vector<float> out;
+  const auto it = attributes.find("COLOR_0");
+  if (it == attributes.end() || it->second < 0) {
+    return out;
+  }
+  const auto& acc = model.accessors[it->second];
+  if (acc.bufferView < 0 || acc.count != count ||
+      (acc.type != TINYGLTF_TYPE_VEC3 && acc.type != TINYGLTF_TYPE_VEC4)) {
+    return out;
+  }
+  const auto& view = model.bufferViews[acc.bufferView];
+  const auto& buf = model.buffers[view.buffer];
+  const int comps = acc.type == TINYGLTF_TYPE_VEC4 ? 4 : 3;
+  const int size = acc.componentType == TINYGLTF_COMPONENT_TYPE_FLOAT            ? 4
+                   : acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT ? 2
+                   : acc.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE  ? 1
+                                                                                 : 0;
+  if (!size) {
+    return out;
+  }
+  const size_t stride = view.byteStride ? view.byteStride : (size_t)comps * size;
+  const size_t start = view.byteOffset + acc.byteOffset;
+  if (start + stride * (count - 1) + (size_t)comps * size > buf.data.size()) {
+    return out;
+  }
+  out.resize(count);
+  for (size_t i = 0; i < count; i++) {
+    const u8* p = buf.data.data() + start + stride * i;
+    float v;
+    if (size == 4) {
+      memcpy(&v, p, 4);
+    } else if (size == 2) {
+      u16 s;
+      memcpy(&s, p, 2);
+      v = s / 65535.f;
+    } else {
+      v = p[0] / 255.f;
+    }
+    out[i] = std::clamp(v, 0.f, 1.f);
+  }
+  return out;
+}
+
 // every triangle of every node, in the glb's own meters turned into game units
 bool load_mesh(Mesh& mesh) {
   tinygltf::TinyGLTF loader;
@@ -208,11 +258,14 @@ bool load_mesh(Mesh& mesh) {
       }
       u32 base = mesh.verts.size();
       auto ex = gltf_util::gltf_vertices(model, prim.attributes, n.w_T_node, false, true, "");
+      const auto wind = color0_gray(model, prim.attributes, ex.vtx.size());
+      mesh.has_wind |= !wind.empty();
       for (size_t i = 0; i < ex.vtx.size(); i++) {
         const auto& v = ex.vtx[i];
         Vec3 nrm = i < ex.normals.size() ? ex.normals[i] : Vec3(0, 1, 0);
         float len = nrm.length();
-        mesh.verts.push_back({v.x, v.y, v.z, v.s, v.t, pack_normal(len > 0 ? nrm / len : nrm)});
+        mesh.verts.push_back({v.x, v.y, v.z, v.s, v.t, pack_normal(len > 0 ? nrm / len : nrm),
+                              wind.empty() ? -1.f : wind[i]});
       }
       auto inds = gltf_util::gltf_index_buffer(model, prim.indices, base);
       mesh.indices.insert(mesh.indices.end(), inds.begin(), inds.end());
@@ -946,6 +999,9 @@ void make_gl(Mesh& mesh, Library& lib) {
   glEnableVertexAttribArray(2);
   glVertexAttribPointer(2, 4, GL_INT_2_10_10_10_REV, GL_TRUE, sizeof(Mesh::Vertex),
                         (void*)offsetof(Mesh::Vertex, normal));
+  glEnableVertexAttribArray(7);
+  glVertexAttribPointer(7, 1, GL_FLOAT, GL_FALSE, sizeof(Mesh::Vertex),
+                        (void*)offsetof(Mesh::Vertex, wind));
   glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
   for (int c = 0; c < 4; c++) {
     glEnableVertexAttribArray(3 + c);
@@ -1821,7 +1877,8 @@ std::vector<std::string> enhanced_scenery_models() {
   for (const auto& dir : {scenery_dir(), editor_kit_dir()}) {
     for (const auto& e : fs::directory_iterator(dir, ec)) {
       const auto name = e.path().filename().string();
-      if (e.path().extension() == ".glb" && name.find("_lod") == std::string::npos) {
+      if (e.path().extension() == ".glb" && name.find("_lod") == std::string::npos &&
+          name.find("_col.glb") == std::string::npos) {
         out.push_back(name);
       }
     }
@@ -1969,20 +2026,30 @@ const CollideShape& collide_shape(const Library& lib, int m, int max_tris = kCol
   const Vec3 ext = mesh.hi - mesh.lo;
   s.size = std::max({ext.x(), ext.y(), ext.z()});
   s.solid = !mesh.cutout;
-  // (its positions only, the same ones joined: then fewer triangles, the shape kept)
-  std::vector<float> pos(mesh.verts.size() * 3);
-  for (size_t i = 0; i < mesh.verts.size(); i++) {
-    pos[i * 3] = mesh.verts[i].x - foot.x();
-    pos[i * 3 + 1] = mesh.verts[i].y - foot.y();
-    pos[i * 3 + 2] = mesh.verts[i].z - foot.z();
+  // a simple stand-in for its shape, if there is one (<file>_col.glb, the same space: a tree's
+  // trunk as a cylinder, a cart as a box), else its own triangles
+  Mesh proxy;
+  proxy.file = fs::path(mesh.file).stem().string() + "_col.glb";
+  const bool use_proxy =
+      max_tris == kCollideTris && fs::exists(scenery_file(proxy.file)) && load_mesh(proxy);
+  if (use_proxy) {
+    s.solid = true;
   }
-  std::vector<u32> remap(mesh.verts.size());
-  const size_t nv = meshopt_generateVertexRemap(remap.data(), mesh.indices.data(), mesh.indices.size(),
-                                                pos.data(), mesh.verts.size(), sizeof(float) * 3);
+  const Mesh& src = use_proxy ? proxy : mesh;
+  // (its positions only, the same ones joined: then fewer triangles, the shape kept)
+  std::vector<float> pos(src.verts.size() * 3);
+  for (size_t i = 0; i < src.verts.size(); i++) {
+    pos[i * 3] = src.verts[i].x - foot.x();
+    pos[i * 3 + 1] = src.verts[i].y - foot.y();
+    pos[i * 3 + 2] = src.verts[i].z - foot.z();
+  }
+  std::vector<u32> remap(src.verts.size());
+  const size_t nv = meshopt_generateVertexRemap(remap.data(), src.indices.data(), src.indices.size(),
+                                                pos.data(), src.verts.size(), sizeof(float) * 3);
   std::vector<float> wpos(nv * 3);
-  meshopt_remapVertexBuffer(wpos.data(), pos.data(), mesh.verts.size(), sizeof(float) * 3, remap.data());
-  std::vector<u32> idx(mesh.indices.size());
-  meshopt_remapIndexBuffer(idx.data(), mesh.indices.data(), mesh.indices.size(), remap.data());
+  meshopt_remapVertexBuffer(wpos.data(), pos.data(), src.verts.size(), sizeof(float) * 3, remap.data());
+  std::vector<u32> idx(src.indices.size());
+  meshopt_remapIndexBuffer(idx.data(), src.indices.data(), src.indices.size(), remap.data());
   if (idx.size() > (size_t)max_tris * 3) {
     std::vector<u32> out(idx.size());
     float err = 0.f;
@@ -2685,10 +2752,12 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
                 mesh.avg.z());
     glUniform2f(glGetUniformLocation(sh.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
+    // (a model with its own wind weights, a tree or a bush: swayed by them, not lit as rock)
+    const bool sways = mesh.cutout || mesh.has_wind;
     glUniform1f(glGetUniformLocation(sh.id(), "enh_foliage"), mesh.cutout ? 1.f : 0.f);
-    glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), mesh.cutout ? 0.f : 1.f);
+    glUniform1f(glGetUniformLocation(sh.id(), "enh_stone"), sways ? 0.f : 1.f);
     glUniform1f(glGetUniformLocation(sh.id(), "enh_wind"),
-                mesh.cutout && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
+                sways && g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f);
     setup_tfrag_shader(render_state, mesh.cutout ? cut : solid, ShaderId::SHRUB_INST);
     glBindVertexArray(version.vao);
     glBindBuffer(GL_ARRAY_BUFFER, lib.instance_vbo);
@@ -2734,7 +2803,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     glUniform4f(glGetUniformLocation(ish.id(), "enh_imp"), center.x(), center.y(), center.z(),
                 (mesh.hi - mesh.lo).length() * 0.5f);
     glUniform1f(glGetUniformLocation(ish.id(), "enh_foliage"), mesh.cutout ? 1.f : 0.f);
-    glUniform1f(glGetUniformLocation(ish.id(), "enh_stone"), mesh.cutout ? 0.f : 1.f);
+    glUniform1f(glGetUniformLocation(ish.id(), "enh_stone"), mesh.cutout || mesh.has_wind ? 0.f : 1.f);
     glUniform2f(glGetUniformLocation(ish.id(), "enh_tip"), mesh.lo.y(),
                 std::max(mesh.hi.y() - mesh.lo.y(), 1.f));
     glUniform1f(glGetUniformLocation(ish.id(), "enh_wind"),
@@ -2758,4 +2827,77 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     prof.add_tri(2 * g.copies.size());
   }
   glBindVertexArray(0);
+}
+
+namespace {
+// the placed objects in the sun's shadow map: each one's far version (fewer faces) in world space,
+// all in one buffer, made again when the list changes or a model finishes loading
+struct PlacedShadow {
+  u64 version = ~0ull;
+  bool pending = false;
+  GLuint vbo = 0, ibo = 0;
+  int count = 0;
+};
+PlacedShadow g_pshadow;
+
+void build_placed_shadow(Library& lib) {
+  auto& sh = g_pshadow;
+  sh.version = g_placed_version;
+  sh.pending = false;
+  std::vector<float> pos;
+  std::vector<u32> idx;
+  for (const auto& o : g_placed.list) {
+    const int m = placed_mesh(lib, o.model);
+    if (m < 0) {
+      sh.pending |= g_placed.mesh_of.find(o.model) == g_placed.mesh_of.end();
+      continue;
+    }
+    const auto& base = lib.meshes[m];
+    const auto& mesh = base.far_lod >= 0 ? lib.meshes[base.far_lod] : base;
+    float cols[3][3];
+    enhanced_placed_axes(o, cols);
+    const float fx = (base.lo.x() + base.hi.x()) * 0.5f, fy = base.foot_y,
+                fz = (base.lo.z() + base.hi.z()) * 0.5f;
+    const u32 first = (u32)(pos.size() / 3);
+    for (const auto& v : mesh.verts) {
+      const float x = v.x - fx, y = v.y - fy, z = v.z - fz;
+      for (int r = 0; r < 3; r++) {
+        pos.push_back(o.pos[r] + cols[0][r] * x + cols[1][r] * y + cols[2][r] * z);
+      }
+    }
+    for (u32 i : mesh.indices) {
+      idx.push_back(first + i);
+    }
+  }
+  if (!sh.vbo) {
+    glGenBuffers(1, &sh.vbo);
+    glGenBuffers(1, &sh.ibo);
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, sh.vbo);
+  glBufferData(GL_ARRAY_BUFFER, pos.size() * sizeof(float), pos.data(), GL_STATIC_DRAW);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sh.ibo);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, idx.size() * sizeof(u32), idx.data(), GL_STATIC_DRAW);
+  sh.count = (int)idx.size();
+}
+}  // namespace
+
+bool enhanced_placed_shadow_draw() {
+  auto& sh = g_pshadow;
+  if (sh.version != g_placed_version || sh.pending) {
+    auto& lib = library();
+    std::unique_lock<std::mutex> lock(lib.mutex, std::try_to_lock);
+    if (lock.owns_lock()) {
+      std::lock_guard<std::mutex> plock(g_placed_mutex);
+      build_placed_shadow(lib);
+    }
+  }
+  if (!sh.count) {
+    return false;
+  }
+  glBindBuffer(GL_ARRAY_BUFFER, sh.vbo);
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
+  glDisableVertexAttribArray(1);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sh.ibo);
+  glDrawElements(GL_TRIANGLES, sh.count, GL_UNSIGNED_INT, nullptr);
+  return true;
 }
