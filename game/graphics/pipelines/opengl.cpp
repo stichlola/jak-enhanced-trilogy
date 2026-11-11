@@ -27,6 +27,7 @@
 #include "game/graphics/screenshot.h"
 #include "game/graphics/texture/TexturePool.h"
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/runtime.h"
 #include "game/sce/libscf.h"
@@ -609,7 +610,21 @@ void render_game_frame(int game_width,
     got_chain = g_gfx_data->dma_cv.wait_for(lock, std::chrono::milliseconds(40),
                                             [=] { return g_gfx_data->has_data_to_render; });
   }
+  {
+    // (test switch "debug": {"drop_chain": n}: every n-th display list is not drawn, as when the
+    // game is late with one: the window is then shown without a new frame)
+    static const EnhancedTune t_drop("debug.drop_chain", 0.f);
+    static int drop_count = 0;
+    const int every = (int)(float)t_drop;
+    if (got_chain && every > 0 && ++drop_count >= every) {
+      drop_count = 0;
+      got_chain = false;
+    }
+  }
   // render that chain.
+  if (!got_chain) {
+    enh_probe::note("no-chain");
+  }
   if (got_chain) {
     g_gfx_data->frame_idx_of_input_data = g_gfx_data->frame_idx;
     RenderOptions options;
@@ -866,6 +881,8 @@ void GLDisplay::render() {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
   }
+  // Enhanced: the window as it is about to be shown ("debug": {"black_probe": 1})
+  enh_probe::end_frame(fbuf_w, fbuf_h);
 
   // actual vsync
   g_gfx_data->debug_gui.finish_frame();

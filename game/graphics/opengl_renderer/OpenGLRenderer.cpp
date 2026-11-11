@@ -11,6 +11,7 @@
 #include "game/graphics/opengl_renderer/DepthCue.h"
 #include "game/graphics/opengl_renderer/DirectRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
+#include "game/graphics/opengl_renderer/EnhancedFrameProbe.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/EyeRenderer.h"
@@ -1103,6 +1104,16 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
   {
     g_current_renderer = "pcrtc";
     auto prof = m_profiler.root()->make_scoped_child("pcrtc");
+    if (enh_probe::on()) {
+      // the finished frame before it goes to the window (not a multisampled one: no scaled blit)
+      if (!m_fbo_state.render_fbo->multisampled) {
+        enh_probe::sample(enh_probe::kFinal, m_fbo_state.render_fbo->fbo_id, 0, 0,
+                          m_fbo_state.render_fbo->width, m_fbo_state.render_fbo->height);
+      }
+      if (settings.pmode_alp_register < 1.f) {
+        enh_probe::blackout(settings.pmode_alp_register);
+      }
+    }
     do_pcrtc_effects(settings.pmode_alp_register, settings.brightness_contrast_color,
                      settings.brightness_contrast_alpha, &m_render_state, prof);
     if (settings.gpu_sync) {
@@ -1392,6 +1403,7 @@ void OpenGLRenderer::setup_frame(const RenderOptions& settings) {
     // doesn't match, set up a new one for these settings
     lg::info("FBO Setup: requested {}x{}, msaa {}", settings.game_res_w, settings.game_res_h,
              settings.msaa_samples);
+    enh_probe::note(fmt::format("fbo-{}x{}", settings.game_res_w, settings.game_res_h));
 
     // clear old framebuffers
     m_fbo_state.resources.render_buffer.clear();
