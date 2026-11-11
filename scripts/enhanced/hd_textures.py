@@ -7,7 +7,10 @@ with "save_texture_pngs": true), upscales each one 4x with Real-ESRGAN (wrap-pad
 textures stay seamless) and writes custom_assets/<game>/texture_replacements/<tpage>/<name>.png.
 Decals, cutouts and glass (any texel with alpha < 120/128, see translucent()) get the upscaled
 colors but their original alpha, resized smoothly (restore_alpha): the upscaler would move
-and soften their transparency. --opaque-only leaves them at their original resolution. The
+and soften their transparency. Their colors are upscaled from an opaque copy: Real-ESRGAN
+blacks out the color under alpha 0, and many of these textures are drawn opaque, their alpha
+holding something else (a face's gloss, an eyelid, hair: Daxter's cutscene face came out black).
+--opaque-only leaves them at their original resolution. The
 decompiler also skips a replacement that doesn't match its texture when
 scaled back down (TextureDB::replace_texture), since texture names aren't unique. The decompiler
 picks those up when it extracts the levels again (levels_extract), so the .fr3
@@ -24,6 +27,7 @@ Real-ESRGAN comes from out/tools (hd_setup.py downloads it) or the jak3-ue5 chec
 
 import argparse
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -68,7 +72,9 @@ def png_size(data):
     return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
 
 
-def run_batch(files, model, gpu):
+def run_batch(files, model, gpu, out_dir, opaque=False):
+    """Upscales a batch into out_dir/<key>.png. opaque: the colors alone, as a picture with no alpha
+    (the upscaler blacks out the color of texels with alpha 0 and thins it where the alpha is low)"""
     esrgan = find_esrgan()
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
@@ -76,7 +82,7 @@ def run_batch(files, model, gpu):
             (tmp / name).mkdir()
         # each texture surrounded by copies of itself, so tiling ones stay seamless
         for key, path in files.items():
-            rgba = np.asarray(Image.open(path).convert("RGBA"))
+            rgba = np.asarray(Image.open(path).convert("RGB" if opaque else "RGBA"))
             Image.fromarray(np.pad(rgba, ((PAD, PAD), (PAD, PAD), (0, 0)), mode="wrap")).save(
                 tmp / "padded" / f"{key}.png")
         command = [str(esrgan), "-i", str(tmp / "padded"), "-o", str(tmp / "scaled"), "-n", model, "-s", "4",
@@ -88,7 +94,7 @@ def run_batch(files, model, gpu):
         for key in files:
             scaled = Image.open(tmp / "scaled" / f"{key}.png")
             scaled.crop((border, border, scaled.width - border, scaled.height - border)).save(
-                CACHE / model / f"{key}.png")
+                out_dir / f"{key}.png")
 
 
 def translucent(todo):
@@ -105,7 +111,8 @@ def restore_alpha(original, scaled, out, soft=False):
     """The upscaled colors with the original alpha resized smoothly: the upscaler would move and soften
     the transparency, and cutouts and decals must blend as in the game. soft (the HUD): the see-through
     parts' own blotches, hand-painted at a quarter of the size, blurred out (not the cutouts' edges in
-    the levels: the leaves would go soft)"""
+    the levels: the leaves would go soft), and their colors the original's enlarged smoothly. The
+    levels' and characters' keep the upscaled colors everywhere (scaled: made from an opaque copy)"""
     big = Image.open(scaled).convert("RGBA")
     small = Image.open(original).convert("RGBA")
     alpha = np.asarray(small.getchannel("A").resize(big.size, Image.BICUBIC)).astype(np.float32)
@@ -116,15 +123,24 @@ def restore_alpha(original, scaled, out, soft=False):
         alpha = alpha * (1.0 - m) + blurred * m
     # (no bicubic overshoot past the original's most opaque: halos where a frame meets glass)
     alpha = np.minimum(alpha, float(np.asarray(small.getchannel("A")).max()))
-    # where it's see-through, the original colors enlarged smoothly instead of the upscaler's: on
-    # flat glass it invents speckles and blobs, which show over whatever is drawn behind (the HUD's
-    # yin-yang over its white fill)
     rgb = np.asarray(big.convert("RGB")).astype(np.float32)
-    smooth = np.asarray(small.convert("RGB").resize(big.size, Image.BICUBIC)).astype(np.float32)
-    w = np.clip((120.0 - alpha) / 40.0, 0.0, 1.0)[..., None]
-    rgb = rgb * (1.0 - w) + smooth * w
+    if soft:
+        # the HUD (scaled: upscaled with its alpha, colors thinned where it's see-through): there the
+        # original colors enlarged smoothly instead of the upscaler's speckles and blobs, which show
+        # over whatever is drawn behind (the yin-yang over its white fill)
+        smooth = np.asarray(small.convert("RGB").resize(big.size, Image.BICUBIC)).astype(np.float32)
+        w = np.clip((120.0 - alpha) / 40.0, 0.0, 1.0)[..., None]
+        rgb = rgb * (1.0 - w) + smooth * w
     out_img = np.dstack([np.clip(rgb, 0, 255), np.clip(alpha, 0, 255)]).round().astype(np.uint8)
     Image.fromarray(out_img, "RGBA").save(out)
+
+
+def put(source, target):
+    """A copy that takes the old file's place, never written into it (a worktree's replacements can be
+    hard links of another tree's)"""
+    part = target.with_name(target.name + ".part")
+    shutil.copyfile(source, part)
+    os.replace(part, target)
 
 
 def main():
@@ -172,27 +188,39 @@ def main():
         todo = [entry for entry in todo if entry[2] not in see_through]
         print(f"{len(see_through)} translucent textures left at their original resolution")
         see_through = set()
-    missing = {}
+    # the levels' and characters' translucent ones: upscaled from an opaque copy, cached apart (-rgb);
+    # the HUD's with their alpha, as the opaque ones (its see-through colors come from the original)
+    rgb_dir = CACHE / (args.model if args.hud else f"{args.model}-rgb")
+    rgb_dir.mkdir(parents=True, exist_ok=True)
+    missing, missing_rgb = {}, {}
     for _, png, key in todo:
-        if not (CACHE / args.model / f"{key}.png").exists():
+        if key in see_through:
+            if not (rgb_dir / f"{key}.png").exists():
+                (missing if args.hud else missing_rgb)[key] = png
+        elif not (CACHE / args.model / f"{key}.png").exists():
             missing[key] = png
-    print(f"{len(todo)} textures in {len({t for t, _, _ in todo})} pages, {len(missing)} to upscale")
+    count = len(missing) + len(missing_rgb)
+    print(f"{len(todo)} textures in {len({t for t, _, _ in todo})} pages, {count} to upscale")
 
-    keys = list(missing)
-    for start in range(0, len(keys), args.batch):
-        batch = {key: missing[key] for key in keys[start:start + args.batch]}
-        run_batch(batch, args.model, args.gpu)
-        print(f"  upscaled {min(start + args.batch, len(keys))}/{len(keys)}", flush=True)
+    done = 0
+    for group, out_dir, opaque in ((missing, CACHE / args.model, False), (missing_rgb, rgb_dir, True)):
+        keys = list(group)
+        for start in range(0, len(keys), args.batch):
+            batch = {key: group[key] for key in keys[start:start + args.batch]}
+            run_batch(batch, args.model, args.gpu, out_dir, opaque)
+            done += len(batch)
+            print(f"  upscaled {done}/{count}", flush=True)
 
     # translucent ones: the upscaled colors with the original alpha, cached apart
-    # (v2: the glass's colors from the original, no overshoot; the HUD's alpha softened apart)
-    alpha_dir = CACHE / f"{args.model}-alpha2{'-hud' if args.hud else ''}"
+    # (v2: no overshoot; the HUD's glass colors from the original, its alpha softened. v3: the
+    # levels' and characters' colors upscaled from an opaque copy, kept everywhere)
+    alpha_dir = CACHE / (f"{args.model}-alpha2-hud" if args.hud else f"{args.model}-alpha3")
     alpha_dir.mkdir(parents=True, exist_ok=True)
     pending = {key: unique[key][1] for key in see_through
-               if not (alpha_dir / f"{key}.png").exists() and (CACHE / args.model / f"{key}.png").exists()}
+               if not (alpha_dir / f"{key}.png").exists() and (rgb_dir / f"{key}.png").exists()}
     if pending:
         for key, png in pending.items():
-            restore_alpha(png, CACHE / args.model / f"{key}.png", alpha_dir / f"{key}.png", soft=args.hud)
+            restore_alpha(png, rgb_dir / f"{key}.png", alpha_dir / f"{key}.png", soft=args.hud)
         print(f"{len(pending)} translucent textures given back their original alpha")
 
     written = 0
@@ -200,7 +228,7 @@ def main():
         scaled = (alpha_dir if key in see_through else CACHE / args.model) / f"{key}.png"
         if scaled.exists():
             (OUT / tpage).mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(scaled, OUT / tpage / png.name)
+            put(scaled, OUT / tpage / png.name)
             written += 1
     print(f"wrote {written} replacements to {OUT}")
 

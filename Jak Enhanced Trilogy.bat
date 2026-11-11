@@ -221,6 +221,20 @@ if defined VER for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" (
   )
 )
 
+rem An update that changes how the HD textures are made: the ones it touches are redrawn and the levels
+rem made again (scripts\enhanced\hd_setup.py --refresh: 15-40 minutes once, with its own message;
+rem nothing for a game without HD textures or with them up to date). If it can't, the game plays with
+rem the old ones and this comes back at the next start
+if defined VER for %%G in (1 2 3) do if exist "%PROJ%\out\jak%%G\iso" if exist "%PROJ%\custom_assets\jak%%G\texture_replacements" (
+  set "HDCHECKED="
+  if exist "%PROJ%\out\jak%%G\hd-checked.txt" set /p HDCHECKED=<"%PROJ%\out\jak%%G\hd-checked.txt"
+  if not "!HDCHECKED!"=="!VER!" (
+    set "PATH=%LOCALAPPDATA%\Programs\Python\Launcher;%PATH%"
+    where py >nul 2>nul && py -3 "%PROJ%\scripts\enhanced\hd_setup.py" --games jak%%G --bin "%BIN%" --refresh && echo !VER!>"%PROJ%\out\jak%%G\hd-checked.txt"
+    call :idle
+  )
+)
+
 rem Which game boots: the one played last (the game writes it), else the first ready. With more than
 rem one ready, the game opens on the trilogy's start menu by itself to pick another
 set "COUNT=0"
