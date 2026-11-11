@@ -118,6 +118,7 @@
 (define-extern enhanced-move-update (function none :behavior enhanced-skin))
 (define-extern enhanced-move-post (function none :behavior enhanced-skin))
 (define-extern enhanced-move-snap-post (function none :behavior enhanced-skin))
+(define-extern enhanced-ride-post (function none :behavior enhanced-skin))
 
 ;; JAK_ENHANCED_PLAYER=<name>: the character, for a gk without the menu (the menu's own answer,
 ;; JAK_ENHANCED_PLAYER_MENU, already starts from it)
@@ -595,6 +596,11 @@
 ;; raised gun arm at a steering wheel (that was from before his arms could take Jak's turns at all: the bind
 ;; fix above). Standing, walking and running they stay his own (enhanced-sig.gc).
 (define *enhanced-sig-jak-arms* 0.0)
+;; 0-1: riding with his hands on something (a vehicle, a leaper, a ledge, a pole), and with his feet on
+;; something (a vehicle, a leaper, the board, a tube): the character's hands and feet go where Jak's are
+;; (enhanced-ride-post, enhanced-moves.gc)
+(define *enhanced-ride-arms* 0.0)
+(define *enhanced-ride-legs* 0.0)
 
 (defbehavior enhanced-skin-arm-fix-init enhanced-skin ()
   "Sig's arm bones' bind directions turned onto Jak's (once, when his skin is made)."
@@ -670,8 +676,8 @@
          ;; Jak's out in a T)
          (sig? (string= (-> ch name) "sig"))
          (arm-w (if sig? (fmax *enhanced-sig-attack-weight* *enhanced-sig-jak-arms*) 0.0))
-         ;; his fingers close only in the attacks
-         (fist-w (if sig? *enhanced-sig-attack-weight* 0.0))
+         ;; his fingers close in the attacks, and on a wheel, a ledge...
+         (fist-w (if sig? (fmax *enhanced-sig-attack-weight* *enhanced-ride-arms*) 0.0))
          )
     ;; On foot, his root goes where his prejoint is (the parent of his body). In his walk and run blends,
     ;; and the attacks out of them, the game's prejoint leaves his root by up to 3 m for a few frames and
@@ -950,6 +956,9 @@
                  )
          )
     (seek! *enhanced-sig-jak-arms* (if afoot? 0.0 1.0) (* (if afoot? 5.0 8.0) (seconds-per-frame)))
+    ;; riding: hands and feet where Jak's are (enhanced-ride-post)
+    (seek! *enhanced-ride-arms* (if (focus-test? tgt pilot flut edge-grab pole) 1.0 0.0) (* 8.0 (seconds-per-frame)))
+    (seek! *enhanced-ride-legs* (if (focus-test? tgt pilot flut board tube) 1.0 0.0) (* 8.0 (seconds-per-frame)))
     )
   (if (< 0.0 (-> self pose-blend))
       (enhanced-skin-retarget (-> self pose-blend))
@@ -965,6 +974,8 @@
   (enhanced-ashelin-kick-post)
   ;; the characters' own attack moves (enhanced-moves.gc), and their crossfade from the pose last drawn
   (enhanced-move-post)
+  ;; riding: its hands and feet where Jak's are
+  (enhanced-ride-post)
   (enhanced-move-snap-post)
   ;; ja-post put its draw origin (bounds, lights, shadow) on the hips of its own animation: put it on the
   ;; hips as drawn, as do-joint-math does (its bounds' centre through the origin joint)
