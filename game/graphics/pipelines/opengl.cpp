@@ -591,7 +591,8 @@ GLDisplay::~GLDisplay() {
   }
 }
 
-void render_game_frame(int game_width,
+// (Enhanced: whether a frame was drawn: false when the game sent none in time)
+bool render_game_frame(int game_width,
                        int game_height,
                        int window_fb_width,
                        int window_fb_height,
@@ -720,6 +721,7 @@ void render_game_frame(int game_width,
     g_gfx_data->has_data_to_render = false;
     g_gfx_data->sync_cv.notify_all();
   }
+  return got_chain;
 }
 
 void GLDisplay::process_sdl_events() {
@@ -815,6 +817,8 @@ void GLDisplay::render() {
 
   // render game!
   g_gfx_data->debug_gui.master_enable = is_imgui_visible();
+  bool game_frame_drawn = false;
+  bool splash_drawn = false;
   if (g_gfx_data->debug_gui.should_advance_frame()) {
     auto p = scoped_prof("game-render");
     int game_res_w = Gfx::g_global_settings.game_res_w;
@@ -836,9 +840,10 @@ void GLDisplay::render() {
     if (SplashScreen && Gfx::g_splash.ready.load() &&
         SplashTimer.getSeconds() < SPLASH_SCREEN_TIME) {
       draw_splash(fbuf_w, fbuf_h);
+      splash_drawn = true;
     }
 
-    render_game_frame(
+    game_frame_drawn = render_game_frame(
         game_res_w, game_res_h, fbuf_w, fbuf_h, Gfx::g_global_settings.lbox_w,
         Gfx::g_global_settings.lbox_h, Gfx::g_global_settings.msaa_samples,
         Gfx::g_global_settings.brightness_contrast_color,
@@ -847,6 +852,19 @@ void GLDisplay::render() {
     // If we took a screenshot, stop taking them now!
     if (m_take_screenshot_next_frame) {
       m_take_screenshot_next_frame = false;
+    }
+  }
+
+  // Enhanced: no new frame from the game this turn (it is late with it: a level coming in, a
+  // hitch; or held by the debug menu's frame advance). The window's two buffers swap, so the one
+  // about to be shown holds the frame before last: the picture stepped back a frame, and went
+  // black for a frame when that one was the last of a load's blackout. The last frame is drawn
+  // into it again instead. (tuning "debug": {"repeat_late_frame": 0}: the window as it was left)
+  // (not over the boot's splash picture, nor under the start menu, which draws the whole window)
+  if (!game_frame_drawn && !splash_drawn && !g_enhanced_menu.start_menu) {
+    static const EnhancedTune t_repeat("debug.repeat_late_frame", 1.f);
+    if ((float)t_repeat > 0.5f) {
+      g_gfx_data->ogl_renderer.present_last_frame();
     }
   }
 
