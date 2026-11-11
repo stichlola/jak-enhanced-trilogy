@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <regex>
 #include <stdexcept>
 #include <string_view>
 
@@ -136,16 +137,6 @@ static std::string xbox_buttons(const std::string& str) {
       {"~Y~22L<~Z~Y~25L@~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~25L\xae~Z~Y~23L[~Z~+26H"},
       {"~Y~22L<~Z~Y~24L#~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~27L\xaf~Z~Y~23L[~Z~+26H"},
       {"~Y~22L<~Z~Y~26L;~Z~Y~1L>~Z~Y~23L[~Z~+26H", "~Y~22L<~Z~Y~1L>~Z~Y~5L\xb8~Z~Y~23L[~Z~+26H"},
-      // the d-pad (<PAD_DPAD_UP>, <PAD_DPAD_DOWN>, <PAD_DPAD_ANY>)
-      {"~Y~22L<PAD_PART_DPAD_L>~Z~3L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
-       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
-       xbox_dpad(22, 3, 22, 22)},
-      {"~Y~22L<PAD_PART_DPAD_L>~Z~3L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
-       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
-       xbox_dpad(22, 3, 3, 22)},
-      {"~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~"
-       "22L~+32H<PAD_PART_DPAD_R>~Z~+56H",
-       xbox_dpad(22, 22, 22, 22)},
       // the stick: arrows pointing away from it (<PAD_ANALOG_ANY>, _LEFT_RIGHT, _UP_DOWN)
       {"~1L~+8H~Y<PAD_PART_STICK>~Z~6L~-16H<PAD_PART_STICK_LEFT>~Z~+16h~6L<PAD_PART_STICK_RIGHT>~Z~"
        "6L~-15V<PAD_PART_STICK_DOWN>~Z~+13V~6L<PAD_PART_STICK_UP>~Z~-10H~+9V~6L<PAD_PART_STICK_UP_"
@@ -163,6 +154,22 @@ static std::string xbox_buttons(const std::string& str) {
     for (size_t at = out.find(ps); at != std::string::npos; at = out.find(ps, at + xbox.size())) {
       out.replace(at, ps.size(), xbox);
     }
+  }
+  // the d-pad, any arm lit (<PAD_DPAD_UP>, _DOWN, _ANY and the texts' own: all four, the left one)
+  if (out.find("<PAD_PART_DPAD_L>") != std::string::npos) {
+    static const std::regex kDpad(
+        "~Y~(\\d+)L<PAD_PART_DPAD_L>~Z~(\\d+)L~\\+17H~-13V<PAD_PART_DPAD_U>~Z~(\\d+)L~\\+17H~\\+14V<"
+        "PAD_PART_DPAD_D>~Z~(\\d+)L~\\+32H<PAD_PART_DPAD_R>~Z~\\+56H");
+    std::string done;
+    auto from = out.cbegin();
+    for (std::sregex_iterator it(out.cbegin(), out.cend(), kDpad), end; it != end; ++it) {
+      const auto& m = *it;
+      done.append(from, m[0].first);
+      done += xbox_dpad(std::stoi(m[1]), std::stoi(m[2]), std::stoi(m[3]), std::stoi(m[4]));
+      from = m[0].second;
+    }
+    done.append(from, out.cend());
+    out = std::move(done);
   }
   // the Start button is the Menu button ("PRESS START", "Press the Start Button" and the
   // translations: START as a word of its own, not the Scandinavian "START OM" of the speedrun menu)
