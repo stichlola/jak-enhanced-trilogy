@@ -22,11 +22,13 @@ uniform sampler2DShadow tex_T1;  // sun shadow map
 uniform int shadow_on;
 uniform mat4 light_mvp;          // world (game units) -> shadow map
 // the nearest lamps and fires (view space, game units; w: reach) lighting a thin air of their own,
-// with no mist (volume.local_lights): halos and glow around them. vl_air: density (/m), gain
+// with no mist (volume.local_lights): halos and glow around them. vl_air: density (/m), gain, the
+// halo's core (m), shape (1: compact halo integrated along the ray, falling to exactly 0 at the
+// light's halo radius; 0: the old marched lobe, which over a lamp-lit alley summed to a pale veil)
 uniform int vl_count;
 uniform vec4 vl_pos[8];
 uniform vec4 vl_color[8];
-uniform vec2 vl_air;
+uniform vec4 vl_air;
 
 in vec2 tex_coord;
 out vec4 color;
@@ -128,10 +130,12 @@ void main() {
   vec3 scattered = vec3(0.0);
   float trans = 1.0;
   vec3 dir_n = normalize(dir);
-  for (int i = 0; i < STEPS; i++) {
+  // (no mist and the halos in closed form: no march at all)
+  int steps = (mist.x > 0.0 || (vl_count > 0 && vl_air.w < 0.5)) ? STEPS : 0;
+  for (int i = 0; i < steps; i++) {
     // the lamps' light in the air: each light's color by a smooth inverse square inside its reach,
     // scattered toward the camera with a mild forward lobe (Henyey-Greenstein g = 0.3)
-    if (vl_count > 0) {
+    if (vl_count > 0 && vl_air.w < 0.5) {
       vec3 lsum = vec3(0.0);
       for (int k = 0; k < vl_count; k++) {
         vec3 d = p - vl_pos[k].xyz;
@@ -158,6 +162,37 @@ void main() {
       }
     }
     p += step_v;
+  }
+  // the lamps' halos, shape 1: per light, along the ray's visible part (camera to the scene) clipped
+  // to the light's sphere (radius R), the integral of a2 / (a2 + d2) - a2 / (a2 + R2) (a: the core),
+  // in closed form: bright around the lamp, 1/distance off it, exactly 0 from R out, so the dark
+  // between the lamps keeps its black. Forward lobe by the angle to the light; no noise, no steps
+  if (vl_count > 0 && vl_air.w >= 0.5) {
+    vec3 lsum = vec3(0.0);
+    float a = max(vl_air.z, 0.05);
+    float a2 = a * a;
+    float L = ray_len / METER;
+    for (int k = 0; k < vl_count; k++) {
+      vec3 c = vl_pos[k].xyz / METER;
+      float R = max(vl_pos[k].w / METER, 1.0);
+      float tc = dot(c, dir_n);
+      float h2 = max(dot(c, c) - tc * tc, 0.0);
+      if (h2 >= R * R) {
+        continue;
+      }
+      float s = sqrt(R * R - h2);
+      float t0 = max(tc - s, 0.0), t1 = min(tc + s, L);
+      if (t1 <= t0) {
+        continue;
+      }
+      float kk = sqrt(a2 + h2);
+      float g = a2 * (atan((t1 - tc) / kk) - atan((t0 - tc) / kk)) / kk - a2 / (a2 + R * R) * (t1 - t0);
+      float ct = 0.5 * tc * inversesqrt(max(dot(c, c), 1e-4));
+      float ph = 0.0703 / pow(1.09 - 0.6 * ct, 1.5);
+      lsum += vl_color[k].rgb * max(g, 0.0) * ph;
+    }
+    // (x2: about the old lobe's brightness at the lamp itself)
+    scattered += lsum * vl_air.x * vl_air.y * 12.566 * 2.0 * (mist.x > 0.0 ? sqrt(trans) : 1.0);
   }
   color = vec4(scattered, trans);
 }

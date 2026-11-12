@@ -9,12 +9,15 @@ layout (location = 1) in vec4 color_in;
 uniform mat4 camera;
 uniform vec4 hvdf_offset;
 uniform float pfog0;
+// 1 for Jak 1; -1 for Jak 2/3, whose camera matrix gives w < 0 in front (sprite3_3d.vert negates
+// the transform too): without it every ribbon had w < 0 and was clipped away
+uniform float w_sign = 1.0;
 
 out float side;
 out vec4 ribbon_color;
 
 void main() {
-  vec4 p = camera[3] + camera[0] * pos_side.x + camera[1] * pos_side.y + camera[2] * pos_side.z;
+  vec4 p = w_sign * (camera[3] + camera[0] * pos_side.x + camera[1] * pos_side.y + camera[2] * pos_side.z);
   float Q = pfog0 / p.w;
   p.xyz *= Q;
   p.xyz += hvdf_offset.xyz;

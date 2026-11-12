@@ -1217,6 +1217,18 @@ static void enhanced_test_switches(const std::string& level) {
                                         "ctyport-start",  "ctysluma-alley",         "ctygenb-start",
                                         "ctyinda-start",  "mhcitya-near-ctyport",   "ctyport-hiphog",
                                         "wasstada-start", "wascityb-start",         "ctyslumb-start"};
+  // (the requests below wait until a level has been up for 6 s: a debug.tp left in the tuning file
+  // from the last run crashed gk (0xC0000005) while Spargus was loading. They are kept, not dropped,
+  // and fire once the level is ready)
+  static double level_up_t = -1;
+  if (level.empty() || level == "none") {
+    level_up_t = -1;
+  } else if (level_up_t < 0) {
+    level_up_t = now;
+  }
+  if (level_up_t < 0 || now - level_up_t < 6.0) {
+    return;
+  }
   static const EnhancedTune t_travel("debug.travel", -1.f);
   static float asked_travel = -1.f;
   if ((float)t_travel >= 0.f && (float)t_travel != asked_travel) {

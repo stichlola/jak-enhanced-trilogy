@@ -15,6 +15,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/Shader.h"
 #include "game/graphics/pipelines/opengl.h"
 #include "game/graphics/texture/TexturePool.h"
@@ -546,6 +547,8 @@ std::vector<ShotTrail> g_trails;
 std::vector<ShotSpark> g_sparks;
 std::vector<ShotVertex> g_shot_vertices;
 float g_shots_time = 0.f;
+// (by day the ribbons are wider: look.shot_day)
+float g_shot_width_k = 1.f;
 
 float rnd() {
   return (float)(std::rand() % 1000) / 1000.f;
@@ -611,6 +614,12 @@ void shot_test(float now) {
   const auto& pl = g_enhanced_player;
   if (!test || !pl.valid || !g_enhanced_camera.valid) {
     return;
+  }
+  static bool logged = false;
+  if (!logged) {
+    logged = true;
+    lg::info("[enhanced] shot test: firing from Jak at {:.1f} {:.1f} {:.1f} m", pl.pos[0] / kMeter,
+             pl.pos[1] / kMeter, pl.pos[2] / kMeter);
   }
   static float start = -1e9f;
   static float from[3], dir[3];
@@ -721,7 +730,7 @@ void build_shot_vertices(float now, const float* cam, float detail) {
     const auto& last = t.points[t.count - 1];
     line.push_back({last.pos[0], last.pos[1], last.pos[2],
                     std::clamp(1.f - (now - last.time) / style.life, 0.f, 1.f) * detail});
-    add_ribbon(line, style.color, style.width * kMeter, cam);
+    add_ribbon(line, style.color, style.width * g_shot_width_k * kMeter, cam);
   }
   for (const auto& s : g_sparks) {
     const float u = (now - s.born) / s.life;
@@ -788,6 +797,15 @@ void enhanced_draw_shots(SharedRenderState* render_state,
   if ((g_trails.empty() && g_sparks.empty()) || !g_enhanced_camera.valid) {
     return;
   }
+  // by day an added glow over pale sand is lost (red + sand clips to the sand's own white): the
+  // ribbons then cover part of what's behind them with their color (premultiplied "over") and are
+  // a little wider, so they read by hue. At night day = 0: added light only, as before.
+  // Tuning look.shot_day 0: off
+  static const EnhancedTune t_shot_day("look.shot_day", 1.f);
+  const float* sun = g_enhanced_fx.sun;
+  const float day = std::clamp(sun[1] * 2.5f, 0.f, 1.f) * std::clamp(sun[3], 0.f, 1.f) *
+                    std::clamp((float)t_shot_day, 0.f, 1.f);
+  g_shot_width_k = 1.f + 0.6f * day;
   build_shot_vertices(now, g_enhanced_camera.trans, g_enhanced_fx.detail);
   if (g_shot_vertices.empty()) {
     return;
@@ -812,6 +830,9 @@ void enhanced_draw_shots(SharedRenderState* render_state,
   glUniformMatrix4fv(glGetUniformLocation(id, "camera"), 1, GL_FALSE, camera);
   glUniform4fv(glGetUniformLocation(id, "hvdf_offset"), 1, hvdf_offset);
   glUniform1f(glGetUniformLocation(id, "pfog0"), pfog0);
+  glUniform1f(glGetUniformLocation(id, "day"), day);
+  glUniform1f(glGetUniformLocation(id, "w_sign"),
+              render_state->version == GameVersion::Jak1 ? 1.f : -1.f);
   glBindVertexArray(vao);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBufferData(GL_ARRAY_BUFFER, g_shot_vertices.size() * sizeof(ShotVertex), g_shot_vertices.data(),
@@ -819,7 +840,8 @@ void enhanced_draw_shots(SharedRenderState* render_state,
   glDisable(GL_CULL_FACE);
   glEnable(GL_BLEND);
   glBlendEquation(GL_FUNC_ADD);
-  glBlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+  // (the shader's alpha is 0 at night: plain added light; the frame's alpha is never touched)
+  glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
   glEnable(GL_DEPTH_TEST);
   glDepthFunc(GL_GEQUAL);
   glDepthMask(GL_FALSE);
