@@ -1123,8 +1123,11 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "morning"), morning);
     // the desert's day (from the dawn at 5, half of it still at the sunset at 18): the morning's
     // colors, its blue sky, warm sand and lit rock, all day long; the pink and peach the morning's own
+    // (Spargus at noon: the look held back in town, light.town_noon_look 0 = off; update_scene)
+    static const EnhancedTune t_town_look("light.town_noon_look", 0.6f);
     const float day_look = ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) *
-                           std::min(m_grade.golden * 2.f, 1.f);
+                           std::min(m_grade.golden * 2.f, 1.f) *
+                           (1.f - std::clamp((float)t_town_look, 0.f, 1.f) * enh_post::g_town_noon);
     glUniform1f(glGetUniformLocation(id, "day_look"), day_look);
     // the same hours for the area's day sky (any outdoor area: its clear blue, the morning's pink
     // toward the sun, the clouds lit to match, the shade's open-sky blue)
@@ -1480,8 +1483,12 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     const float gain = day * (s.bright_day - 1.f) + twilight * (s.bright_dusk - 1.f) +
                        night * (s.bright_night - 1.f);
     // (w: the desert's midday, its own grade: no uniform of its own, the composite has too many)
+    // (Spargus at noon: the midday's golden tan held back in town, light.town_noon_tan 0 = off)
+    static const EnhancedTune t_town_tan("light.town_noon_tan", 0.7f);
     glUniform4f(glGetUniformLocation(id, "brightness"), gain, s.shadow_lift, s.night_vis * night,
-                m_ssao_ready ? enh_post::g_light_midday : 0.f);
+                m_ssao_ready ? enh_post::g_light_midday *
+                                   (1.f - std::clamp((float)t_town_tan, 0.f, 1.f) * enh_post::g_town_noon)
+                             : 0.f);
     static size_t logged = 0;
     if (logged != script_next) {
       logged = script_next;
