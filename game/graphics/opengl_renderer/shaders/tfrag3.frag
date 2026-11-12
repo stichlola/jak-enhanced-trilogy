@@ -37,7 +37,7 @@ const float PBR_R[14] = float[14](0.7, 0.35, 0.12, 0.8, 0.5, 0.72, 0.68, 0.62, 0
 const float PBR_RR[14] = float[14](0.5, 0.5, 0.2, 0.4, 0.6, 0.5, 0.5, 0.5, 0.4, 0.4, 0.3, 0.1, 0.2, 0.2);
 
 // the map's normal on the surface: the level has no tangents, so the texture's axes come from the
-// screen-space derivatives of position and uv (a cotangent frame, Schüler 2013). n is either side:
+// screen-space derivatives of position and uv (a cotangent frame, Schueler 2013). n is either side:
 // the frame flips with it
 vec3 enh_pbr_bump(vec3 n, vec3 dp1, vec3 dp2, vec2 duv1, vec2 duv2) {
   int mi = clamp(enh_material, 0, 13);
