@@ -36,6 +36,27 @@ const float PBR_K[14] = float[14](0.8, 0.4, 0.15, 0.65, 1.3, 1.1, 1.0, 0.9, 0.9,
 const float PBR_R[14] = float[14](0.7, 0.35, 0.12, 0.8, 0.5, 0.72, 0.68, 0.62, 0.78, 0.4, 0.25, 0.08, 0.6, 0.6);
 const float PBR_RR[14] = float[14](0.5, 0.5, 0.2, 0.4, 0.6, 0.5, 0.5, 0.5, 0.4, 0.4, 0.3, 0.1, 0.2, 0.2);
 
+// the map's relief the same near and far: its mips average the bumps away (the desert rock maps' RMS
+// slope: 0.28 at mip 0, 0.18 at 2, 0.11 at 3, 0.055 at 4, a fifth by ~40 m), so close up the
+// full-size cracks shaded dark while the same rock farther off was a flat pale yellow, the look
+// changing as you walk. Close up a little softer, and farther part of what the mips lost given back
+// (the coarser bumps still in the mip, scaled up). The mip as the anisotropic filter picks it (x16)
+uniform float tune_pbr_even = 1.0;   // 0: off (the map's own mips, as before)
+uniform float tune_pbr_near = 0.7;   // the relief at full size, times the class's
+uniform float tune_pbr_keep = 0.6;   // of the slope the mips lost, this power given back (1: all)
+float enh_pbr_gain(vec2 duv1, vec2 duv2) {
+  if (tune_pbr_even <= 0.0 || (tune_pbr_even > 1.5 && gl_FragCoord.x < 640.0)) {
+    return 1.0;  // (2: test, the right half only at 1280 wide)
+  }
+  vec2 ts = vec2(textureSize(tex_T11, 0));
+  vec2 a = duv1 * ts, b = duv2 * ts;
+  float big = max(dot(a, a), dot(b, b)), small = min(dot(a, a), dot(b, b));
+  float lod = 0.5 * log2(max(max(small, big / 256.0), 1e-12));
+  // (the slope's RMS over the mips, measured: ~flat to mip 1, then x0.6 a mip)
+  float lost = exp2(0.75 * clamp(lod - 1.0, 0.0, 5.0));
+  return tune_pbr_near * pow(lost, tune_pbr_keep);
+}
+
 // the map's normal on the surface: the level has no tangents, so the texture's axes come from the
 // screen-space derivatives of position and uv (a cotangent frame, Schüler 2013). n is either side:
 // the frame flips with it
@@ -45,6 +66,7 @@ vec3 enh_pbr_bump(vec3 n, vec3 dp1, vec3 dp2, vec2 duv1, vec2 duv2) {
   if (!g_pbr_on || k <= 0.0) {
     return n;
   }
+  k *= enh_pbr_gain(duv1, duv2);
   vec3 dp2perp = cross(dp2, n), dp1perp = cross(n, dp1);
   vec3 t = dp2perp * duv1.x + dp1perp * duv2.x;
   vec3 b = dp2perp * duv1.y + dp1perp * duv2.y;
@@ -54,6 +76,7 @@ vec3 enh_pbr_bump(vec3 n, vec3 dp1, vec3 dp2, vec2 duv1, vec2 duv2) {
   }
   float inv = inversesqrt(tb);
   vec2 m = (g_pbr.xy * 2.0 - 1.0) * k;
+  m *= min(1.0, 0.95 * inversesqrt(max(dot(m, m), 1e-8)));  // (a boosted far slope: never past ~70 degrees)
   float mz = sqrt(max(1.0 - dot(m, m), 0.05));
   return normalize(t * inv * m.x - b * inv * m.y + n * mz);
 }
