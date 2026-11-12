@@ -232,6 +232,22 @@ and tags rock pixels within ~0.6 m of the dunes, facing up and lit like the dune
 golden hour while the dark middles keep the rock grade. Off: `shaders.tune_rock_on_sand 0`; 2 shows the
 weight (red rock, green sand), 3 the baked light (R 0.5 = as the dunes) and texture (G), with
 `tune_raw_view 1`. Thresholds: `tune_rock_sand_h` (m), `tune_rock_sand_up`, `tune_rock_sand_lit`.
+4 shows its three factors (R height, G facing up, B light), 5 the raw measures, 6/7 the same with the
+other level draws hidden, 8 the blended draws by class, 9 the sand cover's alpha.
+
+The pale wedges that still ringed those slabs were the game's blended sand layer painted over the rock
+(sand in the game's picture): blended draws don't write the normal target, so the pixels kept the rock's
+tag and the composite lit them as rock. Blended sand-class tfrag/tie draws (Jak 3) now blend their normal
+and tag into the normal target by their coverage (rgb only, the class alpha kept; EnhancedMaterials.h
+sets the mask and blend, tfrag3.frag's `enh_blended` 2 writes the coverage): those pixels grade as sand.
+Off: `shaders.tune_sand_cover [0, 0]` (default `[0, 1]`: the alpha range from none to all). The composite's
+rock-on-sand tag window reaches 0.85 for the blended tags.
+
+Thin dark line along a ledge's edge (desert-start's slab at noon): the rim vertices' normals lean out over
+the edge with the wall below; seen almost edge-on from above they crossed the view plane, the composite
+(which turns normals toward the camera by their own sign) turned them down and the sun's light left 2-4 px
+dark. tfrag3.frag keeps the written normal on its face's seen side. Off: `shaders.tune_normal_side 0`;
+`tune_shadow_dbg 9` / `10` show the world normal / the meter-wide one the sun's light uses.
 
 Parallel test games: `JAK_ENHANCED_INSTANCE=<n>` (1-99) moves gk's listener and goalc's nREPL/debug
 ports up by 10*n (jak3 instance 2: gk 8134, nREPL 8201) and names the logs `jak3_i<n>.*.log` /
