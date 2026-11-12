@@ -223,6 +223,14 @@ Environment switches: `JAK_ENHANCED=0` (vanilla look), `JAK_ENHANCED_TAA=0` (FXA
 shadows alone, logs the sun), `JAK_ENHANCED_SUN_FLIP=1` (mirror the sun, for testing). The renderer
 logs `[enhanced] average N fps` every 5 s.
 
+Rock lying on the dunes (the desert's flat tfrag rock patches, their rims painted as the sand): tfrag3.frag
+reads the hfrag's height grid (Hfrag.cpp hands it over each frame with the dunes' mean time of day light)
+and tags rock pixels within ~0.6 m of the dunes, facing up and lit like the dunes as "rock on sand"
+(normal tag 0.756-0.82); the composite then grades them as sand, so no pale polygons ring the patches at
+golden hour while the dark middles keep the rock grade. Off: `shaders.tune_rock_on_sand 0`; 2 shows the
+weight (red rock, green sand), 3 the baked light (R 0.5 = as the dunes) and texture (G), with
+`tune_raw_view 1`. Thresholds: `tune_rock_sand_h` (m), `tune_rock_sand_up`, `tune_rock_sand_lit`.
+
 Parallel test games: `JAK_ENHANCED_INSTANCE=<n>` (1-99) moves gk's listener and goalc's nREPL/debug
 ports up by 10*n (jak3 instance 2: gk 8134, nREPL 8201) and names the logs `jak3_i<n>.*.log` /
 `compiler_i<n>.*.log`; `og_repl.py --instance n` talks to that goalc. `scripts/enhanced/multi_run.ps1

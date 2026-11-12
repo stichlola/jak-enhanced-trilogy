@@ -1103,6 +1103,9 @@ inline float g_light_max_elev = 90.f;
 inline float g_light_midday = 0.f;
 // the same hours in Jak 3's Haven (0..1, update_scene): the light kept under "light.midday_elev_city"
 inline float g_city_midday = 0.f;
+// Spargus (Jak 3, "was*" levels) through the middle of the day (0..1, eased, update_scene): the
+// desert zone's all-day morning look and midday golden tan held back inside the town
+inline float g_town_noon = 0.f;
 
 // test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
 // (tuning in one run); tuning.json's "light": {"yaw", "max_elev", "morning_yaw"} too, over it

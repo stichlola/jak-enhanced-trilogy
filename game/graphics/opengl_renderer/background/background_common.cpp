@@ -314,12 +314,36 @@ float enhanced_level_fade_peek(const std::string& name, u64 frame) {
   return std::clamp(float(frame - it->second.first) / (t_fade * 60.f), 0.f, 1.f);
 }
 
+namespace {
+GLuint g_hfrag_ground_tex = 0;
+u64 g_hfrag_ground_frame = 0;
+float g_hfrag_ground_light = 0.f;
+}  // namespace
+
+void enhanced_set_hfrag_ground(unsigned int tex, u64 frame, float light) {
+  g_hfrag_ground_tex = tex;
+  g_hfrag_ground_frame = frame;
+  g_hfrag_ground_light = light;
+}
+
 void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
                             SharedRenderState* render_state,
                             ShaderId shader) {
   const auto& sh = render_state->shaders[shader];
   sh.activate();
   auto id = sh.id();
+  // Enhanced: the dunes' heights for rock lying on the sand (tfrag3.frag's enh_on_sand; unit 19,
+  // bound again for every tree: the post pass uses that unit after the 3D)
+  if (shader == ShaderId::TFRAG3) {
+    const GLuint ground =
+        g_hfrag_ground_frame == render_state->frame_idx ? g_hfrag_ground_tex : 0;
+    glUniform1i(glGetUniformLocation(id, "enh_ground_on"), ground != 0);
+    glUniform1f(glGetUniformLocation(id, "enh_ground_light"), g_hfrag_ground_light);
+    glUniform1i(glGetUniformLocation(id, "tex_T19"), 19);
+    glActiveTexture(GL_TEXTURE19);
+    glBindTexture(GL_TEXTURE_2D, ground);
+    glActiveTexture(GL_TEXTURE0);
+  }
   glUniform1i(glGetUniformLocation(id, "gfx_hack_no_tex"), Gfx::g_global_settings.hack_no_tex);
   glUniform1i(glGetUniformLocation(id, "decal"), false);
   glUniform1f(glGetUniformLocation(id, "enh_parallax"), 0.f);  // Enhanced: per draw, off unless asked
