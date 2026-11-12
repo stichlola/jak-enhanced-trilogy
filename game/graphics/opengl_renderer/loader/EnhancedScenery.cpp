@@ -1799,6 +1799,7 @@ struct PlacedSet {
   // (the model, then its far versions)
   std::unordered_map<std::string, std::shared_future<std::shared_ptr<std::vector<Mesh>>>> loading;
   u64 drawn_frame = 0;
+  u64 fade_from = 0;  // the frame they started being drawn again (placed.fade_in)
   // each object's light: the nearest vertex of the tree drawing it (its time of day color, its
   // baked light), worked out again when the tree or the place changes
   struct Lit {
@@ -2535,6 +2536,18 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     return;
   }
   std::lock_guard<std::mutex> plock(g_placed_mutex);
+  // they come in (first drawn, or back near a tree after half a second without) dithered over
+  // placed.fade_in seconds, not whole (0: off); the level fade's gap (bg.fade_gap frames)
+  static const EnhancedTune k_fade_in("placed.fade_in", 0.4f);
+  static const EnhancedTune k_fade_gap("bg.fade_gap", 30.f);
+  if (p.drawn_frame == 0 ||
+      render_state->frame_idx > p.drawn_frame + (u64)std::max((float)k_fade_gap, 2.f)) {
+    p.fade_from = render_state->frame_idx;
+  }
+  const float fade_in =
+      k_fade_in > 0.f
+          ? std::clamp(float(render_state->frame_idx - p.fade_from) / (k_fade_in * 60.f), 0.f, 1.f)
+          : 1.f;
   p.drawn_frame = render_state->frame_idx;
   if (p.list.empty()) {
     return;
@@ -2548,6 +2561,10 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
                      g_enhanced_scenery_scale * kMeter;
   const float swap = step * 0.2f;
   const float thin_from = std::max(kPlacedReach * kMeter * 0.5f, (kFarLods + 1.5f) * step);
+  // (the last placed.fade_edge of the reach: the copies left fade out, dithered, instead of
+  // popping at the end of it; 0: cut there)
+  static const EnhancedTune k_fade_edge("placed.fade_edge", 0.1f);
+  const float edge_band = std::max((float)k_fade_edge, 0.f) * kPlacedReach * kMeter;
   for (auto& g : p.groups) {
     g.copies.clear();
   }
@@ -2658,6 +2675,8 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
     const bool upright = full.c[1].y() > 0.7f * full.c[1].length() && o.scale[0] > 0.f &&
                          o.scale[1] > 0.f && o.scale[2] > 0.f;
     const int last = last_version(lib, m, upright);
+    const float edge =
+        edge_band > 0.f ? std::clamp((far_end - std::sqrt(d2)) / edge_band, 0.f, 1.f) : 1.f;
     const float d = std::sqrt(d2) * std::min(kPlacedSize * kMeter / std::max(radius, 1.f), 1.f);
     const int k = std::min((int)(d / step), last);
     const float into = d - (k + 1) * step + swap;  // how far into the swap to the next version
@@ -2669,7 +2688,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
       add(k + 1, inst);
     } else if (k == kImp && d > thin_from && !o.action) {
       const float keep = 1.f - (1.f - kThinKeep) * std::min((d - thin_from) / (kPlacedReach * kMeter - thin_from), 1.f);
-      const float shown = std::clamp(
+      const float shown = edge * std::clamp(
           (keep - hash01((u32)(s64)o.pos[0], (u32)(s64)o.pos[2], 7)) / 0.1f, 0.f, 1.f);
       if (shown > 0.f) {
         if (shown < 1.f) {
@@ -2678,7 +2697,11 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
         }
         add(k, inst);
       }
-    } else {
+    } else if (edge > 0.f) {
+      if (edge < 1.f) {
+        inst.col[1][3] = 1.f - edge;  // (the share of its pixels left out: shrub.frag's enh_xfade)
+        inst.col[2][3] = -1.f;
+      }
       add(k, inst);
     }
   }
@@ -2711,6 +2734,8 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   auto& sh = render_state->shaders[ShaderId::SHRUB_INST];
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_INST);
   glUniform2f(glGetUniformLocation(sh.id(), "enh_lod"), 0.f, 0.f);
+  // (their own fade, not the tree's level's: a level loading nearby doesn't dither them away)
+  glUniform1f(glGetUniformLocation(sh.id(), "enh_fade_in"), fade_in);
   glUniform1f(glGetUniformLocation(sh.id(), "enh_wet"), g_enhanced_wind.wet);
   glUniform1i(glGetUniformLocation(sh.id(), "tex_T10"), 10);
   glUniform1f(glGetUniformLocation(sh.id(), "enh_time"), now);
@@ -2793,6 +2818,7 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
       imp_setup = true;
       first_tfrag_draw_setup(settings.camera, render_state, ShaderId::SHRUB_IMP);
       glUniform2f(glGetUniformLocation(ish.id(), "enh_lod"), 0.f, 0.f);
+      glUniform1f(glGetUniformLocation(ish.id(), "enh_fade_in"), fade_in);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_wet"), g_enhanced_wind.wet);
       glUniform1i(glGetUniformLocation(ish.id(), "tex_T10"), 10);
       glUniform1f(glGetUniformLocation(ish.id(), "enh_time"), now);
