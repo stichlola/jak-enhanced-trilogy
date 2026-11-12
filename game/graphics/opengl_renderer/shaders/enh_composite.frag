@@ -51,16 +51,17 @@ const float PBR_SPEC = 1.4;          // the sun's GGX highlight on the plain cla
 const float PBR_SUN_SHARE = 0.7;     // of the baked light, the sun's (the rest is the sky's)
 const float PBR_DIFFUSE_LOSS = 1.0;  // the diffuse taken by the Fresnel (energy; 0: none)
 const float PBR_RELIEF = 1.6;        // the normal maps' shade against the broad facing
-const float PBR_RELIEF_DARK = 0.22;  // its dark side rolls off toward this (x PBR_RELIEF: at most ~35% darker)
+const float PBR_RELIEF_DARK = 0.15;  // its dark side rolls off toward this (x PBR_RELIEF: at most ~24% darker)
 const float PBR_FAR = 300.0;         // m: the highlight gone by here (from 60 %)
-const float PBR_METAL_FADE = 80.0;
+const float PBR_METAL_FADE = 80.0;   // m: metal and glass's reflections fade from here to twice it (was 60)
 // rocky ground near and far alike (shaders.tune_ground_fine < 0: off, as before): its plates out to here (m, fade
 // from, to), its grain's dark side times this, and past the near grade this share of its darkening
 const vec2 GROUND_PLATES_FAR = vec2(60.0, 140.0);
-const float GROUND_DARK_SOFT = 0.6;
+const float GROUND_DARK_SOFT = 0.4;    // (the grain's and plates' dark side, near and far: x this)
 const float GROUND_RELIEF_DARK = 0.7;  // (the sun's relief on it: its darkest, was 0.55)
-const float GROUND_PEBBLE_NEAR = 0.6;  // (the pebbles at full size: this much of their old strength, all by a mip of 5)
-const float GROUND_FAR_GRADE = 0.4;   // m: metal and glass's reflections fade from here to twice it (was 60)
+const float GROUND_PEBBLE_NEAR = 0.4;  // (the pebbles at full size: this much of their old strength, all by a mip of 5)
+const float GROUND_FAR_GRADE = 0.7;    // (the share of the near grade's darkening also kept on the far color)
+const float GROUND_MOTTLE_FAR = 0.0;   // (the near mottling (2 m) kept on the far color: this share)
 uniform int blast_count;       // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 // (x age (s), y seed, z the ground under it along up from the blast (<= 0; > 0: not known): one
@@ -6091,7 +6092,8 @@ void composite_unused() {
         // grade's darkening: the same ground near and far, not dark and grainy close, pale and flat away)
         if (tune_ground_fine >= 0.0) {
           c_far *= mix(1.0, mix(0.78, 0.5, low_light), GROUND_FAR_GRADE) *
-                   max(1.0 + rock_detail * mix(1.1, 2.2, noon) * far_plates * abs(tune_ground_fine), 0.25);
+                   max(1.0 + rock_detail * (2.0 * m * GROUND_MOTTLE_FAR +
+                                            mix(1.1, 2.2, noon) * far_plates * abs(tune_ground_fine)), 0.25);
         }
         // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
         // sand's made of)

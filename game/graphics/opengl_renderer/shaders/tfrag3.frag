@@ -42,11 +42,11 @@ const float PBR_RR[14] = float[14](0.5, 0.5, 0.2, 0.4, 0.6, 0.5, 0.5, 0.5, 0.4, 
 // changing as you walk. Close up a little softer, and farther part of what the mips lost given back
 // (the coarser bumps still in the mip, scaled up). The mip as the anisotropic filter picks it (x16)
 uniform float tune_pbr_even = 1.0;   // 0: off (the map's own mips, as before)
-uniform float tune_pbr_near = 0.7;   // the relief at full size, times the class's
+uniform float tune_pbr_near = 0.5;  // the relief at full size, times the class's
 uniform float tune_pbr_keep = 0.6;   // of the slope the mips lost, this power given back (1: all)
 float enh_pbr_gain(vec2 duv1, vec2 duv2) {
   if (tune_pbr_even <= 0.0 || (tune_pbr_even > 1.5 && gl_FragCoord.x < 640.0)) {
-    return 1.0;  // (2: test, the right half only at 1280 wide)
+    return 1.0;  // (2: test only, A/B in one frame: the right half on; assumes a 1280 wide window)
   }
   vec2 ts = vec2(textureSize(tex_T11, 0));
   vec2 a = duv1 * ts, b = duv2 * ts;
