@@ -149,6 +149,33 @@ void EnhancedPost::update_scene() {
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
   want.light_yaw = mix(day.light_yaw, night.light_yaw);
   want.light_max_elev = mix(day.light_max_elev, night.light_max_elev);
+  // the zone's own evening palette (world.json "evening"): over the day's grade as the sun goes down,
+  // out into the night's (m_dusk is 0 again by 20:48; the night's mix takes over from 19h).
+  // Tuning grade.evening: its strength (0: off)
+  {
+    static const EnhancedTune t_evening("grade.evening", 1.f);
+    const auto& zl = s.area_grading ? zone : g_world.zones[0];
+    const float ev = zl.has_evening && hour > 12.f
+                         ? std::clamp(m_dusk * (1.f - m_night) * (float)t_evening, 0.f, 1.f)
+                         : 0.f;
+    if (ev > 0.f) {
+      const ZoneLook& e = zl.evening;
+      auto to = [&](float& v, float t) { v += (t - v) * ev; };
+      for (int i = 0; i < 3; i++) {
+        to(want.lift[i], e.lift[i]);
+        to(want.gain[i], e.gain[i]);
+      }
+      to(want.saturation, e.saturation);
+      to(want.contrast, e.contrast);
+      to(want.warmth, e.warmth);
+    }
+    static int logged = -1;
+    const int now = (int)std::lround(ev * 10.f);
+    if (now != logged) {
+      lg::info("[enhanced] evening grade {:.1f} in {}", ev, level.empty() ? "none" : level);
+      logged = now;
+    }
+  }
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
@@ -509,6 +536,13 @@ void EnhancedPost::update_scene() {
       g_city_midday = city_mid * std::clamp((90.f - (float)t_city) / 36.f, 0.f, 1.f);
       g_light_max_elev = std::min(g_light_max_elev, city_cap);
       g_sun_max_elev = std::min(g_sun_max_elev, city_cap);
+      // (Spargus is in the desert zone: its peach morning look lasting all day plus the midday's
+      // golden tan turned the town's pale sand and plaster orange at noon (sand sat 0.46, the
+      // classic look 0.27). Inside the town, 10-15h, both held back: warm, not orange. Eased so
+      // the gate doesn't pop)
+      const float town = jak3 && level.rfind("was", 0) == 0 ? 1.f : 0.f;
+      const float town_mid = smooth((hour - 9.5f) / 1.5f) * (1.f - smooth((hour - 15.f) / 1.5f)) * town;
+      ease(g_town_noon, town_mid, k_grade);
     }
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
@@ -550,6 +584,21 @@ void EnhancedPost::update_scene() {
   // (pbr.on 0 in the tuning file: off, to compare in one run)
   static const EnhancedTune t_pbr_on("pbr.on", 1.f);
   g_enhanced_pbr = m_settings.enabled && m_settings.pbr && t_pbr_on > 0.5f;
+  // (the sand's detail material: detail.on 0 in the tuning file, off live)
+  static const EnhancedTune t_detail_on("detail.on", 1.f);
+  g_enhanced_detail = enhanced_detail_allowed() && m_settings.enabled && m_settings.sand_detail &&
+                      t_detail_on > 0.5f;
+  {
+    float s[3];
+    sun_world(s);
+    const float len = std::sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]);
+    const float up = g_enhanced_sun.valid && len > 1e-6f ? s[1] / len : 0.f;
+    for (int i = 0; i < 3; i++) {
+      g_enhanced_detail_sun[i] = len > 1e-6f ? s[i] / len : (i == 1 ? 1.f : 0.f);
+    }
+    // (fading in as the sun clears the horizon)
+    g_enhanced_detail_sun[3] = std::clamp((up - 0.02f) / 0.13f, 0.f, 1.f);
+  }
   // snow lies: it builds up over ~6 minutes of heavy snow, melts in ~4 after (in a minute in the
   // rain). JAK_ENHANCED_SNOW_COVER=<0..1> holds it (screenshots)
   {

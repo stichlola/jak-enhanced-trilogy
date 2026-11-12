@@ -1,0 +1,19 @@
+// Enhanced: tileable PBR detail materials laid in world space over level textures (loader/EnhancedDetail.cpp,
+// tfrag3.frag, hfrag.frag). The game's texture keeps the color; the material adds a fine normal,
+// roughness and AO near the camera. Pictures from scripts/enhanced/detail_materials.py.
+//   materials.<name>: file (in this folder), tile_m (meters a repeat), normal (relief strength),
+//     rough (how far its roughness moves the class's own), ao (how much of its occlusion)
+//   textures: rules in order, the first whose "contains" has a word of the texture's name (lowercase)
+//     and whose "not" has none wins; "class": "sand" also needs EnhancedMaterials' sand class
+//   hfrag: the material on the hfrag height field (the desert's dunes), "" for none
+// Off: JAK_ENHANCED_DETAIL=0, the menu's "Sand detail material", tuning "detail.on" 0.
+{
+  "materials": {
+    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 2.0, "rough": 0.3, "ao": 0.5 }
+  },
+  "textures": [
+    { "contains": ["sand", "dune"], "not": ["stone", "bag", "rock", "wall", "brick", "quick", "cliff"],
+      "class": "sand", "material": "sand" }
+  ],
+  "hfrag": "sand"
+}

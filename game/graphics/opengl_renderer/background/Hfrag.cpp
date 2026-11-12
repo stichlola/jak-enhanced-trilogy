@@ -4,6 +4,7 @@
 #include "common/util/FileUtil.h"
 
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedDetail.h"
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 
 #include "third-party/imgui/imgui.h"
@@ -501,6 +502,11 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D, lev->enh_height_texture);
     glActiveTexture(GL_TEXTURE0);
+    // the detail material (EnhancedDetail.h, detail.json "hfrag") on unit 3
+    glUniform1i(glGetUniformLocation(id, "tex_T3"), 3);
+    enhanced_detail_bind(glGetUniformLocation(id, "enh_detail"), glGetUniformLocation(id, "enh_detail_k"), 3,
+                         enhanced_detail_hfrag());
+    glUniform4fv(glGetUniformLocation(id, "enh_detail_sun"), 1, g_enhanced_detail_sun);
   }
 
   // draw pass (Enhanced: with the world normals for the lights)

@@ -200,6 +200,10 @@ EnhancedPost::EnhancedPost() {
     // the relief on rock and walls near the camera, 0 = off
     m_settings.parallax = (float)std::atof(px);
   }
+  if (const char* dt = std::getenv("JAK_ENHANCED_DETAIL")) {
+    // the sand's detail material (EnhancedDetail.h), 0 = off (and not even read)
+    m_settings.sand_detail = std::atof(dt) > 0.0;
+  }
   if (const char* pb = std::getenv("JAK_ENHANCED_PBR")) {
     // true PBR (the HD textures' normal and roughness maps), 0 = off
     m_settings.pbr = std::atof(pb) > 0.0;

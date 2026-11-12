@@ -1101,7 +1101,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "contrast"),
                 m_settings.contrast + m_grade.contrast + (float)t_contrast * enh_post::g_city_midday);
   }
-  glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
+  {
+    // (Spargus at noon: the area grade's warm split held back in town too, light.town_noon_grade)
+    static const EnhancedTune t_town_warm("light.town_noon_grade", 0.6f);
+    const float tw = std::clamp((float)t_town_warm, 0.f, 1.f) * enh_post::g_town_noon;
+    glUniform1f(glGetUniformLocation(id, "warmth"),
+                m_settings.warmth + m_grade.warmth * (1.f - (m_grade.warmth > 0.f ? tw : 0.f)));
+  }
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
   {
@@ -1123,8 +1129,11 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "morning"), morning);
     // the desert's day (from the dawn at 5, half of it still at the sunset at 18): the morning's
     // colors, its blue sky, warm sand and lit rock, all day long; the pink and peach the morning's own
+    // (Spargus at noon: the look held back in town, light.town_noon_look 0 = off; update_scene)
+    static const EnhancedTune t_town_look("light.town_noon_look", 0.6f);
     const float day_look = ease(hr - 5.f) * (1.f - ease((hr - 17.f) / 2.f)) *
-                           std::min(m_grade.golden * 2.f, 1.f);
+                           std::min(m_grade.golden * 2.f, 1.f) *
+                           (1.f - std::clamp((float)t_town_look, 0.f, 1.f) * enh_post::g_town_noon);
     glUniform1f(glGetUniformLocation(id, "day_look"), day_look);
     // the same hours for the area's day sky (any outdoor area: its clear blue, the morning's pink
     // toward the sun, the clouds lit to match, the shade's open-sky blue)
@@ -1271,13 +1280,24 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "rock_detail_avg"), m_rock_avg);
   glUniform1f(glGetUniformLocation(id, "ground_detail"), m_ground_tex ? 1.f : 0.f);
   glUniform3fv(glGetUniformLocation(id, "ground_detail_avg"), 1, m_ground_avg);
-  glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   {
+    // (Spargus at noon: the desert grade's warm cast taken toward grey in town, its brightness kept:
+    // after the morning look and the tan it was the largest part of the orange left, sat 0.37 ->
+    // 0.31 without it. light.town_noon_grade 0 = off)
+    static const EnhancedTune t_town_grade("light.town_noon_grade", 0.6f);
+    const float tg = std::clamp((float)t_town_grade, 0.f, 1.f) * enh_post::g_town_noon;
+    const float lift_avg = (m_grade.lift[0] + m_grade.lift[1] + m_grade.lift[2]) / 3.f;
+    const float gain_avg = (m_grade.gain[0] + m_grade.gain[1] + m_grade.gain[2]) / 3.f;
+    float lift[3], gain[3];
+    for (int i = 0; i < 3; i++) {
+      lift[i] = m_grade.lift[i] + (lift_avg - m_grade.lift[i]) * tg;
+      gain[i] = m_grade.gain[i] + (gain_avg - m_grade.gain[i]) * tg;
+    }
+    glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, lift);
     // (...and stopped down a little: the port's sunlit floor was a pale washed yellow)
     static const EnhancedTune t_gain("light.midday_city_gain", -0.06f);
     const float k = 1.f + (float)t_gain * enh_post::g_city_midday;
-    glUniform3f(glGetUniformLocation(id, "grade_gain"), m_grade.gain[0] * k, m_grade.gain[1] * k,
-                m_grade.gain[2] * k);
+    glUniform3f(glGetUniformLocation(id, "grade_gain"), gain[0] * k, gain[1] * k, gain[2] * k);
   }
   // soft shadows: the shadow map again, read as plain depths for the blocker search
   if (!m_shadow_raw_sampler) {
@@ -1480,8 +1500,12 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     const float gain = day * (s.bright_day - 1.f) + twilight * (s.bright_dusk - 1.f) +
                        night * (s.bright_night - 1.f);
     // (w: the desert's midday, its own grade: no uniform of its own, the composite has too many)
+    // (Spargus at noon: the midday's golden tan held back in town, light.town_noon_tan 0 = off)
+    static const EnhancedTune t_town_tan("light.town_noon_tan", 0.7f);
     glUniform4f(glGetUniformLocation(id, "brightness"), gain, s.shadow_lift, s.night_vis * night,
-                m_ssao_ready ? enh_post::g_light_midday : 0.f);
+                m_ssao_ready ? enh_post::g_light_midday *
+                                   (1.f - std::clamp((float)t_town_tan, 0.f, 1.f) * enh_post::g_town_noon)
+                             : 0.f);
     static size_t logged = 0;
     if (logged != script_next) {
       logged = script_next;

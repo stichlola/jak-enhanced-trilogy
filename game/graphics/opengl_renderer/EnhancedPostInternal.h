@@ -26,6 +26,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedDetail.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
@@ -213,6 +214,10 @@ struct ZoneAmbience {
 struct WorldZone {
   std::string name;
   ZoneLook look[2];  // day, night
+  // the evening's grade ("evening" in world.json, optional: lift, gain, saturation, contrast,
+  // warmth), eased in over the day's as the sun goes down (dusk, 16:30-18:30) and out into the night
+  ZoneLook evening;
+  bool has_evening = false;
   ZoneWeather weather;
   ZoneAmbience ambience;
   // the zone's reverb (snd::spatial::Preset, -1: dry outdoors, cave indoors) and how wet (times)
@@ -763,6 +768,11 @@ inline void load_world() {
       if (z.contains("night")) {
         read_look(z["night"], zone.look[1]);
       }
+      if (z.contains("evening")) {
+        zone.evening = zone.look[0];
+        read_look(z["evening"], zone.evening);
+        zone.has_evening = true;
+      }
       if (z.contains("weather")) {
         const auto& wj = z["weather"];
         auto& we = zone.weather;
@@ -1103,6 +1113,9 @@ inline float g_light_max_elev = 90.f;
 inline float g_light_midday = 0.f;
 // the same hours in Jak 3's Haven (0..1, update_scene): the light kept under "light.midday_elev_city"
 inline float g_city_midday = 0.f;
+// Spargus (Jak 3, "was*" levels) through the middle of the day (0..1, eased, update_scene): the
+// desert zone's all-day morning look and midday golden tan held back inside the town
+inline float g_town_noon = 0.f;
 
 // test switch: JAK_ENHANCED_TUNE=<file> reads "light_yaw light_max_elev" from it every second
 // (tuning in one run); tuning.json's "light": {"yaw", "max_elev", "morning_yaw"} too, over it

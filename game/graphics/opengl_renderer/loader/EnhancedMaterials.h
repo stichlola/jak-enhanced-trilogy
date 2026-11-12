@@ -8,6 +8,7 @@
 #include "common/log/log.h"
 
 #include "game/graphics/opengl_renderer/BucketRenderer.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedDetail.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedPbr.h"
 #include "game/graphics/opengl_renderer/loader/common.h"
 
@@ -386,6 +387,20 @@ inline const std::vector<u8>& enhanced_level_materials(const LevelData* lev) {
     for (const auto& tree : lev->level->tie_trees[0]) {
       enhanced_find_repeats(tree.static_draws, tree.unpacked, m);
     }
+    // the detail materials (EnhancedDetail.h) by texture name and class
+    auto& det = lev->enh_detail;
+    det.assign(m.size(), 0);
+    int n_detail = 0;
+    for (size_t i = 0; i < m.size(); i++) {
+      det[i] = enhanced_detail_for_texture(lev->level->textures[i].debug_name, m[i]);
+      n_detail += det[i] ? 1 : 0;
+      if (names && det[i]) {
+        lg::info("[enhanced] detail {} {}: {}", lev->level->level_name, lev->level->textures[i].debug_name, det[i]);
+      }
+    }
+    if (n_detail) {
+      lg::info("[enhanced] detail materials {}: {} textures", lev->level->level_name, n_detail);
+    }
     // (in the log: a level whose rock or sand isn't named so misses the sun on the rock, the
     // sand's ripples and grade)
     lg::info(
@@ -404,7 +419,8 @@ inline void enhanced_set_material(SharedRenderState* render_state,
                                   const std::vector<u8>* materials,
                                   int tex,
                                   const DrawMode& mode,
-                                  const std::vector<GLuint>* pbr = nullptr) {
+                                  const std::vector<GLuint>* pbr = nullptr,
+                                  const std::vector<u8>* detail = nullptr) {
   GLuint program = render_state->shaders[shader].id();
   static GLuint cached_program[2] = {0, 0};
   static GLint cached_loc[2] = {-1, -1};
@@ -476,5 +492,25 @@ inline void enhanced_set_material(SharedRenderState* render_state,
       glBindTexture(GL_TEXTURE_2D, map);
       glActiveTexture(GL_TEXTURE0);
     }
+  }
+  // the detail material (EnhancedDetail.h) on unit 12 (tfrag3.frag's tex_T12); never on a cutout,
+  // a blended draw or a decal
+  static GLint cached_det[2][2] = {{-1, -1}, {-1, -1}};
+  static GLuint cached_det_program[2] = {0, 0};
+  if (cached_det_program[slot] != program) {
+    cached_det_program[slot] = program;
+    cached_det[slot][0] = glGetUniformLocation(program, "enh_detail");
+    cached_det[slot][1] = glGetUniformLocation(program, "enh_detail_k");
+    const GLint t12 = glGetUniformLocation(program, "tex_T12");
+    if (t12 >= 0) {
+      glUniform1i(t12, 12);
+    }
+  }
+  if (cached_det[slot][0] >= 0) {
+    const u8 id = detail && tex >= 0 && tex < (int)detail->size() && !(m & kEnhMatHoles) && !blended &&
+                          !mode.get_decal()
+                      ? (*detail)[tex]
+                      : 0;
+    enhanced_detail_bind(cached_det[slot][0], cached_det[slot][1], 12, id);
   }
 }

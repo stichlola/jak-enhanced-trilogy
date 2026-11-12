@@ -993,8 +993,16 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
 
   // world up in view space, for the fog and the heat haze
   glUniform3f(glGetUniformLocation(id, "up_view"), cam.rot[1][0], cam.rot[1][1], cam.rot[1][2]);
-  glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
-              m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount * m_fog : 0.f, 0.f);
+  {
+    // (fog.w: the look's switches as bits, no new uniform: 1 the richer day sky, 2 explosions by day
+    // kept under the highlights. Tuning look.sky_extras / look.blast_day 0: off)
+    static const EnhancedTune t_sky_extras("look.sky_extras", 1.f);
+    static const EnhancedTune t_blast_day("look.blast_day", 1.f);
+    const int bits = ((float)t_sky_extras > 0.5f ? 1 : 0) | ((float)t_blast_day > 0.5f ? 2 : 0);
+    glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
+                m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount * m_fog : 0.f,
+                (float)bits);
+  }
   glUniform3f(glGetUniformLocation(id, "fog_color"), render_state->fog_color[0] / 255.f,
               render_state->fog_color[1] / 255.f, render_state->fog_color[2] / 255.f);
   m_time += 1.0 / 60.0;
