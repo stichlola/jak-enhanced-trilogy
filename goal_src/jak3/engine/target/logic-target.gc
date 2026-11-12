@@ -18,6 +18,26 @@
     )
   )
 
+;; Enhanced: is Jak piloting something that floats (zoomers, hover cars, the gunship, the Hellcat:
+;; anything but the desert's wheeled cars, wvehicle)? No wheel spray or ruts off it
+(defun enhanced-piloting-hover? ()
+  (let ((v (handle->process (-> *target* pilot vehicle)))
+        (wheeled #f)
+        )
+    (when v
+      (let ((ty (-> v type)))
+        (while (and ty (!= ty object) (not wheeled))
+          (if (= (-> ty symbol) 'wvehicle)
+              (set! wheeled #t)
+              )
+          (set! ty (-> ty parent))
+          )
+        )
+      )
+    (and v (not wheeled))
+    )
+  )
+
 ;; Enhanced: is the water's surface (the levels' water regions) within 2 m under this point?
 (defun enhanced-over-water? ((pos vector))
   (let ((spheres (new 'stack-no-clear 'inline-array 'water-sphere 1))
@@ -3531,6 +3551,10 @@ capture exactly."
           )
       (if (focus-test? *target* hit)
           (+! (-> v w) 2048.0)
+          )
+      ;; + 4096 piloting a hover vehicle (no wet-ground spray, dust or ruts off it)
+      (if (and (focus-test? *target* pilot) (enhanced-piloting-hover?))
+          (+! (-> v w) 4096.0)
           )
       (pc-enhanced-set-player (the-as pointer v))
       (if (> *enhanced-vehicle-in-air* 0)

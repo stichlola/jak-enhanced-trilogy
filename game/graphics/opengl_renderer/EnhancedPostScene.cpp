@@ -1851,7 +1851,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       m_last_player_state = pl.valid ? pl.state : 0;
-      if (pl.valid && pl.state > 0 && pl.state <= 3) {
+      // (a hover vehicle, flag 8: no ruts)
+      if (pl.valid && pl.state > 0 && pl.state <= 3 && !(pl.state == 2 && (pl.flags & 8))) {
         bool rut = pl.state == 2;
         const bool soft = pl.state == 1 || pl.state == 2;
         // (ruts: a piece every meter, each one reaching back to the one before: a solid track)
@@ -2007,8 +2008,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       const bool board = pl.state == 4 || pl.state == 6 || (pl.state == 5 && m_last_ride_state == 4);
       const bool on_water = pl.state == 5 || test_spray;
+      // a hover vehicle (zoomers, hover cars, the gunship; flag 8 from logic-target.gc) has no
+      // wheels: no spray off wet ground, no dust, no plumes over water. Its two plumes were big
+      // white-blue blobs behind a zoomer in Haven's rain. (tuning.json "water": {"hover_puffs": 1}:
+      // the old plumes)
+      static const EnhancedTune t_hover_puffs("water.hover_puffs", 0.f);
+      const bool hover = pl.valid && (pl.flags & 8) && t_hover_puffs < 0.5f;
       // (none while the board or the vehicle is in the air: a jump leaves no dust)
-      if ((riding || test_puffs) && pl.valid && pl.state < 6 && m_time - m_puff_time > 0.06) {
+      if ((riding || test_puffs) && !hover && pl.valid && pl.state < 6 &&
+          m_time - m_puff_time > 0.06) {
         const float sp = test_puffs ? 20.f : m_ride_speed;
         const float side = (m_puff_left ? 1.f : -1.f) * (board ? 0.2f : 1.1f);
         // (the test: as if moving, along a 12 m trail)
@@ -2034,7 +2042,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // hitting the water at speed: a burst all around
       static int last_state = 0;
       if (pl.valid && pl.state == 5 && (last_state == 2 || last_state == 4) && m_ride_speed > 5.f &&
-          m_settings.wake > 0.f) {
+          m_settings.wake > 0.f && !hover) {
         for (int k = 0; k < 4; k++) {
           add_puff((k - 1.5f) * 0.8f, (k % 2 ? 1.f : -1.f) * 1.2f, 0.4f, 2.6f, 1, 1.4f);
         }
