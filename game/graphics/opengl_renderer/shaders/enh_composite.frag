@@ -3195,7 +3195,7 @@ void composite_unused() {
   // rock lying on the dunes (tfrag3.frag's enh_on_sand: the rock's 0.75 lengthened up to 0.82 where
   // it lies on the sand, the desert mounds' flat skirts): how much of the sand's light it takes
   // instead of the rock's (the rock's tests read 0.7-0.85, then fade by this)
-  float rock_tag = step(0.7, pix_tag) * step(pix_tag, 0.845);
+  float rock_tag = step(0.7, pix_tag) * step(pix_tag, 0.85);
   float on_sand = rock_tag * clamp((pix_tag - 0.756) / 0.06, 0.0, 1.0);
   // true PBR (tfrag3.frag, EnhancedPbr.h): the level's roughness, 6 bits in the albedo's low bits,
   // there where its alpha is 1 (-1: none: no map, PBR off, characters, water, effects). Its normal
@@ -5987,7 +5987,7 @@ void composite_unused() {
   // too small for the pixels, a size averages out by itself
   if (rock_detail > 0.0 && z > 0.0) {
     float nl = pix_tag;
-    if (nl > 0.55 && nl < 0.845) {
+    if (nl > 0.55 && nl < 0.85) {
       vec3 c_rock_in = c;  // (rock on the dunes: none of the picture, as the sand around: on_sand)
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
@@ -6165,7 +6165,7 @@ void composite_unused() {
     // (the land only, by the normals' tag lengths: sand, rocky ground, rock. The palms' leaves,
     // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
     float land_tag = pix_tag;
-    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.845) ||
+    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.85) ||
                  (land_tag > 0.85 && land_tag < 0.95) ? 1.0 - flame_keep : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
@@ -7154,6 +7154,10 @@ void composite_unused() {
     c = vec3(d6 > 1e-7 && abs(d6 - d3) < 1e-7 ? 1.0 : 0.0,
              texelFetch(tex_T29, ivec2(tex_coord * hiz_size), 0).r > 1e29 ? 1.0 : 0.0,
              texture(tex_T5, tex_coord).r > d3 + 1e-7 ? 1.0 : 0.0);
+  }
+  // (test 9 / 10: the world normal, this pixel's / the meter-wide one the sun's light uses)
+  if (abs(tune_shadow_dbg - 9.0) < 0.5 || abs(tune_shadow_dbg - 10.0) < 0.5) {
+    c = world_dir(tune_shadow_dbg < 9.5 ? surf_n : soft_n) * 0.5 + 0.5;
   }
   // (8 is no view: the low sun's shade on faces turned from it as it was, see sun_shadow_wide)
   if (tune_shadow_dbg > 1.5 && tune_shadow_dbg < 7.5) {
