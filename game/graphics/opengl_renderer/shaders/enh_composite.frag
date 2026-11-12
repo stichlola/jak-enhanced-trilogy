@@ -339,7 +339,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through, 35-39 splash sprites (see there), 40 shore foam in fixed white (unlit, as before)
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3820,7 +3820,17 @@ void composite_unused() {
       float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
-      wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
+      // (lit as the wake's foam and the runup line on the sand: dimmer at dusk, night-dimmed, shaded
+      // by the sun's shadow; the fixed white glowed along every beach after sunset. Never darker than
+      // the water it lies on: at sunset the sea mirrors a bright sky, and dim foam drew dark streaks.
+      // tune_water_dbg 40: the fixed white, as before)
+      vec3 foam_col = vec3(0.92, 0.94, 0.9);
+      if (abs(tune_water_dbg - 40.0) > 0.5) {
+        foam_col = night_dim(foam_col * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0))) *
+                   (1.0 - shadow_strength * k_water_shade * wsh);
+        foam_col = max(foam_col, wc * 1.08);
+      }
+      wc = mix(wc, foam_col, foam * 0.55);
     }
     // a rough sea: greyer under the storm, whitecaps breaking on the crests
     if (sea_state > 0.5) {
