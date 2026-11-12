@@ -47,6 +47,26 @@ MATERIALS = {
         "ao_px": 5.0,
         "ao_k": 0.22,
     },
+    # rocky ground: weathered stone plates, cracks, gravel and pebbles (2048 seamless, generated art: the
+    # composite's own ground picture), for desert-start's flat slab (wascity-ground-01). detail.json
+    # tile_m 2.2 m, the composite's pebble size
+    "ground": {
+        "src": [
+            os.path.join(ROOT, "custom_assets", "jak3", "scenery", "ground_detail.png"),
+            os.path.join(os.path.dirname(os.path.dirname(ROOT)), "jak-enhanced", "custom_assets", "jak3", "scenery", "ground_detail.png"),
+        ],
+        "size": 512,
+        "seam_max": 1.3,    # (1.21 as it is: the edge blend made it worse, 1.29)
+        "grain_px": 0.7,    # gravel
+        "ripple_px": 14.0,  # the stones and plates, their cracks
+        "grain_w": 0.45,
+        "ripple_w": 1.0,
+        "normal_k": 2.2,
+        "ao_px": 6.0,
+        # (soft: at 0.3 / 0.55 its cracks and pebble gaps read as black specks, the slab 10% darker)
+        "ao_k": 0.15,
+        "ao_min": 0.8,
+    },
 }
 
 
@@ -81,7 +101,7 @@ def build(name, cfg, preview_dir=None):
         c = int(round(a.shape[0] * cfg["crop"]))
         a = a[:c, :c]
     ratio = seam_ratio(a)
-    if ratio > 1.2:
+    if ratio > cfg.get("seam_max", 1.2):
         a = make_seamless(a)
         print(f"{name}: seam ratio {ratio:.2f} -> {seam_ratio(a):.2f} (blended)")
     else:
@@ -112,7 +132,7 @@ def build(name, cfg, preview_dir=None):
     cav = ndimage.gaussian_filter(height, cfg["ao_px"], mode="wrap") - height
     ao = 1.0 - cfg["ao_k"] * np.clip(cav, 0.0, None)
     # (never black: a pebble's dark rim isn't a pit)
-    ao = np.clip(ndimage.gaussian_filter(ao, 0.8, mode="wrap"), 0.55, 1.0)
+    ao = np.clip(ndimage.gaussian_filter(ao, 0.8, mode="wrap"), cfg.get("ao_min", 0.55), 1.0)
     out = np.dstack([nx * 0.5 + 0.5, ny * 0.5 + 0.5, np.clip(rough, 0, 1), ao])
     out8 = (out * 255.0 + 0.5).clip(0, 255).astype(np.uint8)
     os.makedirs(OUT_DIR, exist_ok=True)

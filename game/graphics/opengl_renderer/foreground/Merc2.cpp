@@ -677,6 +677,25 @@ void Merc2::handle_pc_model(const DmaTransfer& setup,
   args.lights = lights;
   args.first_bone = first_bone;
   args.no_texture = render_state->version == GameVersion::Jak3 && model_no_texture;
+  {
+    // Enhanced: no rain on what flies: the zoomers, hover cars, Hellcat and gunship (always), and
+    // Jak and Daxter while piloting one (rain is for characters on foot). Its wet look made a
+    // zoomer read soaked and glossy in Haven's rain. (tuning.json "water": {"hover_dry": 0}: as before)
+    static const EnhancedTune t_hover_dry("water.hover_dry", 1.f);
+    args.dry = false;
+    if (render_state->version == GameVersion::Jak3 && t_hover_dry > 0.5f && g_enhanced_merc.wet > 0.f) {
+      const std::string& n = model->name;
+      auto starts = [&](const char* s) { return n.rfind(s, 0) == 0; };
+      if (starts("bikea") || starts("bikeb") || starts("bikec") || starts("newbike") ||
+          starts("cara") || starts("carb") || starts("carc") || starts("hellcat") ||
+          starts("kg-robot-transport")) {
+        args.dry = true;
+      } else if (g_enhanced_player.valid && (g_enhanced_player.flags & 8) &&
+                 (starts("jakc") || starts("daxter"))) {
+        args.dry = true;
+      }
+    }
+  }
 
   // loop over effects, creating draws for each
   for (size_t ei = 0; ei < model->effects.size(); ei++) {
@@ -800,6 +819,7 @@ void Merc2::init_shader_common(Shader& shader, Uniforms* uniforms, bool include_
   uniforms->enh_mat = glGetUniformLocation(id, "enh_mat");
   uniforms->enh_eye_lid = glGetUniformLocation(id, "enh_eye_lid");
   uniforms->enh_relief = glGetUniformLocation(id, "enh_relief");
+  uniforms->enh_wet = glGetUniformLocation(id, "enh_wet");
   uniforms->enh_fade_in = glGetUniformLocation(id, "enh_fade_in");
   glUniform1i(glGetUniformLocation(id, "tex_relief"), 1);  // (texture unit 1)
 
@@ -1180,6 +1200,9 @@ Merc2::Draw* Merc2::alloc_normal_draw(const tfrag3::MercDraw& mdraw, const DrawA
   if (args.no_texture) {
     draw->flags |= NO_TEXTURE;
   }
+  if (args.dry) {
+    draw->flags |= DRY;
+  }
   for (int i = 0; i < 4; i++) {
     draw->fade[i] = 0;
   }
@@ -1416,6 +1439,7 @@ void Merc2::do_draws(const Draw* draw_array,
   s32 last_tex = INT32_MIN;
   int last_light = -1;
   int last_mat = -1;
+  int last_dry = -1;
   // Enhanced: the parts' materials, by their textures' names
   const auto& char_materials = enhanced_level_char_materials(lev);
   // Enhanced: and the relief maps made for them, on texture unit 1 (nearly always none)
@@ -1551,6 +1575,15 @@ void Merc2::do_draws(const Draw* draw_array,
     if (mat != last_mat) {
       glUniform1i(uniforms.enh_mat, mat);
       last_mat = mat;
+    }
+    // Enhanced: a dry draw (DRY: hover vehicles) gets enh_wet -1: no wet look in merc2.frag, and
+    // its normal tagged 0.40 instead of 0.45 so the composite's rain on characters skips it too
+    {
+      const int dry = (draw.flags & DrawFlags::DRY) ? 1 : 0;
+      if (dry != last_dry) {
+        glUniform1f(uniforms.enh_wet, dry ? -1.f : (g_enhanced_merc.enabled ? g_enhanced_merc.wet : 0.f));
+        last_dry = dry;
+      }
     }
     if (relief_on) {
       std::pair<GLuint, u8> relief = {0, 0};

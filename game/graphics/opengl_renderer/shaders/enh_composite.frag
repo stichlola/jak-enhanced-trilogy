@@ -2574,6 +2574,43 @@ float snow_flakes(vec3 ray_view, float scene_z, float px) {
          snow_grid(o, d, 18.0, min(far, 45.0), 2.4, px, 53.0) * 0.6;
 }
 
+// how much lower a ground point is than the ground around it (m, > 0 in a dip): the depth buffer
+// read on two rings (0.6 and 1.4 m) around it, each neighbor's height compared with this one's.
+// Water gathers there: in a hollow, along a curb, in a gutter, in a rut. A neighbor hidden behind
+// something nearer (its hit lands far from where it was asked) or a wall (more than 25 cm up)
+// counts as level. (pv: view space, game units)
+float ground_hollow(vec3 pv) {
+  float sum = 0.0;
+  float n = 0.0;
+  for (int k = 0; k < 12; k++) {
+    float r = (k < 6 ? 0.6 : 1.4) * 4096.0;
+    float a = float(k) * 1.0471976 + (k < 6 ? 0.0 : 0.5235988);
+    vec3 want_w = vec3(cos(a) * r, 0.0, sin(a) * r);
+    vec3 q = pv + want_w * view_to_world;  // world -> view (transpose)
+    if (q.z < 0.3 * 4096.0) {
+      continue;
+    }
+    vec2 quv = vec2(q.x * proj.z / q.z, q.y * proj.w / q.z) * 0.5 + 0.5;
+    if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+      continue;
+    }
+    float sd = texture(tex_T3, quv).r;
+    if (sd <= 1e-7) {
+      continue;
+    }
+    vec3 s = view_to_world * (view_pos(quv, sd) - pv);
+    // (where the ray met the surface, against where it was asked: off by more than half the ring's
+    // radius sideways, it hit something else)
+    if (length(s.xz - want_w.xz) > r * 0.5) {
+      continue;
+    }
+    float dh = s.y / 4096.0;
+    sum += dh > 0.25 ? 0.0 : clamp(dh, -0.12, 0.12);
+    n += 1.0;
+  }
+  return n > 3.0 ? sum / n : 0.0;
+}
+
 // raindrops in the puddles: each 0.5 m cell gets a ring now and then, spreading and fading
 // (returns the slope it gives the water, xz)
 // how much of a puddle is at a world point (m), as the wet ground draws them (flat ground)
@@ -4229,6 +4266,11 @@ void composite_unused() {
   // fills the screen the drops are blobs: none of it in cutscenes, nor in play with the camera right
   // at them (their own wet look stays: merc2.frag's enh_wet, rain_chars below)
   float rain_wet = rain_open;
+  // (tag 0.36, merc2.frag: a hover vehicle, or Jak on one: no rain at all, water.hover_dry)
+  bool chr_dry = pix_tag > 0.3 && pix_tag < 0.405;
+  if (chr_dry) {
+    rain_wet = 0.0;
+  }
   if (pix_tag > 0.3 && pix_tag < 0.55) {
     rain_wet *= mix(1.0, tune_rain_chr_movie, movie) *
                 smoothstep(tune_rain_chr_near.x * 4096.0, tune_rain_chr_near.y * 4096.0, z);
@@ -4843,7 +4885,22 @@ void composite_unused() {
     vec3 bdir = normalize(vec3(sin(bolt.x), 0.9, cos(bolt.x)));
     float sky_up = 0.5 + 0.5 * wn.y;
     float facing = max(dot(wn, bdir), 0.0);
-    float lit = weather2.w * (0.3 * sky_up + 0.7 * facing) + sheet * 0.35 * sky_up;
+    // (with shadows: the bolt's share stops where the depth buffer has something between this
+    // point and the bolt's side of the sky, 6 m along the ray, so Jak, posts and walls throw a hard
+    // shadow for the flash's instant. Only while a bolt flashes, weather2.w; tune_water_dbg 41:
+    // no shadows, as before)
+    if (weather2.w > 0.04 && facing > 0.0 && abs(tune_water_dbg - 41.0) > 0.5 && z < 120.0 * 4096.0) {
+      vec3 bdir_v = bdir * view_to_world;  // world -> view (transpose)
+      float jit = fract(pixel_angle() * 0.1591549);
+      vec3 from = p + surf_n * (0.03 * 4096.0 + z * 0.002);
+      float bs = light_blocked_by(from, from + bdir_v * (200.0 * 4096.0), jit, 6.0 * 4096.0, 12);
+      bs *= 1.0 - smoothstep(60.0 * 4096.0, 120.0 * 4096.0, z);
+      facing *= 1.0 - bs;
+      if (abs(tune_water_dbg - 44.0) < 0.5) {  // (test: the flash's shadows, red)
+        c = mix(c, vec3(1.0, 0.0, 0.0), bs * 0.7);
+      }
+    }
+    float lit = weather2.w * (0.25 * sky_up + 0.75 * facing) + sheet * 0.35 * sky_up;
     lit *= rain_open * tune_bolt_scene;
     c += (albedo * mix(1.0, 1.5, night_dark.x) + 0.02) * vec3(0.75, 0.82, 1.0) * lit * ao * 0.9;
   }
@@ -5023,12 +5080,25 @@ void composite_unused() {
     // wide puddles: low-frequency dips with a ragged rim. A thunderstorm floods them wider; as they
     // dry they draw back into the deepest dips, still water while the street around has dried
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
+    // (in the ground's real dips, as the depth buffer shows them: ground_hollow. The noise only
+    // rags their rims and, in a downpour, floods the level ground; past 70 m, where the rings get
+    // too few pixels, the noise alone as before. tune_water_dbg 42: the noise everywhere, as before;
+    // 43: the dips, blue)
+    if (abs(tune_water_dbg - 42.0) > 0.5 && z < 70.0 * 4096.0 && dot(wet_n, up_view) > 0.85) {
+      float hol = ground_hollow(p);
+      // (a dip of 1 cm is a full puddle; level ground only in the noise's highest spots)
+      float pd_h = (hol - 0.004) * 40.0 + 0.25 * pd - 0.05;
+      pd = mix(pd_h, pd, smoothstep(50.0 * 4096.0, 70.0 * 4096.0, z));
+    }
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
                    (1.0 - smoothstep(350.0 * 4096.0, 700.0 * 4096.0, z)) * step(0.001, puddle_level) *
                    rain_wet;
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
+    if (abs(tune_water_dbg - 43.0) < 0.5) {
+      c = mix(c, vec3(0.0, 0.3, 1.0), puddle * 0.8);
+    }
     wet = max(wet, puddle * wet_flat * water);
     // (a damp dark rim around a drying puddle)
     float rim = smoothstep(-0.2 - spread, -0.12 - spread, pd) * wet_flat * water * (1.0 - puddle) * rain_wet;
@@ -6586,7 +6656,7 @@ void composite_unused() {
   // characters' tag)
   // (and every character out in the rain, as soaked as the ground: weather.w, under the open sky;
   // the sheen in the sky's own color so a night stays dark, and the lightning glints on them)
-  float rain_chars = tune_rain_chars * weather.w * rain_open;
+  float rain_chars = tune_rain_chars * weather.w * rain_open * (chr_dry ? 0.0 : 1.0);
   if ((jak_fx.w > 0.0 || rain_chars > 0.0) && z > 0.0 && wsurf == 0.0) {
     float ctag = pix_tag;
     float jd = length(p - jak_fx.xyz) / 4096.0;

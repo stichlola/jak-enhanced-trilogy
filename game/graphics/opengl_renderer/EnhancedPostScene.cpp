@@ -1851,8 +1851,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       m_last_player_state = pl.valid ? pl.state : 0;
-      // (a hover vehicle, flag 8: no ruts)
-      if (pl.valid && pl.state > 0 && pl.state <= 3 && !(pl.state == 2 && (pl.flags & 8))) {
+      // (a hover vehicle, flag 8: no ruts; tuning "water": {"hover_puffs": 1}: as before)
+      static const EnhancedTune t_hover_ruts("water.hover_puffs", 0.f);
+      if (pl.valid && pl.state > 0 && pl.state <= 3 &&
+          !(pl.state == 2 && (pl.flags & 8) && t_hover_ruts < 0.5f)) {
         bool rut = pl.state == 2;
         const bool soft = pl.state == 1 || pl.state == 2;
         // (ruts: a piece every meter, each one reaching back to the one before: a solid track)
