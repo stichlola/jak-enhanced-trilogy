@@ -274,7 +274,7 @@ uniform float tune_night_facade_floor = 3.5;  // a storey's height, m (a bay 0.8
 uniform float tune_night_facade_near = 70.0;  // in a lit city, plain and metal walls get them from here (to 1.5x), m
 uniform float tune_night_lamp = 1.0;       // lamps and lit signs at night: their picture as light (0 = off, >= 10 shows the tags)
 uniform float tune_night_lamp_gain = 1.6;  // how bright, over their texture's color
-uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
+uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams); 0 off, -1 per pixel (old: hard-edged searchlights)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
@@ -351,7 +351,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through, 35-39 splash sprites (see there), 40 shore foam in fixed white (unlit, as before)
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -387,7 +387,8 @@ uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
 uniform int tune_hiz_iters = 40;          // the water's Hi-Z reflection: tiles visited at most
 uniform float tune_hiz_range_m = 400.0;   // ...on water up to this far (faded over its last quarter)
 uniform float tune_hiz_len_m = 400.0;     // ...rays this long
-uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta)
+uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta,
+                                          // 3 old metal/glass reflections, 4 their trust in grey)
 uniform int hiz_surf;      // puddles, metal, glass: their reflection on Hi-Z too (post.hiz_surf)
 uniform float tune_hiz_surf_len_m = 150.0;  // ...rays this long (the march: ~25 m)
 uniform sampler2D tex_T27;  // the level's albedo (lights.albedo; a: baked light / 2, 0 = none)
@@ -862,14 +863,38 @@ vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float
 
 float hiz_trace(vec3 p, vec3 r, float z0, float max_len, float jitter, out vec2 uv);
 
+// (metal and glass: how far the reflection can be trusted, 0..1, set by trace_reflection: 1 where
+// the ray met something on screen (or was traced), else how far off the screen's pixel lies where
+// the ray vanishes; a near one (Jak, a wall in front, the camera's own side) isn't what the ray sees)
+float refl_conf = 1.0;
+// tune_hiz_dbg 3: the old reflections (no back-face reject, trusted fallback), 4: refl_conf as grey
+const float REFL_ENV_NEAR = 40.0;   // m: a fallback pixel this near is not trusted at all...
+const float REFL_ENV_FAR = 150.0;   // ...from this far fully (the sky always)
+const float REFL_BACKFACE = 0.15;   // a hit whose normal points along the ray by more is its back
+const float REFL_MISS_KEEP = 0.3;   // how much of an untrusted reflection metal and glass keep
+
+// (a screen hit at uv seen from behind along r: the ray would meet the surface's back side, whose
+// front the screen shows; the level's own normals only, the rebuilt ones are too noisy at edges)
+bool refl_backface(vec2 uv, vec3 r) {
+  vec4 g = gbuf(uv);
+  if (g.a <= 0.17 || abs(tune_hiz_dbg - 3.0) < 0.5) {
+    return false;
+  }
+  vec3 hn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);
+  return dot(hn, r) > REFL_BACKFACE;
+}
+
 // what a surface reflects along r (view space): the scene where the ray meets the depth buffer
 // (a short march), else the screen where the ray vanishes (the sky, far hills); hit: how sure
 vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   hit = 0.0;
   vec3 env = fog_color;
+  float env_ok = 0.0;
   if (r.z > 1e-3) {
     vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
     env = texture(tex_T0, env_uv).rgb;
+    float ed = texture(tex_T3, env_uv).r;
+    env_ok = ed <= 1e-7 ? 1.0 : smoothstep(REFL_ENV_NEAR * 4096.0, REFL_ENV_FAR * 4096.0, view_z(ed));
   }
   vec3 ssr = env;
   float step_len = 0.15 * 4096.0 + z * 0.01;
@@ -883,7 +908,7 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   if (hiz) {
     vec2 huv;
     if (hiz_trace(p + r * (0.05 * 4096.0 + z * 0.002), r, z, tune_hiz_surf_len_m * 4096.0,
-                  jit, huv) > 0.5) {
+                  jit, huv) > 0.5 && !refl_backface(huv, r)) {
       vec2 edge = min(huv, 1.0 - huv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
@@ -928,6 +953,10 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
       if (hd <= 1e-7 || abs(hi.z - view_z(hd)) > used * 0.25 + 0.1 * 4096.0) {
         continue;
       }
+      // (its back: what the screen shows there faces away from the ray. The ray goes on)
+      if (refl_backface(quv, r)) {
+        continue;
+      }
       vec2 edge = min(quv, 1.0 - quv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = texture(tex_T0, quv).rgb;
@@ -935,8 +964,10 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
     }
   }
   vec3 refl = reflection_with_rt(p, r, env, ssr, hit, 60.0 * 4096.0, 1.0);
+  refl_conf = abs(tune_hiz_dbg - 3.0) < 0.5 ? 1.0 : hit + (1.0 - hit) * env_ok;
   if (rt_mode > 0) {
     hit = 1.0;  // traced or not, it's the best there is
+    refl_conf = 1.0;
   }
   return refl;
 }
@@ -3851,7 +3882,17 @@ void composite_unused() {
       float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
-      wc = mix(wc, vec3(0.92, 0.94, 0.9), foam * 0.55);
+      // (lit as the wake's foam and the runup line on the sand: dimmer at dusk, night-dimmed, shaded
+      // by the sun's shadow; the fixed white glowed along every beach after sunset. Never darker than
+      // the water it lies on: at sunset the sea mirrors a bright sky, and dim foam drew dark streaks.
+      // tune_water_dbg 40: the fixed white, as before)
+      vec3 foam_col = vec3(0.92, 0.94, 0.9);
+      if (abs(tune_water_dbg - 40.0) > 0.5) {
+        foam_col = night_dim(foam_col * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0))) *
+                   (1.0 - shadow_strength * k_water_shade * wsh);
+        foam_col = max(foam_col, wc * 1.08);
+      }
+      wc = mix(wc, foam_col, foam * 0.55);
     }
     // a rough sea: greyer under the storm, whitecaps breaking on the crests
     if (sea_state > 0.5) {
@@ -4910,6 +4951,9 @@ void composite_unused() {
       // specular occlusion (Lagarde): crevices and undersides kept a sky-bright reflection, plastic in
       // the shaded corners; the AO takes it away, more where the gloss is rough
       fade *= mix(1.0, clamp(pow(facing + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0), tune_spec_occ);
+      // (a reflection that found nothing it can trust: less of it, the surface's own color shows;
+      // was a smeared copy of whatever stood in front, or the flat fog color on walls facing us)
+      fade *= mix(REFL_MISS_KEEP, 1.0, refl_conf);
       // the sun's highlight, where the sun reaches
       float sunlit = 0.0;
       if (sun_dir.w > 0.0 && dot(nn, sun_dir.xyz) > 0.0) {
@@ -4943,6 +4987,9 @@ void composite_unused() {
         float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
         c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
         c += vec3(1.0, 0.95, 0.85) * pow(sr, 300.0) * 2.0 * sunlit * mk;
+      }
+      if (abs(tune_hiz_dbg - 4.0) < 0.5) {
+        c = vec3(refl_conf);  // (test: how far the reflection is trusted, black = not at all)
       }
       // the lamps' highlights on it (a factory's pipes, a car's paint at night): metal's broad and
       // tinted by the metal, gloss tight and in the lamp's own color
@@ -5133,6 +5180,7 @@ void composite_unused() {
   // them by day, by night they're smoothed into the game's sky)
   float bolt_light = 0.0;
   float sky_kept = 0.0;  // the game's lights over its night sky, kept as drawn
+  float sky_cl_trans = 1.0;  // how much of our sky shows through the cloud volume (the sun's disk below)
   vec3 sky_light = vec3(0.0);
   float sky_k = z == 0.0 ? 1.0
                          : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
@@ -5158,6 +5206,7 @@ void composite_unused() {
         cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, game_w));
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
+      sky_cl_trans = mix(1.0, clamp(cl.a, 0.0, 1.0), clouds.x);
       // (the sprites in front of it: the chimneys' smoke, glows)
       // (the sun's and moon's glows among them: their faint outskirts stopped at the quad's edge, a
       // square over our sky, so the faintest light is let go; and their core, clipped white in the
@@ -5197,11 +5246,55 @@ void composite_unused() {
       // picture), added back over the night sky below (light: replacing the pixel drew a dark box
       // around the beacon's glow). The cards are darker cut-outs, and a sharpness test lost the
       // beacon's even core: a hollow ring)
-      if (z == 0.0 && tune_sky_keep_night > 0.0 && sky_copy > 0.0 && game_w > 0.0) {
-        vec3 dc = max(textureLod(tex_T0, uv, 0.0).rgb - textureLod(tex_T25, uv, 0.0).rgb, 0.0);
-        sky_kept = smoothstep(tune_sky_night_lo, tune_sky_night_hi, max(dc.r, max(dc.g, dc.b))) *
-                   clouds.x * game_w * tune_sky_keep_night;
-        sky_light = dc * sky_kept;
+      // (Weighed by the brightest such light around, not by the pixel's own: per pixel, the
+      // searchlights' soft edges and their long fading tips were squared away (dc * w(dc)), the
+      // beams flat hard-edged slabs cut off midway. Next to a bright core the faint light is kept
+      // as drawn; faint light alone (the game's rain streaks, card seams) is still let go. "Around"
+      // is a share of the screen's height (two rings, 1.2% and 3.5%): a fixed 10 px was a few
+      // percent of a close beam, 100+ px wide at 2560x1600, and drew a box at the reach's edge)
+      // (And over the game's far cloud cards too, not only where its sky shows: the beams were cut
+      // clean where they crossed a card (smoothed away with it), slabs floating mid-air with hard
+      // ends at the cards' edges. A card is darker than the sky copy, so what is brighter than the
+      // sky there is light drawn over it)
+      // (tune_sky_keep_night < 0: per pixel and only over the open sky, as before)
+      if ((z == 0.0 || tune_sky_keep_night > 0.0) && tune_sky_keep_night != 0.0 && sky_copy > 0.0 &&
+          game_w > 0.0) {
+        vec3 g0 = textureLod(tex_T0, uv, 0.0).rgb;
+        vec3 s0 = textureLod(tex_T25, uv, 0.0).rgb;
+        vec2 hgt = vec2(texel.x / texel.y, 1.0);  // uv per screen height
+        if (tune_sky_keep_night > 0.0 && luma(s0 - g0) > 0.02) {
+          // (a light of the game's sky the level covered (its moon behind a cloud card): a beam
+          // crossing it lost its light there, a dark disc in the beam. Against the sky around it)
+          for (int i = 0; i < 4; i++) {
+            vec2 q = uv + vec2(i == 0 ? 1.0 : i == 1 ? -1.0 : 0.0, i == 2 ? 1.0 : i == 3 ? -1.0 : 0.0) *
+                              0.039 * hgt;
+            s0 = min(s0, textureLod(tex_T25, q, 0.0).rgb);
+          }
+        }
+        vec3 dc = max(g0 - s0, 0.0);
+        float d0 = max(dc.r, max(dc.g, dc.b));
+        float dm = d0;
+        if (tune_sky_keep_night > 0.0 && d0 > 0.004) {
+          const float kSkyKeepNear = 0.012;  // the rings, as a share of the screen's height
+          const float kSkyKeepFar = 0.035;
+          for (int i = 0; i < 16; i++) {
+            float a = float(i) * 0.7854 + (i < 8 ? 0.0 : 0.3927);
+            vec2 q = uv + vec2(cos(a), sin(a)) * (i < 8 ? kSkyKeepNear : kSkyKeepFar) * hgt;
+            float zq = view_z(textureLod(tex_T3, q, 0.0).r);
+            if (zq != 0.0 && zq < 2800.0 * 4096.0) {
+              continue;  // (not over the sky or a far card there: a lit wall isn't a light)
+            }
+            vec3 dq = max(textureLod(tex_T0, q, 0.0).rgb - textureLod(tex_T25, q, 0.0).rgb, 0.0);
+            dm = max(dm, max(dq.r, max(dq.g, dq.b)) * (i < 8 ? 1.0 : 0.7));
+          }
+        }
+        float keep_w = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm) * clouds.x * game_w *
+                       abs(tune_sky_keep_night);
+        // (the stars dimmed behind the light itself, not over the whole reach: a dark band)
+        sky_kept = tune_sky_keep_night > 0.0 ? keep_w * smoothstep(tune_sky_night_lo, tune_sky_night_hi, d0)
+                                             : keep_w;
+        // (a far card only partly counted as sky keeps the rest of the game's pixel already)
+        sky_light = dc * keep_w * sky_k;
       }
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
@@ -5888,6 +5981,17 @@ void composite_unused() {
     if (sky_part > 0.0 && wsurf == 0.0) {
       vec3 under = c * min(1.0, 0.9 / max(max(c.r, max(c.g, c.b)), 1e-3));
       under = mix(under, vec3(luma(under)) * vec3(1.0, 0.99, 0.97), 0.5);
+      // (look.sky_extras: brought under 0.9 like the rest, the sun's disk kept only its orange hue at
+      // the sky's peak, so it read as a dark disk on the paler sky at 16h. Its disk and aureole
+      // stay the brightest of the sky: toward a warm white, as far as the clouds let them through)
+      if ((look_bits() & 1) != 0) {
+        float sd = max(dot(ray, sky_sun.xyz), 0.0);
+        float clear = sky_cl_trans * (1.0 - clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0)) * (1.0 - clouds.w) *
+                      smoothstep(-0.02, 0.06, sky_sun.w);
+        float hot = max(smoothstep(0.99955, 0.9998, sd),
+                        pow(sd, 900.0) * 0.4 + pow(sd, 160.0) * 0.1) * clear;
+        under = mix(under, vec3(1.0, 0.97, 0.9), min(hot, 1.0));
+      }
       c = mix(c, under, sky_part);
     }
   }
