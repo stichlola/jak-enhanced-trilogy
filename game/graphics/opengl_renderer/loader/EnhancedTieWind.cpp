@@ -9,6 +9,8 @@
 
 #include "common/log/log.h"
 
+#include "fmt/format.h"
+
 namespace {
 
 constexpr float kMeter = 4096.f;
@@ -146,6 +148,8 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
   int tfrag_trees = 0;
   const auto t0 = std::chrono::steady_clock::now();
   std::set<std::string> logged;
+  // every swaying vertex's cell, lowest y: the wind ties' feet (their crowns lean with the trunks)
+  std::unordered_map<u64, float> level_low;
   // one tree of static geometry (TIE, or tfrag: Spargus' palms and Haven's trees are tfrag)
   auto weigh = [&](std::vector<tfrag3::PreloadedVertex>& vs, const std::vector<u32>& is,
                    const std::vector<tfrag3::StripDraw>& sd, const char* what) {
@@ -200,6 +204,14 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
           low.emplace(key, vs[v].y);
         } else {
           it->second = std::min(it->second, vs[v].y);
+        }
+      }
+      for (const auto& [key, y] : low) {
+        auto it = level_low.find(key);
+        if (it == level_low.end()) {
+          level_low.emplace(key, y);
+        } else {
+          it->second = std::min(it->second, y);
         }
       }
       std::unordered_map<u64, float> foot;
@@ -294,6 +306,98 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
   for (auto& geo : level.tfrag_trees) {
     for (auto& tree : geo) {
       weigh(tree.unpacked.vertices, tree.unpacked.indices, tree.draws, "tfrag");
+    }
+  }
+  // the wind ties' origins over the same foot field (blended as the static vertices' bases), so a
+  // crown sitting on a static trunk (Spargus' palms) gets that trunk top's lean (Tie3.cpp)
+  {
+    auto foot_at = [&](int cx, int cz) {
+      float f = INFINITY;
+      for (int dx = -kFootReach; dx <= kFootReach; dx++) {
+        for (int dz = -kFootReach; dz <= kFootReach; dz++) {
+          auto l = level_low.find(cell_key(cx + dx, cz + dz));
+          if (l != level_low.end()) {
+            f = std::min(f, l->second);
+          }
+        }
+      }
+      return f;
+    };
+    int raised = 0, all_inst = 0;
+    std::unordered_map<const tfrag3::TieWindInstance*, float> foot_y;  // (for the spots' file)
+    double h_sum = 0.;
+    for (auto& geo : level.tie_trees) {
+      for (auto& tree : geo) {
+        for (auto& wi : tree.wind_instance_info) {
+          all_inst++;
+          wi.enh_lean_h = 0.f;
+          const float x = wi.matrix[3].x(), y = wi.matrix[3].y(), z = wi.matrix[3].z();
+          const float fx = x / kCell - 0.5f, fz = z / kCell - 0.5f;
+          const int x0 = (int)std::floor(fx), z0 = (int)std::floor(fz);
+          const float tx = fx - x0, tz = fz - z0;
+          float f00 = foot_at(x0, z0), f10 = foot_at(x0 + 1, z0);
+          float f01 = foot_at(x0, z0 + 1), f11 = foot_at(x0 + 1, z0 + 1);
+          const float any_f = std::min(std::min(f00, f10), std::min(f01, f11));
+          if (!std::isfinite(any_f)) {
+            continue;
+          }
+          for (float* f : {&f00, &f10, &f01, &f11}) {
+            if (!std::isfinite(*f)) {
+              *f = any_f;
+            }
+          }
+          const float base =
+              (f00 * (1 - tx) + f10 * tx) * (1 - tz) + (f01 * (1 - tx) + f11 * tx) * tz;
+          wi.enh_lean_h = std::clamp((y - base) / kMeter, 0.f, kEnhTieSwayMaxM);
+          foot_y[&wi] = base / kMeter;
+          if (wi.enh_lean_h > 0.5f) {
+            raised++;
+            h_sum += wi.enh_lean_h;
+          }
+        }
+      }
+    }
+    if (log_names) {
+      // (spots to go and look: the lowest few origins of each wind tree, with their height)
+      for (const auto& geo : level.tie_trees) {
+        for (const auto& tree : geo) {
+          std::vector<const tfrag3::TieWindInstance*> by_y;
+          for (const auto& wi : tree.wind_instance_info) {
+            by_y.push_back(&wi);
+          }
+          std::sort(by_y.begin(), by_y.end(), [](auto a, auto b) {
+            return a->matrix[3].y() < b->matrix[3].y();
+          });
+          std::string spots;
+          for (size_t i = 0; i < by_y.size() && i < 10; i++) {
+            const auto& m = by_y[i]->matrix[3];
+            spots += fmt::format("{:.0f},{:.0f},{:.0f} h{:.1f}; ", m.x() / kMeter, m.y() / kMeter,
+                                 m.z() / kMeter, by_y[i]->enh_lean_h);
+          }
+          if (!spots.empty()) {
+            lg::info("[enhanced] tie wind {}: wind-tie spots: {}", name, spots);
+          }
+          // (and every origin to log/tie_wind_<level>.csv: x, y, z, height over the foot, the
+          // foot's y, in m)
+          if (!by_y.empty() && &geo == &level.tie_trees[0]) {
+            if (FILE* f = std::fopen(fmt::format("log/tie_wind_{}.csv", name).c_str(), "a")) {
+              for (const auto* wi : by_y) {
+                const auto& m = wi->matrix[3];
+                auto fy = foot_y.find(wi);
+                std::fprintf(f, "%.1f,%.1f,%.1f,%.1f,%.1f\n", m.x() / kMeter, m.y() / kMeter,
+                             m.z() / kMeter, wi->enh_lean_h,
+                             fy != foot_y.end() ? fy->second : -999.f);
+              }
+              std::fclose(f);
+            }
+          }
+        }
+      }
+    }
+    if (log_names && all_inst > 0) {
+      lg::info("[enhanced] tie wind {}: {} of {} wind-tie instances sit {:.1f} m (mean) over a "
+               "static plant's foot (their origin leans with it)",
+               name, raised, all_inst, raised ? h_sum / raised : 0.);
     }
   }
   if (log_names) {

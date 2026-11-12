@@ -362,6 +362,9 @@ struct TieWindInstance {
   std::array<math::Vector4f, 4> matrix;
   u16 wind_idx;
   float stiffness;
+  // Jak Enhanced, not saved: the origin's height above the plants' foot field, meters (0..12, as a
+  // static trunk's sway height), so a Spargus palm's wind-tie crown leans with its static trunk's top
+  float enh_lean_h = 0.f;
   void serialize(Serializer& ser);
 };
 
