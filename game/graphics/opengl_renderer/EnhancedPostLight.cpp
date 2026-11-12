@@ -509,6 +509,13 @@ void EnhancedPost::update_scene() {
       g_city_midday = city_mid * std::clamp((90.f - (float)t_city) / 36.f, 0.f, 1.f);
       g_light_max_elev = std::min(g_light_max_elev, city_cap);
       g_sun_max_elev = std::min(g_sun_max_elev, city_cap);
+      // (Spargus is in the desert zone: its peach morning look lasting all day plus the midday's
+      // golden tan turned the town's pale sand and plaster orange at noon (sand sat 0.46, the
+      // classic look 0.27). Inside the town, 10-15h, both held back: warm, not orange. Eased so
+      // the gate doesn't pop)
+      const float town = jak3 && level.rfind("was", 0) == 0 ? 1.f : 0.f;
+      const float town_mid = smooth((hour - 9.5f) / 1.5f) * (1.f - smooth((hour - 15.f) / 1.5f)) * town;
+      ease(g_town_noon, town_mid, k_grade);
     }
     const float morning = smooth(hour - 6.f) * (1.f - smooth((hour - 10.f) / 1.5f)) * path;
     g_morning_yaw = (std::isnan(g_tune_morning_yaw) ? m_grade.morning_yaw : g_tune_morning_yaw) * morning;
