@@ -464,6 +464,18 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
   glEnable(GL_PRIMITIVE_RESTART);
   glPrimitiveRestartIndex(UINT32_MAX);
 
+  // (the tfrag drawn next reads the dunes' heights and their light now (the time of day colors'
+  // mean brightness): rock lying on the sand, painted as pale as it)
+  {
+    float sum = 0.f;
+    for (u64 i = 0; i < lev->num_colors; i++) {
+      const auto& c = m_color_result[i];
+      sum += (0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2]) / 255.f;
+    }
+    enhanced_set_hfrag_ground(lev->enh_height_texture, render_state->frame_idx,
+                              lev->num_colors ? sum / (float)lev->num_colors : 0.f);
+  }
+
   // set up shader
   first_tfrag_draw_setup(pc_data.camera, render_state, ShaderId::HFRAG);
   setup_opengl_from_draw_mode(lev->hfrag->draw_mode, GL_TEXTURE0, false);

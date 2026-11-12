@@ -2905,14 +2905,32 @@ void composite_unused() {
   float seabed_d = d;
   bool water_deep = true;
   bool water_decal = false;  // something flat lying on the water (splash and ripple discs)
+  bool warp_undo = false;    // a splash's ripple mesh over something else: shown without it
   if (water_strength > 0.0) {
     float wd = texture(tex_T5, uv).r;
     float fd = texture(tex_T6, uv).r;
     bool under_is_sea = fd > 1e-7 && abs(fd - d) < 1e-7 && dot(up_view, view_pos(uv, fd)) < -4096.0;
     // (where the scene's depth changed after the sea was drawn, something drawn later covers it,
     // as the game shows it: Spargus palace's floor, under the sea's level)
-    bool covered = abs(texture(tex_T14, uv).r - d) > 1e-7;
-    if (wd > d + 1e-7 && !covered) {
+    float pre_d = texture(tex_T14, uv).r;
+    bool covered = abs(pre_d - d) > 1e-7;
+    // (a splash's ripple mesh is drawn after the sprites' copy (the warp bucket, depth written, the
+    // sea's surface no longer in the depth buffer): where the picture changed since that copy, near
+    // the water, it is the mesh, not something solid over the sea. tune_water_dbg 35: off)
+    bool warped = false;
+    if (fx_mark > 0.5 && abs(tune_water_dbg - 35.0) > 0.5) {
+      vec3 dw = abs(textureLod(tex_T0, uv, 0.0).rgb - textureLod(tex_T24, uv, 0.0).rgb);
+      warped = max(dw.r, max(dw.g, dw.b)) > 0.004;
+    }
+    if (wd > d + 1e-7 && covered && warped && wd > pre_d + 1e-7 &&
+        abs(dot(up_view, view_pos(uv, d) - view_pos(uv, wd))) < 3.0 * 4096.0) {
+      // (under the surface, over Jak swimming: it bent his legs into a flat tan slab. The water,
+      // what was there before it as the bed, and the picture before it)
+      wsurf = wd;
+      seabed_d = pre_d;
+      water_deep = under_is_sea || pre_d <= 1e-7;
+      warp_undo = true;
+    } else if (wd > d + 1e-7 && !covered) {
       wsurf = wd;
       water_deep = under_is_sea || d <= 1e-7;
     } else if (under_is_sea) {
@@ -2926,9 +2944,28 @@ void composite_unused() {
       // be drawn behind it: where something solid hid the sea, its depth is the scene's own)
       if (ws > 1e-7 && d > ws + 1e-7) {
         float above = dot(up_view, p - view_pos(uv, ws));
-        if (above > 0.0 && above < (scene_level ? 0.4 : 0.12) * 4096.0) {
+        float lim = scene_level ? 0.4 : 0.12;
+        // (the ripple mesh, warped above: up to 3 m over the water is still the disc (its crown
+        // rises). Its raised rim stood out as a bent line of the game's picture across the splash)
+        if (warped) {
+          lim = 3.0;
+        }
+        if (above > 0.0 && above < lim * 4096.0) {
           wsurf = ws;
           water_decal = true;
+          // (under the ripple mesh: what is under the water there (Jak swimming) as the bed, seen
+          // through the water as anywhere else, and the picture before the mesh bent it, not the
+          // mesh's own depth and picture: a flat tan slab over him)
+          float bd = texture(tex_T14, uv).r;
+          if (warped && bd > 1e-7 && bd < ws - 1e-7 && abs(bd - fd) > 1e-7) {
+            seabed_d = bd;
+            water_deep = false;
+          }
+          warp_undo = warped;
+        } else if (warped && abs(above) < 3.0 * 4096.0) {
+          // (the disc in front of something standing out of the water, Jak himself: it bent his
+          // picture into a flat tan slab. The picture before it, there)
+          warp_undo = true;
         }
       }
     }
@@ -3124,6 +3161,11 @@ void composite_unused() {
   // (this pixel's normal and the length its material wrote it at, for everything below: read once)
   vec4 pix_normal = gbuf(tex_coord);
   float pix_tag = length(pix_normal.rgb * 2.0 - 1.0);
+  // rock lying on the dunes (tfrag3.frag's enh_on_sand: the rock's 0.75 lengthened up to 0.82 where
+  // it lies on the sand, the desert mounds' flat skirts): how much of the sand's light it takes
+  // instead of the rock's (the rock's tests read 0.7-0.85, then fade by this)
+  float rock_tag = step(0.7, pix_tag) * step(pix_tag, 0.845);
+  float on_sand = rock_tag * clamp((pix_tag - 0.756) / 0.06, 0.0, 1.0);
   // true PBR (tfrag3.frag, EnhancedPbr.h): the level's roughness, 6 bits in the albedo's low bits,
   // there where its alpha is 1 (-1: none: no map, PBR off, characters, water, effects). Its normal
   // map is in the normal target already. No uniforms here (constants only: the NVIDIA limit)
@@ -3243,6 +3285,9 @@ void composite_unused() {
   if (blur == 0.0) {
     c = fxaa != 0 ? fxaa_at(uv) : texture(tex_T0, uv).rgb;
   }
+  if (warp_undo) {
+    c = textureLod(tex_T24, uv, 0.0).rgb;
+  }
   // a hit (and, faintly, Dark Jak): the colors part toward the screen's edges
   if (chroma > 0.002 && wsurf == 0.0) {
     vec2 from_mid = uv - 0.5;
@@ -3361,14 +3406,27 @@ void composite_unused() {
     for (int i = 0; i < wake_count; i++) {
       // (Jak's root is his feet: up to 2.5 m under the surface swimming, over it riding; a
       // vehicle's seat higher)
-      bool ride = wake[i].w >= 10.0;
+      bool big = wake[i].w >= 20.0;  // (where he jumped in)
+      bool ride = !big && wake[i].w >= 10.0;
       float above = wake[i].y - water_y;
       if (above < -2.5 * 4096.0 || above > (ride ? 3.0 : 1.0) * 4096.0) {
         continue;
       }
       vec2 rel = world - wake[i].xz / 4096.0;  // meters
       float dist = length(rel);
-      float age = wake[i].w - (ride ? 10.0 : 0.0);
+      float age = wake[i].w - (big ? 20.0 : ride ? 10.0 : 0.0);
+      if (big) {
+        // a jump into the water: a wide ring racing out (the game's ripple disc bent the picture
+        // there) with a thinner one behind it, and a broken line of foam riding the first
+        float fade = 1.0 - age / 2.0;
+        float x1 = dist - (0.5 + 2.4 * age);
+        float x2 = dist - (0.2 + 1.5 * age);
+        vec2 dir = rel / max(dist, 0.05);
+        slope += dir * (exp(-x1 * x1 / 0.25) * fade * 1.1 * sin(x1 * 8.0) +
+                        exp(-x2 * x2 / 0.12) * fade * 0.6 * sin(x2 * 11.0)) * wake_strength;
+        wake_foam += exp(-x1 * x1 / 0.05) * fade * fade * 0.6 * smoothstep(0.05, 0.25, age);
+        continue;
+      }
       if (ride) {
         // churned water behind it: foam spreading and thinning out
         float fr = 0.9 + 1.2 * age;
@@ -3424,7 +3482,8 @@ void composite_unused() {
       vec2 ruv = uv + slope * water_refraction * min(depth_m, 2.0) * far;
       float rwd = texture(tex_T5, ruv).r;
       if (rwd > texture(tex_T3, ruv).r + 1e-7) {
-        c = texture(tex_T0, ruv).rgb;
+        // (under a splash's ripple mesh: the picture before it, not its bent copy)
+        c = warp_undo ? textureLod(tex_T24, ruv, 0.0).rgb : texture(tex_T0, ruv).rgb;
       }
       if (sun_dir.w > 0.0 && seabed_level && water_caustics > 0.0 && !pond_here) {
         vec2 bed = vec2(dot(right_view, seabed_p) + cam_pos.x, dot(fwd_view, seabed_p) + cam_pos.z) / 4096.0;
@@ -3826,8 +3885,36 @@ void composite_unused() {
     // the game's effects drawn over the water (foam, splashes, wakes) show through where they're
     // clearly brighter than our water; on a disc lying on the water, anything brighter does
     const vec3 luma = vec3(0.299, 0.587, 0.114);
-    float over = dot(c, luma) - dot(wc, luma);
-    c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
+    // Splashes: the disc a splash "lies" on the water is the game's ripple mesh (skel-generic-ripples,
+    // the warp bucket): it redraws the game's own picture there, bent, and writes depth, so with
+    // "anything brighter shows" it came out as a flat pale-blue hexagon of the game's water. With the
+    // copies around the sprite buckets (T23 before, T24 after, its alpha 1 - the blended sprites'
+    // coverage) the sprites are put back over our water as they were drawn over the game's: texture,
+    // alpha falloff, foam, drops; the ripple mesh and the game's water under it drop out (our water
+    // bends with the rings instead). Lit as the wake's foam: dimmer at dusk. (tune_water_dbg 35: as
+    // before; 36: the sprites alone)
+    if (fx_mark > 0.5 && abs(tune_water_dbg - 35.0) > 0.5) {
+      vec4 sf1 = textureLod(tex_T24, uv, 0.0);
+      vec3 sf0 = textureLod(tex_T23, uv, 0.0).rgb;
+      // (not more coverage than the color change allows: some sprites write an alpha that isn't
+      // their coverage, and a quad that barely changed the picture let the game's pale water
+      // through as a hard-edged rectangle)
+      vec3 sdif = abs(sf1.rgb - sf0);
+      float keep = max(clamp(sf1.a, 0.0, 1.0), 1.0 - clamp(max(sdif.r, max(sdif.g, sdif.b)) * 4.0, 0.0, 1.0));
+      vec3 spr = max(sf1.rgb - sf0 * keep, 0.0);
+      float over0 = dot(sf0, luma) - dot(wc, luma);
+      vec3 under = mix(wc, sf0, smoothstep(0.06, 0.2, over0));
+      float lit = 0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0);
+      c = under * keep + spr * lit;
+      // (and kept out of the grade, put back after it at gain 1 as the other effects over water: in
+      // the grade the dark canal's lift took the foam's streaks to one solid pink-white blob)
+      fx_d = spr * lit;
+      fx_w = smoothstep(0.004, 0.03, max(fx_d.r, max(fx_d.g, fx_d.b)));
+      if (abs(tune_water_dbg - 36.0) < 0.5) { c = spr * 4.0; }
+    } else {
+      float over = dot(c, luma) - dot(wc, luma);
+      c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
+    }
     if (abs(tune_water_dbg - 34.0) < 0.5) { c = wc; }
   } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
     // the shore: the ground just above the water is wet, darker and a little glossy, its line
@@ -5833,7 +5920,8 @@ void composite_unused() {
   // too small for the pixels, a size averages out by itself
   if (rock_detail > 0.0 && z > 0.0) {
     float nl = pix_tag;
-    if (nl > 0.55 && nl < 0.8) {
+    if (nl > 0.55 && nl < 0.845) {
+      vec3 c_rock_in = c;  // (rock on the dunes: none of the picture, as the sand around: on_sand)
       vec3 wp = cam_pos / 4096.0 + world_dir(p) / 4096.0;  // m
       vec3 wn = world_dir(surf_n);
       // (sharp: the view from above, its strata lines, stays off steep faces, where they ran down
@@ -5969,6 +6057,7 @@ void composite_unused() {
         // only partly)
         c = mix(c, c_far, max(smoothstep(30.0, 60.0, dist), smoothstep(0.605, 0.645, nl)));
       }
+      c = mix(c, c_rock_in, on_sand);
     }
   }
 
@@ -5985,7 +6074,7 @@ void composite_unused() {
     // (the land only, by the normals' tag lengths: sand, rocky ground, rock. The palms' leaves,
     // the bushes and the torches' flames are dull greens and pale yellows too: they went beige)
     float land_tag = pix_tag;
-    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.8) ||
+    float land = (land_tag > 0.55 && land_tag < 0.65) || (land_tag > 0.7 && land_tag < 0.845) ||
                  (land_tag > 0.85 && land_tag < 0.95) ? 1.0 - flame_keep : 0.0;
     float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
     float ch = mx - mn;
@@ -6019,7 +6108,7 @@ void composite_unused() {
     // made up in the world (the game's sand is a blur up close), shaded by the sun across them.
     // By the mark only, not the color: the warm haze turns the far sand orange
     float nl = pix_tag;
-    float dune = step(0.85, nl) * step(nl, 0.95) * (1.0 - flame_keep);
+    float dune = max(step(0.85, nl) * step(nl, 0.95), on_sand) * (1.0 - flame_keep);
     float level = dot(surf_n, up_view);
     float foot = length(p) / 4096.0 * pixel_rad / max(abs(dot(ray, up_view)), 0.05);  // m per pixel
     float rip = dune * smoothstep(0.4, 0.75, level);
@@ -6243,20 +6332,24 @@ void composite_unused() {
     // (the sand stopped down; the mountains lifted, the low sun lights them face on. By the
     // normals' tag lengths, tfrag3.frag / hfrag.frag)
     float rock_expo = mix(1.0, 1.12, smoothstep(15.0, 60.0, length(p) / 4096.0));
-    float expo = tag > 0.85 && tag < 0.95 ? 0.82 : tag > 0.7 && tag < 0.8 ? rock_expo : 1.0;
+    // (rock lying on the dunes stopped down as the sand: on_sand)
+    float expo = tag > 0.85 && tag < 0.95 ? 0.82 : rock_tag > 0.0 ? mix(rock_expo, 0.82, on_sand) : 1.0;
+    vec3 c_rock_in = c;
     // (the grey rock slabs in the sand: warm sandstone in this light, not ash)
-    if (tag > 0.7 && tag < 0.8) {
+    if (rock_tag > 0.0) {
       float mxr = max(c.r, max(c.g, c.b));
       float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
       float grey = (1.0 - smoothstep(0.3, 0.6, satr)) * (1.0 - smoothstep(40.0, 120.0, length(p) / 4096.0));
       // (and lit: the game bakes them near black; the low sun catches their tops)
       float lift = mix(1.55, 1.2, smoothstep(20.0, 80.0, length(p) / 4096.0));
       c = mix(c, min(lg * lift, 0.5) * vec3(1.32, 0.95, 0.62), golden * grey * 0.85);
+      c = mix(c, c_rock_in, on_sand);
     }
     c *= mix(vec3(1.0), vec3(1.05, 0.99, 0.92) * expo, golden);
     c *= 1.0 - 0.22 * gk;  // (and all of it stopped down a little: low light, deeper)
     // (the far mountains: their sunlit faces orange, the ones turned away in a deep, cooler shade)
-    if (tag > 0.7 && tag < 0.8) {
+    if (rock_tag > 0.0) {
+      c_rock_in = c;
       float far = smoothstep(100.0, 300.0, length(p) / 4096.0);
       // (by the low sun where its glow is: the faces toward it lit, the ones toward us backlit)
       vec2 brg = normalize(world_dir(sun_dir.xyz).xz + 1e-4);
@@ -6272,6 +6365,7 @@ void composite_unused() {
       vec2 shz = normalize(world_dir(sky_sun.xyz).xz + 1e-4);
       float toward = max(dot(normalize(world_dir(ray).xz + 1e-4), shz), 0.0);
       c += vec3(0.24, 0.12, 0.035) * pow(toward, 5.0) * golden * far;
+      c = mix(c, c_rock_in, on_sand);
     }
     c *= 1.0 - 0.4 * gk * (1.0 - smoothstep(0.2, 0.55, lg));
 
@@ -6359,7 +6453,7 @@ void composite_unused() {
   vec3 pre_relight = c;
   if (z > 0.0 && golden < 0.5 && (sun_haze > 0.0 || rock_sun > 0.0 || wall_sun > 0.0)) {
     float tag = pix_tag;
-    if (tag > 0.7 && tag < 0.8 && rock_sun > 0.0) {
+    if (rock_tag > 0.0 && rock_sun > 0.0) {
       // (the morning isn't dawn here: the sun is up and lights the rock)
       float daylight = clamp(sky_sun.w * 4.0, 0.0, 1.0) * (1.0 - clouds.w * (1.0 - sky_day)) * (1.0 - weather.x);
       float rndl = dot(world_dir(surf_n), normalize(world_dir(sun_dir.xyz) + vec3(0.0, 1e-4, 0.0)));
@@ -6389,7 +6483,8 @@ void composite_unused() {
       // (at noon the sandstone's faces in the sun brighter and warmer: it read grey-brown)
       relit = mix(relit, max(mix(vec3(luma(relit)), relit, 1.3), 0.0) * mix(vec3(0.95), vec3(1.2, 1.08, 0.92), lit),
                   desert_noon());
-      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun);
+      c = mix(c, relit, daylight * (1.0 - golden * 2.0) * mix(mix(0.55, 0.9, far), 1.0, sky_day) * rock_sun *
+                            (1.0 - on_sand));
     }
     if (tag > 0.985 && wsurf == 0.0 && sun_haze > 0.0) {
       // (under the desert's high sun the walls' pale plaster: the patches of sun near white, the rest
@@ -6515,11 +6610,11 @@ void composite_unused() {
   // the desert's rock by day never past a sandstone's saturation: the relight's warmth, the grade's
   // and the morning look's stacked up and the far mountains went the most saturated orange in the
   // frame (the low sun keeps its own, richer)
-  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0 && tune_rock_sat > 0.0 && pix_tag > 0.7 && pix_tag < 0.8) {
+  if (sun_haze > 0.0 && z > 0.0 && wsurf == 0.0 && tune_rock_sat > 0.0 && rock_tag > 0.0) {
     float mxr = max(c.r, max(c.g, c.b));
     float satr = (mxr - min(c.r, min(c.g, c.b))) / max(mxr, 1e-3);
     if (satr > tune_rock_sat) {
-      float k = mix(1.0, tune_rock_sat / satr, (1.0 - min(golden * 2.0, 1.0)) * (1.0 - flame_keep));
+      float k = mix(1.0, tune_rock_sat / satr, (1.0 - min(golden * 2.0, 1.0)) * (1.0 - flame_keep) * (1.0 - on_sand));
       c = max(mix(vec3(luma(c)), c, k), 0.0);
     }
   }
@@ -6950,6 +7045,13 @@ void composite_unused() {
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
+  }
+  if (abs(tune_water_dbg - 37.0) < 0.5) {
+    // (test: r what was drawn after the sprites' copy (the warp bucket), g water, b a disc lying on
+    // it (water_decal), half: the picture before the warp where it isn't water)
+    vec3 dw = abs(texture(tex_T0, tex_coord).rgb - texture(tex_T24, tex_coord).rgb);
+    c = vec3(clamp(max(dw.r, max(dw.g, dw.b)) * 8.0, 0.0, 1.0), wsurf > 0.0 ? 0.6 : 0.0,
+             water_decal ? 1.0 : warp_undo ? 0.5 : 0.0);
   }
   if (tune_raw_view > 0.0 && (tune_raw_view < 1.5 || tex_coord.x > 0.5)) {
     c = texture(tex_T0, tex_coord).rgb;  // (test: the game's own picture, for an A/B with vanilla in one run)
