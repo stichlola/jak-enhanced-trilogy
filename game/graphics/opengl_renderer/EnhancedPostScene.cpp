@@ -1761,6 +1761,26 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         if ((since >= (riding_water ? 0.05 : 0.1) && moved > 0.1f * kMeter) || since >= 0.5) {
           m_wake.push_back({{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time, riding_water});
         }
+        // a jump into the water: falling faster than 5 m/s, then stopped (the shader rings only the
+        // points at the water's height, so a landing on dry ground shows nothing).
+        // (tuning.json "water": {"splash_ring": 0}: off)
+        static const EnhancedTune t_splash_ring("water.splash_ring", 1.f);
+        const double dt = m_time - m_wake_prev_t;
+        if (m_wake_prev_t >= 0.0 && dt > 1e-4 && dt < 0.25) {
+          const float vy = (pl.pos[1] - m_wake_prev_y) / (float)dt;  // game units / s
+          if (vy < -5.f * kMeter) {
+            m_wake_falling = true;
+          } else if (m_wake_falling && vy > -1.5f * kMeter) {
+            m_wake_falling = false;
+            if (t_splash_ring > 0.5f && !riding_water) {
+              WakePoint sp{{pl.pos[0], pl.pos[1], pl.pos[2]}, m_time, false};
+              sp.splash = true;
+              m_wake.push_back(sp);
+            }
+          }
+        }
+        m_wake_prev_y = pl.pos[1];
+        m_wake_prev_t = m_time;
       }
       while (!m_wake.empty() && (m_time - m_wake.front().time > 2.0 || m_wake.size() > kWake)) {
         m_wake.erase(m_wake.begin());
@@ -1772,8 +1792,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           break;
         }
         std::memcpy(wake + wake_count * 4, w.pos, sizeof(float) * 3);
-        // age, + 10 behind a vehicle or the board
-        wake[wake_count * 4 + 3] = (float)(m_time - w.time) + (w.ride ? 10.f : 0.f);
+        // age, + 10 behind a vehicle or the board, + 20 where he jumped in
+        wake[wake_count * 4 + 3] = (float)(m_time - w.time) + (w.splash ? 20.f : w.ride ? 10.f : 0.f);
         wake_count++;
       }
       glUniform1i(glGetUniformLocation(id, "wake_count"), wake_count);

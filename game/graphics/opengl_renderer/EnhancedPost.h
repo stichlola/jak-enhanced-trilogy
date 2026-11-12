@@ -593,8 +593,12 @@ class EnhancedPost {
     float pos[3];
     double time;
     bool ride = false;  // behind a vehicle or the board: foam churned along it
+    bool splash = false;  // where he came down fast (a jump into the water): a bigger ring
   };
   std::vector<WakePoint> m_wake;
+  float m_wake_prev_y = 0.f;  // (Jak's height a frame ago, and whether he was falling fast)
+  double m_wake_prev_t = -1.0;
+  bool m_wake_falling = false;
   // Jak's footprints (a print every stride, left and right in turn) and the ruts of what he drives
   struct Print {
     float pos[3];

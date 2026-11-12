@@ -66,8 +66,8 @@ vec2 g_duv1, g_duv2;
 // game's texture keeps the color; this adds the fine relief (grains, small ripples) near the camera
 uniform sampler2D tex_T12;
 uniform int enh_detail;      // 0 none, 1 on, 2 on and the albedo may carry its roughness (PBR on)
+uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it; also enh_on_sand below)
 uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
-uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it)
 uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
 uniform vec2 tune_detail_fade = vec2(5.0, 45.0);  // m: full up to, gone by
 vec4 g_det = vec4(0.0, 0.0, 0.5, 1.0);  // x y: slopes along world X and Z, z roughness offset, w AO
@@ -126,6 +126,52 @@ vec3 enh_detail_bump(vec3 n) {
   return normalize(n + (t * g_det.x + b * g_det.y) * (k * side));
 }
 
+// Enhanced: rock lying on the dunes. The desert's mounds end in flat skirts flush with the sand,
+// painted and lit to match it (the game shows no edge), but tagged rock the composite lit them as
+// rock (lifted, warmed, the rock picture) next to the sand's darker grade: a pale hard-edged polygon
+// round every mound. The dunes' heights (Hfrag.cpp, drawn first) tell how far a rock pixel stands
+// over the sand: on it (and facing up) it gets the sand's light, through the length of its tag (0.75
+// toward 0.82, enh_composite.frag's on_sand), fading out over its first half meter up.
+// shaders.tune_rock_on_sand 0: off (every rock pixel tagged rock, as before)
+uniform int enh_ground_on;     // 1: tex_T19 has the dunes' heights this frame
+uniform sampler2D tex_T19;     // their 512x512 grid, 8 m apart from the world's origin, 1e30 where none
+// (cam_trans: declared above, with the detail material)
+uniform float tune_rock_on_sand = 1.0;  // (2: shows the weight, red rock to green sand)
+uniform vec2 tune_rock_sand_h = vec2(0.15, 0.6);    // m over the dunes: all sand, none
+uniform vec2 tune_rock_sand_up = vec2(0.6, 0.85);   // facing up (world normal's y): none, all
+uniform float enh_ground_light;  // the dunes' time of day colors' mean brightness now (Hfrag.cpp)
+uniform vec2 tune_rock_sand_lit = vec2(0.5, 0.75);   // its own baked light over the dunes': none, all
+
+float g_t0_luma = -1.0;  // the texture's brightness here (set before enh_pack_normal)
+float enh_on_sand(vec3 face_n) {
+  if (enh_ground_on == 0 || tune_rock_on_sand <= 0.0) {
+    return 0.0;
+  }
+  vec3 w = enh_pos + cam_trans.xyz;
+  vec2 g = w.xz / 32768.0;
+  ivec2 i0 = ivec2(floor(g));
+  if (i0.x < 0 || i0.y < 0 || i0.x > 510 || i0.y > 510) {
+    return 0.0;
+  }
+  vec2 fr = g - vec2(i0);
+  float h00 = texelFetch(tex_T19, i0, 0).r;
+  float h10 = texelFetch(tex_T19, i0 + ivec2(1, 0), 0).r;
+  float h01 = texelFetch(tex_T19, i0 + ivec2(0, 1), 0).r;
+  float h11 = texelFetch(tex_T19, i0 + ivec2(1, 1), 0).r;
+  if (max(max(h00, h10), max(h01, h11)) > 1e29) {
+    return 0.0;  // (no dune there)
+  }
+  float h = mix(mix(h00, h10, fr.x), mix(h01, h11, fr.x), fr.y);
+  float above = (w.y - h) / 4096.0;  // m
+  float on = 1.0 - smoothstep(tune_rock_sand_h.x, tune_rock_sand_h.y, above);
+  // (and painted as pale as the sand: the patches' rims, not their dark middles, which the
+  // composite's rock light lifts on purpose)
+  // (fragment_color is 2x: 1 = lit as the dunes; the rims ~0.7-1.1, the patches' dark middles ~0.45-0.52)
+  float lit = 0.5 * dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) / max(enh_ground_light, 0.02);
+  return on * smoothstep(tune_rock_sand_up.x, tune_rock_sand_up.y, abs(face_n.y)) *
+         smoothstep(tune_rock_sand_lit.x, tune_rock_sand_lit.y, lit);
+}
+
 vec4 enh_pack_normal(vec3 n) {
   vec3 f = cross(g_dp1, g_dp2);
   float flen = length(f);
@@ -156,6 +202,10 @@ vec4 enh_pack_normal(vec3 n) {
   float tag_len = enh_material == 3 ? 0.9 : (enh_material == 4 ? 0.75 : (enh_material == 5 ? 0.6 : 1.0));
   if (enh_material >= 6) {
     tag_len = enh_material == 6 || enh_material == 9 || enh_material == 11 ? 0.99 : 0.995;
+  }
+  // (rock on the sand: 0.75 + up to 0.07, read back as a weight; see enh_on_sand)
+  if (enh_material == 4 && flen > 0.0) {
+    tag_len = 0.75 + 0.07 * enh_on_sand(f);
   }
   // (lamps, 12: plain, 0.2 long, under every other tag; the composite lights them at night)
   if (enh_material == 12) {
@@ -305,6 +355,7 @@ void main() {
       T0 = texture(tex_T0, tex_coord.xy);
     }
     color = fragment_color * T0;
+    g_t0_luma = dot(T0.rgb, vec3(0.3, 0.59, 0.11));
     float baked = clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0);
     // (a < 1: alpha 1 is the PBR-coded albedo below)
     enh_albedo_out = vec4(T0.rgb, min(baked, 0.6));
@@ -331,6 +382,16 @@ void main() {
     color = fragment_color/2;
   }
   enh_normal_out = enh_pack_normal(enh_normal);
+  if (tune_rock_on_sand > 1.5 && enh_material == 4) {
+    // (test: the rock's on-sand weight, red rock to green sand)
+    vec3 fn = cross(g_dp1, g_dp2);
+    float ws = length(fn) > 0.0 ? enh_on_sand(normalize(fn)) : 0.0;
+    color.rgb = mix(vec3(0.5, 0.0, 0.0), vec3(0.0, 0.5, 0.0), ws);
+    if (tune_rock_on_sand > 2.5) {
+      // (3: its baked light over the dunes', grey: 0.5 = the same)
+      color.rgb = vec3(0.25 * dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) / max(enh_ground_light, 0.02), g_t0_luma, 0.0);  // (R 0.5 = as lit as the dunes, G its texture)
+    }
+  }
 
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
