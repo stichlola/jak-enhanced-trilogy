@@ -274,7 +274,7 @@ uniform float tune_night_facade_floor = 3.5;  // a storey's height, m (a bay 0.8
 uniform float tune_night_facade_near = 70.0;  // in a lit city, plain and metal walls get them from here (to 1.5x), m
 uniform float tune_night_lamp = 1.0;       // lamps and lit signs at night: their picture as light (0 = off, >= 10 shows the tags)
 uniform float tune_night_lamp_gain = 1.6;  // how bright, over their texture's color
-uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams); 0 off, -1 per pixel (old: hard-edged searchlights)
+uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams; at dusk/dawn too); 0 off, 2 by night only, -1 per pixel (old: hard-edged searchlights)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
@@ -319,7 +319,7 @@ const float tune_beacon_hot = 0.7;    // its middle toward white, a lamp's hot c
 uniform float tune_shadow_mid_bias_m = 0.35;  // the middle map's depth bias along the light, meters
 uniform float tune_ao_multibounce = 1.0;  // the occlusion per channel by the surface's color (0: grey multiply)
 uniform float tune_ao_mb_luma = 1.0;      // ...its color only, at the grey multiply's brightness (0: the fit's own, brighter)
-uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go (no square at the quad's edge)
+uniform float tune_fx_sky_edge = 0.02;  // the sky glows' faintest light let go by a soft gate (no square at the quad's edge; < 0: old subtraction)
 uniform float tune_fx_sky_core = 1.6;   // their clipped-white core: at least this bright over our sky (0: off)
 uniform float tune_fx_sky = 1.0;  // 1: the sky's glows (sun, moon) kept out of the effects' gain
 uniform float tune_spec_aa = 0.25;  // highlights widened by the normal's spread in the pixel (specular AA; 0: off)
@@ -5288,8 +5288,14 @@ void composite_unused() {
       // square over our sky, so the faintest light is let go; and their core, clipped white in the
       // game's picture, had nothing left to add over a sky as bright: a hollow lilac ring. Where the
       // sprites clipped the game's sky to white it stays white)
+      // (let go by a soft gate, not by taking the edge's level off all of it: that thinned every
+      // halo by as much, their middle too; tune_fx_sky_edge < 0: that old subtraction)
       vec3 fr_pos = max(fx_rest, 0.0);
-      vec3 fr = fx_rest - fr_pos + max(fr_pos - tune_fx_sky_edge, 0.0) * (1.0 + tune_fx_sky_edge * 4.0);
+      float fx_edge = abs(tune_fx_sky_edge);
+      vec3 fr = fx_rest - fr_pos +
+                (tune_fx_sky_edge < 0.0
+                     ? max(fr_pos - fx_edge, 0.0) * (1.0 + fx_edge * 4.0)
+                     : fr_pos * smoothstep(vec3(0.5 * fx_edge), vec3(1.5 * fx_edge + 1e-6), fr_pos));
       c = max(c + fr * clouds.x * (1.0 - game_w), 0.0);
       if (fx_day > 0.0 && z == 0.0 && tune_fx_sky_core > 0.0) {
         vec3 f1s = textureLod(tex_T24, uv, 0.0).rgb;
@@ -5302,6 +5308,9 @@ void composite_unused() {
       // around. Not by the picture's own contrast: that also took every sky pixel at a mountain's
       // edge (grey halos) and the game's painted cloud wisps. A soft cloud card the level draws
       // changes the sky evenly; a mountain's pixels around don't count)
+      float day_keep = 0.0;  // (how much of the game's pixel that put back: the dusk beams below skip it)
+      // (the sun low: the searchlights' light, see below; tune_sky_keep_night 2: by night only)
+      float dusk_l = tune_sky_keep_night > 0.0 && tune_sky_keep_night < 1.5 ? min(1.0, dusk * 3.0) : 0.0;
       if (z == 0.0 && tune_sky_keep > 0.0 && sky_copy > 0.0) {
         vec3 dc = sky_over(uv);
         float sharp = 0.0;
@@ -5314,7 +5323,12 @@ void composite_unused() {
         }
         float keep = smoothstep(tune_sky_keep_lo, tune_sky_keep_hi, min(length(dc), sharp)) *
                      clouds.x * (1.0 - game_w) * tune_sky_keep;
+        // (not light drawn over the game's sky while the sun is low: the searchlights' streaks at
+        // dawn came back as the game's pixel, dark hatched slabs over our pale morning sky (the
+        // game's sky still night-dark there). Added as light below instead)
+        keep *= 1.0 - dusk_l * smoothstep(0.0, 0.02, min(dc.r, min(dc.g, dc.b)));
         c = mix(c, c0, keep);
+        day_keep = keep;
       }
       // (by night the same for the game's own sky: smoothing its cloud cards away took the lights
       // drawn over it too (Haven's tower beacon, its searchlights, the tower's lamps). Kept where
@@ -5333,8 +5347,15 @@ void composite_unused() {
       // ends at the cards' edges. A card is darker than the sky copy, so what is brighter than the
       // sky there is light drawn over it)
       // (tune_sky_keep_night < 0: per pixel and only over the open sky, as before)
+      // (And at dusk and dawn: the searchlights are on from 19:00 to 7:00, but this ran only in the
+      // game's share of the sky (game_w, 0 at 19:00, full at 21:00), so the beams faded in over two
+      // hours, gone at first over our dusk sky (its sharpness test above loses a soft beam). Over our
+      // sky's share too while the sun is low, as the game drew them; the sprites there are already
+      // put back with the effects (fx_rest above), so only what the sprites did not draw.
+      // tune_sky_keep_night 2: by night only, as before)
+      float dusk_w = clouds.x * (1.0 - game_w) * dusk_l * (1.0 - day_keep);
       if ((z == 0.0 || tune_sky_keep_night > 0.0) && tune_sky_keep_night != 0.0 && sky_copy > 0.0 &&
-          game_w > 0.0) {
+          (game_w > 0.0 || dusk_w > 0.0)) {
         vec3 g0 = textureLod(tex_T0, uv, 0.0).rgb;
         vec3 s0 = textureLod(tex_T25, uv, 0.0).rgb;
         vec2 hgt = vec2(texel.x / texel.y, 1.0);  // uv per screen height
@@ -5364,13 +5385,13 @@ void composite_unused() {
             dm = max(dm, max(dq.r, max(dq.g, dq.b)) * (i < 8 ? 1.0 : 0.7));
           }
         }
-        float keep_w = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm) * clouds.x * game_w *
-                       abs(tune_sky_keep_night);
+        float keep_s = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm);
+        float keep_w = keep_s * clouds.x * game_w * min(abs(tune_sky_keep_night), 1.0);
         // (the stars dimmed behind the light itself, not over the whole reach: a dark band)
         sky_kept = tune_sky_keep_night > 0.0 ? keep_w * smoothstep(tune_sky_night_lo, tune_sky_night_hi, d0)
                                              : keep_w;
         // (a far card only partly counted as sky keeps the rest of the game's pixel already)
-        sky_light = dc * keep_w * sky_k;
+        sky_light = (dc * keep_w + max(dc - max(fx_all, 0.0), 0.0) * keep_s * dusk_w) * sky_k;
       }
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
