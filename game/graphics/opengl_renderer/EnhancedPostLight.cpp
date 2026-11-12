@@ -149,6 +149,33 @@ void EnhancedPost::update_scene() {
   want.sun_max_elev = mix(day.sun_max_elev, night.sun_max_elev);
   want.light_yaw = mix(day.light_yaw, night.light_yaw);
   want.light_max_elev = mix(day.light_max_elev, night.light_max_elev);
+  // the zone's own evening palette (world.json "evening"): over the day's grade as the sun goes down,
+  // out into the night's (m_dusk is 0 again by 20:48; the night's mix takes over from 19h).
+  // Tuning grade.evening: its strength (0: off)
+  {
+    static const EnhancedTune t_evening("grade.evening", 1.f);
+    const auto& zl = s.area_grading ? zone : g_world.zones[0];
+    const float ev = zl.has_evening && hour > 12.f
+                         ? std::clamp(m_dusk * (1.f - m_night) * (float)t_evening, 0.f, 1.f)
+                         : 0.f;
+    if (ev > 0.f) {
+      const ZoneLook& e = zl.evening;
+      auto to = [&](float& v, float t) { v += (t - v) * ev; };
+      for (int i = 0; i < 3; i++) {
+        to(want.lift[i], e.lift[i]);
+        to(want.gain[i], e.gain[i]);
+      }
+      to(want.saturation, e.saturation);
+      to(want.contrast, e.contrast);
+      to(want.warmth, e.warmth);
+    }
+    static int logged = -1;
+    const int now = (int)std::lround(ev * 10.f);
+    if (now != logged) {
+      lg::info("[enhanced] evening grade {:.1f} in {}", ev, level.empty() ? "none" : level);
+      logged = now;
+    }
+  }
 
   // the season: the computer's calendar (northern hemisphere) or the menu's pick
   {
