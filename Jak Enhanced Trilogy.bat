@@ -94,9 +94,16 @@ if defined VER (
     powershell -NoProfile -Command "$v = { param($s) $p = @($s.TrimStart('v') -split '\.') + @('0','0','0'); [version]($p[0..2] -join '.') }; if ((& $v '!LATEST!') -gt (& $v '!MINE!')) { exit 1 }" || (
       echo.
       echo A new version is out: !LATEST! ^(you have !MINE!^).
-      rem in a window (scripts\enhanced\ask.ps1: 10 update now, 11 later); in the console when it can't
-      rem (hidden, there is none: later)
-      powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\ask.ps1'))) -Update -Latest '!LATEST!' -Mine '!MINE!' -MB '!LATEST_MB!' -Icon '%PROJQ%\game\assets\enhanced\art\jak-enhanced.ico'; exit $LASTEXITCODE"
+      rem hidden: asked in launcher.ps1's own window (@@ask-update), which writes log\answer.txt (10
+      rem update now, 11 later) and waits for the player, no countdown; with a console: ask.ps1's
+      rem window (10 update now, 11 later), or the console when it can't
+      if defined JAK_ENHANCED_HIDDEN (
+        del "%PROJ%\log\answer.txt" 2>nul
+        echo @@ask-update !LATEST! !MINE! !LATEST_MB!
+        powershell -NoProfile -Command "$f = '%PROJQ%\log\answer.txt'; $t = [Diagnostics.Stopwatch]::StartNew(); while (-not (Test-Path -LiteralPath $f)) { if ($t.Elapsed.TotalHours -gt 2) { exit 11 }; Start-Sleep -Milliseconds 200 }; Start-Sleep -Milliseconds 100; $a = [IO.File]::ReadAllText($f).Trim(); Remove-Item -LiteralPath $f -ErrorAction SilentlyContinue; if ($a -eq '10') { exit 10 }; exit 11"
+      ) else (
+        powershell -NoProfile -Command "& ([scriptblock]::Create([IO.File]::ReadAllText('%PROJQ%\scripts\enhanced\ask.ps1'))) -Update -Latest '!LATEST!' -Mine '!MINE!' -MB '!LATEST_MB!' -Icon '%PROJQ%\game\assets\enhanced\art\jak-enhanced.ico'; exit $LASTEXITCODE"
+      )
       set "ASKED=!errorlevel!"
       if "!ASKED!"=="10" (set "ASKED=1") else if "!ASKED!"=="11" (set "ASKED=2") else if defined JAK_ENHANCED_HIDDEN (set "ASKED=2") else (
         choice /c UC /t 10 /d C /m "U updates now, !LATEST_MB! MB to download, your games are kept; C carries on"

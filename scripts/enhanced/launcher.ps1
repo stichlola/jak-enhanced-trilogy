@@ -8,6 +8,9 @@
 #   @@idle           it ended
 #   @@error <text>   it failed: a window says so, with the log's last lines and where the log is
 #   @@info <text>    nothing to start (no disc yet): a window says so
+#   @@ask-update <latest> <mine> <MB>   a new version: asked in this window (Update now / Later, and
+#                    the optional support links), no countdown; the answer goes to data\lognswer.txt
+#                    (10 update now, 11 later), which the .bat waits for
 #   @@update <tag>   the player chose to update: update.ps1 -Gui runs, in its own progress window
 #   @@launch <1-3>   the game to start: started here, waited for, the report window on a crash
 # The questions (a new version, the HD textures) the .bat asks itself, in windows (ask.ps1).
@@ -116,14 +119,89 @@ try {
   $form.Controls.AddRange(@($stepLabel, $bar, $detail))
   # (closing it doesn't stop the work: it only hides, the game still starts at the end)
   $state = @{ Closed = $false }
-  $form.Add_FormClosing({ param($s, $e) if ($e.CloseReason -eq 'UserClosing') { $e.Cancel = $true; $state.Closed = $true; $form.Hide() } })
+  # (any close but Windows shutting down: a WM_CLOSE from outside says None, not UserClosing)
+  $form.Add_FormClosing({ param($s, $e) if ($e.CloseReason -ne 'WindowsShutDown') { $e.Cancel = $true; $state.Closed = $true; $form.Hide() } })
+
+  # The new version's question, in this window: it waits for the player (no countdown). 10 update
+  # now, 11 later (also when the window is closed).
+  function Ask-Update([string[]]$a) {
+    $latest = $a[0]; $mine = $a[1]; $mb = $a[2]
+    $euro = [char]0x20AC
+    $ui = @{ Answer = $null }
+    $stepLabel.Text = "A new version is out: $latest (you have $mine)"
+    $bar.Visible = $false
+    $detail.Font = New-Object Drawing.Font 'Segoe UI', 9.5
+    $detail.ForeColor = [Drawing.Color]::FromArgb(190, 194, 204)
+    $stepLabel.SetBounds(20, 16, 480, 30)
+    $detail.SetBounds(20, 50, 480, 24)
+    $detail.Text = "Updating downloads $mb MB. Your games and saves are kept."
+    $mk = {
+      param($text, $x, $w, $primary)
+      $b = New-Object Windows.Forms.Button
+      $b.Text = $text
+      $b.SetBounds($x, 92, $w, 34)
+      $b.FlatStyle = 'Flat'
+      $b.FlatAppearance.BorderSize = if ($primary) { 0 } else { 1 }
+      $b.FlatAppearance.BorderColor = [Drawing.Color]::FromArgb(70, 73, 84)
+      $b.BackColor = if ($primary) { [Drawing.Color]::FromArgb(61, 90, 254) } else { [Drawing.Color]::FromArgb(36, 38, 45) }
+      $b.ForeColor = [Drawing.Color]::White
+      $b.Font = New-Object Drawing.Font 'Segoe UI Semibold', 10
+      $b.Cursor = [Windows.Forms.Cursors]::Hand
+      return $b
+    }
+    $yes = & $mk 'Update now' 20 150 $true
+    $no = & $mk 'Later' 180 110 $false
+    $yes.Add_Click({ $ui.Answer = '10' })
+    $no.Add_Click({ $ui.Answer = '11' })
+    $support = New-Object Windows.Forms.LinkLabel
+    $support.SetBounds(20, 142, 480, 22)
+    $support.LinkColor = [Drawing.Color]::FromArgb(120, 150, 255)
+    $support.ActiveLinkColor = [Drawing.Color]::White
+    $support.ForeColor = [Drawing.Color]::FromArgb(126, 130, 144)
+    $parts = @(@('100% free, support is optional: ', $null), @("1 $euro a sweet", 'https://paypal.me/mymusicminis/1EUR'),
+               @(' / ', $null), @("3 $euro a coffee", 'https://paypal.me/mymusicminis/3EUR'), @(' / ', $null),
+               @('any amount', 'https://paypal.me/mymusicminis'))
+    # (the text first: setting it resets the links)
+    $support.Text = -join @($parts | ForEach-Object { $_[0] })
+    $support.Links.Clear(); $text = ''
+    foreach ($pt in $parts) {
+      if ($pt[1]) { [void]$support.Links.Add($text.Length, $pt[0].Length, $pt[1]) }
+      $text += $pt[0]
+    }
+    $support.Add_LinkClicked({ param($s, $e) Start-Process ([string]$e.Link.LinkData) })
+    $form.Controls.AddRange(@($yes, $no, $support))
+    $form.ClientSize = New-Object Drawing.Size 520, 176
+    $form.AcceptButton = $yes
+    $state.Closed = $false
+    $form.TopMost = $true
+    $form.Show(); $form.Activate(); $yes.Focus() | Out-Null
+    while (-not $ui.Answer) {
+      # (closing the window: Later)
+      if ($state.Closed -or $form.IsDisposed -or -not $form.Visible) { $ui.Answer = '11'; $state.Closed = $true; break }
+      [Windows.Forms.Application]::DoEvents()
+      Start-Sleep -Milliseconds 50
+    }
+    # back to the status window
+    foreach ($c in @($yes, $no, $support)) { $form.Controls.Remove($c); $c.Dispose() }
+    $form.AcceptButton = $null
+    $form.ClientSize = New-Object Drawing.Size 520, 132
+    $bar.Visible = $true
+    $detail.Font = New-Object Drawing.Font 'Consolas', 8.5
+    $detail.ForeColor = [Drawing.Color]::FromArgb(126, 130, 144)
+    $detail.SetBounds(20, 86, 480, 36)
+    $stepLabel.SetBounds(20, 18, 480, 44)
+    $detail.Text = ''
+    if ($ui.Answer -eq '10') { $stepLabel.Text = "Getting $latest ready..." } else { $stepLabel.Text = 'Starting Jak Enhanced Trilogy...' }
+    if ($state.Closed) { $form.Hide() }
+    return $ui.Answer
+  }
 
   $encoding = [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
   $stream = New-Object IO.FileStream $log, 'Open', 'Read', ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
   $reader = New-Object IO.StreamReader $stream, $encoding
   $clock = [Diagnostics.Stopwatch]::StartNew()
   $step = $null; $stepAt = 0; $percent = -1
-  $errorText = $null; $info = $null; $update = $null; $launch = $null
+  $errorText = $null; $info = $null; $update = $null; $launch = $null; $askUpdate = $null
   $last = New-Object Collections.Generic.List[string]
   $pending = ''
   while ($true) {
@@ -135,7 +213,7 @@ try {
       foreach ($raw in @($parts | Select-Object -First ($parts.Count - 1))) {
         # (the extractor and the compiler colour their output: "ESC[38;2;144;238;144minfo ESC[0m")
         $line = ($raw -replace "\x1b\[[0-9;?]*[A-Za-z]", '') -replace "[\x00-\x08\x0b\x0c\x0e-\x1f]", ''
-        if ($line -match '^@@(\w+) ?(.*)$') {
+        if ($line -match '^@@([\w-]+) ?(.*)$') {
           $arg = $Matches[2].Trim()
           switch ($Matches[1]) {
             'step' { $step = $arg; $stepAt = $clock.ElapsedMilliseconds; $percent = -1; $detail.Text = '' }
@@ -143,6 +221,7 @@ try {
             'error' { $errorText = $arg }
             'info' { $info = $arg }
             'update' { $update = $arg }
+            'ask-update' { $askUpdate = $arg }
             'launch' { $launch = $arg }
           }
         } elseif ($line.Trim()) {
@@ -153,6 +232,12 @@ try {
           if ($line -match '\[\s*(\d{1,3})%\]') { $percent = [Math]::Min(100, [int]$Matches[1]) }
         }
       }
+    }
+    if ($askUpdate) {
+      $answer = Ask-Update ($askUpdate -split ' ')
+      $askUpdate = $null
+      [IO.File]::WriteAllText((Join-Path $logDir 'answer.txt'), $answer)
+      $clock.Restart(); $step = $null
     }
     if ($exited) { break }
     $stepLabel.Text = if ($step) { $step } else { 'Starting Jak Enhanced Trilogy...' }
