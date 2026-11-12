@@ -612,6 +612,12 @@ void shot_test(float now) {
   if (!test || !pl.valid || !g_enhanced_camera.valid) {
     return;
   }
+  static bool logged = false;
+  if (!logged) {
+    logged = true;
+    lg::info("[enhanced] shot test: firing from Jak at {:.1f} {:.1f} {:.1f} m", pl.pos[0] / kMeter,
+             pl.pos[1] / kMeter, pl.pos[2] / kMeter);
+  }
   static float start = -1e9f;
   static float from[3], dir[3];
   static int kind = 1, id = 1000000;

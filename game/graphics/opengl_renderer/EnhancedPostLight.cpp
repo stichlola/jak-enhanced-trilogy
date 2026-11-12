@@ -3191,7 +3191,12 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
     // the nearest lights in the air (volume_lights_on): world -> this frame's view space
     static const EnhancedTune t_air("volume.light_air", 0.06f);
     static const EnhancedTune t_gain("volume.light_gain", 1.f);
-    static const EnhancedTune t_halo_r("volume.light_halo_m", 8.f);  // a halo's reach (m), at most
+    // a halo's reach (m), at most (6; the old marched shape had 8)
+    static const EnhancedTune t_halo_r("volume.light_halo_m", 6.f);
+    // the halo's shape: 1 compact, exactly 0 from its reach out; 0 the old marched lobe (over a
+    // lamp-lit alley the lobes summed to a pale veil). volume.light_core_m: shape 1's bright core
+    static const EnhancedTune t_shape("volume.light_shape", 1.f);
+    static const EnhancedTune t_core("volume.light_core_m", 1.f);
     static const EnhancedTune t_max_r("volume.light_max_m", 60.f);  // lights reaching farther (the sky's): none
     constexpr int kVol = 8;
     float vpos[kVol * 4] = {}, vcol[kVol * 4] = {};
@@ -3221,7 +3226,8 @@ void EnhancedPost::do_volume(SharedRenderState* render_state,
     glUniform1i(glGetUniformLocation(id, "vl_count"), nv);
     glUniform4fv(glGetUniformLocation(id, "vl_pos"), kVol, vpos);
     glUniform4fv(glGetUniformLocation(id, "vl_color"), kVol, vcol);
-    glUniform2f(glGetUniformLocation(id, "vl_air"), (float)t_air, (float)t_gain);
+    glUniform4f(glGetUniformLocation(id, "vl_air"), (float)t_air, (float)t_gain, (float)t_core,
+                (float)t_shape);
   }
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
   prof.add_draw_call();
