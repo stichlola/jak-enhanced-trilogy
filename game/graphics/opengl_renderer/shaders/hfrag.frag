@@ -30,6 +30,7 @@ uniform float tune_detail_hfrag_pbr = 0.0;
 uniform vec4 enh_detail_sun;
 uniform float tune_detail_shade = 1.2;  // shaders.tune_detail_shade
 vec3 g_n_base = vec3(0.0), g_n_det = vec3(0.0);
+const float DET_SHADE_UP = 0.82, DET_SHADE_SIDE = 0.572;  // (sin, cos of 55 degrees)
 const float DET_SAND_R = 0.88;  // the dunes' dry sand: rougher than tfrag3.frag's PBR_R[3] (0.8), or it glints like water at a low sun
 
 float enh_detail_noise(vec2 p) {
@@ -159,7 +160,16 @@ void main() {
   enh_normal_out = enh_pack_normal(n);
 
   if (tune_detail_hfrag_pbr <= 0.5 && enh_detail_sun.w > 0.0 && g_n_det != vec3(0.0)) {
-    float shade = dot(g_n_det, enh_detail_sun.xyz) - dot(g_n_base, enh_detail_sun.xyz);
+    // (the light at most DET_SHADE_UP high: a sun straight above lights every small slope alike and
+    // the grain vanished at noon; the sky's side light still shows it there)
+    vec3 l = enh_detail_sun.xyz;
+    if (l.y > DET_SHADE_UP) {
+      vec2 d = dot(l.xz, l.xz) > 1e-6 ? normalize(l.xz) : vec2(0.6, 0.8);
+      l = vec3(d.x * DET_SHADE_SIDE, DET_SHADE_UP, d.y * DET_SHADE_SIDE);
+    }
+    // (the bumped normal brought back onto the base's tangent plane: linear in the slopes, so the
+    // grain lights and darkens about the same mean instead of darkening the sand as it grows)
+    float shade = dot(g_n_det / max(dot(g_n_det, g_n_base), 0.3) - g_n_base, l);
     color.rgb *= 1.0 + clamp(shade, -0.5, 0.5) * tune_detail_shade * enh_detail_sun.w;
   }
    color.rgb = mix(color.rgb, fog_color.rgb, clamp(fogginess * fog_color.a, 0, 1));

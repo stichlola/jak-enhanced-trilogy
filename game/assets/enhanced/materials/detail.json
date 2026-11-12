@@ -9,7 +9,7 @@
 // Off: JAK_ENHANCED_DETAIL=0, the menu's "Sand detail material", tuning "detail.on" 0.
 {
   "materials": {
-    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 1.0, "rough": 0.3, "ao": 0.4 }
+    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 2.0, "rough": 0.3, "ao": 0.5 }
   },
   "textures": [
     { "contains": ["sand", "dune"], "not": ["stone", "bag", "rock", "wall", "brick", "quick", "cliff"],
