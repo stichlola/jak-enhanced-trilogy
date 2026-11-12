@@ -1101,7 +1101,13 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "contrast"),
                 m_settings.contrast + m_grade.contrast + (float)t_contrast * enh_post::g_city_midday);
   }
-  glUniform1f(glGetUniformLocation(id, "warmth"), m_settings.warmth + m_grade.warmth);
+  {
+    // (Spargus at noon: the area grade's warm split held back in town too, light.town_noon_grade)
+    static const EnhancedTune t_town_warm("light.town_noon_grade", 0.6f);
+    const float tw = std::clamp((float)t_town_warm, 0.f, 1.f) * enh_post::g_town_noon;
+    glUniform1f(glGetUniformLocation(id, "warmth"),
+                m_settings.warmth + m_grade.warmth * (1.f - (m_grade.warmth > 0.f ? tw : 0.f)));
+  }
   glUniform1f(glGetUniformLocation(id, "sand"), m_grade.sand);
   glUniform1f(glGetUniformLocation(id, "sun_haze"), m_ssao_ready ? m_grade.sun_haze : 0.f);
   {
@@ -1274,13 +1280,24 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
   glUniform1f(glGetUniformLocation(id, "rock_detail_avg"), m_rock_avg);
   glUniform1f(glGetUniformLocation(id, "ground_detail"), m_ground_tex ? 1.f : 0.f);
   glUniform3fv(glGetUniformLocation(id, "ground_detail_avg"), 1, m_ground_avg);
-  glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, m_grade.lift);
   {
+    // (Spargus at noon: the desert grade's warm cast taken toward grey in town, its brightness kept:
+    // after the morning look and the tan it was the largest part of the orange left, sat 0.37 ->
+    // 0.31 without it. light.town_noon_grade 0 = off)
+    static const EnhancedTune t_town_grade("light.town_noon_grade", 0.6f);
+    const float tg = std::clamp((float)t_town_grade, 0.f, 1.f) * enh_post::g_town_noon;
+    const float lift_avg = (m_grade.lift[0] + m_grade.lift[1] + m_grade.lift[2]) / 3.f;
+    const float gain_avg = (m_grade.gain[0] + m_grade.gain[1] + m_grade.gain[2]) / 3.f;
+    float lift[3], gain[3];
+    for (int i = 0; i < 3; i++) {
+      lift[i] = m_grade.lift[i] + (lift_avg - m_grade.lift[i]) * tg;
+      gain[i] = m_grade.gain[i] + (gain_avg - m_grade.gain[i]) * tg;
+    }
+    glUniform3fv(glGetUniformLocation(id, "grade_lift"), 1, lift);
     // (...and stopped down a little: the port's sunlit floor was a pale washed yellow)
     static const EnhancedTune t_gain("light.midday_city_gain", -0.06f);
     const float k = 1.f + (float)t_gain * enh_post::g_city_midday;
-    glUniform3f(glGetUniformLocation(id, "grade_gain"), m_grade.gain[0] * k, m_grade.gain[1] * k,
-                m_grade.gain[2] * k);
+    glUniform3f(glGetUniformLocation(id, "grade_gain"), gain[0] * k, gain[1] * k, gain[2] * k);
   }
   // soft shadows: the shadow map again, read as plain depths for the blocker search
   if (!m_shadow_raw_sampler) {
