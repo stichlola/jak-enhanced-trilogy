@@ -43,6 +43,17 @@ if ($Detach) {
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
+
+# One launcher at a time: a second one (a double click, the laptop waking up) would run the same
+# steps over the same files (the HD textures stopped on a file in use). It only says so.
+$single = New-Object Threading.Mutex($false, 'Local\JakEnhancedTrilogyLauncher')
+$mine = $false
+try { $mine = $single.WaitOne(0) } catch [Threading.AbandonedMutexException] { $mine = $true }
+if (-not $mine) {
+  [void][Windows.Forms.MessageBox]::Show("Jak Enhanced Trilogy is already starting (or running).`r`n`r`nIts window may be behind the others.",
+    'Jak Enhanced Trilogy', 'OK', 'Information', 'Button1', 'DefaultDesktopOnly')
+  exit 0
+}
 $IconFile = Join-Path $Proj 'game\assets\enhanced\art\jak-enhanced.ico'
 $Icon = $null
 try { $Icon = New-Object Drawing.Icon $IconFile } catch { }

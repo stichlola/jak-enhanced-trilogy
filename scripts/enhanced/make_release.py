@@ -39,7 +39,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NAME = "Jak-Enhanced-Trilogy"
 LIGHT_NAME = "Jak-Enhanced-Light"
 # (not in Enhanced Light: the launcher there is OpenGOAL's, and the HD textures need Python)
-FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py",
+FULL_ONLY = {"scripts/enhanced/hd_setup.py", "scripts/enhanced/hd_textures.py", "scripts/enhanced/pbr_maps.py",
              "scripts/enhanced/minimap_maps.py", "scripts/enhanced/update.ps1",
              "scripts/enhanced/report.ps1", "scripts/enhanced/apply_shipped.ps1",
              "scripts/enhanced/refresh_models.ps1", "scripts/enhanced/add_to_steam.ps1",
@@ -52,6 +52,7 @@ DATA = [
     "custom_assets",
     "scripts/enhanced/hd_setup.py",  # the HD textures, made by the player (the launcher asks)
     "scripts/enhanced/hd_textures.py",
+    "scripts/enhanced/pbr_maps.py",  # the normal and roughness maps, after the 4x upscale (hd_setup runs it)
     "scripts/enhanced/minimap_maps.py",
     "scripts/enhanced/update.ps1",  # a new release installed over this one (the launcher asks)
     "scripts/enhanced/apply_shipped.ps1",  # the main world put in place, keeping the player's edits
@@ -239,6 +240,15 @@ def main():
     parser.add_argument("--skip-shader-check", action="store_true",
                         help="don't stop on shader errors (check_shaders.py: glslang, ASCII only)")
     args = parser.parse_args()
+
+    # every script the shipped scripts run (HERE / "x.py", "x.ps1") is shipped too: a release once left
+    # out pbr_maps.py and every update stopped at the HD textures' 74%
+    shipped = {Path(d).name for d in DATA if d.startswith("scripts/enhanced/")}
+    for d in [d for d in DATA if d.startswith("scripts/enhanced/")]:
+        text = (ROOT / d).read_text(encoding="utf-8", errors="replace")
+        for name in set(re.findall(r'HERE\s*/\s*"([\w.-]+\.(?:py|ps1))"', text)):
+            if name not in shipped:
+                sys.exit(f"ERROR: {d} runs {name}, which isn't in DATA (make_release.py): add it")
 
     # every shader compiled by Khronos' reference compiler and ASCII only, as AMD's driver wants them
     # (NVIDIA's lets through what AMD refuses: a release once wouldn't start on AMD cards)
