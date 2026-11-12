@@ -417,7 +417,12 @@ try {
             if ($since) { & git -C $Root cat-file -e "$since^{commit}" 2>$null; if ($LASTEXITCODE -ne 0) { $since = '' } }
             if ($since) { $subjects = @(GitQ log --no-merges --format=%s "$since..HEAD") } else { $subjects = @(GitQ log --no-merges --format=%s -40) }
             $list = ($subjects | ForEach-Object { "- $_" }) -join "`n"
-            $body = "$headText`n`n## Which one to download`n`n| File | What it is | For whom |`n|---|---|---|`n" +
+            # a big, obvious download link first (the installer), then the table for the rest
+            $dl = "https://github.com/$Repo/releases/download/$Version"
+            $arrow = [char]::ConvertFromUtf32(0x2B07) + [char]0xFE0F
+            $big = "# $arrow [Download for Windows]($dl/Setup-Jak-Enhanced-Trilogy-$Version.exe)`n`n" +
+                "The installer: run it, pick your disc images, done. Portable folder instead: [Jak-Enhanced-Trilogy-$Version.zip]($dl/Jak-Enhanced-Trilogy-$Version.zip). OpenGOAL launcher: [Jak Enhanced Light]($dl/windows-jak-enhanced-light-$Version.zip)."
+            $body = "$headText`n`n$big`n`n## Which one to download`n`n| File | What it is | For whom |`n|---|---|---|`n" +
                 "| **Setup-Jak-Enhanced-Trilogy-$Version.exe** | The installer. It asks for your disc images, extracts and compiles the games, optionally makes the HD textures on your graphics card, and can add the game to Steam. | Most players: pick this one. |`n" +
                 "| **Jak-Enhanced-Trilogy-$Version.zip** | The same game without an installer: unzip it anywhere, put your .iso files in the ISO folder, double-click `"Jak Enhanced Trilogy.bat`". | Who prefers a portable folder. |`n" +
                 "| **$patchCell** | Only the files changed since that version (the in-game update uses them). | Who updates by hand. |`n" +
