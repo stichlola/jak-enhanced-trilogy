@@ -3900,8 +3900,13 @@ void composite_unused() {
     // coverage) the sprites are put back over our water as they were drawn over the game's: texture,
     // alpha falloff, foam, drops; the ripple mesh and the game's water under it drop out (our water
     // bends with the rings instead). Lit as the wake's foam: dimmer at dusk. (tune_water_dbg 35: as
-    // before; 36: the sprites alone)
+    // before; 36: the sprites alone; 38: every sprite dimmed, the first version; 39: foam weight)
+    float over = dot(c, luma) - dot(wc, luma);
+    vec3 c_old = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
     if (fx_mark > 0.5 && abs(tune_water_dbg - 35.0) > 0.5) {
+      // (towards full night the copies stop (EnhancedPost::capture_fx at night 0.999): the old rule
+      // takes over by then, no jump mid-splash)
+      float nb = smoothstep(0.0, 0.08, fx_day);
       vec4 sf1 = textureLod(tex_T24, uv, 0.0);
       vec3 sf0 = textureLod(tex_T23, uv, 0.0).rgb;
       // (not more coverage than the color change allows: some sprites write an alpha that isn't
@@ -3912,16 +3917,31 @@ void composite_unused() {
       vec3 spr = max(sf1.rgb - sf0 * keep, 0.0);
       float over0 = dot(sf0, luma) - dot(wc, luma);
       vec3 under = mix(wc, sf0, smoothstep(0.06, 0.2, over0));
-      float lit = 0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0);
-      c = under * keep + spr * lit;
+      // (only the foam is lit by the scene: what the blended sprites covered, and the pale (white, grey)
+      // sprites: a splash's spray is additive and reaches past its disc. Coloured light added over the
+      // water (a shot, its flash, eco, a lamp's glow, the canal's light beams) keeps the game's strength:
+      // dimmed with the foam at dusk it could lose two thirds. Measured: a Peacemaker shot over the port
+      // and the Spargus shallows, 12-20.4h, glow within frame noise of "every sprite dimmed" and not below
+      // the old rule; tune_water_dbg 38 = every sprite dimmed, 39 = this foam weight)
+      float smx = max(spr.r, max(spr.g, spr.b));
+      float sat = (smx - min(spr.r, min(spr.g, spr.b))) / max(smx, 1e-3);
+      float foam = smoothstep(0.02, 0.15, 1.0 - clamp(sf1.a, 0.0, 1.0));
+      foam = max(foam, 1.0 - smoothstep(0.25, 0.55, sat));
+      if (abs(tune_water_dbg - 38.0) < 0.5) { foam = 1.0; }
+      float lit = mix(1.0, 0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0), foam);
+      vec3 c_new = under * keep + spr * lit;
       // (and kept out of the grade, put back after it at gain 1 as the other effects over water: in
       // the grade the dark canal's lift took the foam's streaks to one solid pink-white blob)
-      fx_d = spr * lit;
-      fx_w = smoothstep(0.004, 0.03, max(fx_d.r, max(fx_d.g, fx_d.b)));
+      vec3 e_new = spr * lit;
+      float w_new = smoothstep(0.004, 0.03, max(e_new.r, max(e_new.g, e_new.b)));
+      vec3 e = mix(fx_w * fx_d, w_new * e_new, nb);
+      fx_w = mix(fx_w, w_new, nb);
+      fx_d = fx_w > 0.0 ? e / fx_w : vec3(0.0);
+      c = mix(c_old, c_new, nb);
       if (abs(tune_water_dbg - 36.0) < 0.5) { c = spr * 4.0; }
+      if (abs(tune_water_dbg - 39.0) < 0.5) { c = vec3(foam, clamp(smx * 4.0, 0.0, 1.0), nb); }
     } else {
-      float over = dot(c, luma) - dot(wc, luma);
-      c = water_decal ? max(wc, c) : mix(wc, c, smoothstep(0.06, 0.2, over));
+      c = c_old;
     }
     if (abs(tune_water_dbg - 34.0) < 0.5) { c = wc; }
   } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {

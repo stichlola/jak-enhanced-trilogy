@@ -84,6 +84,71 @@ vec3 enh_pbr_bump(vec3 n, vec3 dp1, vec3 dp2, vec2 duv1, vec2 duv2) {
 vec3 g_dp1, g_dp2;
 vec2 g_duv1, g_duv2;
 
+// Enhanced: the detail material (EnhancedDetail.h, detail.json) on unit 12: a tileable picture laid
+// in world space (x along X, y along Z), R G its normal, B a roughness offset about 0.5, A AO. The
+// game's texture keeps the color; this adds the fine relief (grains, small ripples) near the camera
+uniform sampler2D tex_T12;
+uniform int enh_detail;      // 0 none, 1 on, 2 on and the albedo may carry its roughness (PBR on)
+uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it; also enh_on_sand below)
+uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
+uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
+uniform vec2 tune_detail_fade = vec2(5.0, 45.0);  // m: full up to, gone by
+vec4 g_det = vec4(0.0, 0.0, 0.5, 1.0);  // x y: slopes along world X and Z, z roughness offset, w AO
+float g_det_k = 0.0;  // its strength at this pixel (0: none)
+
+float enh_detail_noise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  vec2 h = vec2(127.1, 311.7);
+  float a = fract(sin(dot(i, h)) * 43758.5453);
+  float b = fract(sin(dot(i + vec2(1.0, 0.0), h)) * 43758.5453);
+  float c = fract(sin(dot(i + vec2(0.0, 1.0), h)) * 43758.5453);
+  float d = fract(sin(dot(i + vec2(1.0, 1.0), h)) * 43758.5453);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// the tile and a copy 2.7x as big turned 37 degrees, their weights varied by a slow noise, so
+// neither repeat shows; the slopes (not the normals) summed. Mips average the normal flat with
+// distance; the fade by distance only saves the reads. (The camera's part wrapped first: precision)
+void enh_detail_sample() {
+  if (enh_detail == 0 || tune_detail <= 0.0) {
+    return;
+  }
+  float k = 1.0 - smoothstep(tune_detail_fade.x * 4096.0, tune_detail_fade.y * 4096.0, length(enh_pos));
+  if (k <= 0.0) {
+    return;
+  }
+  const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+  float s1 = enh_detail_k.x, s2 = enh_detail_k.x / 2.7;
+  vec2 uv1 = fract(cam_trans.xz * s1) + enh_pos.xz * s1;
+  vec2 uv2 = fract((rot * cam_trans.xz) * s2 + 0.37) + (rot * enh_pos.xz) * s2;
+  vec4 a = textureGrad(tex_T12, uv1, g_dp1.xz * s1, g_dp2.xz * s1);
+  vec4 b = textureGrad(tex_T12, uv2, (rot * g_dp1.xz) * s2, (rot * g_dp2.xz) * s2);
+  float nz = enh_detail_noise((cam_trans.xz + enh_pos.xz) / (4096.0 * 9.0));
+  float wa = mix(0.55, 1.0, nz), wb = mix(0.75, 0.35, nz);
+  vec2 na = a.xy * 2.0 - 1.0, nb = b.xy * 2.0 - 1.0;
+  vec2 ga = na / max(sqrt(1.0 - dot(na, na)), 0.3);
+  vec2 gb = nb / max(sqrt(1.0 - dot(nb, nb)), 0.3);
+  // (b's slopes back from its turned frame to the world's: rot's transpose)
+  vec2 g = ga * wa + (gb * rot) * wb;
+  g_det = vec4(g, 0.5 + (a.b - 0.5) * wa + (b.b - 0.5) * wb, mix(1.0, a.a, wa) * mix(1.0, b.a, wb));
+  g_det_k = k * tune_detail;
+}
+
+// the detail's slopes on the surface's normal (UDN: added along the world's X and Z projected onto
+// the surface). n is either side (the composite flips it toward the camera): the slopes flip with it.
+// Only on what faces up (sand on a steep face would stretch)
+vec3 enh_detail_bump(vec3 n) {
+  float k = g_det_k * enh_detail_k.y * smoothstep(0.35, 0.7, abs(n.y));
+  if (k <= 0.0) {
+    return n;
+  }
+  vec3 t = normalize(vec3(1.0, 0.0, 0.0) - n * n.x);
+  vec3 b = normalize(vec3(0.0, 0.0, 1.0) - n * n.z);
+  float side = n.y < 0.0 ? -1.0 : 1.0;
+  return normalize(n + (t * g_det.x + b * g_det.y) * (k * side));
+}
+
 // Enhanced: rock lying on the dunes. The desert's mounds end in flat skirts flush with the sand,
 // painted and lit to match it (the game shows no edge), but tagged rock the composite lit them as
 // rock (lifted, warmed, the rock picture) next to the sand's darker grade: a pale hard-edged polygon
@@ -93,7 +158,7 @@ vec2 g_duv1, g_duv2;
 // shaders.tune_rock_on_sand 0: off (every rock pixel tagged rock, as before)
 uniform int enh_ground_on;     // 1: tex_T19 has the dunes' heights this frame
 uniform sampler2D tex_T19;     // their 512x512 grid, 8 m apart from the world's origin, 1e30 where none
-uniform vec4 cam_trans;        // (tfrag3.vert's: the camera, to rebuild the world position)
+// (cam_trans: declared above, with the detail material)
 uniform float tune_rock_on_sand = 1.0;  // (2: shows the weight, red rock to green sand)
 uniform vec2 tune_rock_sand_h = vec2(0.15, 0.6);    // m over the dunes: all sand, none
 uniform vec2 tune_rock_sand_up = vec2(0.6, 0.85);   // facing up (world normal's y): none, all
@@ -150,6 +215,8 @@ vec4 enh_pack_normal(vec3 n) {
     return vec4(0.0);
   }
   n = enh_pbr_bump(n, g_dp1, g_dp2, g_duv1, g_duv2);
+  // (the detail material's fine relief over the map's broad one)
+  n = enh_detail_bump(n);
   // the material in the 2-bit alpha: 1 plain, 2/3 metal, 1/3 glossy (0: no normal); sand (plain)
   // as a normal 0.9 long (the composite draws the wind's ripples on it)
   // (the rougher classes a step under 1.0, still plain scenery to the composite's tests)
@@ -270,6 +337,7 @@ void main() {
   g_dp2 = dFdy(enh_pos);
   g_duv1 = dFdx(tex_coord.xy);
   g_duv2 = dFdy(tex_coord.xy);
+  enh_detail_sample();
   if (enh_fade_in < 1.0 && enh_fade_in <= enh_dither()) {
     discard;
   }
@@ -314,15 +382,20 @@ void main() {
     float baked = clamp(dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) * 0.5, 1.0 / 255.0, 1.0);
     // (a < 1: alpha 1 is the PBR-coded albedo below)
     enh_albedo_out = vec4(T0.rgb, min(baked, 0.6));
-    if (enh_pbr != 0) {
-      g_pbr = textureGrad(tex_T11, uv_used, g_duv1, g_duv2);
-      g_pbr_on = true;
+    // (the detail material's occlusion: in the hollows between grains and ripples)
+    color.rgb *= mix(1.0, g_det.w, clamp(enh_detail_k.w * g_det_k, 0.0, 1.0));
+    if (enh_pbr != 0 || (enh_detail == 2 && g_det_k > 0.0)) {
+      if (enh_pbr != 0) {
+        g_pbr = textureGrad(tex_T11, uv_used, g_duv1, g_duv2);
+        g_pbr_on = true;
+      }
       // the roughness for the composite, 6 bits in the albedo's spare low bits (10-bit target, 8-bit
       // texture): code 1..63 over its three channels, alpha 1 says it's there (the other level
       // shaders write their light under 2/3). Where the baked light is ~0 (alpha 0: no albedo for the
       // lamps), none: the composite takes the class's own
       int mi = clamp(enh_material, 0, 13);
-      float r = clamp(PBR_R[mi] + (g_pbr.b - 0.5) * 2.0 * PBR_RR[mi], 0.03, 1.0);
+      float r = clamp(PBR_R[mi] + (g_pbr.b - 0.5) * 2.0 * PBR_RR[mi] +
+                      (g_det.z - 0.5) * 2.0 * enh_detail_k.z * g_det_k, 0.03, 1.0);
       int code = 1 + int(r * 62.0 + 0.5);
       vec3 a8 = floor(clamp(T0.rgb, 0.0, 1.0) * 255.0 + 0.5);
       vec3 bits = vec3(float((code >> 4) & 3), float((code >> 2) & 3), float(code & 3));
