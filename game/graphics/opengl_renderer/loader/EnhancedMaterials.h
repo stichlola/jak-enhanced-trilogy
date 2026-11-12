@@ -441,6 +441,26 @@ inline void enhanced_set_material(SharedRenderState* render_state,
   }
   glUniform1f(cached_parallax[slot], relief * 4096.f * g_enhanced_parallax);
   glUniform2f(cached_notile[slot], notile_u, notile_v);
+  // sand painted over the ground (a blended draw: the desert's flat rock slabs have their rims
+  // covered by it, sand in the game's picture) writes the normal target too, by its coverage, rgb
+  // only: the tag under it goes from the rock's toward the sand's, so the composite grades those
+  // pixels as sand instead of lifting them as rock (pale rims). tfrag3.frag's enh_blended: 1 = it
+  // puts its coverage in the normal's alpha (tune_sand_cover 0 there: 0, nothing changes)
+  static GLint cached_blended[2] = {-1, -1};
+  static GLuint cached_blended_program[2] = {0, 0};
+  if (cached_blended_program[slot] != program) {
+    cached_blended_program[slot] = program;
+    cached_blended[slot] = glGetUniformLocation(program, "enh_blended");
+  }
+  if (cached_blended[slot] >= 0) {
+    const bool cover = blended && kind == kSand && render_state->version == GameVersion::Jak3 &&
+                       mode.get_zt_enable();
+    glUniform1i(cached_blended[slot], blended ? (cover ? 2 : 1) : 0);
+    if (cover) {
+      glColorMaski(1, GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+      glBlendFunci(1, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    }
+  }
   // true PBR (EnhancedPbr.h): the texture's normal and roughness map on unit 11 (tfrag3.frag's tex_T11)
   static GLint cached_pbr[2] = {-1, -1};
   static GLuint cached_pbr_program[2] = {0, 0};

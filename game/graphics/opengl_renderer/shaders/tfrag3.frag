@@ -77,16 +77,21 @@ uniform vec2 tune_rock_sand_up = vec2(0.6, 0.85);   // facing up (world normal's
 uniform float enh_ground_light;  // the dunes' time of day colors' mean brightness now (Hfrag.cpp)
 uniform vec2 tune_rock_sand_lit = vec2(0.5, 0.75);   // its own baked light over the dunes': none, all
 
+uniform float tune_normal_side = 1.0;  // (enh_pack_normal: the normal on the face's seen side; 0 off)
+uniform int enh_blended;               // 0 opaque, 1 blended, 2 blended sand over the ground (see main)
+uniform vec2 tune_sand_cover = vec2(0.0, 1.0);  // (that sand's tag over the rock under it, by its alpha: none, all; 0 0 off)
+
 float g_t0_luma = -1.0;  // the texture's brightness here (set before enh_pack_normal)
-float enh_on_sand(vec3 face_n) {
+// (the three factors: R on the dunes, G facing up, B lit as them; their product is the weight)
+vec3 enh_on_sand_parts(vec3 face_n) {
   if (enh_ground_on == 0 || tune_rock_on_sand <= 0.0) {
-    return 0.0;
+    return vec3(0.0);
   }
   vec3 w = enh_pos + cam_trans.xyz;
   vec2 g = w.xz / 32768.0;
   ivec2 i0 = ivec2(floor(g));
   if (i0.x < 0 || i0.y < 0 || i0.x > 510 || i0.y > 510) {
-    return 0.0;
+    return vec3(0.0);
   }
   vec2 fr = g - vec2(i0);
   float h00 = texelFetch(tex_T19, i0, 0).r;
@@ -94,19 +99,20 @@ float enh_on_sand(vec3 face_n) {
   float h01 = texelFetch(tex_T19, i0 + ivec2(0, 1), 0).r;
   float h11 = texelFetch(tex_T19, i0 + ivec2(1, 1), 0).r;
   if (max(max(h00, h10), max(h01, h11)) > 1e29) {
-    return 0.0;  // (no dune there)
+    return vec3(0.0);  // (no dune there)
   }
   float h = mix(mix(h00, h10, fr.x), mix(h01, h11, fr.x), fr.y);
   float above = (w.y - h) / 4096.0;  // m
-  float on = 1.0 - smoothstep(tune_rock_sand_h.x, tune_rock_sand_h.y, above);
-  // (and painted as pale as the sand: the patches' rims, not their dark middles, which the
-  // composite's rock light lifts on purpose)
   // (fragment_color is 2x: 1 = lit as the dunes; the rims ~0.7-1.1, the patches' dark middles ~0.45-0.52)
   float lit = 0.5 * dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) / max(enh_ground_light, 0.02);
-  return on * smoothstep(tune_rock_sand_up.x, tune_rock_sand_up.y, abs(face_n.y)) *
-         smoothstep(tune_rock_sand_lit.x, tune_rock_sand_lit.y, lit);
+  return vec3(1.0 - smoothstep(tune_rock_sand_h.x, tune_rock_sand_h.y, above),
+              smoothstep(tune_rock_sand_up.x, tune_rock_sand_up.y, abs(face_n.y)),
+              smoothstep(tune_rock_sand_lit.x, tune_rock_sand_lit.y, lit));
 }
-
+float enh_on_sand(vec3 face_n) {
+  vec3 k = enh_on_sand_parts(face_n);
+  return k.x * k.y * k.z;
+}
 vec4 enh_pack_normal(vec3 n) {
   vec3 f = cross(g_dp1, g_dp2);
   float flen = length(f);
@@ -152,6 +158,18 @@ vec4 enh_pack_normal(vec3 n) {
   // after reading it; its backlight lights them through toward the sun, as the shrubs' 0.97)
   if (enh_leaf > 0.5 && tag_len == 1.0 && a == 1.0) {
     tag_len = 0.675;
+  }
+  // (n kept on the face's own side as the camera sees it. A ledge's rim vertices' normals lean out
+  // over the edge with the walls below; seen almost edge-on from above they crossed the view plane,
+  // the composite (which turns normals toward the camera by their own sign) turned them down, the
+  // sun left those pixels dark: a thin dark line along every ledge's edge. tune_normal_side 0: off)
+  if (tune_normal_side > 0.0 && flen > 0.0) {
+    vec3 v = -normalize(enh_pos);
+    float fs = dot(f, v);
+    float ns = dot(n, v) * sign(fs);
+    if (abs(fs) > 0.005 && ns < 0.02) {
+      n = normalize(n + v * sign(fs) * (0.02 - ns));
+    }
   }
   return vec4(n * tag_len * 0.5 + 0.5, a);
 }
@@ -309,12 +327,31 @@ void main() {
     color = fragment_color/2;
   }
   enh_normal_out = enh_pack_normal(enh_normal);
+  // (6 / 7: as 4 / 5 with every other level draw hidden: the rock under sand painted over it)
+  float dbg_view = tune_rock_on_sand > 5.5 ? tune_rock_on_sand - 2.0 : tune_rock_on_sand;
+  if (tune_rock_on_sand > 5.5 && enh_material != 4) {
+    discard;
+  }
   if (tune_rock_on_sand > 1.5 && enh_material == 4) {
     // (test: the rock's on-sand weight, red rock to green sand)
     vec3 fn = cross(g_dp1, g_dp2);
     float ws = length(fn) > 0.0 ? enh_on_sand(normalize(fn)) : 0.0;
     color.rgb = mix(vec3(0.5, 0.0, 0.0), vec3(0.0, 0.5, 0.0), ws);
-    if (tune_rock_on_sand > 2.5) {
+    if (dbg_view > 4.5) {
+      // (5: the raw measures: R height over the dunes / 2 m, G facing up, B light over the dunes' / 2)
+      vec3 w = enh_pos + cam_trans.xyz;
+      vec2 g = w.xz / 32768.0;
+      ivec2 i0 = clamp(ivec2(floor(g)), ivec2(0), ivec2(510));
+      vec2 fr = g - vec2(i0);
+      float h = mix(mix(texelFetch(tex_T19, i0, 0).r, texelFetch(tex_T19, i0 + ivec2(1, 0), 0).r, fr.x),
+                    mix(texelFetch(tex_T19, i0 + ivec2(0, 1), 0).r, texelFetch(tex_T19, i0 + ivec2(1, 1), 0).r, fr.x), fr.y);
+      float above = (w.y - h) / 4096.0;
+      float lit = 0.5 * dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) / max(enh_ground_light, 0.02);
+      color.rgb = 0.5 * vec3(clamp(above / 2.0, 0.0, 1.0), abs(normalize(fn).y), clamp(lit / 2.0, 0.0, 1.0));
+    } else if (dbg_view > 3.5) {
+      // (4: the weight's three factors: R on the dunes, G facing up, B lit as them; white = sand)
+      color.rgb = 0.5 * (length(fn) > 0.0 ? enh_on_sand_parts(normalize(fn)) : vec3(0.0));
+    } else if (dbg_view > 2.5) {
       // (3: its baked light over the dunes', grey: 0.5 = the same)
       color.rgb = vec3(0.25 * dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11)) / max(enh_ground_light, 0.02), g_t0_luma, 0.0);  // (R 0.5 = as lit as the dunes, G its texture)
     }
@@ -322,6 +359,23 @@ void main() {
 
   if (color.a < alpha_min || color.a > alpha_max) {
     discard;
+  }
+  // (sand painted over the ground, blended: its coverage blends its normal and tag over what's
+  // under it, EnhancedMaterials.h's enh_blended 2; the rest of the blended draws write none)
+  if (enh_blended == 2) {
+    enh_normal_out.a = tune_sand_cover.y > 0.0 ? smoothstep(tune_sand_cover.x, tune_sand_cover.y, color.a) : 0.0;
+  }
+  if (tune_rock_on_sand > 8.5 && enh_blended == 2) {
+    color = vec4(vec3(0.5 * color.a), 1.0);  // (9: that sand's alpha, grey 0.5 = 1, over black)
+  } else if (tune_rock_on_sand > 8.5) {
+    discard;
+  } else if (tune_rock_on_sand > 7.5) {
+    // (8: the blended draws only, by class: sand yellow, rock red, rocky ground orange, the rest blue)
+    if (enh_blended == 0) {
+      discard;
+    }
+    color.rgb = enh_material == 3 ? vec3(0.5, 0.5, 0.0) : enh_material == 4 ? vec3(0.5, 0.0, 0.0)
+              : enh_material == 5 ? vec3(0.5, 0.25, 0.0) : vec3(0.0, 0.1, 0.5);
   }
 
   color.rgb = mix(color.rgb, fog_color.rgb, clamp(fogginess * fog_color.a, 0, 1));
