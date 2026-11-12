@@ -15,6 +15,9 @@ uniform int decal;
 // (game units, 0 = still); in the tree's own space, more the higher up its first 2 m
 uniform vec4 enh_tie_flutter;
 uniform float enh_tie_time;
+// Enhanced: the leaves swing from the trunk's axis (Tie3::render_tree_wind): xy the wind's
+// direction in the tree's own xz (game units per meter), z meters per meter of reach (0 = none)
+uniform vec4 enh_tie_frond;
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -25,9 +28,20 @@ void main() {
   if (enh_tie_flutter.w > 0.0) {
     float t = enh_tie_time;
     vec2 wp = enh_tie_flutter.xz + position_in.xz / 4096.0;
-    float f = clamp(position_in.y / 8192.0, 0.0, 1.0) * enh_tie_flutter.w;
+    // (m from the trunk's axis: a palm's crown has its origin up where the fronds grow, so the
+    // fronds hang below it)
+    float r = length(position_in.xz) / 4096.0;
+    float f = clamp(max(position_in.y / 4096.0, r) * 0.5, 0.0, 1.0) * enh_tie_flutter.w;
     p += vec3(sin(t * 6.1 + wp.x * 1.7 + wp.y * 1.3), sin(t * 7.3 + wp.x * 1.1 - wp.y * 1.9) * 0.6,
               sin(t * 5.3 - wp.x * 1.4 + wp.y * 1.6)) * f;
+    if (enh_tie_frond.z > 0.0) {
+      // as tfrag3.vert's leaves: pushed downwind and bobbing, the farther out the more
+      float ph = wp.x * 0.37 + wp.y * 0.29;
+      float push = sin(t * 1.7 + ph) * 0.5 + sin(t * 2.9 + ph * 1.7) * 0.3 + 0.35;
+      float bob = sin(t * 2.3 + ph * 1.3) * 0.6 + sin(t * 3.7 - ph) * 0.4;
+      p.xz += enh_tie_frond.xy * push * r * enh_tie_frond.z;
+      p.y += bob * 0.6 * r * enh_tie_frond.z * 4096.0;
+    }
   }
   vec4 transformed = -camera[3];
   transformed -= camera[0] * p.x;

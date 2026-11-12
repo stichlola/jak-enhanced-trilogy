@@ -6,6 +6,7 @@
 #include "game/graphics/opengl_renderer/EnhancedPost.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedMaterials.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedTieWind.h"
 #include "game/graphics/opengl_renderer/dma_helpers.h"
 
 #include "third-party/imgui/imgui.h"
@@ -465,6 +466,19 @@ void TFragment::render_tree(int geom,
   g_enhanced_bg_level = m_level_name;
 
   first_tfrag_draw_setup(settings.camera, render_state, ShaderId::TFRAG3);
+  // Enhanced: tfrag trees in the wind too (Spargus' palms, Haven's trees: EnhancedTieWind), the
+  // same gusts as TIE's (the uniform is the program's, so set it here, not left from TIE)
+  {
+    static GLuint program = 0;
+    static GLint loc = -1;
+    const GLuint id = render_state->shaders[ShaderId::TFRAG3].id();
+    if (id != program) {
+      program = id;
+      loc = glGetUniformLocation(id, "enh_tie_wind");
+    }
+    glUniform4f(loc, enh_tie_wind_seconds(),
+                g_enhanced_wind.enabled ? g_enhanced_wind.now() : 0.f, 0.f, 0.f);
+  }
 
   glBindVertexArray(tree.vao);
   glBindBuffer(GL_ARRAY_BUFFER, tree.vertex_buffer);

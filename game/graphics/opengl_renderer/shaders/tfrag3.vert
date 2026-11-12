@@ -19,6 +19,10 @@ uniform int decal;
 uniform vec4 enh_tie_wind;
 // 0 = still (as the game), 1 = sway; >= 10 paints the weights (blue leaves, green trunks, by height)
 uniform float tune_tie_wind = 1.0;
+// the trunk's lean, m per meter of height and unit of wind (0.03 = the old, whole-tree lean)
+uniform float tune_tie_trunk = 0.0015;
+// a leaf's swing, m per meter of reach from its trunk and unit of wind (0 = the old: flutter only)
+uniform float tune_tie_frond = 0.02;
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -48,18 +52,32 @@ void main() {
   // flutter on top
   vec3 world = position_in;
   int sway = tod_sway.y;
-  float sway_h = float(sway & 0x7fff) * (12.0 / 32767.0);  // meters above the plant's foot
-  if (sway != 0 && tune_tie_wind > 0.0 && tune_tie_wind < 10.0) {
+  bool leaf = (sway & 0x8000) != 0;
+  // meters above the plant's foot; a leaf's reach: meters from its trunk (EnhancedTieWind.h)
+  float sway_h = leaf ? float((sway >> 8) & 0x7f) * 0.1 : float(sway & 0x7fff) * (12.0 / 32767.0);
+  float reach = leaf ? float(sway & 0xff) * 0.025 : 0.0;
+  // (>= 20: sway at tune_tie_wind - 19 and paint how far each vertex moves, red = 30 cm)
+  float tie_amp = tune_tie_wind >= 20.0 ? tune_tie_wind - 19.0 : tune_tie_wind;
+  if (sway != 0 && tie_amp > 0.0 && (tune_tie_wind < 10.0 || tune_tie_wind >= 20.0)) {
     float t = enh_tie_wind.x;
     vec2 wp = position_in.xz / 4096.0;
     float gust = sin(t * 1.3 + wp.x * 0.11 + wp.y * 0.07) * 0.6 +
                  sin(t * 2.1 + wp.x * 0.05 - wp.y * 0.13) * 0.4;
-    // m: 3 cm per meter of height, as the game's wind ties (Tie3::render_tree_wind) lean
-    float bend = 0.03 * sway_h;
-    float k = tune_tie_wind * enh_tie_wind.y * 4096.0;
-    world.xz += vec2(0.8, 0.6) * (gust * 0.7 + 0.3) * bend * k;
-    if ((sway & 0x8000) != 0) {
-      float f = min(sway_h * 0.5, 1.0) * 0.035 * k;  // up to 3.5 cm
+    float k = tie_amp * enh_tie_wind.y * 4096.0;
+    // the trunk barely leans (tune_tie_trunk m per meter of height: 1 cm at 10 m in a calm, ~5 in a
+    // sandstorm), its leaves with it so nothing tears
+    world.xz += vec2(0.8, 0.6) * (gust * 0.7 + 0.3) * tune_tie_trunk * sway_h * k;
+    if (leaf) {
+      // the fronds swing from where they grow (tune_tie_frond m per meter of reach): pushed
+      // downwind and bobbing, each plant a little out of step, the tips most
+      float ph = wp.x * 0.37 + wp.y * 0.29;
+      float push = sin(t * 1.7 + ph) * 0.5 + sin(t * 2.9 + ph * 1.7) * 0.3 + 0.35;
+      float bob = sin(t * 2.3 + ph * 1.3) * 0.6 + sin(t * 3.7 - ph) * 0.4;
+      float r = reach * tune_tie_frond * k;
+      world.xz += vec2(0.8, 0.6) * push * r;
+      world.y += bob * 0.6 * r;
+      // and a flutter on top, up to 3.5 cm
+      float f = min(reach * 0.5, 1.0) * 0.035 * k;
       world += vec3(sin(t * 6.1 + wp.x * 1.7 + wp.y * 1.3), sin(t * 7.3 + wp.x * 1.1 - wp.y * 1.9) * 0.6,
                     sin(t * 5.3 - wp.x * 1.4 + wp.y * 1.6)) * f;
     }
@@ -90,10 +108,16 @@ void main() {
     // tfrag/tie always use TCC=RGB, so even with decal, alpha comes from fragment.
     fragment_color.xyz = vec3(1.0, 1.0, 1.0);
   }
-  if (tune_tie_wind >= 10.0) {
+  if (tune_tie_wind >= 20.0) {
+    float moved = length(world - position_in) / (0.3 * 4096.0);
+    fragment_color.xyz = sway == 0 ? fragment_color.xyz * 0.3
+                                   : vec3(min(moved, 1.0) * 2.0, leaf ? 0.15 : 0.5, 0.0);
+  } else if (tune_tie_wind >= 10.0) {
+    // (leaves blue by their reach, 0..4 m; trunks green by height)
     float hw = 0.15 + 0.85 * sway_h / 12.0;
     fragment_color.xyz = sway == 0 ? fragment_color.xyz * 0.3
-                                   : ((sway & 0x8000) != 0 ? vec3(0.0, 0.0, 2.0 * hw) : vec3(0.0, hw, 0.0));
+                                   : (leaf ? vec3(0.0, 0.0, 0.3 + 1.7 * min(reach / 4.0, 1.0))
+                                           : vec3(0.0, hw, 0.0));
   }
 
   tex_coord = tex_coord_in;

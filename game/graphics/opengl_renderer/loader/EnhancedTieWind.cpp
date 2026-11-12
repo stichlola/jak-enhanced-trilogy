@@ -1,6 +1,7 @@
 #include "EnhancedTieWind.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <set>
@@ -39,8 +40,14 @@ Kind texture_kind(const tfrag3::Texture& tex) {
   const bool plant = has_any(name, {"leaf", "leaves", "tree", "palm", "fern", "bush", "frond",
                                     "branch", "foliage", "vine", "plant", "ivy", "hedge",
                                     "shrub", "flower", "weed", "reed", "bamboo", "twig"});
-  const bool trunk = has_any(name, {"trunk", "bark", "tree", "palm"});
-  if (!plant && !trunk) {
+  // the trunk proper stays nearly still; a tree's or palm's other solid parts (a palm's crown and
+  // frond stems: des-palm-top) swing with the leaves they hold, or the leaves tear off them
+  const bool trunk = has_any(name, {"trunk", "bark", "root", "stump"});
+  const bool tree_part = has_any(name, {"tree", "palm"});
+  if (trunk) {
+    return kTrunk;
+  }
+  if (!plant) {
     return kNone;
   }
   bool holes = false;
@@ -50,20 +57,81 @@ Kind texture_kind(const tfrag3::Texture& tex) {
       break;
     }
   }
-  if (plant && holes) {
-    return kLeaf;
-  }
-  return trunk ? kTrunk : kNone;
+  return holes || tree_part ? kLeaf : kNone;
 }
 
 u64 cell_key(int x, int z) {
   return ((u64)(u32)x << 32) | (u32)z;
 }
 
+u64 cell_key3(int x, int y, int z) {
+  return ((u64)(x & 0x1fffff) << 42) | ((u64)(y & 0x1fffff) << 21) | (u64)(z & 0x1fffff);
+}
+
+// the trunks' points (one per 0.5 m), hashed in 2 m cells: how far a leaf is from its plant's trunk
+struct TrunkPoints {
+  static constexpr float kFine = 0.5f * kMeter;
+  static constexpr float kCoarse = 2.f * kMeter;
+  std::unordered_map<u64, std::vector<math::Vector3f>> cells;
+
+  void add(const tfrag3::PreloadedVertex& v, std::set<u64>& fine) {
+    if (!fine.insert(cell_key3((int)std::floor(v.x / kFine), (int)std::floor(v.y / kFine),
+                               (int)std::floor(v.z / kFine)))
+             .second) {
+      return;
+    }
+    cells[cell_key3((int)std::floor(v.x / kCoarse), (int)std::floor(v.y / kCoarse),
+                    (int)std::floor(v.z / kCoarse))]
+        .push_back(math::Vector3f(v.x, v.y, v.z));
+  }
+
+  // meters to the nearest trunk point, up to ~6 m (INFINITY: none)
+  float nearest(const tfrag3::PreloadedVertex& v) const {
+    if (cells.empty()) {
+      return INFINITY;
+    }
+    const int cx = (int)std::floor(v.x / kCoarse), cy = (int)std::floor(v.y / kCoarse),
+              cz = (int)std::floor(v.z / kCoarse);
+    float best = INFINITY;
+    // growing shells: once the best is within the shell's sure radius, nothing farther can win
+    for (int r = 1; r <= 3; r++) {
+      for (int dx = -r; dx <= r; dx++) {
+        for (int dy = -r; dy <= r; dy++) {
+          for (int dz = -r; dz <= r; dz++) {
+            if (std::max(std::abs(dx), std::max(std::abs(dy), std::abs(dz))) != r && r > 1) {
+              continue;  // (inner cells already seen)
+            }
+            auto it = cells.find(cell_key3(cx + dx, cy + dy, cz + dz));
+            if (it == cells.end()) {
+              continue;
+            }
+            for (const auto& p : it->second) {
+              const float ex = p.x() - v.x, ey = p.y() - v.y, ez = p.z() - v.z;
+              best = std::min(best, ex * ex + ey * ey + ez * ez);
+            }
+          }
+        }
+      }
+      if (best <= (float)(r * r) * kCoarse * kCoarse) {
+        break;
+      }
+    }
+    return std::sqrt(best) / kMeter;
+  }
+};
+
 }  // namespace
 
 bool enhanced_tie_wind_is_leaf(const tfrag3::Texture& tex) {
-  return texture_kind(tex) == kLeaf;
+  if (texture_kind(tex) == kLeaf) {
+    return true;
+  }
+  // a wind tie's leaves may be solid cards (Spargus' palms: wascity-palm-leaf-worn)
+  std::string name = tex.debug_name;
+  std::transform(name.begin(), name.end(), name.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return texture_kind(tex) != kNone && has_any(name, {"leaf", "leaves", "frond", "foliage"}) &&
+         !has_any(name, {"trunk", "bark", "root"});
 }
 
 void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
@@ -74,29 +142,16 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
   }
 
   int draws[3] = {}, verts[3] = {};
+  double reach_sum = 0.;
+  int tfrag_trees = 0;
+  const auto t0 = std::chrono::steady_clock::now();
   std::set<std::string> logged;
-  for (auto& geo : level.tie_trees) {
-    for (auto& tree : geo) {
-      auto& vs = tree.unpacked.vertices;
-      const auto& is = tree.unpacked.indices;
-      const auto& sd = tree.static_draws;
+  // one tree of static geometry (TIE, or tfrag: Spargus' palms and Haven's trees are tfrag)
+  auto weigh = [&](std::vector<tfrag3::PreloadedVertex>& vs, const std::vector<u32>& is,
+                   const std::vector<tfrag3::StripDraw>& sd, const char* what) {
       // each vertex's kind (a leaf wins over a trunk), from the draws that use it
       std::vector<u8> vkind(vs.size(), kNone);
       bool any = false;
-      if (log_names && !tree.wind_instance_info.empty()) {
-        std::set<std::string> wind_tex;
-        for (const auto& wd : tree.instanced_wind_draws) {
-          if (wd.tree_tex_id >= 0 && wd.tree_tex_id < (int)level.textures.size()) {
-            wind_tex.insert(level.textures[wd.tree_tex_id].debug_name);
-          }
-        }
-        std::string all;
-        for (const auto& t : wind_tex) {
-          all += t + " ";
-        }
-        lg::info("[enhanced] tie wind {}: game wind {} instances, {} draws: {}", name,
-                 tree.wind_instance_info.size(), tree.instanced_wind_draws.size(), all);
-      }
       for (size_t d = 0; d < sd.size(); d++) {
         const int tex = sd[d].tree_tex_id;
         const Kind k = tex >= 0 && tex < (int)kinds.size() ? (Kind)kinds[tex] : kNone;
@@ -104,7 +159,12 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
             (k != kNone || sd[d].mode.get_at_enable())) {
           const auto& tn = level.textures[tex].debug_name;
           if (logged.insert(tn).second) {
-            lg::info("[enhanced] tie wind {}: {} kind {}", name, tn, (int)k);
+            // (with a spot to go and look at it: the draw's first vertex, in meters)
+            const size_t fi = sd[d].unpacked.idx_of_first_idx_in_full_buffer;
+            const u32 v0 = fi < is.size() && is[fi] < vs.size() ? is[fi] : 0;
+            lg::info("[enhanced] tie wind {}: {} {} kind {} at {:.0f} {:.0f} {:.0f}", name, what, tn, (int)k,
+                     vs.empty() ? 0.f : vs[v0].x / kMeter, vs.empty() ? 0.f : vs[v0].y / kMeter,
+                     vs.empty() ? 0.f : vs[v0].z / kMeter);
           }
         }
         if (k == kNone) {
@@ -123,7 +183,10 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
         }
       }
       if (!any) {
-        continue;
+        return;
+      }
+      if (what[1] == 'f') {
+        tfrag_trees++;
       }
       // the lowest swaying vertex of each cell, then of each cell's neighbourhood: the plants' feet
       std::unordered_map<u64, float> low;
@@ -158,6 +221,15 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
         foot.emplace(key, f);
         return f;
       };
+      TrunkPoints trunks;
+      {
+        std::set<u64> fine;
+        for (size_t v = 0; v < vs.size(); v++) {
+          if (vkind[v] == kTrunk) {
+            trunks.add(vs[v], fine);
+          }
+        }
+      }
       for (size_t v = 0; v < vs.size(); v++) {
         if (vkind[v] == kNone) {
           continue;
@@ -181,8 +253,47 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
         }
         const float base = (f00 * (1 - tx) + f10 * tx) * (1 - tz) + (f01 * (1 - tx) + f11 * tx) * tz;
         const float h = std::clamp((vs[v].y - base) / (kEnhTieSwayMaxM * kMeter), 0.f, 1.f);
-        vs[v].enh_sway = (u16)std::lround(h * 32767.f) | (vkind[v] == kLeaf ? 0x8000 : 0);
+        if (vkind[v] != kLeaf) {
+          vs[v].enh_sway = (u16)std::lround(h * 32767.f);
+          continue;
+        }
+        // a leaf: its height (dm) and its reach, from the trunk or, with none near, from the ground
+        const float h_m = h * kEnhTieSwayMaxM;
+        // (with no trunk: a bush, or a planter's or a wall's hanging leaves, whose foot is their
+        // lowest tip: at most kBushReachM, so they don't swing like palm fronds)
+        constexpr float kBushReachM = 1.5f;
+        const float trunk = trunks.nearest(vs[v]);
+        const float reach = std::isfinite(trunk) ? std::min(trunk, h_m) : std::min(h_m, kBushReachM);
+        const int hd = std::clamp((int)std::lround(h_m * 10.f), 0, 127);
+        const int rq = std::clamp((int)std::lround(reach / kEnhTieReachStepM), 0, 255);
+        reach_sum += reach;
+        vs[v].enh_sway = (u16)(0x8000 | (hd << 8) | rq);
       }
+  };
+  for (auto& geo : level.tie_trees) {
+    for (auto& tree : geo) {
+      if (log_names && !tree.wind_instance_info.empty()) {
+        std::set<std::string> wind_tex;
+        for (const auto& wd : tree.instanced_wind_draws) {
+          if (wd.tree_tex_id >= 0 && wd.tree_tex_id < (int)level.textures.size()) {
+            wind_tex.insert(level.textures[wd.tree_tex_id].debug_name);
+          }
+        }
+        std::string all;
+        for (const auto& t : wind_tex) {
+          all += t + " ";
+        }
+        const auto& m0 = tree.wind_instance_info[0].matrix[3];
+        lg::info("[enhanced] tie wind {}: game wind {} instances (first at {:.0f} {:.0f} {:.0f}), {} draws: {}",
+                 name, tree.wind_instance_info.size(), m0.x() / kMeter, m0.y() / kMeter,
+                 m0.z() / kMeter, tree.instanced_wind_draws.size(), all);
+      }
+      weigh(tree.unpacked.vertices, tree.unpacked.indices, tree.static_draws, "tie");
+    }
+  }
+  for (auto& geo : level.tfrag_trees) {
+    for (auto& tree : geo) {
+      weigh(tree.unpacked.vertices, tree.unpacked.indices, tree.draws, "tfrag");
     }
   }
   if (log_names) {
@@ -201,7 +312,11 @@ void enhanced_tie_wind_weights(tfrag3::Level& level, const std::string& name) {
     lg::info("[enhanced] tie wind {}: shrubs: {}", name, all);
   }
   if (draws[kTrunk] + draws[kLeaf] > 0) {
-    lg::info("[enhanced] tie wind {}: {} leaf draws ({} verts), {} trunk draws ({} verts)", name,
-             draws[kLeaf], verts[kLeaf], draws[kTrunk], verts[kTrunk]);
+    lg::info(
+        "[enhanced] tie wind {}: {} leaf draws ({} verts, mean reach {:.2f} m), {} trunk draws ({} "
+        "verts), {} of them tfrag trees, {:.0f} ms",
+        name, draws[kLeaf], verts[kLeaf], verts[kLeaf] ? reach_sum / verts[kLeaf] : 0.,
+        draws[kTrunk], verts[kTrunk], tfrag_trees,
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
   }
 }
