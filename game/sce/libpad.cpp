@@ -1,9 +1,17 @@
 #include "libpad.h"
 
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+
+#include "common/log/log.h"
 #include "common/util/Assert.h"
 
 #include "game/graphics/display.h"
+#include "game/graphics/enhanced_state.h"
 #include "game/graphics/gfx.h"
+#include "game/graphics/opengl_renderer/EnhancedPost.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/kernel/common/kernel_types.h"
 #include "game/system/hid/input_bindings.h"
 
@@ -57,6 +65,157 @@ int scePadInfoMode(int /*port*/, int /*slot*/, int term, int offs) {
   return 0;
 }
 
+// Enhanced test switch: pad 0 driven from the tuning file, for automated runs that really travel
+// (drive across the desert, walk into a district) instead of teleporting, so levels stream in as in
+// play. Unset keys: the real pad, untouched.
+//   debug.pad = [left x, left y, right x, right y, buttons]: sticks -1..1 (left y -1 = forward),
+//     buttons a PadData::ButtonIndex bit mask (CROSS 16384, TRIANGLE 4096, SQUARE 32768...), their
+//     pressure full (the cars' throttle is the X button's pressure)
+//   debug.route = [x0, z0, x1, z1, ...] (meters): the left stick steers Jak toward each point in
+//     turn, from the camera's view (on foot the stick is camera-relative; in a car the camera sits
+//     behind it); debug.pad's buttons are held meanwhile (X = gas). Reached within
+//     debug.route_reach m; after the last point the stick is let go. debug.route_mode 0 on foot
+//     (stuck for 1.5 s: a jump), 1 vehicle (steering only). Each point reached and each stuck second
+//     goes to the log ("[enhanced] route ...")
+namespace {
+struct TestPad {
+  bool on = false;
+  int lx = 127, ly = 127, rx = 127, ry = 127;
+  u32 buttons = 0;
+};
+
+TestPad enhanced_test_pad() {
+  static const EnhancedTune t_pad("debug.pad", {0.f, 0.f, 0.f, 0.f, 0.f});
+  // (a key holds as many values as its built-in list: room for 24 points, unused ones -1e9)
+  static const EnhancedTune t_route(
+      "debug.route", {-1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f,
+                      -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f,
+                      -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f,
+                      -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f,
+                      -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f, -1e9f});
+  static const EnhancedTune t_reach("debug.route_reach", 10.f);
+  static const EnhancedTune t_mode("debug.route_mode", 0.f);
+  TestPad out;
+  const auto stick = [](float v) { return std::clamp((int)std::lround(127.5f + 127.5f * v), 0, 255); };
+  if (t_pad.is_set() && t_pad.size() >= 4) {
+    out.on = true;
+    out.lx = stick(t_pad[0]);
+    out.ly = stick(t_pad[1]);
+    out.rx = stick(t_pad[2]);
+    out.ry = stick(t_pad[3]);
+    out.buttons = t_pad.size() >= 5 ? (u32)std::max(0.f, (float)t_pad[4]) : 0u;
+  }
+  using clock = std::chrono::steady_clock;
+  static int next = 0;
+  static std::vector<float> asked;
+  static clock::time_point last_move = clock::now(), last_log = clock::now(), jump_until{};
+  static float last_pos[2] = {0.f, 0.f};
+  if (!t_route.is_set() || t_route.size() < 2) {
+    asked.clear();
+    return out;
+  }
+  std::vector<float> now_route;
+  for (int i = 0; i + 1 < t_route.size() && t_route[i] > -1e8f && t_route[i + 1] > -1e8f; i += 2) {
+    now_route.push_back(t_route[i]);
+    now_route.push_back(t_route[i + 1]);
+  }
+  if (now_route.empty()) {
+    asked.clear();
+    return out;
+  }
+  if (now_route != asked) {
+    asked = now_route;
+    next = 0;
+    last_move = clock::now();
+    lg::info("[enhanced] route of {} points, mode {}", (int)asked.size() / 2, (int)t_mode);
+  }
+  out.on = true;
+  const auto& pl = g_enhanced_player;
+  const auto& cam = g_enhanced_camera;
+  // (the camera as the renderer last saw it: its valid flag only lasts within a frame)
+  const bool cam_seen = cam.trans[0] != 0.f || cam.trans[1] != 0.f || cam.trans[2] != 0.f;
+  if (!pl.valid || !cam_seen || next >= (int)asked.size() / 2) {
+    out.lx = out.ly = 127;
+    return out;
+  }
+  const float m = 4096.f;
+  const float px = pl.pos[0] / m, pz = pl.pos[2] / m;
+  float dx = asked[next * 2] - px, dz = asked[next * 2 + 1] - pz;
+  const auto t = clock::now();
+  if (std::sqrt(dx * dx + dz * dz) < (float)t_reach) {
+    lg::info("[enhanced] route point {} reached at {:.0f} {:.0f} m", next, px, pz);
+    next++;
+    if (next >= (int)asked.size() / 2) {
+      lg::info("[enhanced] route done");
+      out.lx = out.ly = 127;
+      return out;
+    }
+    dx = asked[next * 2] - px;
+    dz = asked[next * 2 + 1] - pz;
+  }
+  // the camera's forward on the ground: from it to Jak; its right: the view's x axis
+  float fx = pl.pos[0] - cam.trans[0], fz = pl.pos[2] - cam.trans[2];
+  const float fl = std::sqrt(fx * fx + fz * fz);
+  if (fl < 1.f) {
+    fx = cam.rot[0][2];
+    fz = cam.rot[2][2];
+  } else {
+    fx /= fl;
+    fz /= fl;
+  }
+  // (the view's x axis points to the screen's left in the game's handedness: a first run steered
+  // the car away from its point; debug.route_flip 1: the other side)
+  static const EnhancedTune t_flip("debug.route_flip", 0.f);
+  const float rs = (float)t_flip > 0.5f ? 1.f : -1.f;
+  const float rgx = rs * cam.rot[0][0], rgz = rs * cam.rot[2][0];
+  const float dl = std::max(std::sqrt(dx * dx + dz * dz), 1e-3f);
+  const float ux = dx / dl, uz = dz / dl;
+  float err = std::atan2(ux * rgx + uz * rgz, ux * fx + uz * fz);  // + = to the right
+  // stuck (no meter in 1.5 s): a way round, 1.5 s at a time, sides taken in turn: on foot 70 deg
+  // off (with a jump), a vehicle backs up (Square, the brake, reverses) steering the other way
+  static clock::time_point detour_until{};
+  static float detour_side = 1.f;
+  const double still_s = std::chrono::duration<double>(t - last_move).count();
+  if (still_s > 1.5 && t > detour_until + std::chrono::milliseconds(500)) {
+    detour_until = t + std::chrono::milliseconds(1500);
+    detour_side = -detour_side;
+  }
+  const bool detour = t < detour_until;
+  if (detour && (int)t_mode == 1) {
+    out.buttons = (out.buttons & ~(1u << PadData::CROSS)) | (1u << PadData::SQUARE);
+    err = -detour_side * 1.f;
+  } else if (detour) {
+    err += detour_side * 1.22f;
+  }
+  if ((int)t_mode == 1) {
+    out.lx = stick(std::clamp(err / 0.5f, -1.f, 1.f));
+    out.ly = 127;
+  } else {
+    out.lx = stick(std::sin(err));
+    out.ly = stick(-std::cos(err));
+  }
+  const float moved = std::hypot(px - last_pos[0], pz - last_pos[1]);
+  if (moved > 1.f) {
+    last_move = t;
+    last_pos[0] = px;
+    last_pos[1] = pz;
+  }
+  const double still = std::chrono::duration<double>(t - last_move).count();
+  if ((int)t_mode == 0 && still > 1.5 && t > jump_until + std::chrono::milliseconds(700)) {
+    jump_until = t + std::chrono::milliseconds(250);
+  }
+  if (t < jump_until) {
+    out.buttons |= 1u << PadData::CROSS;
+  }
+  if (std::chrono::duration<double>(t - last_log).count() >= 1.0) {
+    last_log = t;
+    lg::info("[enhanced] route to {} at {:.0f} {:.0f} m, {:.0f} m off, turn {:.0f} deg{}", next, px,
+             pz, dl, err * 57.2958f, still > 1.5 ? ", stuck" : "");
+  }
+  return out;
+}
+}  // namespace
+
 // reads controller data and writes it to a buffer in rdata (must be at least 32 bytes large).
 // returns buffer size (32) or 0 on error.
 int scePadRead(int port, int /*slot*/, u8* rdata) {
@@ -91,6 +250,25 @@ int scePadRead(int port, int /*slot*/, u8* rdata) {
     cpad->button0 = 0;
     for (size_t i = 0; i < pad_data.value()->button_data.size(); i++) {
       cpad->button0 |= pad_data.value()->button_data.at(i) << i;
+    }
+  }
+
+  if (port == 0) {
+    const TestPad tp = enhanced_test_pad();
+    if (tp.on) {
+      cpad->leftx = (u8)tp.lx;
+      cpad->lefty = (u8)tp.ly;
+      cpad->rightx = (u8)tp.rx;
+      cpad->righty = (u8)tp.ry;
+      cpad->button0 = (u16)tp.buttons;
+      // (PadData::PressureIndex order: right left up down triangle circle cross square l1 r1 l2 r2)
+      static const int kPressureButton[12] = {
+          PadData::DPAD_RIGHT, PadData::DPAD_LEFT, PadData::DPAD_UP, PadData::DPAD_DOWN,
+          PadData::TRIANGLE,   PadData::CIRCLE,    PadData::CROSS,   PadData::SQUARE,
+          PadData::L1,         PadData::R1,        PadData::L2,      PadData::R2};
+      for (int i = 0; i < 12; i++) {
+        cpad->abutton[i] = (tp.buttons >> kPressureButton[i]) & 1 ? 255 : 0;
+      }
     }
   }
 

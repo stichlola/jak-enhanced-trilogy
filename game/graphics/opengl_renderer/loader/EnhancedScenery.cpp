@@ -2543,6 +2543,10 @@ void enhanced_draw_placed(const tfrag3::ShrubTree& tree,
   if (p.drawn_frame == 0 ||
       render_state->frame_idx > p.drawn_frame + (u64)std::max((float)k_fade_gap, 2.f)) {
     p.fade_from = render_state->frame_idx;
+    if (k_fade_in > 0.f) {
+      lg::info("[enhanced] placed objects fade in ({} frames away)",
+               p.drawn_frame == 0 ? 0 : render_state->frame_idx - p.drawn_frame);
+    }
   }
   const float fade_in =
       k_fade_in > 0.f
