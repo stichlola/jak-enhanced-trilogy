@@ -264,12 +264,13 @@ std::array<math::Vector4f, 4> make_new_cam_mat(const math::Vector4f cam_T_w[4],
 
 std::string g_enhanced_bg_level;
 
-// Enhanced (off by default: suspected of smearing levels while they load): a level that starts
-// being drawn (just loaded, or shown again after a gap) fades in
-// over bg.fade_in seconds, dithered, instead of popping in whole (0: off). Every displayed level
-// sends its trees each frame whatever the camera sees, so turning round doesn't restart it.
-// (counted in frames, at 60 a second: a loading hitch of 0.4 s between two frames restarted a
-// fade by the clock, and a long first frame would skip it)
+// Enhanced: a level that starts being drawn (just loaded, or shown again after a gap of more than
+// bg.fade_gap frames) fades in over bg.fade_in seconds, dithered, instead of popping in whole
+// (0: off). Every displayed level sends its trees each frame whatever the camera sees, so turning
+// round doesn't restart it. (counted in frames, at 60 a second: a loading hitch of 0.4 s between
+// two frames restarted a fade by the clock, and a long first frame would skip it.) It was off for
+// a while, suspected of the streaky far side while Haven loads; a gap of 2 frames restarted it
+// whenever a level skipped a few frames, so now only a real absence (half a second) restarts it.
 namespace {
 struct FadeSeen {
   u64 first = 0, last = 0;
@@ -282,12 +283,13 @@ std::unordered_map<std::string, FadeSeen>& fade_seen() {
 }  // namespace
 
 static float enhanced_level_fade_in(const std::string& name, u64 frame) {
-  static const EnhancedTune t_fade("bg.fade_in", 0.f);
+  static const EnhancedTune t_fade("bg.fade_in", 0.4f);
+  static const EnhancedTune t_gap("bg.fade_gap", 30.f);
   if (name.empty() || t_fade <= 0.f) {
     return 1.f;
   }
   auto& s = fade_seen()[name];
-  if (!s.any || frame > s.last + 2) {
+  if (!s.any || frame > s.last + (u64)std::max((float)t_gap, 2.f)) {
     s.first = frame;
     s.any = true;
     lg::info("[enhanced] level {} fades in", name);
@@ -301,14 +303,16 @@ static float enhanced_level_fade_in(const std::string& name, u64 frame) {
 // background hasn't been drawn (common, Jak's own models) is shown whole. The level's background
 // buckets come before its merc in the frame, so a restart is already counted here.
 float enhanced_level_fade_peek(const std::string& name, u64 frame) {
-  static const EnhancedTune t_fade("bg.fade_in", 0.f);
-  static const EnhancedTune t_fg("fg.fade_in", 0.f);
+  static const EnhancedTune t_fade("bg.fade_in", 0.4f);
+  static const EnhancedTune t_fg("fg.fade_in", 1.f);
+  static const EnhancedTune t_gap("bg.fade_gap", 30.f);
   if (name.empty() || t_fade <= 0.f || t_fg <= 0.f) {
     return 1.f;
   }
   auto& seen = fade_seen();
   auto it = seen.find(name);
-  if (it == seen.end() || !it->second.any || frame > it->second.last + 2) {
+  if (it == seen.end() || !it->second.any ||
+      frame > it->second.last + (u64)std::max((float)t_gap, 2.f)) {
     return 1.f;
   }
   return std::clamp(float(frame - it->second.first) / (t_fade * 60.f), 0.f, 1.f);
@@ -348,9 +352,18 @@ void first_tfrag_draw_setup(const GoalBackgroundCameraData& settings,
   glUniform1i(glGetUniformLocation(id, "decal"), false);
   glUniform1f(glGetUniformLocation(id, "enh_parallax"), 0.f);  // Enhanced: per draw, off unless asked
   glUniform2f(glGetUniformLocation(id, "enh_notile"), 0.f, 0.f);
+  // (the detailed scenery, its impostors and the grass fields drawn with a level's trees fade in
+  // with it: they popped in whole over the dithered ground; bg.fade_scenery 0 = only the game's)
+  static const EnhancedTune t_fade_scenery("bg.fade_scenery", 1.f);
   if (shader == ShaderId::TFRAG3 || shader == ShaderId::SHRUB) {
     glUniform1f(glGetUniformLocation(id, "enh_fade_in"),
                 enhanced_level_fade_in(g_enhanced_bg_level, render_state->frame_idx));
+  } else if (shader == ShaderId::SHRUB_INST || shader == ShaderId::SHRUB_IMP ||
+             shader == ShaderId::SHRUB_GRASS) {
+    glUniform1f(glGetUniformLocation(id, "enh_fade_in"),
+                t_fade_scenery > 0.f
+                    ? enhanced_level_fade_in(g_enhanced_bg_level, render_state->frame_idx)
+                    : 1.f);
   }
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glUniformMatrix4fv(glGetUniformLocation(id, "camera"), 1, GL_FALSE, settings.camera[0].data());

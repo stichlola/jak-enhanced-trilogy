@@ -36,13 +36,19 @@ float noise() {
   return fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
 }
 
+uniform float enh_fade_in = 1.0;  // the level just drawn, or the placed objects coming back: 0 -> 1
+
 void main() {
   enh_albedo_out = vec4(0.0);
+  ivec2 p = ivec2(gl_FragCoord.xy) & 3;
+  int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
+  float dither = fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
+  // (fading in with its level, on shrub.frag's dither: the same pixels as the level's own)
+  if (enh_fade_in < 1.0 && enh_fade_in <= dither) {
+    discard;
+  }
   // the game's proto takes over at the far end (its own dither: shrub.frag's)
   if (enh_lod.y > 0.0) {
-    ivec2 p = ivec2(gl_FragCoord.xy) & 3;
-    int m[16] = int[16](0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5);
-    float dither = fract((float(m[p.y * 4 + p.x]) + 0.5) / 16.0);
     if (smoothstep(enh_lod.x, enh_lod.y, length(enh_pos)) > dither) {
       discard;
     }
