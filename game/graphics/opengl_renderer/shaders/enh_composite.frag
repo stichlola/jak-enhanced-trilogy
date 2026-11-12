@@ -5207,40 +5207,55 @@ void composite_unused() {
       // picture), added back over the night sky below (light: replacing the pixel drew a dark box
       // around the beacon's glow). The cards are darker cut-outs, and a sharpness test lost the
       // beacon's even core: a hollow ring)
-      // (Weighed by the brightest such light within a few pixels, not by the pixel's own: per pixel,
-      // the searchlights' soft edges and their long fading tips were squared away (dc * w(dc)), the
+      // (Weighed by the brightest such light around, not by the pixel's own: per pixel, the
+      // searchlights' soft edges and their long fading tips were squared away (dc * w(dc)), the
       // beams flat hard-edged slabs cut off midway. Next to a bright core the faint light is kept
-      // as drawn; faint light alone (the game's rain streaks, card seams) is still let go.
-      // tune_sky_keep_night < 0: per pixel, as before)
-      if (z == 0.0 && tune_sky_keep_night != 0.0 && sky_copy > 0.0 && game_w > 0.0) {
+      // as drawn; faint light alone (the game's rain streaks, card seams) is still let go. "Around"
+      // is a share of the screen's height (two rings, 1.2% and 3.5%): a fixed 10 px was a few
+      // percent of a close beam, 100+ px wide at 2560x1600, and drew a box at the reach's edge)
+      // (And over the game's far cloud cards too, not only where its sky shows: the beams were cut
+      // clean where they crossed a card (smoothed away with it), slabs floating mid-air with hard
+      // ends at the cards' edges. A card is darker than the sky copy, so what is brighter than the
+      // sky there is light drawn over it)
+      // (tune_sky_keep_night < 0: per pixel and only over the open sky, as before)
+      if ((z == 0.0 || tune_sky_keep_night > 0.0) && tune_sky_keep_night != 0.0 && sky_copy > 0.0 &&
+          game_w > 0.0) {
         vec3 g0 = textureLod(tex_T0, uv, 0.0).rgb;
         vec3 s0 = textureLod(tex_T25, uv, 0.0).rgb;
+        vec2 hgt = vec2(texel.x / texel.y, 1.0);  // uv per screen height
         if (tune_sky_keep_night > 0.0 && luma(s0 - g0) > 0.02) {
           // (a light of the game's sky the level covered (its moon behind a cloud card): a beam
           // crossing it lost its light there, a dark disc in the beam. Against the sky around it)
           for (int i = 0; i < 4; i++) {
             vec2 q = uv + vec2(i == 0 ? 1.0 : i == 1 ? -1.0 : 0.0, i == 2 ? 1.0 : i == 3 ? -1.0 : 0.0) *
-                              28.0 * texel;
+                              0.039 * hgt;
             s0 = min(s0, textureLod(tex_T25, q, 0.0).rgb);
           }
         }
         vec3 dc = max(g0 - s0, 0.0);
-        float dm = max(dc.r, max(dc.g, dc.b));
-        if (tune_sky_keep_night > 0.0 && dm > 1e-4) {
-          const float kSkyKeepReach = 10.0;  // px: how far a core's weight carries
-          for (int i = 0; i < 8; i++) {
-            float a = float(i) * 0.7854;
-            vec2 q = uv + vec2(cos(a), sin(a)) * kSkyKeepReach * texel * (i % 2 == 0 ? 1.0 : 0.6);
-            if (textureLod(tex_T3, q, 0.0).r > 1e-7) {
-              continue;  // (not over the sky there: a lit wall isn't a light)
+        float d0 = max(dc.r, max(dc.g, dc.b));
+        float dm = d0;
+        if (tune_sky_keep_night > 0.0 && d0 > 0.004) {
+          const float kSkyKeepNear = 0.012;  // the rings, as a share of the screen's height
+          const float kSkyKeepFar = 0.035;
+          for (int i = 0; i < 16; i++) {
+            float a = float(i) * 0.7854 + (i < 8 ? 0.0 : 0.3927);
+            vec2 q = uv + vec2(cos(a), sin(a)) * (i < 8 ? kSkyKeepNear : kSkyKeepFar) * hgt;
+            float zq = view_z(textureLod(tex_T3, q, 0.0).r);
+            if (zq != 0.0 && zq < 2800.0 * 4096.0) {
+              continue;  // (not over the sky or a far card there: a lit wall isn't a light)
             }
             vec3 dq = max(textureLod(tex_T0, q, 0.0).rgb - textureLod(tex_T25, q, 0.0).rgb, 0.0);
-            dm = max(dm, max(dq.r, max(dq.g, dq.b)));
+            dm = max(dm, max(dq.r, max(dq.g, dq.b)) * (i < 8 ? 1.0 : 0.7));
           }
         }
-        sky_kept = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm) * clouds.x * game_w *
-                   abs(tune_sky_keep_night);
-        sky_light = dc * sky_kept;
+        float keep_w = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm) * clouds.x * game_w *
+                       abs(tune_sky_keep_night);
+        // (the stars dimmed behind the light itself, not over the whole reach: a dark band)
+        sky_kept = tune_sky_keep_night > 0.0 ? keep_w * smoothstep(tune_sky_night_lo, tune_sky_night_hi, d0)
+                                             : keep_w;
+        // (a far card only partly counted as sky keeps the rest of the game's pixel already)
+        sky_light = dc * keep_w * sky_k;
       }
       if (bolt.w > 0.0 && strike.w == 0.0) {
         bolt_light = d <= 1e-7 ? sky_lightning(ray, pixel_rad) : 0.0;
