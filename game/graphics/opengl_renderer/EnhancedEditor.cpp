@@ -28,6 +28,7 @@
 
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedNotes.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedTerrain.h"
@@ -6595,6 +6596,35 @@ void enhanced_editor_probe_hit(int id, float u) {
 }
 
 void enhanced_editor_camera(float* trans, float* rot) {
+  // (test: tuning debug.view = [x, y, z, yaw, pitch] (meters, degrees; yaw 0 looks along +z, 90
+  // along +x; pitch up) holds photo mode's camera there, for close shots of things out of the
+  // game camera's reach; with debug.photo 1)
+  static const EnhancedTune t_view("debug.view", {0.f, 0.f, 0.f, 0.f, 0.f});
+  if (t_view.is_set() && t_view.size() >= 5 && g_enhanced_menu.photo_active) {
+    const float yaw = t_view[3] * 0.0174533f, pitch = t_view[4] * 0.0174533f;
+    const V3 f = {std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
+    // (the game's handedness: the right axis as the incoming rows have it)
+    const V3 r0 = {rot[0], rot[1], rot[2]}, r1 = {rot[4], rot[5], rot[6]}, r2 = {rot[8], rot[9], rot[10]};
+    const float hand = dot(cross(r0, r1), r2) >= 0.f ? 1.f : -1.f;
+    V3 right = normalize(cross(V3{0, 1, 0}, f));
+    V3 up = normalize(cross(f, right));
+    if (up[1] < 0.f) {
+      up = up * -1.f;
+    }
+    if (dot(cross(right, up), f) * hand < 0.f) {
+      right = right * -1.f;
+    }
+    const V3 rows[3] = {right, up, f};
+    for (int r = 0; r < 3; r++) {
+      for (int k = 0; k < 3; k++) {
+        rot[r * 4 + k] = rows[r][k];
+      }
+    }
+    for (int k = 0; k < 3; k++) {
+      trans[k] = t_view[k] * 4096.f;
+    }
+    return;
+  }
   CamMoves m;
   {
     std::lock_guard<std::mutex> lock(g_cam_mutex);

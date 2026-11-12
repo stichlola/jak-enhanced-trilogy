@@ -683,6 +683,14 @@ void EnhancedPost::update_scene() {
     const float swell = 0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3);
     const float rough = std::max(m_storm, std::max(m_dust, 0.7f * m_rain));
     g_enhanced_wind.gust = std::clamp((m_wind_speed / 9.f + 1.4f * rough) * swell, 0.5f, 3.f);
+    // (one line per quarter of change: what the trees and grass sway at, EnhancedWind::now)
+    static float logged_gust = -1.f;
+    if (std::abs(g_enhanced_wind.gust - logged_gust) >= 0.25f) {
+      logged_gust = g_enhanced_wind.gust;
+      lg::info("[enhanced] wind now {:.2f} (gust {:.2f}, speed {:.1f}, rough {:.2f}) in {}",
+               g_enhanced_wind.now(), g_enhanced_wind.gust, m_wind_speed, rough,
+               level.empty() ? "none" : level);
+    }
   }
   const float wl =std::max(1e-3f, std::sqrt(m_wind[0] * m_wind[0] + m_wind[1] * m_wind[1]));
   // (wrapped now and then: a pop every few hours of the same wind)

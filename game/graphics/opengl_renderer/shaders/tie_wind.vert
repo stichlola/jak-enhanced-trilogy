@@ -18,6 +18,9 @@ uniform float enh_tie_time;
 // Enhanced: the leaves swing from the trunk's axis (Tie3::render_tree_wind): xy the wind's
 // direction in the tree's own xz (game units per meter), z meters per meter of reach (0 = none)
 uniform vec4 enh_tie_frond;
+// Enhanced: tune_tie_wind's paint (Tie3::render_tree_wind): x 1 weights, 2 how far each vertex
+// moves (0: none), y the trunk shear (m per m), z the origin's height over the foot (m), w 1 = leaves
+uniform vec4 enh_tie_paint;
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -35,8 +38,9 @@ void main() {
     p += vec3(sin(t * 6.1 + wp.x * 1.7 + wp.y * 1.3), sin(t * 7.3 + wp.x * 1.1 - wp.y * 1.9) * 0.6,
               sin(t * 5.3 - wp.x * 1.4 + wp.y * 1.6)) * f;
     if (enh_tie_frond.z > 0.0) {
-      // as tfrag3.vert's leaves: pushed downwind and bobbing, the farther out the more
-      float ph = wp.x * 0.37 + wp.y * 0.29;
+      // as tfrag3.vert's leaves: pushed downwind and bobbing, the farther out the more (one phase
+      // per tree, from its origin, so a frond doesn't stretch)
+      float ph = enh_tie_flutter.x * 0.37 + enh_tie_flutter.z * 0.29;
       float push = sin(t * 1.7 + ph) * 0.5 + sin(t * 2.9 + ph * 1.7) * 0.3 + 0.35;
       float bob = sin(t * 2.3 + ph * 1.3) * 0.6 + sin(t * 3.7 - ph) * 0.4;
       p.xz += enh_tie_frond.xy * push * r * enh_tie_frond.z;
@@ -78,6 +82,22 @@ void main() {
   if (decal == 1) {
     // tfrag/tie always use TCC=RGB, so even with decal, alpha comes from fragment.
     fragment_color.xyz = vec3(1.0, 1.0, 1.0);
+  }
+
+  if (enh_tie_paint.x > 0.5) {
+    // as tfrag3.vert's: >= 20 red by how far the vertex moves (30 cm), the trunk's lean included;
+    // 10..19 the weights, trunks green by height, leaves blue by their reach (0..4 m)
+    float y_m = position_in.y / 4096.0;
+    float lean = enh_tie_paint.y * (y_m + enh_tie_paint.z);
+    vec3 own = (p - position_in) / 4096.0;
+    float moved = sqrt(dot(own, own) + lean * lean) / 0.3;
+    bool leaf = enh_tie_paint.w > 0.5;
+    float r = length(position_in.xz) / 4096.0;
+    float h = clamp(y_m + enh_tie_paint.z, 0.0, 12.0);
+    fragment_color.xyz = enh_tie_paint.x > 1.5
+        ? vec3(min(moved, 1.0) * 2.0, leaf ? 0.15 : 0.5, 0.0)
+        : (leaf ? vec3(0.0, 0.0, 0.3 + 1.7 * min(r / 4.0, 1.0))
+                : vec3(0.0, 0.15 + 0.85 * h / 12.0, 0.0));
   }
 
   tex_coord = tex_coord_in;

@@ -201,6 +201,23 @@ void Tie3::load_from_fr3_data(const LevelData* loader_data) {
                              ? 1
                              : 0);
         }
+        // (JAK_ENHANCED_TIE_WIND_LOG: which wind draws flutter, per tree)
+        static const bool log_leaf = std::getenv("JAK_ENHANCED_TIE_WIND_LOG") != nullptr;
+        if (log_leaf) {
+          int n_leaf = 0;
+          std::string names;
+          for (size_t d = 0; d < leaf.size(); d++) {
+            n_leaf += leaf[d];
+            const int t = tree.instanced_wind_draws[d].tree_tex_id;
+            if (leaf[d] && t >= 0 && t < (int)lev_data->textures.size() &&
+                names.find(lev_data->textures[t].debug_name) == std::string::npos) {
+              names += lev_data->textures[t].debug_name + " ";
+            }
+          }
+          lg::info("[enhanced] tie wind {}: lod {} tree {}: wind_leaf {} of {} draws ({} instances): {}",
+                   lev_data->level_name, l_geo, l_tree, n_leaf, leaf.size(),
+                   tree.wind_instance_info.size(), names);
+        }
       }
 
       // set up per-proto visibility. Jak 2 needs to enable/disable individual protos.
@@ -968,8 +985,17 @@ void Tie3::render_tree_wind(int idx,
   // the trunk's lean and the leaves' swing, as tfrag3.vert's (same keys, same defaults)
   static const EnhancedTune k_tie_trunk("shaders.tune_tie_trunk", 0.0015f);
   static const EnhancedTune k_tie_frond("shaders.tune_tie_frond", 0.02f);
-  const float enh_k = k_tie_wind < 10.f && g_enhanced_wind.enabled ? k_tie_wind * g_enhanced_wind.now() : 0.f;
+  // (as tfrag3.vert: 10..19 paints the weights and holds still, >= 20 sways at tune_tie_wind - 19
+  // and paints how far each vertex moves)
+  const float tw = k_tie_wind;
+  const float enh_amp = tw >= 20.f ? tw - 19.f : (tw < 10.f ? tw : 0.f);
+  const int enh_paint = tw >= 20.f ? 2 : (tw >= 10.f ? 1 : 0);
+  const float enh_k = enh_amp > 0.f && g_enhanced_wind.enabled ? enh_amp * g_enhanced_wind.now() : 0.f;
+  // a crown on a static trunk (Spargus' palms) also moves at its origin by that trunk's lean there
+  // (tie.crown_lean 0: off, the crown sheared from its origin only)
+  static const EnhancedTune k_crown_lean("tie.crown_lean", 1.f);
   const float enh_t = enh_tie_wind_seconds();
+  tree.wind_lean.assign(tree.instance_info->size(), 0.f);
   memset(tree.wind_matrix_cache.data(), 0, sizeof(float) * 16 * tree.wind_matrix_cache.size());
   auto& cam_bad = settings.camera.camera;
   std::array<math::Vector4f, 4> cam;
@@ -998,6 +1024,11 @@ void Tie3::render_tree_wind(int idx,
         mat[i].x() += 0.8f * sh * mat[i].y();
         mat[i].z() += 0.6f * sh * mat[i].y();
       }
+      // (the static trunk's top leans sh m per meter of its height, capped at kEnhTieSwayMaxM)
+      const float lift = sh * info.enh_lean_h * 4096.f * (float)k_crown_lean;
+      mat[3].x() += 0.8f * lift;
+      mat[3].z() += 0.6f * lift;
+      tree.wind_lean[inst_id] = sh;
     }
 
     // vmulax.xyzw acc, vf20, vf10
@@ -1043,7 +1074,9 @@ void Tie3::render_tree_wind(int idx,
   const GLuint wind_prog = render_state->shaders[shader_id].id();
   const GLint flutter_loc = glGetUniformLocation(wind_prog, "enh_tie_flutter");
   const GLint frond_loc = glGetUniformLocation(wind_prog, "enh_tie_frond");
+  const GLint paint_loc = glGetUniformLocation(wind_prog, "enh_tie_paint");
   glUniform1f(glGetUniformLocation(wind_prog, "enh_tie_time"), enh_t);
+  glUniform4f(paint_loc, 0.f, 0.f, 0.f, 0.f);
 
   for (size_t draw_idx = 0; draw_idx < tree.wind_draws->size(); draw_idx++) {
     const auto& draw = tree.wind_draws->operator[](draw_idx);
@@ -1087,6 +1120,13 @@ void Tie3::render_tree_wind(int idx,
         };
         glUniform4f(frond_loc, local(0) * 4096.f, local(2) * 4096.f, enh_k * (float)k_tie_frond,
                     0.f);
+      }
+      if (enh_paint > 0) {
+        // (tie_wind.vert's paint: mode, the trunk shear, the origin's height over the foot, leaf)
+        const bool is_leaf = draw_idx < tree.wind_leaf.size() && tree.wind_leaf[draw_idx];
+        glUniform4f(paint_loc, (float)enh_paint, tree.wind_lean[grp.instance_idx],
+                    tree.instance_info->at(grp.instance_idx).enh_lean_h * (float)k_crown_lean,
+                    is_leaf ? 1.f : 0.f);
       }
 
       prof.add_draw_call();

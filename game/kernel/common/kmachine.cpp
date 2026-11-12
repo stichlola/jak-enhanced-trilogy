@@ -1261,6 +1261,14 @@ static void enhanced_test_switches(const std::string& level) {
     g_enhanced_menu.ask(8, fmt::format("{}", (int)asked_vehicle));
     return;
   }
+  // (debug.photo = 1 photo mode on, 0 off: with debug.view, a camera held anywhere)
+  static const EnhancedTune t_photo("debug.photo", -1.f);
+  static float asked_photo = -1.f;
+  if ((float)t_photo >= 0.f && (float)t_photo != asked_photo) {
+    asked_photo = (float)t_photo;
+    g_enhanced_menu.photo = asked_photo > 0.5f;
+    return;
+  }
 }
 
 // Enhanced: the level Jak is in, the hour (0-24) and whether a cutscene plays
