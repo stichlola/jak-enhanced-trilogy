@@ -3662,7 +3662,10 @@ void composite_unused() {
       // (post.hiz: a tile at a time through the depth pyramid, 5x the old march's reach)
       vec2 huv;
       if (hiz_trace(p, r, z, tune_hiz_len_m * 4096.0,
-                    hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0), huv) > 0.5) {
+                    hash1(gl_FragCoord.xy + fract(haze.w * 7.0) * 61.0), huv) > 0.5 &&
+          !refl_backface(huv, r)) {
+        // (a hit on a surface's back, a dock's or a crate's top seen from below, mirrored the top
+        // the screen shows there: rejected as for metal and glass, the march below looks on)
         vec2 edge = min(huv, 1.0 - huv);
         ssr_hit = smoothstep(0.0, 0.08, edge.x) * smoothstep(0.0, 0.15, edge.y) *
                   (1.0 - smoothstep(0.75 * tune_hiz_range_m * 4096.0, tune_hiz_range_m * 4096.0, z));
@@ -3714,6 +3717,9 @@ void composite_unused() {
             }
           }
           quv = 0.5 * vec2(proj.z * hi.x, proj.w * hi.y) / hi.z + 0.5;
+          if (refl_backface(quv, rs)) {
+            continue;  // (its back, as in the Hi-Z trace above: the ray goes on)
+          }
           // fade toward the screen's edges, wider at the top (where the reflected ray leaves the
           // picture it ends in a hard line otherwise)
           vec2 edge = min(quv, 1.0 - quv);
