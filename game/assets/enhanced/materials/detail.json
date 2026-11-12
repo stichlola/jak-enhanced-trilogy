@@ -4,14 +4,20 @@
 //   materials.<name>: file (in this folder), tile_m (meters a repeat), normal (relief strength),
 //     rough (how far its roughness moves the class's own), ao (how much of its occlusion)
 //   textures: rules in order, the first whose "contains" has a word of the texture's name (lowercase)
-//     and whose "not" has none wins; "class": "sand" also needs EnhancedMaterials' sand class
+//     and whose "not" has none wins; "class": "sand" / "rock" / "ground" also needs that
+//     EnhancedMaterials class
 //   hfrag: the material on the hfrag height field (the desert's dunes), "" for none
-// Off: JAK_ENHANCED_DETAIL=0, the menu's "Sand detail material", tuning "detail.on" 0.
+// Off: JAK_ENHANCED_DETAIL=0, the menu's "Sand detail material", tuning "detail.on" 0; on rock and
+// rocky ground only: shaders.tune_detail_rock 0.
 {
   "materials": {
-    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 2.0, "rough": 0.3, "ao": 0.5 }
+    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 2.0, "rough": 0.3, "ao": 0.5 },
+    "ground": { "file": "ground_detail.png", "tile_m": 2.2, "normal": 1.0, "rough": 0.25, "ao": 0.3 }
   },
   "textures": [
+    // (desert-start's flat slab, rocky ground: its remade picture is soft and its PBR map was made
+    // from the old one; stone plates, cracks and gravel)
+    { "contains": ["wascity-ground-01"], "class": "ground", "material": "ground" },
     { "contains": ["sand", "dune"], "not": ["stone", "bag", "rock", "wall", "brick", "quick", "cliff"],
       "class": "sand", "material": "sand" }
   ],

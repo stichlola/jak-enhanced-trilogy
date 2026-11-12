@@ -97,8 +97,13 @@ const Config& config() {
         if (r.contains("not")) {
           rule.nots = r["not"].get<std::vector<std::string>>();
         }
-        if (r.value("class", std::string()) == "sand") {
+        const std::string cls = r.value("class", std::string());
+        if (cls == "sand") {
           rule.need_class = kSand;
+        } else if (cls == "rock") {
+          rule.need_class = kRock;
+        } else if (cls == "ground") {
+          rule.need_class = kGround;
         }
         rule.material = index(r.value("material", std::string()));
         if (rule.material) {

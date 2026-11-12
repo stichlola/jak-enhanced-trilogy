@@ -93,6 +93,9 @@ uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it; also 
 uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
 uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
 uniform vec2 tune_detail_fade = vec2(5.0, 45.0);  // m: full up to, gone by
+// shaders.tune_detail_rock: the material's strength on rock and rocky ground (detail.json's "ground":
+// desert-start's flat slab, wascity-ground-01), 0 off there (the sand's kept)
+uniform float tune_detail_rock = 1.0;
 vec4 g_det = vec4(0.0, 0.0, 0.5, 1.0);  // x y: slopes along world X and Z, z roughness offset, w AO
 float g_det_k = 0.0;  // its strength at this pixel (0: none)
 
@@ -111,7 +114,8 @@ float enh_detail_noise(vec2 p) {
 // neither repeat shows; the slopes (not the normals) summed. Mips average the normal flat with
 // distance; the fade by distance only saves the reads. (The camera's part wrapped first: precision)
 void enh_detail_sample() {
-  if (enh_detail == 0 || tune_detail <= 0.0) {
+  float strength = tune_detail * (enh_material == 4 || enh_material == 5 ? tune_detail_rock : 1.0);
+  if (enh_detail == 0 || strength <= 0.0) {
     return;
   }
   float k = 1.0 - smoothstep(tune_detail_fade.x * 4096.0, tune_detail_fade.y * 4096.0, length(enh_pos));
@@ -132,7 +136,7 @@ void enh_detail_sample() {
   // (b's slopes back from its turned frame to the world's: rot's transpose)
   vec2 g = ga * wa + (gb * rot) * wb;
   g_det = vec4(g, 0.5 + (a.b - 0.5) * wa + (b.b - 0.5) * wb, mix(1.0, a.a, wa) * mix(1.0, b.a, wb));
-  g_det_k = k * tune_detail;
+  g_det_k = k * strength;
 }
 
 // the detail's slopes on the surface's normal (UDN: added along the world's X and Z projected onto
