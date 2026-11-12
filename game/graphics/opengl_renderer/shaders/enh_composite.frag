@@ -138,7 +138,10 @@ uniform vec3 lawn_feet;         // or (no field drawn) the small plants' feet ma
 uniform float vignette;
 
 uniform vec3 up_view;   // world up in view space
-uniform vec4 fog;       // density (1/game unit), height falloff (1/game unit), max amount, -
+uniform vec4 fog;       // density (1/game unit), height falloff (1/game unit), max amount, w: look bits
+// (fog.w, no new uniform: bit 1 the richer day sky (look.sky_extras), bit 2 explosions by day kept
+// under the highlights (look.blast_day))
+int look_bits() { return int(fog.w + 0.5); }
 uniform vec3 fog_color;
 uniform vec4 haze;      // strength (uv), start, end (game units), time (s)
 uniform mat3 to_prev;   // view -> previous frame's view
@@ -1656,11 +1659,17 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
         float thick = (t1 - t0) / (2.0 * r);
         float body = smoothstep(0.35, 0.75, n + thick * 0.75 - u * 0.35) * (1.0 - smoothstep(0.6, 1.0, u));
         float temp = thick * 0.8 + n * 0.6 - u * 1.25;
+        // (look.blast_day: by day the fireball over noon sand was half see-through and 2.2x bright: the
+        // sand under it plus its light clipped to one white blot, no fire in it. By day it hides more of
+        // what's behind, its core stays orange-yellow and its light within the highlights' room, the soot
+        // darker: it reads by color and by its dark smoke, not by brightness)
+        float bday = (look_bits() & 2) != 0 ? clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) : 0.0;
         vec3 fire_c = mix(vec3(0.6, 0.08, 0.01), vec3(1.0, 0.45, 0.08), smoothstep(0.0, 0.4, temp));
-        fire_c = mix(fire_c, vec3(1.0, 0.9, 0.55), smoothstep(0.45, 0.85, temp));
+        fire_c = mix(fire_c, mix(vec3(1.0, 0.9, 0.55), vec3(1.0, 0.7, 0.3), bday), smoothstep(0.45, 0.85, temp));
         float soot = body * mix(0.2, 0.85, smoothstep(0.1, 0.8, u)) * (1.0 - smoothstep(-0.1, 0.25, temp));
-        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * (2.2 - 1.6 * u);
-        trans *= 1.0 - max(soot, body * 0.5);
+        soot = min(soot * (1.0 + 0.4 * bday), 1.0);
+        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * mix(2.2 - 1.6 * u, 1.15 - 0.6 * u, bday);
+        trans *= 1.0 - max(soot, body * mix(0.5, 0.85, bday));
       }
     }
   }
@@ -2093,6 +2102,19 @@ vec3 sky_color(vec3 dv) {
       return ph * 0.5;
     }
     col = mix(col, ph * luma(col), min(tune_phys_dome, 1.0) * pw);
+  }
+  // (look.sky_extras) the clear day sky richer: deeper overhead, a pale haze band hugging the
+  // horizon (warmer on the sun's side, thicker in a hazy area), and the sun's aureole, the bright
+  // forward-scattered ring just around its disk
+  if ((look_bits() & 1) != 0) {
+    float dayk = smoothstep(-0.02, 0.1, sky_sun.w) * (1.0 - over) * (1.0 - clouds.w);
+    float hz_k = min(sun_haze * 1.25, 1.0);
+    col = mix(col, col * vec3(0.84, 0.92, 1.05), smoothstep(0.3, 1.0, up) * 0.5 * dayk);
+    float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), normalize(world_dir(sky_sun.xyz).xz + 1e-4));
+    float lc = luma(col);
+    vec3 hz = mix(vec3(lc) * vec3(1.03, 1.0, 0.96), sc * lc, az * az * 0.45) * 1.15;
+    col = mix(col, hz, exp(-up * 20.0) * (0.3 + 0.2 * hz_k) * dayk);
+    col += sc * (pow(sd, 900.0) * 0.5 + pow(sd, 160.0) * 0.1) * dayk * (0.75 + 0.5 * hz_k);
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * sky_day);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
@@ -7160,7 +7182,19 @@ void composite_unused() {
   // and the grade left the noon sand nowhere to go, the blast's light pool was +3 of 255 on the frame.
   // Added here it reads as a warm pool for its half second; the shoulder below keeps its hue
   if (tune_flash_day_late > 0.0 && night_dark.x < 1.0) {
-    c += g_flash * tune_flash_day_late * (1.0 - night_dark.x);
+    vec3 fl = g_flash * tune_flash_day_late * (1.0 - night_dark.x);
+    if ((look_bits() & 2) != 0) {
+      // (look.blast_day: over noon sand this pushed the pool past 1, the shoulder took it to white. Its
+      // light only up to the room the pixel has left (0.95), what's left over as the fire's hue)
+      float fm = max(fl.r, max(fl.g, fl.b));
+      float m0 = max(c.r, max(c.g, c.b));
+      float fit = min(fm, max(0.95 - m0, 0.0));
+      c += fl * (fit / max(fm, 1e-4));
+      float m1 = max(c.r, max(c.g, c.b));
+      c = mix(c, vec3(1.0, 0.62, 0.3) * m1, clamp((fm - fit) * 0.9, 0.0, 0.5));
+    } else {
+      c += fl;
+    }
   }
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
   // the clamp below cut them to a flat white-yellow with the hue gone. The brightest channel rolls

@@ -83,6 +83,8 @@
   //   (0..1: the game bakes them evenly lit); headlights: the vehicles' headlights (times: their
   //   light, beams and glare); glows: the light the game's glows cast (times: engines, lamps' halos);
   //   lamps: the levels' own lamps and the fires they place (times)
+  // "evening" (optional): the grade as the sun goes down (lift, gain, saturation, contrast, warmth),
+  //   eased over the day's from 16:30 to 18:30 and out into the night's (tuning grade.evening: 0 off)
   // "weather" is what the "Changing" weather does there (all optional):
   //   outdoors: false = no weather at all (caves, interiors)
   //   rain, mist, snow, heat (hot air over lava), dust, sunny (the zone's own touch of vivid
@@ -118,6 +120,8 @@
     // Haven: teal shadows and warm light by day; blue night, neon kept vivid
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
+      // (the evening, as the sun goes down: violet shade, amber light, a little more contrast)
+      "evening": {"lift": [0.004, -0.002, 0.024], "gain": [1.08, 0.99, 0.89], "saturation": 1.06, "contrast": 0.08, "warmth": 0.03},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
