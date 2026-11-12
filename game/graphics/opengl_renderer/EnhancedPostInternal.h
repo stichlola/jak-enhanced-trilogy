@@ -214,6 +214,10 @@ struct ZoneAmbience {
 struct WorldZone {
   std::string name;
   ZoneLook look[2];  // day, night
+  // the evening's grade ("evening" in world.json, optional: lift, gain, saturation, contrast,
+  // warmth), eased in over the day's as the sun goes down (dusk, 16:30-18:30) and out into the night
+  ZoneLook evening;
+  bool has_evening = false;
   ZoneWeather weather;
   ZoneAmbience ambience;
   // the zone's reverb (snd::spatial::Preset, -1: dry outdoors, cave indoors) and how wet (times)
@@ -763,6 +767,11 @@ inline void load_world() {
       zone.look[1] = zone.look[0];
       if (z.contains("night")) {
         read_look(z["night"], zone.look[1]);
+      }
+      if (z.contains("evening")) {
+        zone.evening = zone.look[0];
+        read_look(z["evening"], zone.evening);
+        zone.has_evening = true;
       }
       if (z.contains("weather")) {
         const auto& wj = z["weather"];

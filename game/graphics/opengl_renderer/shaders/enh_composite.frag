@@ -51,8 +51,17 @@ const float PBR_SPEC = 1.4;          // the sun's GGX highlight on the plain cla
 const float PBR_SUN_SHARE = 0.7;     // of the baked light, the sun's (the rest is the sky's)
 const float PBR_DIFFUSE_LOSS = 1.0;  // the diffuse taken by the Fresnel (energy; 0: none)
 const float PBR_RELIEF = 1.6;        // the normal maps' shade against the broad facing
+const float PBR_RELIEF_DARK = 0.15;  // its dark side rolls off toward this (x PBR_RELIEF: at most ~24% darker)
 const float PBR_FAR = 300.0;         // m: the highlight gone by here (from 60 %)
 const float PBR_METAL_FADE = 80.0;   // m: metal and glass's reflections fade from here to twice it (was 60)
+// rocky ground near and far alike (shaders.tune_ground_fine < 0: off, as before): its plates out to here (m, fade
+// from, to), its grain's dark side times this, and past the near grade this share of its darkening
+const vec2 GROUND_PLATES_FAR = vec2(60.0, 140.0);
+const float GROUND_DARK_SOFT = 0.4;    // (the grain's and plates' dark side, near and far: x this)
+const float GROUND_RELIEF_DARK = 0.7;  // (the sun's relief on it: its darkest, was 0.55)
+const float GROUND_PEBBLE_NEAR = 0.4;  // (the pebbles at full size: this much of their old strength, all by a mip of 5)
+const float GROUND_FAR_GRADE = 0.7;    // (the share of the near grade's darkening also kept on the far color)
+const float GROUND_MOTTLE_FAR = 0.0;   // (the near mottling (2 m) kept on the far color: this share)
 uniform int blast_count;       // explosions: view space + radius (game units), age (s)
 uniform vec4 blast_pos[4];
 // (x age (s), y seed, z the ground under it along up from the blast (<= 0; > 0: not known): one
@@ -130,7 +139,10 @@ uniform vec3 lawn_feet;         // or (no field drawn) the small plants' feet ma
 uniform float vignette;
 
 uniform vec3 up_view;   // world up in view space
-uniform vec4 fog;       // density (1/game unit), height falloff (1/game unit), max amount, -
+uniform vec4 fog;       // density (1/game unit), height falloff (1/game unit), max amount, w: look bits
+// (fog.w, no new uniform: bit 1 the richer day sky (look.sky_extras), bit 2 explosions by day kept
+// under the highlights (look.blast_day))
+int look_bits() { return int(fog.w + 0.5); }
 uniform vec3 fog_color;
 uniform vec4 haze;      // strength (uv), start, end (game units), time (s)
 uniform mat3 to_prev;   // view -> previous frame's view
@@ -1648,11 +1660,17 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
         float thick = (t1 - t0) / (2.0 * r);
         float body = smoothstep(0.35, 0.75, n + thick * 0.75 - u * 0.35) * (1.0 - smoothstep(0.6, 1.0, u));
         float temp = thick * 0.8 + n * 0.6 - u * 1.25;
+        // (look.blast_day: by day the fireball over noon sand was half see-through and 2.2x bright: the
+        // sand under it plus its light clipped to one white blot, no fire in it. By day it hides more of
+        // what's behind, its core stays orange-yellow and its light within the highlights' room, the soot
+        // darker: it reads by color and by its dark smoke, not by brightness)
+        float bday = (look_bits() & 2) != 0 ? clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) : 0.0;
         vec3 fire_c = mix(vec3(0.6, 0.08, 0.01), vec3(1.0, 0.45, 0.08), smoothstep(0.0, 0.4, temp));
-        fire_c = mix(fire_c, vec3(1.0, 0.9, 0.55), smoothstep(0.45, 0.85, temp));
+        fire_c = mix(fire_c, mix(vec3(1.0, 0.9, 0.55), vec3(1.0, 0.7, 0.3), bday), smoothstep(0.45, 0.85, temp));
         float soot = body * mix(0.2, 0.85, smoothstep(0.1, 0.8, u)) * (1.0 - smoothstep(-0.1, 0.25, temp));
-        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * (2.2 - 1.6 * u);
-        trans *= 1.0 - max(soot, body * 0.5);
+        soot = min(soot * (1.0 + 0.4 * bday), 1.0);
+        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * mix(2.2 - 1.6 * u, 1.15 - 0.6 * u, bday);
+        trans *= 1.0 - max(soot, body * mix(0.5, 0.85, bday));
       }
     }
   }
@@ -2085,6 +2103,19 @@ vec3 sky_color(vec3 dv) {
       return ph * 0.5;
     }
     col = mix(col, ph * luma(col), min(tune_phys_dome, 1.0) * pw);
+  }
+  // (look.sky_extras) the clear day sky richer: deeper overhead, a pale haze band hugging the
+  // horizon (warmer on the sun's side, thicker in a hazy area), and the sun's aureole, the bright
+  // forward-scattered ring just around its disk
+  if ((look_bits() & 1) != 0) {
+    float dayk = smoothstep(-0.02, 0.1, sky_sun.w) * (1.0 - over) * (1.0 - clouds.w);
+    float hz_k = min(sun_haze * 1.25, 1.0);
+    col = mix(col, col * vec3(0.84, 0.92, 1.05), smoothstep(0.3, 1.0, up) * 0.5 * dayk);
+    float az = 0.5 + 0.5 * dot(normalize(wd.xz + 1e-4), normalize(world_dir(sky_sun.xyz).xz + 1e-4));
+    float lc = luma(col);
+    vec3 hz = mix(vec3(lc) * vec3(1.03, 1.0, 0.96), sc * lc, az * az * 0.45) * 1.15;
+    col = mix(col, hz, exp(-up * 20.0) * (0.3 + 0.2 * hz_k) * dayk);
+    col += sc * (pow(sd, 900.0) * 0.5 + pow(sd, 160.0) * 0.1) * dayk * (0.75 + 0.5 * hz_k);
   }
   col += sc * (pow(sd, 6.0) * 0.18 + pow(sd, 60.0) * 0.35) * (1.0 - over * 0.7) * (1.0 - 0.6 * sky_day);
   col += sc * smoothstep(0.99955, 0.9998, sd) * 3.0 * (1.0 - over);
@@ -5023,6 +5054,12 @@ void composite_unused() {
   if (pbr_rough >= 0.0 && rk > 0.0 && sun_dir.w > 0.0 && z > 0.0 && wsurf == 0.0) {
     float fade = 1.0 - smoothstep(60.0 * 4096.0, 150.0 * 4096.0, z);
     float shade = dot(surf_n, sun_dir.xyz) - dot(soft_n, sun_dir.xyz);
+    // (the dark side rolled off: clamped at -0.5 a pit turned from a low sun went to a fifth of its light,
+    // a black speckle close up that the same ground's mips never show farther on; with
+    // shaders.tune_ground_fine < 0 as before)
+    if (tune_ground_fine >= 0.0 && shade < 0.0) {
+      shade = -PBR_RELIEF_DARK * (1.0 - exp(shade / PBR_RELIEF_DARK));
+    }
     c *= 1.0 + clamp(shade, -0.5, 0.5) * PBR_RELIEF * rk * fade * ao * mix(0.35, 1.0, sun_lit);
     rk = 0.0;
   }
@@ -6027,6 +6064,7 @@ void composite_unused() {
         // (with the ground picture (ground_detail.png: stone, gravel, pebbles) that instead: two sizes,
         // turned against each other, and its colors too, the grey-blue pebbles among the brown)
         vec3 gtint = vec3(1.0);
+        float far_plates = 0.0;  // (the plates past the near grade, on the game's own color: c_far)
         if (ground_detail > 0.0) {
           close = 1.0 - smoothstep(15.0, 50.0, dist);
           gq = mat2(0.87, 0.5, -0.5, 0.87) * wp.xz / 2.2;
@@ -6037,15 +6075,36 @@ void composite_unused() {
           vec3 gc = notile(tex_T16, gq, glod).rgb;
           vec3 pc = notile(tex_T16, pq, plod).rgb;
           float gn = 1.0 - smoothstep(6.0, 9.0, glod);
-          fine = ((luma(gc) - ga) * 2.2 * gn + (luma(pc) - ga) * 1.2 + lumps * 0.2) * close;
+          if (tune_ground_fine >= 0.0) {
+            // (near and far the same ground: the plates (8.5 m) reach out to GROUND_PLATES_FAR, only
+            // the pebbles go with the pixel's size and the near fade; and the grain's dark side softer,
+            // close up its pits read as dark speckles the farther ground never had. tune_ground_fine < 0:
+            // as before, at its size)
+            float far_k = 1.0 - smoothstep(GROUND_PLATES_FAR.x, GROUND_PLATES_FAR.y, dist);
+            float pl = (luma(pc) - ga) * 1.2 * far_k;
+            // (the pebbles by the pixel's size: softer at full size, out to ~60 m as their mip blurs them)
+            float peb = 2.2 * mix(GROUND_PEBBLE_NEAR, 1.0, smoothstep(1.0, 5.0, glod)) * gn * (1.0 - smoothstep(40.0, 80.0, dist));
+            fine = (luma(gc) - ga) * peb + pl + lumps * 0.2 * close;
+            fine = fine < 0.0 ? fine * GROUND_DARK_SOFT : fine;
+            far_plates = pl < 0.0 ? pl * GROUND_DARK_SOFT : pl;
+          } else {
+            fine = ((luma(gc) - ga) * 2.2 * gn + (luma(pc) - ga) * 1.2 + lumps * 0.2) * close;
+          }
           vec3 chroma = mix(pc / max(luma(pc), 0.02), gc / max(luma(gc), 0.02), gn) / (ground_detail_avg / ga);
           gtint = mix(vec3(1.0), clamp(chroma, vec3(0.6), vec3(1.5)), 0.8 * close);
         }
         c /= max(1.0 + rock_detail * 1.6 * d * bands, 0.3);
-        fine *= tune_ground_fine;
+        fine *= abs(tune_ground_fine);
         // (in the late afternoon's low light much darker than the sand; by day nearer its paleness)
         float low_light = min(golden * 2.0, 1.0);
         c *= mix(0.78, 0.5, low_light) * max(1.0 + rock_detail * (2.0 * m + mix(1.1, 2.2, noon) * fine), 0.25);
+        // (past the near grade (30-60 m, below) the game's own color, with the plates and a share of the
+        // grade's darkening: the same ground near and far, not dark and grainy close, pale and flat away)
+        if (tune_ground_fine >= 0.0) {
+          c_far *= mix(1.0, mix(0.78, 0.5, low_light), GROUND_FAR_GRADE) *
+                   max(1.0 + rock_detail * (2.0 * m * GROUND_MOTTLE_FAR +
+                                            mix(1.1, 2.2, noon) * far_plates * abs(tune_ground_fine)), 0.25);
+        }
         // (weathered: grey-brown in the low light, the sky's blue in its shade; by day the warm stone the
         // sand's made of)
         // (not by night: the moon's blue ground went grey-mauve, red +29 over vanilla at 22h)
@@ -6055,14 +6114,16 @@ void composite_unused() {
         c *= gtint;
         // (lit by the sun: the relief's slope against the light, near only)
         if (close > 0.0 && plod < 6.0) {
-          const float e = 0.06;
+          // (the slope over at least two pixels' width: over 6 cm, close up each pebble's texels shaded as
+          // dark pits, a speckle the same ground a few meters on no longer had; tune_ground_fine < 0: as before)
+          float e = tune_ground_fine >= 0.0 ? max(0.06, foot * 2.0) : 0.06;
           float h0 = ground_height(wp.xz, glod, plod);
           vec2 grad = vec2(ground_height(wp.xz + vec2(e, 0.0), glod, plod) - h0,
                            ground_height(wp.xz + vec2(0.0, e), glod, plod) - h0) / e;
           vec3 bn = normalize(wn - vec3(grad.x, 0.0, grad.y) * 1.0);
           vec3 ws = normalize(world_dir(sun_dir.xyz));
           float base = max(dot(wn, ws), 0.05);
-          float relief = clamp(max(dot(bn, ws), 0.0) / base, 0.55, 1.6);
+          float relief = clamp(max(dot(bn, ws), 0.0) / base, tune_ground_fine >= 0.0 ? GROUND_RELIEF_DARK : 0.55, 1.6);
           float rk = close * 0.7 * clamp(base * 4.0, 0.0, 1.0);
           // (the sunlit sides warm, the turned-away ones cooler: the sky lights them)
           vec3 tint = relief > 1.0 ? mix(vec3(1.0), vec3(1.1, 0.98, 0.84), min(relief - 1.0, 1.0))
@@ -7133,7 +7194,19 @@ void composite_unused() {
   // and the grade left the noon sand nowhere to go, the blast's light pool was +3 of 255 on the frame.
   // Added here it reads as a warm pool for its half second; the shoulder below keeps its hue
   if (tune_flash_day_late > 0.0 && night_dark.x < 1.0) {
-    c += g_flash * tune_flash_day_late * (1.0 - night_dark.x);
+    vec3 fl = g_flash * tune_flash_day_late * (1.0 - night_dark.x);
+    if ((look_bits() & 2) != 0) {
+      // (look.blast_day: over noon sand this pushed the pool past 1, the shoulder took it to white. Its
+      // light only up to the room the pixel has left (0.95), what's left over as the fire's hue)
+      float fm = max(fl.r, max(fl.g, fl.b));
+      float m0 = max(c.r, max(c.g, c.b));
+      float fit = min(fm, max(0.95 - m0, 0.0));
+      c += fl * (fit / max(fm, 1e-4));
+      float m1 = max(c.r, max(c.g, c.b));
+      c = mix(c, vec3(1.0, 0.62, 0.3) * m1, clamp((fm - fit) * 0.9, 0.0, 0.5));
+    } else {
+      c += fl;
+    }
   }
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
   // the clamp below cut them to a flat white-yellow with the hue gone. The brightest channel rolls
