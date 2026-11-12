@@ -449,6 +449,11 @@ void Sprite3::render_jak2(DmaFollower& dma,
     flush_sprites(render_state, prof, false);
   }
 
+  // Enhanced: the ribbons and sparks of Jak's shots (jak 2/3 draw here, not in render_jak1: before
+  // this call was only there, so Jak 3's shots and JAK_ENHANCED_SHOT_TEST drew nothing)
+  enhanced_draw_shots(render_state, m_3d_matrix_data.camera.data(), m_3d_matrix_data.hvdf_offset.data(),
+                      m_frame_data.pfog0);
+
   // shadow draw
   render_fake_shadow(dma);
 
