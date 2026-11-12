@@ -139,6 +139,7 @@ class Merc2 {
     GLuint enh_mat;
     GLuint enh_eye_lid;
     GLuint enh_relief;
+    GLuint enh_wet;  // (merc2 only; -1 in emerc)
     GLuint enh_fade_in;  // Enhanced: the level's fade-in (fg.fade_in)
   };
 
@@ -183,6 +184,7 @@ class Merc2 {
     IGNORE_ALPHA = 1,
     MOD_VTX = 2,
     NO_TEXTURE = 4,
+    DRY = 8,  // Enhanced: no rain on it (hover vehicles; Jak and Daxter while piloting one)
   };
 
   struct Draw {
@@ -222,6 +224,7 @@ class Merc2 {
     bool ignore_alpha;
     bool disable_fog;
     bool no_texture;
+    bool dry;
     u64 hash;
     u32 lights;
     u32 first_bone;
