@@ -611,6 +611,7 @@ void EnhancedPost::draw_menu() {
     if (group("Surfaces and materials")) {
       check_amount("Surface relief", &s.relief, 1.f);
       check("True PBR (normal and roughness maps)", &s.pbr);
+      check("Sand detail material", &s.sand_detail);
       check("Geometry normals", &s.geometry_normals);
       check_amount("Reflective metal and glass", &s.materials, 1.f);
       bool traced = s.ray_traced > 0;
@@ -1007,6 +1008,7 @@ std::string EnhancedPost::menu_settings_json() const {
   j["parallax"] = s.parallax;
   j["wall_notile"] = s.wall_notile;
   j["pbr"] = s.pbr;
+  j["sand_detail"] = s.sand_detail;
   j["fx_detail"] = s.fx_detail;
   j["hit_chroma"] = s.hit_chroma;
   j["dawn_fog"] = s.dawn_fog;
@@ -1119,6 +1121,7 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("parallax", s.parallax);
   get("wall_notile", s.wall_notile);
   get("pbr", s.pbr);
+  get("sand_detail", s.sand_detail);
   get("fx_detail", s.fx_detail);
   get("hit_chroma", s.hit_chroma);
   get("dawn_fog", s.dawn_fog);
@@ -1216,6 +1219,7 @@ void EnhancedPost::apply_preset(int preset) {
     s.parallax = 0.f;
     s.wall_notile = false;
     s.pbr = false;
+    s.sand_detail = false;
     g_enhanced_vegetation = 0;
     return;
   }
@@ -1244,6 +1248,7 @@ void EnhancedPost::apply_preset(int preset) {
   s.parallax = d.parallax;
   s.wall_notile = d.wall_notile;
   s.pbr = d.pbr;
+  s.sand_detail = d.sand_detail;
   s.ray_traced = all_on(preset) ? d.ray_traced : 0;
   s.rt_ao = all_on(preset) && d.rt_ao;
   s.water_reflections = d.water_reflections;

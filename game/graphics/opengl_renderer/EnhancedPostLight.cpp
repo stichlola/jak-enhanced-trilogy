@@ -557,6 +557,21 @@ void EnhancedPost::update_scene() {
   // (pbr.on 0 in the tuning file: off, to compare in one run)
   static const EnhancedTune t_pbr_on("pbr.on", 1.f);
   g_enhanced_pbr = m_settings.enabled && m_settings.pbr && t_pbr_on > 0.5f;
+  // (the sand's detail material: detail.on 0 in the tuning file, off live)
+  static const EnhancedTune t_detail_on("detail.on", 1.f);
+  g_enhanced_detail = enhanced_detail_allowed() && m_settings.enabled && m_settings.sand_detail &&
+                      t_detail_on > 0.5f;
+  {
+    float s[3];
+    sun_world(s);
+    const float len = std::sqrt(s[0] * s[0] + s[1] * s[1] + s[2] * s[2]);
+    const float up = g_enhanced_sun.valid && len > 1e-6f ? s[1] / len : 0.f;
+    for (int i = 0; i < 3; i++) {
+      g_enhanced_detail_sun[i] = len > 1e-6f ? s[i] / len : (i == 1 ? 1.f : 0.f);
+    }
+    // (fading in as the sun clears the horizon)
+    g_enhanced_detail_sun[3] = std::clamp((up - 0.02f) / 0.13f, 0.f, 1.f);
+  }
   // snow lies: it builds up over ~6 minutes of heavy snow, melts in ~4 after (in a minute in the
   // rain). JAK_ENHANCED_SNOW_COVER=<0..1> holds it (screenshots)
   {
