@@ -387,7 +387,8 @@ uniform vec2 hiz_size;      // its level 0 (the depth copy's size)
 uniform int tune_hiz_iters = 40;          // the water's Hi-Z reflection: tiles visited at most
 uniform float tune_hiz_range_m = 400.0;   // ...on water up to this far (faded over its last quarter)
 uniform float tune_hiz_len_m = 400.0;     // ...rays this long
-uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta)
+uniform float tune_hiz_dbg = 0.0;         // (test: 1 the old march on the left half, 2 hits magenta,
+                                          // 3 old metal/glass reflections, 4 their trust in grey)
 uniform int hiz_surf;      // puddles, metal, glass: their reflection on Hi-Z too (post.hiz_surf)
 uniform float tune_hiz_surf_len_m = 150.0;  // ...rays this long (the march: ~25 m)
 uniform sampler2D tex_T27;  // the level's albedo (lights.albedo; a: baked light / 2, 0 = none)
@@ -862,14 +863,38 @@ vec3 reflection_with_rt(vec3 p, vec3 r, vec3 env, vec3 ssr, float ssr_hit, float
 
 float hiz_trace(vec3 p, vec3 r, float z0, float max_len, float jitter, out vec2 uv);
 
+// (metal and glass: how far the reflection can be trusted, 0..1, set by trace_reflection: 1 where
+// the ray met something on screen (or was traced), else how far off the screen's pixel lies where
+// the ray vanishes; a near one (Jak, a wall in front, the camera's own side) isn't what the ray sees)
+float refl_conf = 1.0;
+// tune_hiz_dbg 3: the old reflections (no back-face reject, trusted fallback), 4: refl_conf as grey
+const float REFL_ENV_NEAR = 40.0;   // m: a fallback pixel this near is not trusted at all...
+const float REFL_ENV_FAR = 150.0;   // ...from this far fully (the sky always)
+const float REFL_BACKFACE = 0.15;   // a hit whose normal points along the ray by more is its back
+const float REFL_MISS_KEEP = 0.3;   // how much of an untrusted reflection metal and glass keep
+
+// (a screen hit at uv seen from behind along r: the ray would meet the surface's back side, whose
+// front the screen shows; the level's own normals only, the rebuilt ones are too noisy at edges)
+bool refl_backface(vec2 uv, vec3 r) {
+  vec4 g = gbuf(uv);
+  if (g.a <= 0.17 || abs(tune_hiz_dbg - 3.0) < 0.5) {
+    return false;
+  }
+  vec3 hn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);
+  return dot(hn, r) > REFL_BACKFACE;
+}
+
 // what a surface reflects along r (view space): the scene where the ray meets the depth buffer
 // (a short march), else the screen where the ray vanishes (the sky, far hills); hit: how sure
 vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   hit = 0.0;
   vec3 env = fog_color;
+  float env_ok = 0.0;
   if (r.z > 1e-3) {
     vec2 env_uv = clamp(0.5 * vec2(proj.z * r.x, proj.w * r.y) / r.z + 0.5, vec2(0.002), vec2(0.998));
     env = texture(tex_T0, env_uv).rgb;
+    float ed = texture(tex_T3, env_uv).r;
+    env_ok = ed <= 1e-7 ? 1.0 : smoothstep(REFL_ENV_NEAR * 4096.0, REFL_ENV_FAR * 4096.0, view_z(ed));
   }
   vec3 ssr = env;
   float step_len = 0.15 * 4096.0 + z * 0.01;
@@ -883,7 +908,7 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
   if (hiz) {
     vec2 huv;
     if (hiz_trace(p + r * (0.05 * 4096.0 + z * 0.002), r, z, tune_hiz_surf_len_m * 4096.0,
-                  jit, huv) > 0.5) {
+                  jit, huv) > 0.5 && !refl_backface(huv, r)) {
       vec2 edge = min(huv, 1.0 - huv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = abs(tune_hiz_dbg - 2.0) < 0.5 ? vec3(1.0, 0.0, 1.0) : texture(tex_T0, huv).rgb;
@@ -928,6 +953,10 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
       if (hd <= 1e-7 || abs(hi.z - view_z(hd)) > used * 0.25 + 0.1 * 4096.0) {
         continue;
       }
+      // (its back: what the screen shows there faces away from the ray. The ray goes on)
+      if (refl_backface(quv, r)) {
+        continue;
+      }
       vec2 edge = min(quv, 1.0 - quv);
       hit = smoothstep(0.0, 0.06, min(edge.x, edge.y));
       ssr = texture(tex_T0, quv).rgb;
@@ -935,8 +964,10 @@ vec3 trace_reflection(vec3 p, vec3 r, float z, out float hit) {
     }
   }
   vec3 refl = reflection_with_rt(p, r, env, ssr, hit, 60.0 * 4096.0, 1.0);
+  refl_conf = abs(tune_hiz_dbg - 3.0) < 0.5 ? 1.0 : hit + (1.0 - hit) * env_ok;
   if (rt_mode > 0) {
     hit = 1.0;  // traced or not, it's the best there is
+    refl_conf = 1.0;
   }
   return refl;
 }
@@ -4920,6 +4951,9 @@ void composite_unused() {
       // specular occlusion (Lagarde): crevices and undersides kept a sky-bright reflection, plastic in
       // the shaded corners; the AO takes it away, more where the gloss is rough
       fade *= mix(1.0, clamp(pow(facing + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0), tune_spec_occ);
+      // (a reflection that found nothing it can trust: less of it, the surface's own color shows;
+      // was a smeared copy of whatever stood in front, or the flat fog color on walls facing us)
+      fade *= mix(REFL_MISS_KEEP, 1.0, refl_conf);
       // the sun's highlight, where the sun reaches
       float sunlit = 0.0;
       if (sun_dir.w > 0.0 && dot(nn, sun_dir.xyz) > 0.0) {
@@ -4953,6 +4987,9 @@ void composite_unused() {
         float f = 0.04 + 0.96 * pow(1.0 - facing, 5.0);
         c = mix(c, refl, clamp(f * 0.45 + 0.06, 0.0, 1.0) * mk * fade);
         c += vec3(1.0, 0.95, 0.85) * pow(sr, 300.0) * 2.0 * sunlit * mk;
+      }
+      if (abs(tune_hiz_dbg - 4.0) < 0.5) {
+        c = vec3(refl_conf);  // (test: how far the reflection is trusted, black = not at all)
       }
       // the lamps' highlights on it (a factory's pipes, a car's paint at night): metal's broad and
       // tinted by the metal, gloss tight and in the lamp's own color
