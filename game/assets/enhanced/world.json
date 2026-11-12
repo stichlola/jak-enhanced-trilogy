@@ -121,7 +121,7 @@
     "haven": {
       "day": {"lift": [-0.005, 0, 0.012], "gain": [1.03, 1, 0.96], "saturation": 1.0, "contrast": 0.04, "warmth": 0.02, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       // (the evening, as the sun goes down: violet shade, amber light, a little more contrast)
-      "evening": {"lift": [0.004, -0.002, 0.024], "gain": [1.08, 0.99, 0.89], "saturation": 1.06, "contrast": 0.08, "warmth": 0.03},
+      "evening": {"lift": [0.012, -0.004, 0.045], "gain": [1.15, 0.98, 0.8], "saturation": 1.1, "contrast": 0.1, "warmth": 0.05},
       "night": {"lift": [0, 0.006, 0.03], "gain": [1.06, 0.98, 1.02], "saturation": 1.12, "contrast": 0.08, "warmth": -0.02, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
@@ -132,6 +132,8 @@
     // little so it isn't all red (the same weather as the rest of Haven: "haven-..." zones share it)
     "haven-industrial": {
       "day": {"lift": [-0.008, 0.002, 0.014], "gain": [0.95, 1, 1.03], "saturation": 0.86, "contrast": 0.04, "warmth": -0.04, "clouds": 0.5, "day_sky": 1, "sun_max_elev": 32, "light_max_elev": 40, "rock_sun": 0.6, "wall_sun": 0.6, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
+      // (its evening as the rest of Haven's, kept a little less red: the district is rust already)
+      "evening": {"lift": [0.008, -0.003, 0.045], "gain": [1.08, 0.97, 0.84], "saturation": 0.98, "contrast": 0.1, "warmth": 0.02},
       "night": {"lift": [-0.004, 0.006, 0.03], "gain": [0.97, 0.99, 1.04], "saturation": 0.95, "contrast": 0.08, "warmth": -0.05, "clouds": 0.65, "headlights": 0.4, "glows": 0.35, "lamps": 1.0},
       "weather": {"fog": {"period": 480, "clear": 0.7, "light": 0.2},
                   "spells": {"period": 540, "fair": 0.45, "overcast": 0.12, "shower": 0.24, "thunder": 0.12, "fog": 0.06, "snow": 0.01}},
