@@ -92,7 +92,7 @@ uniform int enh_detail;      // 0 none, 1 on, 2 on and the albedo may carry its 
 uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it; also enh_on_sand below)
 uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
 uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
-uniform vec2 tune_detail_fade = vec2(5.0, 45.0);  // m: full up to, gone by
+uniform vec2 tune_detail_fade = vec2(15.0, 120.0);  // m: full up to, gone by (long, soft fade)
 // shaders.tune_detail_rock: the material's strength on rock and rocky ground (detail.json's "ground":
 // desert-start's flat slab, wascity-ground-01), 0 off there (the sand's kept)
 uniform float tune_detail_rock = 1.0;

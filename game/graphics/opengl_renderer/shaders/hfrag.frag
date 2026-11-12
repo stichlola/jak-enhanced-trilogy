@@ -14,7 +14,7 @@ uniform int enh_detail;      // 0 none, 1 on, 2 on and the albedo may carry its 
 uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
 uniform vec4 cam_trans;      // (hfrag.vert's: enh_pos is relative to it)
 uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
-uniform vec2 tune_detail_fade = vec2(5.0, 45.0);  // m: full up to, gone by
+uniform vec2 tune_detail_fade = vec2(15.0, 120.0);  // m: full up to, gone by (long, soft fade)
 vec4 g_det = vec4(0.0, 0.0, 0.5, 1.0);
 float g_det_k = 0.0;
 // the broad relief from the dunes' own grain picture (they have no PBR map): its slopes along X, Z
