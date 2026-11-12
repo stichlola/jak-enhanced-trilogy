@@ -212,8 +212,9 @@ void main() {
     if (flen > 0.0 && bump_g != vec3(0.0)) {
       n = normalize(n - bump_g * (dot(n, sn) < 0.0 ? -1.0 : 1.0));
     }
-    // (0.52: see-through cloth, the composite puts the game's own color back over it)
-    enh_normal_out = flen > 0.0 ? vec4(n * (enh_mat == MAT_LAMP ? 0.2 : (enh_cloth != 0 ? 0.52 : 0.45)) * 0.5 + 0.5, 1.0) : vec4(0.0);
+    // (0.52: see-through cloth, the composite puts the game's own color back over it; 0.36: a
+    // character kept dry, enh_wet < 0: hover vehicles, the composite's rain skips it)
+    enh_normal_out = flen > 0.0 ? vec4(n * (enh_mat == MAT_LAMP ? 0.2 : (enh_cloth != 0 ? 0.52 : (enh_wet < 0.0 ? 0.36 : 0.45))) * 0.5 + 0.5, 1.0) : vec4(0.0);
   }
 
   // Enhanced: the relief in the key light, where the surface isn't already turned away from it
