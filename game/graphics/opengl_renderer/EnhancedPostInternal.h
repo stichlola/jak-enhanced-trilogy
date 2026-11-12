@@ -26,6 +26,7 @@
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedEditor.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
+#include "game/graphics/opengl_renderer/loader/EnhancedDetail.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedGrass.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedRayTrace.h"
 #include "game/graphics/opengl_renderer/loader/EnhancedScenery.h"

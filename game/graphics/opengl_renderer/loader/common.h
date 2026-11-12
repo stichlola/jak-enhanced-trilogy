@@ -21,6 +21,7 @@ struct LevelData {
   std::vector<EnhPbrPixels> enh_pbr_pending;    // Enhanced: ...read, not yet uploaded
   u64 load_id = UINT64_MAX;
   mutable std::vector<u8> enh_materials;  // Enhanced: see EnhancedMaterials.h
+  mutable std::vector<u8> enh_detail;     // Enhanced: per texture, its detail material (EnhancedDetail.h, 0: none)
   mutable std::vector<u8> enh_char_materials;  // Enhanced: and the characters', same place
   mutable std::vector<std::pair<GLuint, u8>> enh_relief;  // Enhanced: see EnhancedTextures.h
 
