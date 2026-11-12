@@ -5143,6 +5143,7 @@ void composite_unused() {
   // them by day, by night they're smoothed into the game's sky)
   float bolt_light = 0.0;
   float sky_kept = 0.0;  // the game's lights over its night sky, kept as drawn
+  float sky_cl_trans = 1.0;  // how much of our sky shows through the cloud volume (the sun's disk below)
   vec3 sky_light = vec3(0.0);
   float sky_k = z == 0.0 ? 1.0
                          : smoothstep(2800.0 * 4096.0, 4000.0 * 4096.0, z) *
@@ -5168,6 +5169,7 @@ void composite_unused() {
         cl = cloud_volume(ray, pixel_angle() / 6.2832, mix(sky, c, game_w));
       }
       c = mix(c, c * cl.a + cl.rgb, clouds.x);
+      sky_cl_trans = mix(1.0, clamp(cl.a, 0.0, 1.0), clouds.x);
       // (the sprites in front of it: the chimneys' smoke, glows)
       // (the sun's and moon's glows among them: their faint outskirts stopped at the quad's edge, a
       // square over our sky, so the faintest light is let go; and their core, clipped white in the
@@ -5927,6 +5929,17 @@ void composite_unused() {
     if (sky_part > 0.0 && wsurf == 0.0) {
       vec3 under = c * min(1.0, 0.9 / max(max(c.r, max(c.g, c.b)), 1e-3));
       under = mix(under, vec3(luma(under)) * vec3(1.0, 0.99, 0.97), 0.5);
+      // (look.sky_extras: brought under 0.9 like the rest, the sun's disk kept only its orange hue at
+      // the sky's peak, so it read as a dark disk on the paler sky at 16h. Its disk and aureole
+      // stay the brightest of the sky: toward a warm white, as far as the clouds let them through)
+      if ((look_bits() & 1) != 0) {
+        float sd = max(dot(ray, sky_sun.xyz), 0.0);
+        float clear = sky_cl_trans * (1.0 - clamp((clouds.y - 0.5) * 2.0, 0.0, 1.0)) * (1.0 - clouds.w) *
+                      smoothstep(-0.02, 0.06, sky_sun.w);
+        float hot = max(smoothstep(0.99955, 0.9998, sd),
+                        pow(sd, 900.0) * 0.4 + pow(sd, 160.0) * 0.1) * clear;
+        under = mix(under, vec3(1.0, 0.97, 0.9), min(hot, 1.0));
+      }
       c = mix(c, under, sky_part);
     }
   }
