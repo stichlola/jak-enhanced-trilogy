@@ -1,4 +1,5 @@
 #include "EnhancedPost.h"
+#include "EnhancedTune.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1000,6 +1001,25 @@ void EnhancedPost::remember_lamp(const float* pos, float size, const float* colo
 }
 
 void EnhancedPost::draw_debug_window() {
+  if (ImGui::TreeNode("Sand detail")) {
+    // Live sliders over the shaders' tune_detail* defaults (tfrag3.frag / hfrag.frag), through the
+    // tuning overrides: strength, distance where it is gone, the far ripples' strength.
+    static float strength = 0.58f, far_m = 800.f, far_octave = 0.73f;
+    char line[96];
+    if (ImGui::SliderFloat("Strength", &strength, 0.f, 1.5f)) {
+      snprintf(line, sizeof(line), "shaders.tune_detail %.3f", strength);
+      enhanced_request_tune_set(line);
+    }
+    if (ImGui::SliderFloat("Gone by (m)", &far_m, 20.f, 800.f, "%.0f")) {
+      snprintf(line, sizeof(line), "shaders.tune_detail_fade 10 %.1f", far_m);
+      enhanced_request_tune_set(line);
+    }
+    if (ImGui::SliderFloat("Far ripples", &far_octave, 0.f, 2.5f)) {
+      snprintf(line, sizeof(line), "shaders.tune_detail_far %.3f", far_octave);
+      enhanced_request_tune_set(line);
+    }
+    ImGui::TreePop();
+  }
   if (ImGui::TreeNode("Enhanced Post")) {
     ImGui::Checkbox("Enabled", &m_settings.enabled);
     ImGui::Checkbox("SSAO", &m_settings.ssao);

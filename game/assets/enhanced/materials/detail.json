@@ -11,7 +11,7 @@
 // rocky ground only: shaders.tune_detail_rock 0.
 {
   "materials": {
-    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 2.0, "rough": 0.3, "ao": 0.5 },
+    "sand": { "file": "sand_detail.png", "tile_m": 0.9, "normal": 1.1, "rough": 0.3, "ao": 0.35 },
     "ground": { "file": "ground_detail.png", "tile_m": 2.2, "normal": 1.0, "rough": 0.25, "ao": 0.3 }
   },
   "textures": [

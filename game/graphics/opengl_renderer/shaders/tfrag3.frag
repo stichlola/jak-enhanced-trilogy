@@ -91,8 +91,9 @@ uniform sampler2D tex_T12;
 uniform int enh_detail;      // 0 none, 1 on, 2 on and the albedo may carry its roughness (PBR on)
 uniform vec4 cam_trans;      // (tfrag3.vert's: enh_pos is relative to it; also enh_on_sand below)
 uniform vec4 enh_detail_k;   // 1 / tile (game units), normal, roughness, AO strengths
-uniform float tune_detail = 1.0;                  // shaders.tune_detail: strength, 0 off
-uniform vec2 tune_detail_fade = vec2(15.0, 120.0);  // m: full up to, gone by (long, soft fade)
+uniform float tune_detail = 0.58;                 // shaders.tune_detail: strength, 0 off
+uniform vec2 tune_detail_fade = vec2(10.0, 800.0);  // m: full up to, gone by (long, soft fade)
+uniform float tune_detail_far = 0.73;  // shaders.tune_detail_far: the far octave's strength
 // shaders.tune_detail_rock: the material's strength on rock and rocky ground (detail.json's "ground":
 // desert-start's flat slab, wascity-ground-01), 0 off there (the sand's kept)
 uniform float tune_detail_rock = 1.0;
@@ -135,6 +136,17 @@ void enh_detail_sample() {
   vec2 gb = nb / max(sqrt(1.0 - dot(nb, nb)), 0.3);
   // (b's slopes back from its turned frame to the world's: rot's transpose)
   vec2 g = ga * wa + (gb * rot) * wb;
+  // Far octave: 7x wider ripples that take over from ~6 m to 25 m, where the fine ones mip down to
+  // flat at a grazing view, so the sand keeps a readable texture out to the fade.
+  float wf = smoothstep(6.0 * 4096.0, 25.0 * 4096.0, length(enh_pos));
+  if (wf > 0.0) {
+    const mat2 rot2 = mat2(0.28, -0.96, 0.96, 0.28);  // rot * rot
+    float s3 = enh_detail_k.x / 7.0;
+    vec2 uv3 = fract((rot2 * cam_trans.xz) * s3 + 0.71) + (rot2 * enh_pos.xz) * s3;
+    vec4 c = textureGrad(tex_T12, uv3, (rot2 * g_dp1.xz) * s3, (rot2 * g_dp2.xz) * s3);
+    vec2 nc = c.xy * 2.0 - 1.0;
+    g += (nc / max(sqrt(1.0 - dot(nc, nc)), 0.3) * rot2) * (wf * tune_detail_far);
+  }
   g_det = vec4(g, 0.5 + (a.b - 0.5) * wa + (b.b - 0.5) * wb, mix(1.0, a.a, wa) * mix(1.0, b.a, wb));
   g_det_k = k * strength;
 }
