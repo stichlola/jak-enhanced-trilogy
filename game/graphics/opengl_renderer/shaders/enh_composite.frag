@@ -274,7 +274,7 @@ uniform float tune_night_facade_floor = 3.5;  // a storey's height, m (a bay 0.8
 uniform float tune_night_facade_near = 70.0;  // in a lit city, plain and metal walls get them from here (to 1.5x), m
 uniform float tune_night_lamp = 1.0;       // lamps and lit signs at night: their picture as light (0 = off, >= 10 shows the tags)
 uniform float tune_night_lamp_gain = 1.6;  // how bright, over their texture's color
-uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams)
+uniform float tune_sky_keep_night = 1.0;  // the same by night: lights drawn over the game's sky (beacons, beams); 0 off, -1 per pixel (old: hard-edged searchlights)
 uniform float tune_sky_night_lo = 0.01;   // by how much brighter than the sky: from here
 uniform float tune_sky_night_hi = 0.2;    // to here, all of the game's pixel (0.04: the port's mist orb a lilac diamond, its halo cut)
 uniform sampler2D tex_T25;  // the game's sky before the levels (capture_sky)
@@ -5197,10 +5197,39 @@ void composite_unused() {
       // picture), added back over the night sky below (light: replacing the pixel drew a dark box
       // around the beacon's glow). The cards are darker cut-outs, and a sharpness test lost the
       // beacon's even core: a hollow ring)
-      if (z == 0.0 && tune_sky_keep_night > 0.0 && sky_copy > 0.0 && game_w > 0.0) {
-        vec3 dc = max(textureLod(tex_T0, uv, 0.0).rgb - textureLod(tex_T25, uv, 0.0).rgb, 0.0);
-        sky_kept = smoothstep(tune_sky_night_lo, tune_sky_night_hi, max(dc.r, max(dc.g, dc.b))) *
-                   clouds.x * game_w * tune_sky_keep_night;
+      // (Weighed by the brightest such light within a few pixels, not by the pixel's own: per pixel,
+      // the searchlights' soft edges and their long fading tips were squared away (dc * w(dc)), the
+      // beams flat hard-edged slabs cut off midway. Next to a bright core the faint light is kept
+      // as drawn; faint light alone (the game's rain streaks, card seams) is still let go.
+      // tune_sky_keep_night < 0: per pixel, as before)
+      if (z == 0.0 && tune_sky_keep_night != 0.0 && sky_copy > 0.0 && game_w > 0.0) {
+        vec3 g0 = textureLod(tex_T0, uv, 0.0).rgb;
+        vec3 s0 = textureLod(tex_T25, uv, 0.0).rgb;
+        if (tune_sky_keep_night > 0.0 && luma(s0 - g0) > 0.02) {
+          // (a light of the game's sky the level covered (its moon behind a cloud card): a beam
+          // crossing it lost its light there, a dark disc in the beam. Against the sky around it)
+          for (int i = 0; i < 4; i++) {
+            vec2 q = uv + vec2(i == 0 ? 1.0 : i == 1 ? -1.0 : 0.0, i == 2 ? 1.0 : i == 3 ? -1.0 : 0.0) *
+                              28.0 * texel;
+            s0 = min(s0, textureLod(tex_T25, q, 0.0).rgb);
+          }
+        }
+        vec3 dc = max(g0 - s0, 0.0);
+        float dm = max(dc.r, max(dc.g, dc.b));
+        if (tune_sky_keep_night > 0.0 && dm > 1e-4) {
+          const float kSkyKeepReach = 10.0;  // px: how far a core's weight carries
+          for (int i = 0; i < 8; i++) {
+            float a = float(i) * 0.7854;
+            vec2 q = uv + vec2(cos(a), sin(a)) * kSkyKeepReach * texel * (i % 2 == 0 ? 1.0 : 0.6);
+            if (textureLod(tex_T3, q, 0.0).r > 1e-7) {
+              continue;  // (not over the sky there: a lit wall isn't a light)
+            }
+            vec3 dq = max(textureLod(tex_T0, q, 0.0).rgb - textureLod(tex_T25, q, 0.0).rgb, 0.0);
+            dm = max(dm, max(dq.r, max(dq.g, dq.b)));
+          }
+        }
+        sky_kept = smoothstep(tune_sky_night_lo, tune_sky_night_hi, dm) * clouds.x * game_w *
+                   abs(tune_sky_keep_night);
         sky_light = dc * sky_kept;
       }
       if (bolt.w > 0.0 && strike.w == 0.0) {
