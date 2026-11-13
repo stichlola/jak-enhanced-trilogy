@@ -139,12 +139,26 @@ bool GameCntTool::run(const ToolInput& task, const PathMap& path_map) {
 
 TextTool::TextTool() : Tool("text") {}
 
+namespace {
+// Enhanced: the text and subtitle files come out of goalc's own code too, not only out of their
+// sources (common/util/font/font_utils.cpp turns the PlayStation buttons into the Xbox pad's glyphs on
+// the way in). Rebuilt when goalc is newer than them: a text built by an older goalc kept the old
+// button strings, which drew wrong over a newer font texture (font.24lo, xbox_font_glyphs.py).
+void add_compiler_dep(std::vector<std::string>& deps) {
+  const auto exe = file_util::get_current_executable_path();
+  if (!exe.empty() && fs::exists(exe)) {
+    deps.push_back(exe);
+  }
+}
+}  // namespace
+
 bool TextTool::needs_run(const ToolInput& task, const PathMap& path_map) {
   if (task.input.size() != 1) {
     throw std::runtime_error(fmt::format("Invalid amount of inputs to {} tool", name()));
   }
 
   std::vector<std::string> deps;
+  add_compiler_dep(deps);
   std::vector<GameTextDefinitionFile> files;
   open_text_project("text", task.input.at(0), files);
   for (auto& file : files) {
@@ -175,6 +189,7 @@ void enumerate_subtitle_project_files(const std::string& tool_name,
                                       const PathMap& path_map,
                                       std::vector<GameSubtitleDefinitionFile>& files,
                                       std::vector<std::string>& deps) {
+  add_compiler_dep(deps);
   open_subtitle_project(tool_name, file_path, files);
   for (auto& file : files) {
     deps.push_back(path_map.apply_remaps(file.lines_path));
