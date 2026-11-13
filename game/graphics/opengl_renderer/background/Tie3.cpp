@@ -983,8 +983,8 @@ void Tie3::render_tree_wind(int idx,
   // and our own sway on them, with the static trees' (tune_tie_wind, the shader's switch)
   static const EnhancedTune k_tie_wind("shaders.tune_tie_wind", 1.f);
   // the trunk's lean and the leaves' swing, as tfrag3.vert's (same keys, same defaults)
-  static const EnhancedTune k_tie_trunk("shaders.tune_tie_trunk", 0.0015f);
-  static const EnhancedTune k_tie_frond("shaders.tune_tie_frond", 0.03f);
+  static const EnhancedTune k_tie_trunk("shaders.tune_tie_trunk", 0.006f);
+  static const EnhancedTune k_tie_frond("shaders.tune_tie_frond", 0.10f);
   // (as tfrag3.vert: 10..19 paints the weights and holds still, >= 20 sways at tune_tie_wind - 19
   // and paints how far each vertex moves)
   const float tw = k_tie_wind;
@@ -998,7 +998,7 @@ void Tie3::render_tree_wind(int idx,
                           ? enh_amp * g_enhanced_wind.now() * enh_calm
                           : 0.f;
   // (a strong wind swings the leaves more than in proportion, as tfrag3.vert's tune_tie_frond_gale)
-  static const EnhancedTune k_tie_frond_gale("shaders.tune_tie_frond_gale", 0.15f);
+  static const EnhancedTune k_tie_frond_gale("shaders.tune_tie_frond_gale", 0.6f);
   const float enh_gale =
       1.f + (float)k_tie_frond_gale * std::max(g_enhanced_wind.now() - 1.f, 0.f);
   // a crown on a static trunk (Spargus' palms) also moves at its origin by that trunk's lean there

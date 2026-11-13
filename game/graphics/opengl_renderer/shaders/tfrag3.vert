@@ -20,11 +20,11 @@ uniform vec4 enh_tie_wind;
 // 0 = still (as the game), 1 = sway; >= 10 paints the weights (blue leaves, green trunks, by height)
 uniform float tune_tie_wind = 1.0;
 // the trunk's lean, m per meter of height and unit of wind (0.03 = the old, whole-tree lean)
-uniform float tune_tie_trunk = 0.0015;
+uniform float tune_tie_trunk = 0.006;
 // a leaf's swing, m per meter of reach from its trunk and unit of wind (0 = the old: flutter only)
-uniform float tune_tie_frond = 0.03;
+uniform float tune_tie_frond = 0.10;
 // and how much more per unit of wind past 1 (0 = linear, as before the weather's wind amount)
-uniform float tune_tie_frond_gale = 0.15;
+uniform float tune_tie_frond_gale = 0.6;
 // below this wind (+ 0.4 to fade in) the trees stand still: the weather's calm (0 = sway at any wind)
 uniform float tune_tie_calm = 0.3;
 
