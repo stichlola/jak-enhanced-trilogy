@@ -946,6 +946,10 @@ class EnhancedPost {
   float m_cover_now = 0.f;       // the sky hidden above Jak, as last traced (0..1)
   float m_cover = 0.f;           // the same, eased: the rain on the roof over him
   int m_spell = 0;               // the changing weather's current spell (SpellKind)
+  int64_t m_spell_index = -1;    // which of the zone's spells (logged once per change)
+  std::string m_spell_zone;      // the zone it was rolled in
+  // the weather's own clock (s): m_time sped up by tuning weather.time_scale (tests fast-forward)
+  double m_weather_clock = 0.0;
   float m_cine = 0.f;  // cutscene depth of field, eased in and out
   float m_movie = 0.f;  // a cutscene plays, eased: its close-ups get the game's own shading
   int m_zone = 0;

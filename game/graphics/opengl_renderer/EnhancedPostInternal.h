@@ -172,8 +172,18 @@ struct ZoneLook {
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
-enum SpellKind { kFair, kOvercast, kShower, kThunder, kFogSpell, kSandstorm, kSnowSpell, kSpellKinds };
-const char* const kSpellNames[kSpellKinds] = {"fair", "overcast", "shower", "thunder", "fog", "sandstorm", "snow"};
+// (the ids are tuning weather.test_spell's: 7 = windy; world.json reads them by name)
+enum SpellKind { kFair, kOvercast, kShower, kThunder, kFogSpell, kSandstorm, kSnowSpell, kWindy, kSpellKinds };
+const char* const kSpellNames[kSpellKinds] = {"fair", "overcast", "shower", "thunder", "fog", "sandstorm", "snow", "windy"};
+// what the automatic weather is doing now, for the menu's "Now:" line (update_scene fills it)
+struct WeatherNow {
+  int spell = -1;          // SpellKind, -1: the zone has no spells
+  float left_s = 0.f;      // real seconds until the next spell
+  float wind = 0.f;        // the weather's wind amount (eased)
+  bool outdoors = true;
+  std::string zone;
+};
+inline WeatherNow g_weather_now;
 const char* const kSeasonNames[4] = {"spring", "summer", "autumn", "winter"};
 // what a season does everywhere: the spells' odds (times), the grade (plus), the animals (times)
 struct Season {
@@ -704,6 +714,20 @@ inline void weather_menu(EnhancedPost::Settings& s, const char* id) {
     ImGui::SetNextItemWidth(160);
     ImGui::Combo(fmt::format("Season##{}", id).c_str(), &s.season,
                  "By the calendar\0Spring\0Summer\0Autumn\0Winter\0");
+    // what it is doing here and now (update_scene's g_weather_now)
+    const WeatherNow& now = g_weather_now;
+    const char* wind = now.wind < 0.25f ? "calm" : now.wind < 0.6f ? "breezy" : now.wind < 1.f ? "windy" : "strong";
+    std::string line;
+    if (!now.outdoors) {
+      line = "Now: indoors (no weather)";
+    } else if (now.spell < 0 || now.spell >= kSpellKinds) {
+      line = fmt::format("Now: {} weather, wind {}", now.zone.empty() ? "the area's" : now.zone, wind);
+    } else {
+      const int left = std::max(0, (int)now.left_s);
+      line = fmt::format("Now: {} in {}, wind {}, changes in {}:{:02d}", kSpellNames[now.spell], now.zone,
+                         wind, left / 60, left % 60);
+    }
+    ImGui::TextDisabled("%s", line.c_str());
     ImGui::Unindent();
     return;
   }
