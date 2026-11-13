@@ -654,6 +654,7 @@ void EnhancedPost::update_scene() {
   g_enhanced_wind.wet = m_settings.enabled ? m_wet : 0.f;
   g_enhanced_parallax = m_settings.enabled ? m_settings.parallax : 0.f;
   g_enhanced_wall_notile = m_settings.enabled && m_settings.wall_notile;
+  g_enhanced_on = m_settings.enabled;
   // (pbr.on 0 in the tuning file: off, to compare in one run)
   static const EnhancedTune t_pbr_on("pbr.on", 1.f);
   g_enhanced_pbr = m_settings.enabled && m_settings.pbr && t_pbr_on > 0.5f;

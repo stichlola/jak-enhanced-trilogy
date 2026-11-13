@@ -2626,6 +2626,20 @@ float snow_flakes(vec3 ray_view, float scene_z, float px) {
 float ground_hollow(vec3 pv) {
   float sum = 0.0;
   float n = 0.0;
+  // (the depth is read texel by texel (GL_NEAREST): each point is rebuilt at the texel's center,
+  // not where it was asked. Rebuilt off-center, a point took a neighboring row's depth, a few mm
+  // too high or low on level ground seen from low, and as the samples' offsets in their texels
+  // drifted from row to row the error made stripes: every one a row of puddles, dark lines across
+  // the desert at fixed distances from the camera, in rain and for minutes after. tune_water_dbg 46:
+  // as before)
+  bool snap = abs(tune_water_dbg - 46.0) > 0.5;
+  vec2 dsz = vec2(textureSize(tex_T3, 0));
+  vec3 pc = pv;
+  if (snap) {
+    vec2 cuv = (floor((vec2(pv.x * proj.z, pv.y * proj.w) / pv.z * 0.5 + 0.5) * dsz) + 0.5) / dsz;
+    float cd = texture(tex_T3, cuv).r;
+    pc = cd > 1e-7 ? view_pos(cuv, cd) : pv;
+  }
   for (int k = 0; k < 12; k++) {
     float r = (k < 6 ? 0.6 : 1.4) * 4096.0;
     float a = float(k) * 1.0471976 + (k < 6 ? 0.0 : 0.5235988);
@@ -2635,6 +2649,9 @@ float ground_hollow(vec3 pv) {
       continue;
     }
     vec2 quv = vec2(q.x * proj.z / q.z, q.y * proj.w / q.z) * 0.5 + 0.5;
+    if (snap) {
+      quv = (floor(quv * dsz) + 0.5) / dsz;
+    }
     if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
       continue;
     }
@@ -2642,7 +2659,7 @@ float ground_hollow(vec3 pv) {
     if (sd <= 1e-7) {
       continue;
     }
-    vec3 s = view_to_world * (view_pos(quv, sd) - pv);
+    vec3 s = view_to_world * (view_pos(quv, sd) - pc);
     // (where the ray met the surface, against where it was asked: off by more than half the ring's
     // radius sideways, it hit something else)
     if (length(s.xz - want_w.xz) > r * 0.5) {
@@ -5125,14 +5142,18 @@ void composite_unused() {
     // dry they draw back into the deepest dips, still water while the street around has dried
     float pd = gnoise(ww.xz * 0.22) + 0.45 * gnoise(ww.xz * 0.7 + 7.1) + 0.12 * gnoise(ww.xz * 3.1 + 2.3);
     // (in the ground's real dips, as the depth buffer shows them: ground_hollow. The noise only
-    // rags their rims and, in a downpour, floods the level ground; past 70 m, where the rings get
-    // too few pixels, the noise alone as before. tune_water_dbg 42: the noise everywhere, as before;
-    // 43: the dips, blue)
-    if (abs(tune_water_dbg - 42.0) > 0.5 && z < 70.0 * 4096.0 && dot(wet_n, up_view) > 0.85) {
-      float hol = ground_hollow(p);
+    // rags their rims and, in a downpour, floods the level ground. Past 50-70 m, where the dips get
+    // too few pixels, the ground counts as level, the same rule without them: the bare noise there
+    // made half the far ground puddles against a few near, a ring around the camera at 50-70 m that
+    // from a low camera lay across the desert as a dark band of reflected sky, in rain and for
+    // minutes after. tune_water_dbg 42: the noise everywhere; 43: the puddles, blue; 46: the bare
+    // noise past 70 m, as before)
+    if (abs(tune_water_dbg - 42.0) > 0.5 && dot(wet_n, up_view) > 0.85) {
+      float far_k = smoothstep(50.0 * 4096.0, 70.0 * 4096.0, z);
+      float hol = z < 70.0 * 4096.0 ? ground_hollow(p) * (1.0 - far_k) : 0.0;
       // (a dip of 1 cm is a full puddle; level ground only in the noise's highest spots)
       float pd_h = (hol - 0.004) * 40.0 + 0.25 * pd - 0.05;
-      pd = mix(pd_h, pd, smoothstep(50.0 * 4096.0, 70.0 * 4096.0, z));
+      pd = abs(tune_water_dbg - 46.0) < 0.5 ? mix(pd_h, pd, far_k) : pd_h;
     }
     float spread = 0.22 * weather2.x - 0.3 * (1.0 - puddle_level);
     float puddle = smoothstep(-0.12 - spread, 0.02 - spread, pd) * smoothstep(0.85, 0.95, dot(wet_n, up_view)) *
@@ -5142,6 +5163,10 @@ void composite_unused() {
     float water = min(puddle_level * 3.0, 1.0);
     if (abs(tune_water_dbg - 43.0) < 0.5) {
       c = mix(c, vec3(0.0, 0.3, 1.0), puddle * 0.8);
+    }
+    if (abs(tune_water_dbg - 47.0) < 0.5) {  // (test: the dips red, the bumps green: 1 cm full)
+      float hh = ground_hollow(p) * 100.0;
+      c = vec3(clamp(hh, 0.0, 1.0), clamp(-hh, 0.0, 1.0), 0.0);
     }
     wet = max(wet, puddle * wet_flat * water);
     // (a damp dark rim around a drying puddle)
