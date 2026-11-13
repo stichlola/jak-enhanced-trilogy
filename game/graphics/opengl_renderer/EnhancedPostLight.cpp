@@ -222,6 +222,7 @@ void EnhancedPost::update_scene() {
   float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
   float snow = 0.f;
   float fog = 1.f;
+  float wind = 0.15f;  // the weather's wind: 0 still, 1 windy or a sandstorm, 1.5 a blizzard
   // lava levels: the air over it shimmers whatever the weather
   const float heat = zone.weather.heat;
   const bool outdoors = zone.weather.outdoors;
@@ -269,8 +270,16 @@ void EnhancedPost::update_scene() {
     lg::info("[enhanced] weather mode {} in {}", weather_mode, level.empty() ? "none" : level);
     logged_weather_mode = weather_mode;
   }
+  // the automatic weather's clock: the game's, sped up by tuning weather.time_scale (a test sees
+  // a run of spells in a minute at 40)
+  static const EnhancedTune t_time_scale("weather.time_scale", 1.f);
+  const double time_scale = std::clamp((double)(float)t_time_scale, 0.0, 1000.0);
+  m_weather_clock += time_scale / 60.0;
+  g_weather_now.outdoors = zone.weather.outdoors;
+  g_weather_now.zone = zone.name;
+  g_weather_now.spell = -1;
   switch (weather_mode) {
-    case 1: {
+    case kWeatherAuto: {
       // changing: a four-minute cycle per area. Rain comes in Haven and the forest (clouds build,
       // rain, a thunderstorm, the rain stops and the sun comes out on the wet streets, they dry),
       // sand blows up in the desert on top of the game's own storms, fog on early mornings
@@ -278,7 +287,7 @@ void EnhancedPost::update_scene() {
         const char* e = std::getenv("JAK_ENHANCED_WEATHER_PHASE");
         return e ? std::atof(e) : 0.0;
       }();
-      const float ph = (float)std::fmod(m_time + phase0, 240.0);
+      const float ph = (float)std::fmod(m_weather_clock + phase0, 240.0);
       auto in = [&](float a, float b) {
         return std::clamp((ph - a) / 12.f, 0.f, 1.f) * std::clamp((b - ph) / 12.f, 0.f, 1.f);
       };
@@ -303,17 +312,24 @@ void EnhancedPost::update_scene() {
         // each spell its own (and a new one on every visit): a roll picks its weather by the zone's
         // odds times the season's. A wet spell: clouds build, rain (the storm in the middle of it),
         // the sun back out on the wet ground, drying; the others rise and fall over the spell
-        const double tt = m_time + phase0 + m_visit_offset;
+        const double tt = m_weather_clock + phase0 + m_visit_offset;
         const double period = std::max(30.0, (double)w.spell_period);
-        const float p = (float)(std::fmod(tt, period) / period);
+        float p = (float)(std::fmod(tt, period) / period);
         const uint32_t index = (uint32_t)(tt / period);
-        const uint32_t spell = index * 2654435761u + 977u;
+        // (murmur3's finalizer: the plain multiplicative hash gave strengths falling by 0.2 from
+        // one spell to the next, and the kinds came in a pattern)
+        auto hash_mix = [](uint32_t h) {
+          h ^= h >> 16;
+          h *= 0x85ebca6bu;
+          h ^= h >> 13;
+          h *= 0xc2b2ae35u;
+          h ^= h >> 16;
+          return h;
+        };
+        const uint32_t spell = hash_mix(index * 2654435761u + 977u);
         const float roll = (float)((spell >> 8) % 1000) / 1000.f;
         // how strong this one is (a drizzle or a downpour, a haze or a storm)
-        const float strength = (float)(((spell * 2246822519u) >> 12) % 1000) / 1000.f;
-        auto win = [&](float a, float b) {
-          return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
-        };
+        float strength = (float)((hash_mix(spell ^ 0x9e3779b9u) >> 12) % 1000) / 1000.f;
         std::array<float, kSpellKinds> odds;
         float total = 0.f;
         for (int k = 0; k < kSpellKinds; k++) {
@@ -329,16 +345,41 @@ void EnhancedPost::update_scene() {
             break;
           }
         }
-        // (test: tuning weather.test_spell = a SpellKind (5 sandstorm) holds that spell, -1 off; one
-        // log line per change)
+        // (test: tuning weather.test_spell = a SpellKind (7 windy, 5 sandstorm, 3 thunder, 0 fair)
+        // holds that spell at weather.test_phase of it (0.5: its middle) and weather.test_strength
+        // (-1: the roll's); -1 off)
         static const EnhancedTune t_test_spell("weather.test_spell", -1.f);
-        if ((float)t_test_spell >= 0.f) {
+        static const EnhancedTune t_test_phase("weather.test_phase", 0.5f);
+        static const EnhancedTune t_test_strength("weather.test_strength", -1.f);
+        const bool test = (float)t_test_spell >= 0.f;
+        if (test) {
           kind = std::clamp((int)(float)t_test_spell, 0, kSpellKinds - 1);
+          p = std::clamp((float)t_test_phase, 0.f, 0.999f);
+          if ((float)t_test_strength >= 0.f) {
+            strength = std::clamp((float)t_test_strength, 0.f, 1.f);
+          }
         }
-        if (kind != m_spell) {
-          lg::info("[enhanced] weather spell {} in {}", kSpellNames[kind], level);
+        // (Enhanced's fog is off: a fog spell is an overcast one, not damp ground under no fog)
+        if (kFogOff && kind == kFogSpell) {
+          kind = kOvercast;
+        }
+        auto win = [&](float a, float b) {
+          return std::clamp((p - a) / 0.05f, 0.f, 1.f) * std::clamp((b - p) / 0.05f, 0.f, 1.f);
+        };
+        // one line per spell (a new roll, a new zone, a test's pick)
+        const int64_t spell_id = test ? -2 - kind : (int64_t)index;
+        if (kind != m_spell || spell_id != m_spell_index || zone.name != m_spell_zone) {
+          lg::info("[enhanced] weather spell {} in {} (zone {}, strength {:.2f}, period {} s)",
+                   kSpellNames[kind], level, zone.name, strength, (int)period);
+          m_spell_index = spell_id;
+          m_spell_zone = zone.name;
         }
         m_spell = kind;
+        g_weather_now.spell = kind;
+        g_weather_now.left_s =
+            test ? 0.f : (float)((1.0 - p) * period / std::max(time_scale, 1e-3));
+        // each spell blows its own wind (0 still, 1 windy, see `wind`): fair a breath, a storm
+        // gusting at its height, a sandstorm as hard as its sand
         switch (kind) {
           case kShower:
           case kThunder: {
@@ -352,6 +393,8 @@ void EnhancedPost::update_scene() {
             }
             want.clouds = std::max(want.clouds, 0.95f * win(0.25f, 0.7f));
             fair = 1.f - win(0.25f, 0.7f);
+            wind = thunder ? 0.35f + 0.9f * win(0.4f, 0.7f)
+                           : std::max(0.15f, (0.3f + 0.3f * strength) * win(0.333f, 0.667f));
             m_weather_state = p < 0.25f ? 6 : p < 0.333f ? 1 : p < 0.667f ? (storm > 0.f ? 3 : 2)
                             : p < 0.925f ? 4 : 6;
             break;
@@ -359,6 +402,7 @@ void EnhancedPost::update_scene() {
           case kOvercast:
             want.clouds = std::max(want.clouds, 0.92f * win(0.1f, 0.9f));
             fair = 1.f - win(0.1f, 0.9f);
+            wind = 0.3f;
             m_weather_state = 1;
             break;
           case kFogSpell:
@@ -367,22 +411,37 @@ void EnhancedPost::update_scene() {
             want.clouds = std::max(want.clouds, 0.7f * win(0.15f, 0.85f));
             wet = std::max(wet, 0.3f * win(0.15f, 0.85f));
             fair = 1.f - win(0.15f, 0.85f);
+            wind = 0.1f;
             m_weather_state = 1;
             break;
-          case kSandstorm:
-            dust = std::max(dust, (0.6f + 0.6f * strength) * win(0.2f, 0.8f));
+          case kSandstorm: {
+            const float sand = (0.6f + 0.6f * strength) * win(0.2f, 0.8f);
+            dust = std::max(dust, sand);
+            // (the wind before Spargus' walls keep the sand out, below: in town the palms still
+            // bend and the wind still howls)
+            wind = std::max(0.15f, sand);
             m_weather_state = p > 0.2f && p < 0.8f ? 5 : 6;
             break;
+          }
           case kSnowSpell:
             snow = std::max(snow, (0.35f + 0.75f * strength) * win(0.2f, 0.85f));
             mist = std::max(mist, 0.3f * win(0.2f, 0.85f));
             want.clouds = std::max(want.clouds, 0.88f * win(0.15f, 0.9f));
             fair = 1.f - win(0.15f, 0.9f);
+            wind = std::max(0.15f, (0.2f + 0.6f * strength) * win(0.2f, 0.85f));
             m_weather_state = 1;
+            break;
+          case kWindy:
+            // a dry gale: clear air, the palms and grass thrashing, broken clouds racing over
+            wind = std::max(0.15f, (0.7f + 0.5f * strength) * win(0.1f, 0.9f));
+            want.clouds = std::max(want.clouds, (0.3f + 0.3f * strength) * win(0.1f, 0.9f));
+            m_weather_state = 6;
             break;
           default:
             // fair weather clouds drift over now and then
             want.clouds = std::max(want.clouds, 0.2f + 0.4f * strength * win(0.25f, 0.67f));
+            // (calm to a light breeze: the grass and palms hardly move)
+            wind = 0.1f + 0.15f * strength;
             m_weather_state = 6;
             break;
         }
@@ -391,7 +450,7 @@ void EnhancedPost::update_scene() {
       // the fog: fixed, or its own spells (clear, a little, full), each its own
       fog = w.fog;
       if (w.fog_period > 0.f) {
-        const double tt = m_time + phase0 + m_visit_offset;
+        const double tt = m_weather_clock + phase0 + m_visit_offset;
         const double period = std::max(30.0, (double)w.fog_period);
         const uint32_t index = (uint32_t)(tt / period);
         const uint32_t spell = index * 2246822519u + 3266489917u;
@@ -430,7 +489,21 @@ void EnhancedPost::update_scene() {
       want.clouds = std::max(want.clouds * 0.5f, m[6]);
       clear = m[7];
       wet = m[8];
+      wind = m[9];
       break;
+    }
+  }
+  // storms, sand and rain blow too, whatever the preset says (the automatic weather's spells too),
+  // and the game's own sandstorm; under a roof it's still
+  wind = std::max({wind, 0.9f * storm, dust, 0.5f * rain, game_dust});
+  if (!outdoors) {
+    wind = 0.1f;
+  }
+  {
+    // (weather.wind_force in the tuning file: holds the wind amount, -1 = the weather's)
+    static const EnhancedTune t_wind_force("weather.wind_force", -1.f);
+    if (t_wind_force >= 0.f) {
+      wind = t_wind_force;
     }
   }
   sunny = std::max(sunny, s.vivid * (1.f - m_night) * (1.f - std::min(1.f, rain)));
@@ -635,7 +708,9 @@ void EnhancedPost::update_scene() {
     g[RainRoof] = m_cover * std::min(1.f, r * 1.4f);
     g[Drips] = outdoors ? std::clamp(m_puddle * 1.5f - r * 3.f, 0.f, 1.f) : 0.f;
     g[WindNight] = std::max(a.wind, a.wind_night * m_night);
-    g[WindStorm] = std::clamp(std::max(m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f), 0.f, 1.f);
+    g[WindStorm] = std::clamp(std::max({m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f,
+                                        0.8f * std::clamp((m_wind_amount - 0.4f) / 0.6f, 0.f, 1.f)}),
+                              0.f, 1.f);
     const float calm = (1.f - std::clamp(r * 3.f, 0.f, 1.f)) * (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
     g[Crickets] = a.crickets * season.crickets * m_night * calm;
     g[Birds] = a.birds * season.birds * (1.f - m_night) * calm;
@@ -663,7 +738,8 @@ void EnhancedPost::update_scene() {
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
   const float wa = 0.7f + 0.5f * (float)std::sin(m_time * 0.013);
   float wx = std::sin(wa), wz = std::cos(wa);
-  float speed = 7.f + 3.f * m_storm;
+  // (the dust drifts faster the windier it is; the game storm's own speed wins while it blows)
+  float speed = 3.f + 9.f * m_wind_amount;
   if (game_storm) {
     const float gx = gd.wind_x.load(), gz = gd.wind_z.load();
     const float gl = std::sqrt(gx * gx + gz * gz);
@@ -677,18 +753,30 @@ void EnhancedPost::update_scene() {
   ease(m_wind[0], wx, k_wind);
   ease(m_wind[1], wz, k_wind);
   ease(m_wind_speed, speed, k_wind);
-  // the grass and trees sway with it: the wind's speed, a storm or a sandstorm, and slow swells
-  // over a few minutes (calm spells, breezier ones)
+  ease(m_wind_amount, wind, k_wind);
+  g_weather_now.wind = m_wind_amount;
+  // the grass, palms and trees sway with the weather's wind amount (eased), slow swells over a few
+  // minutes (calm spells, breezier ones) and, the windier it is, faster surges. Clear sways ~0.55-0.7,
+  // windy and a sandstorm ~2.1-2.6 (weather.wind_calm, weather.wind_gain)
   {
-    const float swell = 0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3);
+    static const EnhancedTune t_calm("weather.wind_calm", 0.45f);
+    static const EnhancedTune t_gain("weather.wind_gain", 2.2f);
+    const float surge = 0.15f * m_wind_amount * (float)std::sin(m_time * 0.7) *
+                        (float)std::sin(m_time * 0.23 + 2.0);
+    const float swell =
+        0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3) + surge;
     const float rough = std::max(m_storm, std::max(m_dust, 0.7f * m_rain));
-    g_enhanced_wind.gust = std::clamp((m_wind_speed / 9.f + 1.4f * rough) * swell, 0.5f, 3.f);
+    g_enhanced_wind.gust =
+        std::clamp(((float)t_calm + (float)t_gain * m_wind_amount) * swell, 0.3f, 3.f);
     // (one line per quarter of change: what the trees and grass sway at, EnhancedWind::now)
-    static float logged_gust = -1.f;
-    if (std::abs(g_enhanced_wind.gust - logged_gust) >= 0.25f) {
+    // (and per 0.05 of the wind amount, so a settled calm shows too)
+    static float logged_gust = -1.f, logged_amount = -1.f;
+    if (std::abs(g_enhanced_wind.gust - logged_gust) >= 0.25f ||
+        std::abs(m_wind_amount - logged_amount) >= 0.05f) {
       logged_gust = g_enhanced_wind.gust;
-      lg::info("[enhanced] wind now {:.2f} (gust {:.2f}, speed {:.1f}, rough {:.2f}) in {}",
-               g_enhanced_wind.now(), g_enhanced_wind.gust, m_wind_speed, rough,
+      logged_amount = m_wind_amount;
+      lg::info("[enhanced] wind now {:.2f} (gust {:.2f}, speed {:.1f}, rough {:.2f}, amount {:.2f}) in {}",
+               g_enhanced_wind.now(), g_enhanced_wind.gust, m_wind_speed, rough, m_wind_amount,
                level.empty() ? "none" : level);
     }
   }

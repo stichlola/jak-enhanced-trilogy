@@ -513,8 +513,15 @@ void EnhancedPost::draw_menu() {
         *value = b ? on : 0.f;
       }
     };
+    // (test runs: JAK_ENHANCED_MENU_GROUP=<label> opens that group once, scrolled to)
+    static const char* open_group = std::getenv("JAK_ENHANCED_MENU_GROUP");
     auto group = [&](const char* label) {
       n = 0;
+      if (open_group && std::strcmp(open_group, label) == 0) {
+        open_group = nullptr;
+        ImGui::SetNextItemOpen(true);
+        ImGui::SetScrollHereY(0.15f);
+      }
       return ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth);
     };
     if (group("Image and camera")) {
@@ -627,7 +634,7 @@ void EnhancedPost::draw_menu() {
     }
     if (group("World and vegetation")) {
       check("Extended draw distance", &s.far_view);
-      check("Wind on the grass", &g_enhanced_wind.enabled);
+      check("Wind on grass and trees", &g_enhanced_wind.enabled);
       check("Grass bends away", &g_enhanced_wind.push);
       ImGui::NewLine();
       ImGui::SetNextItemWidth(200);
@@ -1112,7 +1119,12 @@ void EnhancedPost::apply_menu_settings(const std::string& text) {
   get("snow_cover", s.snow_cover);
   get("weather", s.weather);
   s.weather = std::clamp(s.weather, 0, kWeatherCount - 1);
-  get("weather_mix", s.weather_mix);
+  {
+    // older builds saved 9 values (no wind): those load and the wind keeps its default
+    std::vector<float> mix;
+    get("weather_mix", mix);
+    std::copy_n(mix.begin(), std::min(mix.size(), s.weather_mix.size()), s.weather_mix.begin());
+  }
   get("season", s.season);
   get("photo_filter", s.photo_filter);
   get("photo_vignette", s.photo_vignette);

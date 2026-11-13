@@ -172,8 +172,18 @@ struct ZoneLook {
 };
 // the weathers a zone's spells pick from ("spells" in world.json), and the seasons that make some
 // likelier than others
-enum SpellKind { kFair, kOvercast, kShower, kThunder, kFogSpell, kSandstorm, kSnowSpell, kSpellKinds };
-const char* const kSpellNames[kSpellKinds] = {"fair", "overcast", "shower", "thunder", "fog", "sandstorm", "snow"};
+// (the ids are tuning weather.test_spell's: 7 = windy; world.json reads them by name)
+enum SpellKind { kFair, kOvercast, kShower, kThunder, kFogSpell, kSandstorm, kSnowSpell, kWindy, kSpellKinds };
+const char* const kSpellNames[kSpellKinds] = {"fair", "overcast", "shower", "thunder", "fog", "sandstorm", "snow", "windy"};
+// what the automatic weather is doing now, for the menu's "Now:" line (update_scene fills it)
+struct WeatherNow {
+  int spell = -1;          // SpellKind, -1: the zone has no spells
+  float left_s = 0.f;      // real seconds until the next spell
+  float wind = 0.f;        // the weather's wind amount (eased)
+  bool outdoors = true;
+  std::string zone;
+};
+inline WeatherNow g_weather_now;
 const char* const kSeasonNames[4] = {"spring", "summer", "autumn", "winter"};
 // what a season does everywhere: the spells' odds (times), the grade (plus), the animals (times)
 struct Season {
@@ -252,43 +262,56 @@ inline bool volume_lights_on() {
   return t_on > 0.5f && g_enhanced_smoke_lights.count > 0;
 }
 
-// the weather presets of the menu (the order is kept: saved settings and test scripts use the
-// index). Values as in Settings::weather_mix; "Changing" has none (the zones decide)
+// the weather presets (the array order is kept: the index is the saved id, JAK_ENHANCED_WEATHER and the
+// test scripts use it; new presets go at the end). The menu shows them in its own order,
+// kWeatherMenuOrder. Values as in Settings::weather_mix; "Automatic" has none (the zones
+// decide)
 struct WeatherPreset {
-  const char* name;
-  std::array<float, 9> mix;  // rain, storm, fog, mist, snow, dust, clouds, after, wet
+  const char* name;  // a short title (1-2 words), no description or tooltip
+  std::array<float, 10> mix;  // rain, storm, fog, mist, snow, dust, clouds, after, wet, wind (0..1.5)
 };
 // cutscene close-ups: nearer than this (game units) the screen-space shadows and occlusion and the
 // sun's shadow map fade out. At a face's scale a pixel step is a millimeter: Daxter's fur and Jak's
 // hair shadow themselves into specks and stripes, and the map's texels show as blocks
 constexpr float kCloseUp = 3.f * 4096.f;  // 3 m
 
-const WeatherPreset kWeatherPresets[] = {
-    {"Clear", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
-    {"Changing (by area)", {0, 0, 0, 0, 0, 0, 0, 0, -1}},
-    {"Rain", {1, 0, 0.6f, 0, 0, 0, 0.95f, 0, -1}},
-    {"Sandstorm", {0, 0, 0.3f, 0, 0, 1, 0.3f, 0, -1}},
-    {"Thunderstorm", {1, 1, 0.7f, 0, 0, 0, 1, 0, -1}},
-    {"After the rain", {0, 0, 0.3f, 0, 0, 0, 0.55f, 1, 0.85f}},
-    {"Morning fog", {0, 0, 0.6f, 1, 0, 0, 0.4f, 0, 0.25f}},
-    {"Clear, a few clouds", {0, 0, 0, 0, 0, 0, 0.25f, 0, -1}},
-    {"Snow", {0, 0, 0.6f, 0.4f, 1, 0, 0.8f, 0, -1}},
-    {"Overcast", {0, 0, 0.2f, 0, 0, 0, 0.95f, 0, -1}},
-    {"Drizzle", {0.3f, 0, 0.3f, 0, 0, 0, 0.9f, 0, -1}},
-    {"Downpour", {1.3f, 0.3f, 0.8f, 0, 0, 0, 1, 0, -1}},
-    {"Storm in the fog", {1, 1, 1, 0.6f, 0, 0, 1, 0, -1}},
-    {"Light fog", {0, 0, 0.4f, 0, 0, 0, 0.5f, 0, -1}},
-    {"Fog", {0, 0, 1, 0.3f, 0, 0, 0.7f, 0, -1}},
-    {"Dense fog", {0, 0, 1, 1, 0, 0, 0.9f, 0, 0.3f}},
-    {"Rain and fog", {0.6f, 0, 1, 0.5f, 0, 0, 0.95f, 0, -1}},
-    {"Light snow", {0, 0, 0.3f, 0, 0.4f, 0, 0.7f, 0, -1}},
-    {"Blizzard", {0, 0, 1, 0.8f, 1.4f, 0, 1, 0, -1}},
-    {"Dusty haze", {0, 0, 0.4f, 0, 0, 0.35f, 0.3f, 0, -1}},
-    {"Sun after the storm", {0, 0, 0, 0.2f, 0, 0, 0.4f, 0.8f, 0.7f}},
-    {"Custom", {0, 0, 0, 0, 0, 0, 0.3f, 0, -1}},
+constexpr WeatherPreset kWeatherPresets[] = {
+    {"Clear", {0, 0, 0, 0, 0, 0, 0, 0, -1, 0.1f}},                           // 0
+    {"Automatic", {0, 0, 0, 0, 0, 0, 0, 0, -1, 0.15f}},            // 1
+    {"Rain", {1, 0, 0.6f, 0, 0, 0, 0.95f, 0, -1, 0.35f}},                    // 2
+    {"Sandstorm", {0, 0, 0.3f, 0, 0, 1, 0.3f, 0, -1, 1.f}},                  // 3
+    {"Thunderstorm", {1, 1, 0.7f, 0, 0, 0, 1, 0, -1, 0.9f}},                 // 4
+    {"After rain", {0, 0, 0.3f, 0, 0, 0, 0.55f, 1, 0.85f, 0.2f}},        // 5 (not in the menu)
+    {"Morning fog", {0, 0, 0.6f, 1, 0, 0, 0.4f, 0, 0.25f, 0.05f}},           // 6
+    {"Partly cloudy", {0, 0, 0, 0, 0, 0, 0.25f, 0, -1, 0.2f}},               // 7
+    {"Snow", {0, 0, 0.6f, 0.4f, 1, 0, 0.8f, 0, -1, 0.25f}},                  // 8
+    {"Cloudy", {0, 0, 0.2f, 0, 0, 0, 0.95f, 0, -1, 0.3f}},                   // 9
+    {"Drizzle", {0.3f, 0, 0.3f, 0, 0, 0, 0.9f, 0, -1, 0.2f}},                // 10
+    {"Heavy rain", {1.3f, 0.3f, 0.8f, 0, 0, 0, 1, 0, -1, 0.6f}},             // 11
+    {"Foggy storm", {1, 1, 1, 0.6f, 0, 0, 1, 0, -1, 0.7f}},             // 12
+    {"Light fog", {0, 0, 0.4f, 0, 0, 0, 0.5f, 0, -1, 0.05f}},                // 13
+    {"Fog", {0, 0, 1, 0.3f, 0, 0, 0.7f, 0, -1, 0.05f}},                      // 14
+    {"Dense fog", {0, 0, 1, 1, 0, 0, 0.9f, 0, 0.3f, 0}},                     // 15
+    {"Foggy rain", {0.6f, 0, 1, 0.5f, 0, 0, 0.95f, 0, -1, 0.3f}},          // 16
+    {"Light snow", {0, 0, 0.3f, 0, 0.4f, 0, 0.7f, 0, -1, 0.15f}},            // 17
+    {"Blizzard", {0, 0, 1, 0.8f, 1.4f, 0, 1, 0, -1, 1.2f}},                  // 18
+    {"Dust haze", {0, 0, 0.4f, 0, 0, 0.35f, 0.3f, 0, -1, 0.5f}},             // 19
+    {"Clearing", {0, 0, 0, 0.2f, 0, 0, 0.4f, 0.8f, 0.7f, 0.3f}},  // 20 (not in the menu)
+    {"Custom", {0, 0, 0, 0, 0, 0, 0.3f, 0, -1, 0.15f}},                      // 21
+    {"Windy", {0, 0, 0, 0, 0, 0, 0.35f, 0, -1, 1.f}},                        // 22
 };
 constexpr int kWeatherCount = sizeof(kWeatherPresets) / sizeof(kWeatherPresets[0]);
-constexpr int kWeatherCustom = kWeatherCount - 1;
+constexpr int kWeatherAuto = 1;     // changes by area, comes and goes
+constexpr int kWeatherCustom = 21;  // the mix of the sliders (Settings::weather_mix)
+constexpr int kWeatherWindy = 22;
+static_assert(kWeatherCount == 23, "weather ids are saved: only append presets");
+static_assert(kWeatherPresets[kWeatherCustom].name[0] == 'C' &&
+                  kWeatherPresets[kWeatherCustom].name[1] == 'u',
+              "kWeatherCustom must be the Custom preset");
+// the Weather combo's order (ids): classic first, fog presets after them when the fog is on; 5 and
+// 20 are left out but stay valid (a saved or scripted one still shows its name)
+constexpr int kWeatherMenuOrder[] = {1, 0, 7, 9, 22, 10, 2, 11, 4, 3, 19, 17, 8, 18, 21};
+constexpr int kWeatherMenuFog[] = {6, 12, 13, 14, 15, 16};
 
 // photo mode's filters: a grade over the area's (saturation times, contrast and warmth plus, the
 // highlights tinted, the shadows lifted)
@@ -645,36 +668,74 @@ inline void menu_glow() {
 }
 
 // the weather in a menu: the presets, and under them the mix (moving a slider makes it "Custom")
+// (once at startup: test runs check the menu's order)
+inline void log_weather_menu() {
+  std::string list;
+  for (int i : kWeatherMenuOrder) {
+    list += (list.empty() ? "" : ", ") + std::string(kWeatherPresets[i].name);
+  }
+  if (!kFogOff) {
+    for (int i : kWeatherMenuFog) {
+      list += ", " + std::string(kWeatherPresets[i].name);
+    }
+  }
+  lg::info("[enhanced] weather menu: {}", list);
+}
 inline void weather_menu(EnhancedPost::Settings& s, const char* id) {
+  // (test runs: JAK_ENHANCED_MENU_WEATHER=1 opens the combo once, for a screenshot of the list)
+  static bool open_test = std::getenv("JAK_ENHANCED_MENU_WEATHER") != nullptr;
+  if (open_test) {
+    open_test = false;
+    ImGui::OpenPopup(ImHashStr("##ComboPopup", 0, ImGui::GetID(id)));
+  }
   ImGui::SetNextItemWidth(200);
   if (ImGui::BeginCombo(id, kWeatherPresets[std::clamp(s.weather, 0, kWeatherCount - 1)].name)) {
-    for (int i = 0; i < kWeatherCount; i++) {
-      if (kFogOff && std::strstr(kWeatherPresets[i].name, "fog")) {
-        continue;
-      }
+    auto item = [&](int i) {
       if (ImGui::Selectable(kWeatherPresets[i].name, s.weather == i)) {
         s.weather = i;
-        if (i != 1 && i != kWeatherCustom) {
+        if (i != kWeatherAuto && i != kWeatherCustom) {
           s.weather_mix = kWeatherPresets[i].mix;
         }
+      }
+    };
+    for (int i : kWeatherMenuOrder) {
+      item(i);
+    }
+    if (!kFogOff) {
+      for (int i : kWeatherMenuFog) {
+        item(i);
       }
     }
     ImGui::EndCombo();
   }
-  if (s.weather == 1) {
+  if (s.weather == kWeatherAuto) {
     // the changing weather follows the season: the calendar's, or one picked here
     ImGui::Indent();
     ImGui::SetNextItemWidth(160);
     ImGui::Combo(fmt::format("Season##{}", id).c_str(), &s.season,
                  "By the calendar\0Spring\0Summer\0Autumn\0Winter\0");
+    // what it is doing here and now (update_scene's g_weather_now)
+    const WeatherNow& now = g_weather_now;
+    const char* wind = now.wind < 0.25f ? "calm" : now.wind < 0.6f ? "breezy" : now.wind < 1.f ? "windy" : "strong";
+    std::string line;
+    if (!now.outdoors) {
+      line = "Now: indoors (no weather)";
+    } else if (now.spell < 0 || now.spell >= kSpellKinds) {
+      line = fmt::format("Now: {} weather, wind {}", now.zone.empty() ? "the area's" : now.zone, wind);
+    } else {
+      const int left = std::max(0, (int)now.left_s);
+      line = fmt::format("Now: {} in {}, wind {}, changes in {}:{:02d}", kSpellNames[now.spell], now.zone,
+                         wind, left / 60, left % 60);
+    }
+    ImGui::TextDisabled("%s", line.c_str());
     ImGui::Unindent();
     return;
   }
-  const char* names[9] = {"Rain", "Thunderstorm", "Fog", "Ground mist", "Snow",
-                          "Dust", "Clouds", "Sun after rain", "Wet ground"};
-  const float top[9] = {1.5f, 1.f, 1.f, 1.f, 1.5f, 1.f, 1.f, 1.f, 1.f};
+  const char* names[10] = {"Rain", "Thunderstorm", "Fog",  "Ground mist",    "Snow",
+                           "Dust", "Clouds",       "Sun after rain", "Wet ground", "Wind"};
+  const float top[10] = {1.5f, 1.f, 1.f, 1.f, 1.5f, 1.f, 1.f, 1.f, 1.f, 1.5f};
   ImGui::Indent();
-  for (int i = 0; i < 9; i++) {
+  for (int i = 0; i < 10; i++) {
     if (kFogOff && (i == 2 || i == 3)) {
       continue;  // fog, ground mist
     }

@@ -984,13 +984,23 @@ void Tie3::render_tree_wind(int idx,
   static const EnhancedTune k_tie_wind("shaders.tune_tie_wind", 1.f);
   // the trunk's lean and the leaves' swing, as tfrag3.vert's (same keys, same defaults)
   static const EnhancedTune k_tie_trunk("shaders.tune_tie_trunk", 0.0015f);
-  static const EnhancedTune k_tie_frond("shaders.tune_tie_frond", 0.02f);
+  static const EnhancedTune k_tie_frond("shaders.tune_tie_frond", 0.03f);
   // (as tfrag3.vert: 10..19 paints the weights and holds still, >= 20 sways at tune_tie_wind - 19
   // and paints how far each vertex moves)
   const float tw = k_tie_wind;
   const float enh_amp = tw >= 20.f ? tw - 19.f : (tw < 10.f ? tw : 0.f);
   const int enh_paint = tw >= 20.f ? 2 : (tw >= 10.f ? 1 : 0);
-  const float enh_k = enh_amp > 0.f && g_enhanced_wind.enabled ? enh_amp * g_enhanced_wind.now() : 0.f;
+  // (a calm fades to nearly still, as tfrag3.vert's tune_tie_calm)
+  static const EnhancedTune k_tie_calm("shaders.tune_tie_calm", 0.3f);
+  const float enh_calm =
+      std::clamp((g_enhanced_wind.now() - (float)k_tie_calm) / 0.4f, 0.f, 1.f);
+  const float enh_k = enh_amp > 0.f && g_enhanced_wind.enabled
+                          ? enh_amp * g_enhanced_wind.now() * enh_calm
+                          : 0.f;
+  // (a strong wind swings the leaves more than in proportion, as tfrag3.vert's tune_tie_frond_gale)
+  static const EnhancedTune k_tie_frond_gale("shaders.tune_tie_frond_gale", 0.15f);
+  const float enh_gale =
+      1.f + (float)k_tie_frond_gale * std::max(g_enhanced_wind.now() - 1.f, 0.f);
   // a crown on a static trunk (Spargus' palms) also moves at its origin by that trunk's lean there
   // (tie.crown_lean 0: off, the crown sheared from its origin only)
   static const EnhancedTune k_crown_lean("tie.crown_lean", 1.f);
@@ -1118,8 +1128,8 @@ void Tie3::render_tree_wind(int idx,
           const float l2 = m[i].x() * m[i].x() + m[i].y() * m[i].y() + m[i].z() * m[i].z();
           return l2 > 0.f ? (0.8f * m[i].x() + 0.6f * m[i].z()) / l2 : 0.f;
         };
-        glUniform4f(frond_loc, local(0) * 4096.f, local(2) * 4096.f, enh_k * (float)k_tie_frond,
-                    0.f);
+        glUniform4f(frond_loc, local(0) * 4096.f, local(2) * 4096.f,
+                    enh_k * enh_gale * (float)k_tie_frond, 0.f);
       }
       if (enh_paint > 0) {
         // (tie_wind.vert's paint: mode, the trunk shear, the origin's height over the foot, leaf)
