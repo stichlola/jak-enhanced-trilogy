@@ -409,6 +409,23 @@ struct EnhancedHeadlights {
 };
 extern EnhancedHeadlights g_enhanced_headlights;
 
+// Enhanced: which levels the renderer has ready, by bsp name (published by Loader::publish_ready once a
+// frame). loaded: the loader's stages are done (geometry, textures with their HD and PBR maps, the
+// detailed scenery's meshes); fading: drawn lately and its load-in dither (bg.fade_in) not over yet
+// (a level not drawn at all, behind a shut door, is not fading: it is shown whole as the door opens);
+// placed_loading: placed objects' models still loading on a worker. pc-enhanced-level-ready reads it,
+// so the game's load doors (com-airlock) open only once the level behind them is really in.
+struct EnhancedLevelReady {
+  std::mutex mutex;
+  std::vector<std::string> loaded;
+  std::vector<std::string> fading;
+  std::atomic<int> placed_loading = 0;
+  // levels a load door opened onto (pc-enhanced-level-whole): the door hid their loading, so they
+  // are shown whole, without the load-in dither, when they start being drawn in the next 10 s
+  std::vector<std::string> whole;
+};
+extern EnhancedLevelReady g_enhanced_level_ready;
+
 // Enhanced: the fires and lamps the levels place (particle spawners: torches, braziers, barrel
 // fires, gas lamps) near the camera this frame, world position (game units) and kind. Many of
 // them make no glow the renderer could light from (a torch is just its flame), so they become

@@ -28,6 +28,8 @@ class Loader {
   std::vector<LevelData*> get_in_use_levels();
   // Enhanced: the common level's (its textures: the HUD's, level-default-minimap...), null before it loads
   LevelData* get_common_level() { return m_common_level.level ? &m_common_level : nullptr; }
+  // Enhanced: publish which levels are ready (g_enhanced_level_ready), once a frame after update()
+  void publish_ready(u64 frame);
   void draw_debug_window();
   void debug_print_loaded_levels();
   void request_reload_all() { m_want_reload = true; }

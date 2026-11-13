@@ -24,7 +24,11 @@ if (-not $Repo) {
 }
 if (-not (Test-Path (Join-Path $Repo 'scripts\enhanced'))) { throw "-Repo: not a jak-enhanced tree: $Repo" }
 $main = Split-Path (& git -C $Repo rev-parse --path-format=absolute --git-common-dir)
-if (-not $From) { $From = Join-Path $main 'out\build\Release\bin' }
+# a worktree with its own build runs its own gk (its C++ change), else the main tree's
+if (-not $From) {
+  $own = Join-Path $Repo 'out\build\Release\bin'
+  $From = if (Test-Path (Join-Path $own 'gk.exe')) { $own } else { Join-Path $main 'out\build\Release\bin' }
+}
 $runRoot = Join-Path $main 'local\run'
 New-Item -ItemType Directory -Force $runRoot | Out-Null
 

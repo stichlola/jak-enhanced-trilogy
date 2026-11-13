@@ -18,6 +18,7 @@
 #   -Wait      wait until frames come ("[enhanced] average" in the log; headless: Jak in the level,
 #              "GAMEPLAY: enter" or the first "[camera]" line, as dev_test's "ready")
 #   -Minimized start the window minimized (test runs that only read logs)
+#   -From      bin folder to shadow-copy (a worktree's own out\build\Release\bin; default the main tree's)
 # Output: "LAUNCH instance=<n> pid=<gk> port=<gk listener> bin=<shadow bin> cfg=<dir> log=<gk log|->",
 # then the dev goalc's GOALC line. Stop the game with Stop-Process -Id <pid> (only the one you started).
 param(
@@ -35,6 +36,7 @@ param(
   [int]$Width = 640,
   [int]$Height = 360,
   [int]$BootTimeout = 120,
+  [string]$From = '',
   [string]$Repo = ''
 )
 $ErrorActionPreference = 'Stop'
@@ -59,11 +61,11 @@ while ($true) {
 }
 
 # the shadow bin's run dir also holds the test config, so dev_bin.ps1 prunes both once gk is gone
-# (JAK_DEV_OWN_TREE=1: a worktree's own build, not the main tree's gk)
-$binArgs = @{ Tag = "gk$Instance"; Repo = $Repo }
-$ownBin = Join-Path $Repo 'out\build\Release\bin'
-if ($env:JAK_DEV_OWN_TREE -eq '1' -and (Test-Path (Join-Path $ownBin 'gk.exe'))) { $binArgs.From = $ownBin }
-$bin = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $enh 'dev_bin.ps1')))) @binArgs
+# (JAK_DEV_OWN_TREE=1 without -From: the worktree's own build)
+if (-not $From -and $env:JAK_DEV_OWN_TREE -eq '1' -and (Test-Path (Join-Path $Repo 'out\build\Release\bin\gk.exe'))) {
+  $From = Join-Path $Repo 'out\build\Release\bin'
+}
+$bin = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $enh 'dev_bin.ps1')))) -Tag "gk$Instance" -Repo $Repo -From $From
 if ($Instance -gt 0 -and -not $Config) { $TestCfg = $true }
 $cfg = ''
 if ($TestCfg) {
