@@ -22,7 +22,11 @@ uniform float tune_tie_wind = 1.0;
 // the trunk's lean, m per meter of height and unit of wind (0.03 = the old, whole-tree lean)
 uniform float tune_tie_trunk = 0.0015;
 // a leaf's swing, m per meter of reach from its trunk and unit of wind (0 = the old: flutter only)
-uniform float tune_tie_frond = 0.02;
+uniform float tune_tie_frond = 0.03;
+// and how much more per unit of wind past 1 (0 = linear, as before the weather's wind amount)
+uniform float tune_tie_frond_gale = 0.15;
+// below this wind (+ 0.4 to fade in) the trees stand still: the weather's calm (0 = sway at any wind)
+uniform float tune_tie_calm = 0.3;
 
 out vec4 fragment_color;
 out vec3 tex_coord;
@@ -63,7 +67,10 @@ void main() {
     vec2 wp = position_in.xz / 4096.0;
     float gust = sin(t * 1.3 + wp.x * 0.11 + wp.y * 0.07) * 0.6 +
                  sin(t * 2.1 + wp.x * 0.05 - wp.y * 0.13) * 0.4;
-    float k = tie_amp * enh_tie_wind.y * 4096.0;
+    // (a still day, wind now under tune_tie_calm + 0.4, fades to nearly still: calm barely moves,
+    // a breeze (clear weather, ~0.7+) sways as before)
+    float calm = clamp((enh_tie_wind.y - tune_tie_calm) / 0.4, 0.0, 1.0);
+    float k = tie_amp * enh_tie_wind.y * calm * 4096.0;
     // the trunk barely leans (tune_tie_trunk m per meter of height: 1 cm at 10 m in a calm, ~5 in a
     // sandstorm), its leaves with it so nothing tears
     world.xz += vec2(0.8, 0.6) * (gust * 0.7 + 0.3) * tune_tie_trunk * sway_h * k;
@@ -73,7 +80,11 @@ void main() {
       float ph = wp.x * 0.37 + wp.y * 0.29;
       float push = sin(t * 1.7 + ph) * 0.5 + sin(t * 2.9 + ph * 1.7) * 0.3 + 0.35;
       float bob = sin(t * 2.3 + ph * 1.3) * 0.6 + sin(t * 3.7 - ph) * 0.4;
-      float r = reach * tune_tie_frond * k;
+      // (a strong wind bends the blades more than in proportion: past a breeze (wind now 1) each
+      // unit adds tune_tie_frond_gale more swing, so windy weather and a sandstorm read as such
+      // while a calm or clear day stays as it was)
+      float gale = 1.0 + tune_tie_frond_gale * max(enh_tie_wind.y - 1.0, 0.0);
+      float r = reach * tune_tie_frond * k * gale;
       world.xz += vec2(0.8, 0.6) * push * r;
       world.y += bob * 0.6 * r;
       // and a flutter on top, up to 3.5 cm
