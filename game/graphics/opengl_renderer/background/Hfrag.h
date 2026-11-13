@@ -77,6 +77,7 @@ class Hfrag : public BucketRenderer {
   std::array<HfragLevel, kMaxLevels> m_levels;
   static constexpr int TIME_OF_DAY_COLOR_COUNT = 8192;
   std::vector<math::Vector<u8, 4>> m_color_result;
+  std::vector<float> m_tod_luma, m_tod_sorted;  // Enhanced: the colors' brightness (the lit reference)
 
   bool m_bucket_used[kNumBuckets];
   bool m_corner_vis[kNumCorners];

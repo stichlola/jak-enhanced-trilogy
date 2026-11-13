@@ -1,5 +1,7 @@
 #include "Hfrag.h"
 
+#include <algorithm>
+
 #include "common/log/log.h"
 #include "common/util/FileUtil.h"
 
@@ -477,6 +479,37 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
                               lev->num_colors ? sum / (float)lev->num_colors : 0.f);
   }
 
+  // Enhanced: the dunes' light in full sun at this hour, for hfrag.vert to take the game's baked
+  // shadows back out of the vertex colors (the composite draws the sun's real shadows). Their
+  // colors at one hour are the sunlit sand's (most of the desert) and darker, bluer ones where the
+  // bake had a mountain between the vertex and the sun: soft blots tens of meters wide that never
+  // moved with the weather or the sun, and seen from the ground they lay across the sand as dark
+  // horizontal bands. The reference: the mean of the brightest fifth of the colors
+  float tod_lit[3] = {0.f, 0.f, 0.f};
+  if (lev->num_colors) {
+    m_tod_luma.resize(lev->num_colors);
+    for (u64 i = 0; i < lev->num_colors; i++) {
+      const auto& c = m_color_result[i];
+      m_tod_luma[i] = 0.3f * c[0] + 0.59f * c[1] + 0.11f * c[2];
+    }
+    const size_t k = (lev->num_colors * 4) / 5;
+    m_tod_sorted = m_tod_luma;
+    std::nth_element(m_tod_sorted.begin(), m_tod_sorted.begin() + k, m_tod_sorted.end());
+    const float cut = m_tod_sorted[k];
+    int n = 0;
+    for (u64 i = 0; i < lev->num_colors; i++) {
+      if (m_tod_luma[i] >= cut) {
+        for (int j = 0; j < 3; j++) {
+          tod_lit[j] += m_color_result[i][j];
+        }
+        n++;
+      }
+    }
+    for (int j = 0; j < 3; j++) {
+      tod_lit[j] /= 255.f * (float)std::max(n, 1);
+    }
+  }
+
   // set up shader
   first_tfrag_draw_setup(pc_data.camera, render_state, ShaderId::HFRAG);
   setup_opengl_from_draw_mode(lev->hfrag->draw_mode, GL_TEXTURE0, false);
@@ -507,6 +540,7 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
     enhanced_detail_bind(glGetUniformLocation(id, "enh_detail"), glGetUniformLocation(id, "enh_detail_k"), 3,
                          enhanced_detail_hfrag());
     glUniform4fv(glGetUniformLocation(id, "enh_detail_sun"), 1, g_enhanced_detail_sun);
+    glUniform3f(glGetUniformLocation(id, "enh_tod_lit"), tod_lit[0], tod_lit[1], tod_lit[2]);
   }
 
   // draw pass (Enhanced: with the world normals for the lights)

@@ -22,6 +22,8 @@ out vec2 world_xz;  // Enhanced: for the world-space sand
 uniform sampler2D tex_T2;  // Enhanced: the grid's heights (Hfrag.cpp), 1e30 where it has none
 out vec3 enh_normal;       // Enhanced: smooth world normal, from the neighbors' heights
 out vec3 enh_pos;          // Enhanced: world position relative to the camera
+uniform vec3 enh_tod_lit;  // Enhanced: the sunlit sand's time of day color now (Hfrag.cpp)
+uniform float tune_hfrag_unbake = 0.75;  // shaders.tune_hfrag_unbake: share of the baked shade removed (0: as the game)
 
 float enh_height(int x, int z, float own) {
   float h = texelFetch(tex_T2, ivec2(clamp(x, 0, 511), clamp(z, 0, 511)), 0).r;
@@ -56,4 +58,21 @@ void main() {
   // time of day lookup
   fragment_color = texelFetch(tex_T10, time_of_day_index, 0);
   fragment_color.a = 1.0;
+
+  // Enhanced: the game's baked shadows taken (mostly) back out: below the sunlit sand's light of
+  // this hour (Hfrag.cpp: enh_tod_lit) a vertex's darkening is cut to a power of itself and its
+  // shade's blue turned back toward the sun's color. The composite casts the real shadows; the
+  // baked ones stayed in rain and under any sun, dark blots that from the ground lay across the
+  // sand as horizontal bands. The dunes' own sides keep part of their shading
+  float lr = dot(enh_tod_lit, vec3(0.3, 0.59, 0.11));
+  float lv = dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11));
+  if (tune_hfrag_unbake > 0.0 && lr > 0.02 && lv < lr) {
+    float r = max(lv, 1e-3) / lr;
+    float r2 = pow(r, 1.0 - tune_hfrag_unbake);
+    vec3 hue = mix(fragment_color.rgb / max(lv, 1e-3), enh_tod_lit / lr, tune_hfrag_unbake);
+    // (the sand's small differences of light kept as they are: at noon all the colors are within a
+    // few percent of the reference, and taking those out only paled the dunes)
+    float w = 1.0 - smoothstep(0.8, 0.97, r);
+    fragment_color.rgb = mix(fragment_color.rgb, hue * lr * r2, w);
+  }
 }
