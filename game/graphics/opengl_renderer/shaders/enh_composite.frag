@@ -7447,6 +7447,20 @@ void composite_unused() {
       c += fl;
     }
   }
+  // a kept flame's hue, again here: put back as the game drew it before the night's grade, a torch's
+  // flame still came out a pale cream with lavender tips at night and under a roof (the lamps' glow
+  // in the air, the eye's adaptation and the lights after it lay over it): the game's own orange and
+  // yellow at the brightness the picture has there now, never less saturated than the game's
+  if (flame_keep > 0.0) {
+    float fl0 = luma(flame_base);
+    float fl1 = luma(c);
+    if (fl0 > 0.05) {
+      vec3 fh = flame_base * (max(fl1, fl0) / fl0);
+      float s0 = 1.0 - min(flame_base.r, min(flame_base.g, flame_base.b)) / max(max(flame_base.r, max(flame_base.g, flame_base.b)), 1e-3);
+      float s1 = 1.0 - min(c.r, min(c.g, c.b)) / max(max(c.r, max(c.g, c.b)), 1e-3);
+      c = mix(c, fh, flame_keep * smoothstep(0.0, 0.15, s0 - s1));
+    }
+  }
   // an explosion's fireball, here (look.blast_punch): drawn with the dust ring before the grade it
   // went through the day's stop-down, the highlights' squeeze and the desert's grade as if it were
   // lit sand, and came out the sand's own color with the game's sprites over it: a see-through ring.
