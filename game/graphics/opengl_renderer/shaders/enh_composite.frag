@@ -2622,8 +2622,9 @@ float snow_flakes(vec3 ray_view, float scene_z, float px) {
 // read on two rings (0.6 and 1.4 m) around it, each neighbor's height compared with this one's.
 // Water gathers there: in a hollow, along a curb, in a gutter, in a rut. A neighbor hidden behind
 // something nearer (its hit lands far from where it was asked) or a wall (more than 25 cm up)
-// counts as level. (pv: view space, game units)
-float ground_hollow(vec3 pv) {
+// counts as level. (pv: view space, game units; on_sand: the pixel is the desert's sand or rock,
+// by the length its material wrote the normal at)
+float ground_hollow(vec3 pv, float on_sand_px) {
   float sum = 0.0;
   float n = 0.0;
   // (the depth is read texel by texel (GL_NEAREST): each point is rebuilt at the texel's center,
@@ -2640,7 +2641,9 @@ float ground_hollow(vec3 pv) {
   // water pools where the ground bends up every way, so the smallest bend counts: a fold is level
   // along itself. The foot of a step or curb (5 cm or more up on one side, level on the other)
   // still gathers its gutter, outside the desert (below). tune_water_dbg 48: the average, as before)
-  bool basin = abs(tune_water_dbg - 48.0) > 0.5;
+  // (49: its measure painted as 47 does; 51: its puddles in blue, as 43)
+  bool basin = abs(tune_water_dbg - 48.0) > 0.5 && abs(tune_water_dbg - 49.0) > 0.5 &&
+               abs(tune_water_dbg - 51.0) > 0.5;
   float dk[12];
   vec2 dsz = vec2(textureSize(tex_T3, 0));
   vec3 pc = pv;
@@ -2687,6 +2690,7 @@ float ground_hollow(vec3 pv) {
   float bend_min = 1.0;
   float foot = 0.0;
   float pairs = 0.0;
+  float bn_min = 1e3, bn_max = -1e3;
   for (int p = 0; p < 6; p++) {
     int a = p < 3 ? p : p + 3;
     float da = dk[a], db = dk[a + 3];
@@ -2695,15 +2699,33 @@ float ground_hollow(vec3 pv) {
     }
     float bend = 0.5 * (da + db);
     bend_min = min(bend_min, bend);
+    // (the bend per square meter: a round basin gives the same on both rings)
+    float bn = bend / (p < 3 ? 0.36 : 1.96);
+    bn_min = min(bn_min, bn);
+    bn_max = max(bn_max, bn);
     if (max(da, db) > 0.05 && min(da, db) > -0.02) {
       foot = max(foot, bend);
     }
     pairs += 1.0;
   }
-  // (not in the desert (the area's sand grade): its ground is layers of meshes, flat rock plates and
-  // sand-painted sheets lying 12-25 cm over the dunes, and their edges are steps nobody sees. At
-  // their feet the gutter rule drew the lattice of straight puddle lines across the open sand)
-  foot *= 1.0 - smoothstep(0.05, 0.2, sand);
+  // (not on the desert's sand (the area's sand grade, and the pixel marked sand or rock): its ground
+  // is layers of meshes, flat rock plates and sand-painted sheets lying 12-25 cm over the dunes, and
+  // their edges are steps nobody sees. At their feet the gutter rule drew the lattice of straight
+  // puddle lines across the open sand. Spargus' paving (same area) keeps its gutters)
+  float desert = smoothstep(0.05, 0.2, sand) * on_sand_px;
+  // (a fold the six directions miss by up to 15 degrees still bends up a little along every one of
+  // them, most on the inner ring: the dashed lines of puddle left along the desert's diamond lattice
+  // of triangle folds (2-3 m cells) under the Hellcat's camera. A basin bends up alike every way
+  // (per square meter), a fold mostly across: a fold scores at most 0.17 of its steepest bend, a
+  // round dip 1, one twice as long as wide 0.5. tune_water_dbg 50: without this test)
+  if (bend_min > 0.0 && abs(tune_water_dbg - 50.0) > 0.5) {
+    bend_min *= smoothstep(0.25, 0.45, bn_min / max(bn_max, 1e-6));
+    // (nor, there, where two of those edges cross: a fold meeting a sheet's edge rose 3-5 cm within
+    // 0.6 m every way and held a hard-edged block of puddle on the open sand. A hollow in sand that
+    // holds 1 cm of water rises about 0.4 cm over 0.6 m, never 2)
+    bend_min *= 1.0 - desert * smoothstep(0.012, 0.024, bn_max * 0.36);
+  }
+  foot *= 1.0 - desert;
   return pairs > 2.5 ? max(bend_min, foot) : 0.0;
 }
 
@@ -5183,9 +5205,11 @@ void composite_unused() {
     // from a low camera lay across the desert as a dark band of reflected sky, in rain and for
     // minutes after. tune_water_dbg 42: the noise everywhere; 43: the puddles, blue; 46: the bare
     // noise past 70 m, as before)
+    // (the desert's sand and the rock lying on it, by their normals' length: tfrag3.frag, hfrag.frag)
+    float sand_px = max(max(step(0.85, pix_tag) * step(pix_tag, 0.95), on_sand), rock_tag);
     if (abs(tune_water_dbg - 42.0) > 0.5 && dot(wet_n, up_view) > 0.85) {
       float far_k = smoothstep(50.0 * 4096.0, 70.0 * 4096.0, z);
-      float hol = z < 70.0 * 4096.0 ? ground_hollow(p) * (1.0 - far_k) : 0.0;
+      float hol = z < 70.0 * 4096.0 ? ground_hollow(p, sand_px) * (1.0 - far_k) : 0.0;
       // (a dip of 1 cm is a full puddle; level ground only in the noise's highest spots)
       float pd_h = (hol - 0.004) * 40.0 + 0.25 * pd - 0.05;
       pd = abs(tune_water_dbg - 46.0) < 0.5 ? mix(pd_h, pd, far_k) : pd_h;
@@ -5196,11 +5220,12 @@ void composite_unused() {
                    rain_wet;
     float soaked = wet;
     float water = min(puddle_level * 3.0, 1.0);
-    if (abs(tune_water_dbg - 43.0) < 0.5) {
+    if (abs(tune_water_dbg - 43.0) < 0.5 || abs(tune_water_dbg - 51.0) < 0.5) {
       c = mix(c, vec3(0.0, 0.3, 1.0), puddle * 0.8);
     }
-    if (abs(tune_water_dbg - 47.0) < 0.5) {  // (test: the dips red, the bumps green: 1 cm full)
-      float hh = ground_hollow(p) * 100.0;
+    // (test: the dips red, the bumps green: 1 cm full; 49: as the old average measured them)
+    if (abs(tune_water_dbg - 47.0) < 0.5 || abs(tune_water_dbg - 49.0) < 0.5) {
+      float hh = ground_hollow(p, sand_px) * 100.0;
       c = vec3(clamp(hh, 0.0, 1.0), clamp(-hh, 0.0, 1.0), 0.0);
     }
     wet = max(wet, puddle * wet_flat * water);
