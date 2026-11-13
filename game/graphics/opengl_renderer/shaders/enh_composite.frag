@@ -2633,6 +2633,15 @@ float ground_hollow(vec3 pv) {
   // the desert at fixed distances from the camera, in rain and for minutes after. tune_water_dbg 46:
   // as before)
   bool snap = abs(tune_water_dbg - 46.0) > 0.5;
+  // (a basin, not a line: the neighbors' average called any straight valley a dip, a fold between
+  // two flat triangles as much as the foot of a mesh lying over another, so every such edge was a
+  // straight line of puddle: in the desert a lattice of dark lines over the open sand, in rain and
+  // after. Each opposite pair of neighbors gives the bend along its direction (a slope cancels out);
+  // water pools where the ground bends up every way, so the smallest bend counts: a fold is level
+  // along itself. The foot of a step or curb (5 cm or more up on one side, level on the other)
+  // still gathers its gutter, outside the desert (below). tune_water_dbg 48: the average, as before)
+  bool basin = abs(tune_water_dbg - 48.0) > 0.5;
+  float dk[12];
   vec2 dsz = vec2(textureSize(tex_T3, 0));
   vec3 pc = pv;
   if (snap) {
@@ -2641,6 +2650,7 @@ float ground_hollow(vec3 pv) {
     pc = cd > 1e-7 ? view_pos(cuv, cd) : pv;
   }
   for (int k = 0; k < 12; k++) {
+    dk[k] = -1.0;  // (no sample)
     float r = (k < 6 ? 0.6 : 1.4) * 4096.0;
     float a = float(k) * 1.0471976 + (k < 6 ? 0.0 : 0.5235988);
     vec3 want_w = vec3(cos(a) * r, 0.0, sin(a) * r);
@@ -2666,10 +2676,35 @@ float ground_hollow(vec3 pv) {
       continue;
     }
     float dh = s.y / 4096.0;
-    sum += dh > 0.25 ? 0.0 : clamp(dh, -0.12, 0.12);
+    dk[k] = dh > 0.25 ? 0.0 : clamp(dh, -0.12, 0.12);
+    sum += dk[k];
     n += 1.0;
   }
-  return n > 3.0 ? sum / n : 0.0;
+  if (!basin) {
+    return n > 3.0 ? sum / n : 0.0;
+  }
+  // (the six directions: pairs k, k+3 on each ring, the outer ring turned 30 degrees)
+  float bend_min = 1.0;
+  float foot = 0.0;
+  float pairs = 0.0;
+  for (int p = 0; p < 6; p++) {
+    int a = p < 3 ? p : p + 3;
+    float da = dk[a], db = dk[a + 3];
+    if (da < -0.5 || db < -0.5) {
+      continue;
+    }
+    float bend = 0.5 * (da + db);
+    bend_min = min(bend_min, bend);
+    if (max(da, db) > 0.05 && min(da, db) > -0.02) {
+      foot = max(foot, bend);
+    }
+    pairs += 1.0;
+  }
+  // (not in the desert (the area's sand grade): its ground is layers of meshes, flat rock plates and
+  // sand-painted sheets lying 12-25 cm over the dunes, and their edges are steps nobody sees. At
+  // their feet the gutter rule drew the lattice of straight puddle lines across the open sand)
+  foot *= 1.0 - smoothstep(0.05, 0.2, sand);
+  return pairs > 2.5 ? max(bend_min, foot) : 0.0;
 }
 
 // raindrops in the puddles: each 0.5 m cell gets a ring now and then, spreading and fading
