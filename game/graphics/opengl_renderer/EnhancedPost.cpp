@@ -290,8 +290,10 @@ EnhancedPost::EnhancedPost() {
   if (ao_debug && std::strcmp(ao_debug, "1") == 0) {
     m_settings.ssao_debug = true;
   }
+  log_weather_menu();
   if (const char* weather = std::getenv("JAK_ENHANCED_WEATHER")) {
-    // 0 clear, 1 by area, 2 rain, 3 sandstorm
+    // a preset id (kWeatherPresets): 0 clear, 1 automatic (by area), 2 rain, 3 sandstorm,
+    // 4 thunderstorm, 7 partly cloudy, 9 cloudy, 10 drizzle, 11 heavy rain, 21 custom, 22 windy
     m_settings.weather = std::clamp(std::atoi(weather), 0, kWeatherCount - 1);
   }
   if (const char* clouds = std::getenv("JAK_ENHANCED_CLOUDS")) {
@@ -1176,8 +1178,8 @@ void EnhancedPost::draw_debug_window() {
     ImGui::Checkbox("Grade per area", &m_settings.area_grading);
     ImGui::Text("area %s, night %.2f, rain %.2f, dust %.2f, focus %.1f m", g_world.zones[m_zone].name.c_str(), m_night, m_rain,
                 m_dust, m_focus / kMeter);
-    ImGui::Text("wet %.2f, storm %.2f, mist %.2f, sun after rain %.2f, state %d, wind %.1f m/s",
-                m_wet, m_storm, m_mist, m_clear, m_weather_state, m_wind_speed);
+    ImGui::Text("wet %.2f, storm %.2f, mist %.2f, sun after rain %.2f, state %d, wind %.1f m/s, amount %.2f",
+                m_wet, m_storm, m_mist, m_clear, m_weather_state, m_wind_speed, m_wind_amount);
     ImGui::Text("season %s, spell %s, roof over Jak %.2f", kSeasonNames[m_season], kSpellNames[m_spell], m_cover);
     ImGui::Checkbox("Soft shadows", &m_settings.soft_shadows);
     ImGui::SliderFloat("Shadow softness (/m)", &m_settings.shadow_softness, 0.f, 0.08f, "%.3f");

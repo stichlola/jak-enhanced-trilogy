@@ -264,11 +264,12 @@ class EnhancedPost {
     float shadow_softness = 0.02f;  // penumbra per meter between caster and receiver
     bool clouds = true;            // a drifting cloud layer in the sky, lit by the sun
     float cloud_amount = 1.0f;
-    int weather = 1;               // a preset (kWeatherPresets in EnhancedPost.cpp): 1 changing (by
-                                   // area, comes and goes), the last one custom (weather_mix)
+    int weather = 1;               // a preset id (kWeatherPresets in EnhancedPostInternal.h): 1
+                                   // automatic (by area, comes and goes), 21 custom (weather_mix),
+                                   // 22 windy; the menu shows them in kWeatherMenuOrder
     // the custom weather, mixed by hand: rain, thunderstorm, fog, ground mist, snow, dust, clouds,
-    // the sun out after the rain, wet ground (< 0: as wet as it rains)
-    std::array<float, 9> weather_mix = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.3f, 0.f, -1.f};
+    // the sun out after the rain, wet ground (< 0: as wet as it rains), wind (0..1.5)
+    std::array<float, 10> weather_mix = {0.f, 0.f, 0.f, 0.f, 0.f, 0.f, 0.3f, 0.f, -1.f, 0.15f};
     int photo_filter = 0;          // photo mode's filter (kPhotoFilters in EnhancedPost.cpp)
     float photo_vignette = 0.f;    // photo mode's extra vignette
     int season = 0;                // the changing weather's season: 0 by the calendar, 1-4 spring..winter
@@ -938,6 +939,7 @@ class EnhancedPost {
   int m_thunder_kind = 0;
   float m_wind[2] = {0.f, 1.f};  // the dust's wind direction (world xz)
   float m_wind_speed = 8.f;      // m/s
+  float m_wind_amount = 0.15f;   // the weather's wind (0 still .. 1.5 blizzard), eased
   double m_drift[2] = {0, 0};    // how far the wind has carried the dust (m, wrapped)
   int m_weather_state = 0;       // what the changing weather is doing now (for the debug text)
   int m_season = 0;              // 0 spring .. 3 winter

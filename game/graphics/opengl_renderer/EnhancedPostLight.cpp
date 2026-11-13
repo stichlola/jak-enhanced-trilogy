@@ -222,6 +222,7 @@ void EnhancedPost::update_scene() {
   float rain = 0.f, dust = 0.f, storm = 0.f, mist = 0.f, clear = 0.f, wet = -1.f, sunny = 0.f;
   float snow = 0.f;
   float fog = 1.f;
+  float wind = 0.15f;  // the weather's wind: 0 still, 1 windy or a sandstorm, 1.5 a blizzard
   // lava levels: the air over it shimmers whatever the weather
   const float heat = zone.weather.heat;
   const bool outdoors = zone.weather.outdoors;
@@ -270,7 +271,7 @@ void EnhancedPost::update_scene() {
     logged_weather_mode = weather_mode;
   }
   switch (weather_mode) {
-    case 1: {
+    case kWeatherAuto: {
       // changing: a four-minute cycle per area. Rain comes in Haven and the forest (clouds build,
       // rain, a thunderstorm, the rain stops and the sun comes out on the wet streets, they dry),
       // sand blows up in the desert on top of the game's own storms, fog on early mornings
@@ -430,7 +431,21 @@ void EnhancedPost::update_scene() {
       want.clouds = std::max(want.clouds * 0.5f, m[6]);
       clear = m[7];
       wet = m[8];
+      wind = m[9];
       break;
+    }
+  }
+  // storms, sand and rain blow too, whatever the preset says (the automatic weather's spells too),
+  // and the game's own sandstorm; under a roof it's still
+  wind = std::max({wind, 0.9f * storm, dust, 0.5f * rain, game_dust});
+  if (!outdoors) {
+    wind = 0.1f;
+  }
+  {
+    // (weather.wind_force in the tuning file: holds the wind amount, -1 = the weather's)
+    static const EnhancedTune t_wind_force("weather.wind_force", -1.f);
+    if (t_wind_force >= 0.f) {
+      wind = t_wind_force;
     }
   }
   sunny = std::max(sunny, s.vivid * (1.f - m_night) * (1.f - std::min(1.f, rain)));
@@ -635,7 +650,9 @@ void EnhancedPost::update_scene() {
     g[RainRoof] = m_cover * std::min(1.f, r * 1.4f);
     g[Drips] = outdoors ? std::clamp(m_puddle * 1.5f - r * 3.f, 0.f, 1.f) : 0.f;
     g[WindNight] = std::max(a.wind, a.wind_night * m_night);
-    g[WindStorm] = std::clamp(std::max(m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f), 0.f, 1.f);
+    g[WindStorm] = std::clamp(std::max({m_storm * 0.8f, std::max(m_dust, game_dust) * 1.2f,
+                                        0.8f * std::clamp((m_wind_amount - 0.4f) / 0.6f, 0.f, 1.f)}),
+                              0.f, 1.f);
     const float calm = (1.f - std::clamp(r * 3.f, 0.f, 1.f)) * (1.f - std::clamp(m_storm + m_snow, 0.f, 1.f));
     g[Crickets] = a.crickets * season.crickets * m_night * calm;
     g[Birds] = a.birds * season.birds * (1.f - m_night) * calm;
@@ -663,7 +680,8 @@ void EnhancedPost::update_scene() {
   // the dust's wind: the game storm's when it blows, else a slow drift that wanders
   const float wa = 0.7f + 0.5f * (float)std::sin(m_time * 0.013);
   float wx = std::sin(wa), wz = std::cos(wa);
-  float speed = 7.f + 3.f * m_storm;
+  // (the dust drifts faster the windier it is; the game storm's own speed wins while it blows)
+  float speed = 3.f + 9.f * m_wind_amount;
   if (game_storm) {
     const float gx = gd.wind_x.load(), gz = gd.wind_z.load();
     const float gl = std::sqrt(gx * gx + gz * gz);
@@ -677,18 +695,29 @@ void EnhancedPost::update_scene() {
   ease(m_wind[0], wx, k_wind);
   ease(m_wind[1], wz, k_wind);
   ease(m_wind_speed, speed, k_wind);
-  // the grass and trees sway with it: the wind's speed, a storm or a sandstorm, and slow swells
-  // over a few minutes (calm spells, breezier ones)
+  ease(m_wind_amount, wind, k_wind);
+  // the grass, palms and trees sway with the weather's wind amount (eased), slow swells over a few
+  // minutes (calm spells, breezier ones) and, the windier it is, faster surges. Clear sways ~0.55-0.7,
+  // windy and a sandstorm ~2.1-2.6 (weather.wind_calm, weather.wind_gain)
   {
-    const float swell = 0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3);
+    static const EnhancedTune t_calm("weather.wind_calm", 0.45f);
+    static const EnhancedTune t_gain("weather.wind_gain", 2.2f);
+    const float surge = 0.15f * m_wind_amount * (float)std::sin(m_time * 0.7) *
+                        (float)std::sin(m_time * 0.23 + 2.0);
+    const float swell =
+        0.8f + 0.2f * (float)std::sin(m_time * 0.031) * (float)std::sin(m_time * 0.0077 + 1.3) + surge;
     const float rough = std::max(m_storm, std::max(m_dust, 0.7f * m_rain));
-    g_enhanced_wind.gust = std::clamp((m_wind_speed / 9.f + 1.4f * rough) * swell, 0.5f, 3.f);
+    g_enhanced_wind.gust =
+        std::clamp(((float)t_calm + (float)t_gain * m_wind_amount) * swell, 0.3f, 3.f);
     // (one line per quarter of change: what the trees and grass sway at, EnhancedWind::now)
-    static float logged_gust = -1.f;
-    if (std::abs(g_enhanced_wind.gust - logged_gust) >= 0.25f) {
+    // (and per 0.05 of the wind amount, so a settled calm shows too)
+    static float logged_gust = -1.f, logged_amount = -1.f;
+    if (std::abs(g_enhanced_wind.gust - logged_gust) >= 0.25f ||
+        std::abs(m_wind_amount - logged_amount) >= 0.05f) {
       logged_gust = g_enhanced_wind.gust;
-      lg::info("[enhanced] wind now {:.2f} (gust {:.2f}, speed {:.1f}, rough {:.2f}) in {}",
-               g_enhanced_wind.now(), g_enhanced_wind.gust, m_wind_speed, rough,
+      logged_amount = m_wind_amount;
+      lg::info("[enhanced] wind now {:.2f} (gust {:.2f}, speed {:.1f}, rough {:.2f}, amount {:.2f}) in {}",
+               g_enhanced_wind.now(), g_enhanced_wind.gust, m_wind_speed, rough, m_wind_amount,
                level.empty() ? "none" : level);
     }
   }
