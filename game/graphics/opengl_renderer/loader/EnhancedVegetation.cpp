@@ -233,7 +233,7 @@ class Ground {
     return found;
   }
 
-  // DEBUG: this level's own floor at (x, z) within 8 m of hy but not at hy (NAN if none)
+  // this level's own floor at (x, z) within 8 m of hy but not at hy (NAN if none)
   float own_off(float x, float z, float hy) const {
     auto it = m_cells.find(key(cell(x), cell(z)));
     float best = NAN;
@@ -748,6 +748,11 @@ void add_to_tree(tfrag3::ShrubTree& tree,
             !ground.height(x, z, hy, 0.5f * kMeter, 1.f * kMeter, &y) ||
             !ground.height(x + 1.f * kMeter, z, y, 0.3f * kMeter, 0.3f * kMeter, &y2)) {
           continue;  // off the desert, or an edge or a step
+        }
+        if (!std::isnan(ground.own_off(x, z, hy))) {
+          // (the level's own floor right there isn't the height field: under a higher floor the
+          // stone is buried, over a lower one it floats, as in front of Spargus' garage)
+          continue;
         }
         if (y < kSeaTop) {
           continue;  // (the dunes under the sea: no stones floating on it)
@@ -1306,6 +1311,43 @@ void add_ground_class_grass(tfrag3::Level& level,
     }
   }
 }
+
+// Is the height field this level's ground? The field is kept from the desert level that has it for
+// the levels loaded after it, but it runs on under (and over) Spargus and its garage, where the game
+// never draws it: stones and grass set down on it there float over the city's own floor. So it
+// counts for a level only if the level's own plants stand on it: of its small shrubs over the
+// field, how many have their foot within 0.5 m of it (desert levels: most; Spargus: almost none).
+float plants_on_hfrag(const tfrag3::Level& level, const std::vector<float>& h, u32* n_over) {
+  u32 over = 0, on = 0;
+  for (const auto& tree : level.shrub_trees) {
+    const auto& verts = tree.unpacked.vertices;
+    u32 i = 0;
+    for (const auto& g : tree.packed_vertices.instance_groups) {
+      u32 n = g.end_vert - g.start_vert;
+      if (n == 0 || i + n > verts.size()) {
+        break;
+      }
+      float min_y = 1e30f, max_y = -1e30f, sx = 0, sz = 0;
+      for (u32 v = i; v < i + n; v++) {
+        min_y = std::min(min_y, verts[v].y);
+        max_y = std::max(max_y, verts[v].y);
+        sx += verts[v].x;
+        sz += verts[v].z;
+      }
+      i += n;
+      float hy;
+      if (max_y - min_y > 1.6f * kMeter || !hfrag_height(h, sx / n, sz / n, &hy)) {
+        continue;
+      }
+      over++;
+      if (std::abs(min_y - hy) < 0.5f * kMeter) {
+        on++;
+      }
+    }
+  }
+  *n_over = over;
+  return over ? on / (float)over : 0.f;
+}
 }  // namespace
 
 void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
@@ -1317,6 +1359,18 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
   auto ground_kept = std::make_shared<Ground>();
   Ground& ground = *ground_kept;
   ground.hfrag = current_hfrag();
+  // (the plants' copies, strewn stones and tufts use the height field only if it's this level's
+  // ground; the dense grass fields and the editor's brush keep it)
+  bool plants_use_hfrag = true;
+  if (ground.hfrag && level.hfrag.vertices.empty()) {
+    u32 over = 0;
+    float on = plants_on_hfrag(level, *ground.hfrag, &over);
+    plants_use_hfrag = on >= 0.5f;
+    if (!plants_use_hfrag) {
+      lg::info("[enhanced] vegetation {}: the height field isn't its ground ({:.0f}% of {} plants over it "
+               "stand on it)", name, on * 100.f, over);
+    }
+  }
   Walls walls;
   for (const auto& tree : level.tfrag_trees[0]) {
     if (tree.kind != tfrag3::TFragmentTreeKind::NORMAL &&
@@ -1390,11 +1444,17 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
   }
   Stats stats;
   std::vector<EnhancedPlantFoot> feet;
+  auto kept_hfrag = ground.hfrag;
+  if (!plants_use_hfrag) {
+    ground.hfrag = nullptr;
+  }
   for (u32 t = 0; t < level.shrub_trees.size(); t++) {
     add_to_tree(level.shrub_trees[t], level.textures, ground, walls,
                 4000.f / level.shrub_trees.size(), t, 150000.f / level.shrub_trees.size(), &stats,
                 &feet);
   }
+  const bool used_hfrag = ground.hfrag != nullptr;
+  ground.hfrag = kept_hfrag;
   {
     std::lock_guard<std::mutex> lock(g_feet_mutex);
     g_feet[name] = std::move(feet);
@@ -1403,7 +1463,7 @@ void enhanced_add_vegetation(tfrag3::Level& level, const std::string& name) {
   lg::info("[enhanced] vegetation {}: {} floor triangles, {} plants with {} copies, {} strewn, {} tufts on {} "
            "grassy floors, {} wall vines with {} copies{}",
            name, ground.size(), stats.plants, stats.copies, stats.strewn, stats.tufts, stats.habitats,
-           stats.vine_sources, stats.vines, ground.hfrag ? " (and the height field)" : "");
+           stats.vine_sources, stats.vines, used_hfrag ? " (and the height field)" : "");
   if (kVegDebug) {
     lg::info("[vegdbg] {}: {} copies and {} strewn on the height field where the level has a floor of its own",
              name, stats.dbg1, stats.dbg2);  // DEBUG
