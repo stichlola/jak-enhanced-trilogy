@@ -275,6 +275,7 @@ namespace {
 struct FadeSeen {
   u64 first = 0, last = 0;
   bool any = false;
+  u64 whole_until = 0;  // a load door opened onto it: a fade starting before this frame starts done
 };
 std::unordered_map<std::string, FadeSeen>& fade_seen() {
   static std::unordered_map<std::string, FadeSeen> seen;
@@ -292,7 +293,14 @@ static float enhanced_level_fade_in(const std::string& name, u64 frame) {
   if (!s.any || frame > s.last + (u64)std::max((float)t_gap, 2.f)) {
     s.first = frame;
     s.any = true;
-    lg::info("[enhanced] level {} fades in", name);
+    if (frame <= s.whole_until) {
+      // behind a load door that waited for it: no dither as the door opens
+      s.first = frame - std::min<u64>(frame, (u64)(t_fade * 60.f) + 1);
+      s.whole_until = 0;
+      lg::info("[enhanced] level {} shown whole (load door)", name);
+    } else {
+      lg::info("[enhanced] level {} fades in", name);
+    }
   }
   s.last = std::max(s.last, frame);
   return std::clamp(float(frame - s.first) / (t_fade * 60.f), 0.f, 1.f);
@@ -316,6 +324,30 @@ float enhanced_level_fade_peek(const std::string& name, u64 frame) {
     return 1.f;
   }
   return std::clamp(float(frame - it->second.first) / (t_fade * 60.f), 0.f, 1.f);
+}
+
+// Enhanced: the level's background was drawn within the last fade_gap frames and its fade-in is not
+// over yet. Loader::publish_ready, for the game's load doors.
+bool enhanced_level_fading(const std::string& name, u64 frame) {
+  static const EnhancedTune t_fade("bg.fade_in", 0.4f);
+  static const EnhancedTune t_gap("bg.fade_gap", 30.f);
+  auto& seen = fade_seen();
+  auto it = seen.find(name);
+  if (it == seen.end() || !it->second.any ||
+      frame > it->second.last + (u64)std::max((float)t_gap, 2.f)) {
+    return false;
+  }
+  return float(it->second.last - it->second.first) < std::max((float)t_fade, 0.f) * 60.f;
+}
+
+void enhanced_level_fade_skip(const std::string& name, u64 frame, u64 until) {
+  static const EnhancedTune t_gap("bg.fade_gap", 30.f);
+  auto& s = fade_seen()[name];
+  // already being drawn (and so already faded or fading where it was seen): nothing to skip
+  if (s.any && frame <= s.last + (u64)std::max((float)t_gap, 2.f)) {
+    return;
+  }
+  s.whole_until = until;
 }
 
 namespace {

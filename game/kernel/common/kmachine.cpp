@@ -1308,6 +1308,33 @@ void pc_enhanced_set_continue(u32 name) {
   g_enhanced_scene.continue_point = Ptr<String>(name).c()->data();
 }
 
+// Enhanced: how ready the renderer has the level whose bsp name this is (the game's load doors wait for
+// it): 1 its data is uploaded (geometry, textures with HD and PBR maps, detailed scenery), 2 it is
+// drawn and still fading in, 4 placed objects' models are still loading (any level)
+u64 pc_enhanced_level_ready(u32 name) {
+  std::string n = Ptr<String>(name).c()->data();
+  std::lock_guard<std::mutex> lock(g_enhanced_level_ready.mutex);
+  auto& r = g_enhanced_level_ready;
+  u64 out = 0;
+  if (std::find(r.loaded.begin(), r.loaded.end(), n) != r.loaded.end()) {
+    out |= 1;
+  }
+  if (std::find(r.fading.begin(), r.fading.end(), n) != r.fading.end()) {
+    out |= 2;
+  }
+  if (r.placed_loading > 0) {
+    out |= 4;
+  }
+  return out;
+}
+
+// Enhanced: a load door opens onto this level (bsp name) after waiting for it: show it whole, not
+// dithered in, when it starts being drawn
+void pc_enhanced_level_whole(u32 name) {
+  std::lock_guard<std::mutex> lock(g_enhanced_level_ready.mutex);
+  g_enhanced_level_ready.whole.push_back(Ptr<String>(name).c()->data());
+}
+
 // Enhanced: the game's sandstorm this frame (intensity, wind direction xz, wind speed)
 void pc_enhanced_set_dust(u32 intensity, u32 wind_x, u32 wind_z, u32 vel) {
   auto f = [](u32 v) {
@@ -1970,6 +1997,8 @@ void init_common_pc_port_functions(
   make_func_symbol_func("pc-enhanced-smooth-anim?", (void*)pc_enhanced_smooth_anim);
   make_func_symbol_func("pc-enhanced-balance?", (void*)pc_enhanced_balance);
   make_func_symbol_func("pc-enhanced-menu-state", (void*)pc_enhanced_menu_state);
+  make_func_symbol_func("pc-enhanced-level-ready", (void*)pc_enhanced_level_ready);
+  make_func_symbol_func("pc-enhanced-level-whole", (void*)pc_enhanced_level_whole);
   make_func_symbol_func("pc-enhanced-light?", (void*)pc_enhanced_light);
   make_func_symbol_func("pc-enhanced-strike", (void*)pc_enhanced_strike);
   make_func_symbol_func("pc-enhanced-strike-hit", (void*)pc_enhanced_strike_hit);

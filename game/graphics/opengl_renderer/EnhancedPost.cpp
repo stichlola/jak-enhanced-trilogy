@@ -70,6 +70,7 @@ EnhancedGameLights g_enhanced_game_lights;
 EnhancedExplosions g_enhanced_explosions;
 EnhancedStrike g_enhanced_strike;
 EnhancedHeadlights g_enhanced_headlights;
+EnhancedLevelReady g_enhanced_level_ready;
 EnhancedFires g_enhanced_fires;
 EnhancedMenu g_enhanced_menu;
 EnhancedBigmap g_enhanced_bigmap;

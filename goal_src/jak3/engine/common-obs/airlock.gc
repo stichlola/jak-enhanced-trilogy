@@ -380,8 +380,129 @@
     )
   )
 
+;; Enhanced: a load door also waits for the renderer (pc-enhanced-level-ready): each level behind it
+;; uploaded (geometry, textures with their HD and PBR maps, detailed scenery), not halfway through its
+;; load-in fade if it is already drawn, no placed objects' models still loading. At most *enhanced-door-wait-max*
+;; past the game's own condition, so it never locks Jak out. A level that is ready but not drawn yet
+;; (behind the shut door) is then shown whole as the door opens (pc-enhanced-level-whole) instead of
+;; dithering in; on a timeout the soft fade stays as the fallback.
+(define *enhanced-door-wait* #t)
+(define *enhanced-door-wait-max* (seconds 8))
+(define *enhanced-door-wait-proc* (the-as process #f))
+(define *enhanced-door-wait-start* (the-as time-frame 0))
+(define *enhanced-door-wait-last* (the-as time-frame 0))
+(define *enhanced-door-wait-done* #f)
+
+(define *enhanced-door-ok* #t)
+(define *enhanced-door-bad* (the-as level #f))
+(define *enhanced-door-bad-r* 0)
+(define *enhanced-door-whole?* #f)
+
+(define-extern enhanced-door-visit (function symbol int int))
+
+(defun enhanced-door-visit ((name symbol) (depth int))
+  "Check one of a door's levels on the renderer (or, *enhanced-door-whole?*, have it shown whole), with
+the levels it borrows and, for an alias like desert-game, the levels it stands for."
+  (when (and name (< depth 4))
+    (let ((lev (level-get *level* name)))
+      (cond
+        (lev
+         (let ((bsp (symbol->string (bsp-name lev))))
+           (if *enhanced-door-whole?*
+               (pc-enhanced-level-whole bsp)
+               (let ((r (pc-enhanced-level-ready bsp)))
+                 (when (not (and (logtest? r 1) (not (logtest? r 6))))
+                   (set! *enhanced-door-ok* #f)
+                   (set! *enhanced-door-bad* lev)
+                   (set! *enhanced-door-bad-r* r)
+                   )
+                 )
+               )
+           )
+         (when (-> lev info borrow)
+           (dotimes (i 5)
+             (let ((bi (the-as pair (-> lev info borrow borrow-info i))))
+               (if (and bi (car (cdr bi)))
+                   (enhanced-door-visit (the-as symbol (car bi)) (+ depth 1))
+                   )
+               )
+             )
+           )
+         )
+        (else
+          (let ((info (lookup-level-info name)))
+            (when (and info (-> info borrow) (-> info borrow alias))
+              (let ((l (the-as pair (-> info borrow alias))))
+                (while (and (not (null? l)) (car l))
+                  (if (!= (car l) 'dummy)
+                      (enhanced-door-visit (the-as symbol (car l)) (+ depth 1))
+                      )
+                  (set! l (cdr (cdr l)))
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  0
+  )
+
+(defun enhanced-door-render-ready? ((door process) (levels pair))
+  "The game's levels for this door are loaded: are they ready on the renderer too?"
+  (if (not *enhanced-door-wait*)
+      (return #t)
+      )
+  ;; a new wait: another door, or this one asking again after a pause
+  (when (or (!= door *enhanced-door-wait-proc*) (time-elapsed? *enhanced-door-wait-last* (seconds 0.5)))
+    (set! *enhanced-door-wait-proc* door)
+    (set! *enhanced-door-wait-done* #f)
+    (set-time! *enhanced-door-wait-start*)
+    )
+  (set-time! *enhanced-door-wait-last*)
+  (if *enhanced-door-wait-done*
+      (return #t)
+      )
+  (set! *enhanced-door-ok* #t)
+  (set! *enhanced-door-whole?* #f)
+  (let ((l levels))
+    (while (not (null? l))
+      (enhanced-door-visit (the-as symbol (car l)) 0)
+      (set! l (cdr l))
+      )
+    )
+  (let ((ok *enhanced-door-ok*)
+        (waited (- (current-time) *enhanced-door-wait-start*))
+        )
+    (when (or ok (>= waited *enhanced-door-wait-max*))
+      (set! *enhanced-door-wait-done* #t)
+      (when ok
+        (set! *enhanced-door-whole?* #t)
+        (let ((l levels))
+          (while (not (null? l))
+            (enhanced-door-visit (the-as symbol (car l)) 0)
+            (set! l (cdr l))
+            )
+          )
+        (set! *enhanced-door-whole?* #f)
+        )
+      (format 0 "[enhanced] load door ~A ~A after ~,,2f s for the renderer~%"
+              (-> door name) (if ok "ready" "timed out") (* 0.0033333334 (the float waited)))
+      (if (and (not ok) *enhanced-door-bad*)
+          (format 0 "[enhanced] load door waited on ~A (~A) ready bits ~D~%"
+                  (-> *enhanced-door-bad* name) (-> *enhanced-door-bad* status) *enhanced-door-bad-r*)
+          )
+      )
+    (or ok (>= waited *enhanced-door-wait-max*))
+    )
+  )
+
 (defmethod destination-loaded? ((this com-airlock) (level-status symbol))
-  (let ((s5-1 (script-eval (-> this level-name))))
+  (let ((s5-1 (script-eval (-> this level-name)))
+        (enh-levels (the-as pair #f))
+        )
+    (set! enh-levels (the-as pair s5-1))
     (cond
       ((not s5-1)
        (if level-status
@@ -410,7 +531,11 @@
             (set! a1-3 (car (the-as pair s5-1)))
             )
           )
-        #t
+        ;; Enhanced: and the renderer has them (the 'display check, open's trans, stays the game's)
+        (if (= level-status 'display)
+            #t
+            (enhanced-door-render-ready? this enh-levels)
+            )
         )
       (else
         (let* ((v1-13 s5-1)

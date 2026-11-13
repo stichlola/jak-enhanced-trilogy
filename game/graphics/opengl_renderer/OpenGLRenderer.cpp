@@ -1081,6 +1081,7 @@ void OpenGLRenderer::render(DmaFollower dma, const RenderOptions& settings) {
     } else {
       m_render_state.loader->update(*m_render_state.texture_pool);
     }
+    m_render_state.loader->publish_ready(m_render_state.frame_idx);
   }
 
   // render the buckets!

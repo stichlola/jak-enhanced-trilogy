@@ -1847,6 +1847,7 @@ int placed_mesh(Library& lib, const std::string& model) {
                        return chain;
                      })
               .share();
+    g_enhanced_level_ready.placed_loading = (int)p.loading.size();
   }
   if (job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
     return -1;
@@ -1864,6 +1865,7 @@ int placed_mesh(Library& lib, const std::string& model) {
   }
   p.mesh_of[model] = idx;
   p.loading.erase(model);
+  g_enhanced_level_ready.placed_loading = (int)p.loading.size();
   return idx;
 }
 }  // namespace

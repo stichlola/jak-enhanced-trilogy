@@ -20,6 +20,13 @@
 
 #include "third-party/imgui/imgui.h"
 
+#include "game/graphics/enhanced_state.h"
+
+// Enhanced (background_common.cpp): the level is drawn lately and its load-in fade is not over
+bool enhanced_level_fading(const std::string& name, u64 frame);
+// Enhanced (background_common.cpp): show the level whole if it starts being drawn before frame until
+void enhanced_level_fade_skip(const std::string& name, u64 frame, u64 until);
+
 Loader::Loader(const fs::path& base_path, int max_levels)
     : m_base_path(base_path), m_max_levels(max_levels) {
   m_loader_thread = std::thread(&Loader::loader_thread, this);
@@ -98,6 +105,29 @@ void Loader::set_want_levels(const std::vector<std::string>& levels) {
 void Loader::set_active_levels(const std::vector<std::string>& levels) {
   std::unique_lock<std::mutex> lk(m_loader_mutex);
   m_active_levels = levels;
+}
+
+void Loader::publish_ready(u64 frame) {
+  std::vector<std::string> loaded, fading;
+  {
+    std::unique_lock<std::mutex> lk(m_loader_mutex);
+    for (auto& [name, lev] : m_loaded_tfrag3_levels) {
+      loaded.push_back(name);
+      if (enhanced_level_fading(name, frame)) {
+        fading.push_back(name);
+      }
+    }
+  }
+  std::vector<std::string> whole;
+  {
+    std::lock_guard<std::mutex> g(g_enhanced_level_ready.mutex);
+    g_enhanced_level_ready.loaded = std::move(loaded);
+    g_enhanced_level_ready.fading = std::move(fading);
+    whole.swap(g_enhanced_level_ready.whole);
+  }
+  for (auto& name : whole) {
+    enhanced_level_fade_skip(name, frame, frame + 600);
+  }
 }
 
 /*!
