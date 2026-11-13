@@ -23,7 +23,7 @@ uniform sampler2D tex_T2;  // Enhanced: the grid's heights (Hfrag.cpp), 1e30 whe
 out vec3 enh_normal;       // Enhanced: smooth world normal, from the neighbors' heights
 out vec3 enh_pos;          // Enhanced: world position relative to the camera
 uniform vec3 enh_tod_lit;  // Enhanced: the sunlit sand's time of day color now (Hfrag.cpp)
-uniform float tune_hfrag_unbake = 0.5;  // shaders.tune_hfrag_unbake: share of the baked shade removed (0: as the game; Enhanced off: none, Hfrag.cpp)
+uniform float tune_hfrag_unbake = 0.0;  // shaders.tune_hfrag_unbake: share of the baked shade removed (0: as the game; Enhanced off: none, Hfrag.cpp)
 
 float enh_height(int x, int z, float own) {
   float h = texelFetch(tex_T2, ivec2(clamp(x, 0, 511), clamp(z, 0, 511)), 0).r;
