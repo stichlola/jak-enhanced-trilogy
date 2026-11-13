@@ -1643,7 +1643,8 @@ void blast_chunks(int i, float z, inout vec3 c) {
 // an explosion's layers over the scene along the ray (the flash and the sparks are drawn apart, the
 // smoke is puffs): the ring of dust it blows out along the ground, and the fireball, boiling from
 // white to orange to soot. Everything scales with the blast's radius. Premultiplied color, coverage.
-vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
+// part: 0 both, 1 the ring alone, 2 the fireball alone (look.blast_punch draws it past the grade)
+vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust, int part) {
   vec3 bp = blast_pos[i].xyz;
   float age = blast_info[i].x;
   float rad = clamp(blast_pos[i].w, 1.5 * 4096.0, 12.0 * 4096.0);
@@ -1659,7 +1660,7 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
   if (punch) {
     dust *= vec3(0.55, 0.5, 0.45);
   }
-  if (blast_info[i].z <= 0.0 && age < ring_end && abs(upd) > 0.01) {
+  if (part != 2 && blast_info[i].z <= 0.0 && age < ring_end && abs(upd) > 0.01) {
     // three sheets one over the other: low and wide, higher and behind it
     float grow = 1.0 - exp(-age * 3.0);
     float ring = rad * (0.35 + 1.9 * grow);
@@ -1684,21 +1685,34 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
       trans *= 1.0 - a;
     }
   }
-  if (age < 0.75) {
+  if (part != 1 && age < 0.75) {
     float u = age / 0.75;
     float r = rad * (0.25 + 0.75 * (1.0 - exp(-age * 9.0))) * (punch ? 0.8 : 1.0);
-    float tc = dot(bp, ray);
-    float h2 = dot(bp, bp) - tc * tc;
+    // (punch: the ball stands on the ground, not half in it, and is as thick as the ball itself, not
+    // as the piece of the ray over the ground: seen from above its middle was a thin slice, a hollow
+    // ring with the sand showing through. It fades where it meets the ground instead)
+    vec3 fb = punch ? bp + up_view * (0.4 * r) : bp;
+    float tc = dot(fb, ray);
+    float h2 = dot(fb, fb) - tc * tc;
     if (h2 < r * r && tc + r > 0.0) {
       float half_chord = sqrt(r * r - h2);
       float t0 = max(tc - half_chord, 0.0);
       float t1 = min(tc + half_chord, scene_dist);
       if (t1 > t0) {
-        vec3 q = view_to_world * (ray * (0.5 * (t0 + t1)) - bp) / r;
+        vec3 q = view_to_world * (ray * (punch ? tc : 0.5 * (t0 + t1)) - fb) / r;
+        if (punch) {
+          // (a vehicle's 10 m ball had a grenade's few folds, blown up: finer ones as it grows)
+          q *= clamp(rad / (4.0 * 4096.0), 1.0, 2.5);
+        }
         float n = vnoise3(q * 2.6 + vec3(seed * 3.0, -age * 3.0, seed)) * 0.6 +
                   vnoise3(q * 6.0 + vec3(-seed, -age * 5.0, seed * 2.0)) * 0.4;
-        float thick = (t1 - t0) / (2.0 * r);
+        float thick = punch ? half_chord / r : (t1 - t0) / (2.0 * r);
         float body = smoothstep(0.35, 0.75, n + thick * 0.75 - u * 0.35) * (1.0 - smoothstep(0.6, 1.0, u));
+        if (punch) {
+          // (its rim by the boil, lumps in and out of the ball's outline: not a clean disc)
+          body = smoothstep(0.45, 0.8, n * 0.9 + thick * 0.9 - u * 0.35) * (1.0 - smoothstep(0.6, 1.0, u)) *
+                 clamp((scene_dist - t0) / (0.25 * r), 0.0, 1.0);
+        }
         float temp = thick * 0.8 + n * 0.6 - u * 1.25;
         // (look.blast_day: by day the fireball over noon sand was half see-through and 2.2x bright: the
         // sand under it plus its light clipped to one white blot, no fire in it. By day it hides more of
@@ -1715,8 +1729,23 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
         soot = min(soot * (1.0 + 0.4 * bday), 1.0);
         float glow = punch ? mix(1.6 - 1.1 * u, 1.15 - 0.6 * u, bday) : mix(2.2 - 1.6 * u, 1.15 - 0.6 * u, bday);
         vec3 soot_c = punch ? vec3(0.02, 0.017, 0.015) : vec3(0.035, 0.03, 0.028);
+        float cover = body * mix(punch ? 0.75 : 0.5, 0.85, bday);
+        if (punch) {
+          // (an orange core at the sunlit sand's own level was the sand's color: the ball read as a
+          // hollow red ring, see-through. A solid ball: yellow-hot at first, then a deep orange with
+          // darker red folds, brighter than the sand around it at first and more saturated after, its
+          // rim red, never white)
+          float fold = smoothstep(0.2, 0.8, vnoise3(q * 3.1 + vec3(seed * 5.0, -age * 3.0, -seed)) * 0.65 +
+                                            vnoise3(q * 7.0 + vec3(seed, -age * 5.0, seed * 3.0)) * 0.35);
+          vec3 hot = mix(vec3(1.0, 0.78, 0.3), vec3(1.0, 0.5, 0.1), smoothstep(0.1, 0.55, u));
+          fire_c = mix(vec3(0.5, 0.05, 0.01), vec3(1.0, 0.33, 0.04), smoothstep(-0.1, 0.35, temp));
+          fire_c = mix(fire_c, hot, smoothstep(0.4, 0.85, temp));
+          fire_c *= mix(0.6, 1.0, max(fold, smoothstep(0.7, 1.1, temp))) * (0.88 + 0.22 * clamp(q.y, -1.0, 1.0));
+          glow = mix(1.6 - 1.1 * u, 1.9 - 1.2 * u, bday);
+          cover = body * mix(0.9, 0.97, bday);
+        }
         col = col * (1.0 - soot) + soot_c * soot + fire_c * body * glow;
-        trans *= 1.0 - max(soot, body * mix(punch ? 0.75 : 0.5, 0.85, bday));
+        trans *= 1.0 - max(soot, cover);
       }
     }
   }
@@ -5711,7 +5740,7 @@ void composite_unused() {
     float scene_dist = z > 0.0 ? length(p) : 1e12;
     for (int i = 0; i < blast_count; i++) {
       if (blast_dir[i].w < 0.5) {
-        vec4 l = blast_layers(i, ray, scene_dist, dust);
+        vec4 l = blast_layers(i, ray, scene_dist, dust, (look_bits() & 4) != 0 ? 1 : 0);
         c = c * (1.0 - l.a) + l.rgb;
         if (blast_sparks > 0.0) {
           blast_chunks(i, z, c);
@@ -7416,6 +7445,21 @@ void composite_unused() {
       c = mix(c, vec3(1.0, 0.62, 0.3) * m1, clamp((fm - fit) * 0.9, 0.0, 0.5));
     } else {
       c += fl;
+    }
+  }
+  // an explosion's fireball, here (look.blast_punch): drawn with the dust ring before the grade it
+  // went through the day's stop-down, the highlights' squeeze and the desert's grade as if it were
+  // lit sand, and came out the sand's own color with the game's sprites over it: a see-through ring.
+  // Past the grade it keeps its own colors, yellow-hot to orange to red and soot, by day and by
+  // night; its brightest channel held at 1 (hue kept: no cream core from the shoulder below)
+  if (fx_detail > 0.0 && blast_count > 0 && (look_bits() & 4) != 0) {
+    float ball_dist = z > 0.0 ? length(p) : 1e12;
+    for (int i = 0; i < blast_count; i++) {
+      if (blast_dir[i].w < 0.5 && blast_info[i].x < 0.75) {
+        vec4 l = blast_layers(i, ray, ball_dist, vec3(0.0), 2);
+        l.rgb /= max(max(l.r, max(l.g, l.b)), 1.0);
+        c = c * (1.0 - l.a) + l.rgb;
+      }
     }
   }
   // a shoulder for every pixel: relit lamps, light spill, shafts, bloom and GI added up past 1 and
