@@ -1307,17 +1307,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float life = std::max((float)t_soot_life, 0.5f);
       std::erase_if(soot, [&](const Blast& b) { return m_time - b.start > life || m_time < b.start; });
       auto& sl = g_enhanced_smoke_lights;
-      {
-        static int dbg_n = 0;
-        if (dbg_n < 20 && !m_blasts.empty()) {
-          dbg_n++;
-          lg::info("[blastdbg] blasts {} kind {} age {} soot {} on {} punch {}", m_blasts.size(),
-                   m_blasts.back().kind, m_time - m_blasts.back().start, soot.size(), on,
-                   (float)t_punch);
-        }
-      }
       sl.soot_count = 0;
-      if (on && (float)t_punch > 0.5f) {
+      // (not tied to the dynamic lights: the auto quality may turn those off, the smoke stays)
+      if ((float)t_punch > 0.5f) {
         for (size_t k = soot.size(); k-- > 0 && sl.soot_count < EnhancedSmokeLights::kSoot;) {
           const auto& b = soot[k];
           const int i = sl.soot_count++;

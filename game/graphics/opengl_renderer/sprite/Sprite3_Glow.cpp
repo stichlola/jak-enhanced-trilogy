@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <cmath>
-#include "common/log/log.h"
 #include "game/graphics/enhanced_state.h"
 #include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/sprite/Sprite3.h"
@@ -82,15 +81,6 @@ bool glow_math(const SpriteGlowConsts* consts,
       w = std::max(w, 1.f - std::clamp((d - 0.55f) / 0.45f, 0.f, 1.f));
     }
     w *= std::clamp((float)t_blast_glow, 0.f, 1.f);
-    {
-      static int dbg_n = 0;
-      if (sl.soot_count > 0 && dbg_n++ < 8)
-        lg::info("[blastdbg] glow w {} rgba {} {} {} size {} d {}", w, rgba.x(), rgba.y(), rgba.z(),
-                 in->size_x / 4096.f,
-                 std::sqrt(std::pow(in->pos[0] - sl.soot_pos[0][0], 2.f) +
-                           std::pow(in->pos[1] - sl.soot_pos[0][1], 2.f) +
-                           std::pow(in->pos[2] - sl.soot_pos[0][2], 2.f)) / 4096.f);
-    }
     if (w > 0.f) {
       rgba.x() *= 1.f - 0.25f * w;
       rgba.y() *= 1.f - 0.55f * w;
