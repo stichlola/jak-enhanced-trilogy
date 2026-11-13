@@ -59,7 +59,11 @@ while ($true) {
 }
 
 # the shadow bin's run dir also holds the test config, so dev_bin.ps1 prunes both once gk is gone
-$bin = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $enh 'dev_bin.ps1')))) -Tag "gk$Instance" -Repo $Repo
+# (JAK_DEV_OWN_TREE=1: a worktree's own build, not the main tree's gk)
+$binArgs = @{ Tag = "gk$Instance"; Repo = $Repo }
+$ownBin = Join-Path $Repo 'out\build\Release\bin'
+if ($env:JAK_DEV_OWN_TREE -eq '1' -and (Test-Path (Join-Path $ownBin 'gk.exe'))) { $binArgs.From = $ownBin }
+$bin = & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $enh 'dev_bin.ps1')))) @binArgs
 if ($Instance -gt 0 -and -not $Config) { $TestCfg = $true }
 $cfg = ''
 if ($TestCfg) {
@@ -88,7 +92,10 @@ if ($TestCfg) {
 }
 
 $psi = New-Object Diagnostics.ProcessStartInfo (Join-Path $bin 'gk.exe')
-$a = "--game $Game --proj-path `"$main`""
+# (JAK_DEV_OWN_TREE=1: a worktree's game reads its own shaders, --proj-path the worktree; it needs
+# junctions to the main tree's data as the lane worktrees have: out\jak3\iso|obj|fr3, log, iso_data...)
+$proj = if ($env:JAK_DEV_OWN_TREE -eq '1' -and (Test-Path (Join-Path $Repo 'out\jak3\iso'))) { $Repo } else { $main }
+$a = "--game $Game --proj-path `"$proj`""
 if ($cfg) { $a += " --config-path `"$cfg`"" }
 if ($Headless) { $a += ' --no-display' }
 $psi.Arguments = "$a -- -boot -fakeiso -debug"

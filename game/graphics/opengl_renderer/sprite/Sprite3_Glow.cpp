@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <cmath>
+#include "common/log/log.h"
 #include "game/graphics/enhanced_state.h"
+#include "game/graphics/opengl_renderer/EnhancedTune.h"
 #include "game/graphics/opengl_renderer/sprite/Sprite3.h"
 
 struct SpriteGlowData {
@@ -65,6 +68,35 @@ bool glow_math(const SpriteGlowConsts* consts,
   rgba.x() *= rgba.w() * fade / 128.f;
   rgba.y() *= rgba.w() * fade / 128.f;
   rgba.z() *= rgba.w() * fade / 128.f;
+  {
+    // Enhanced: an explosion's own glow, a near-white star many meters wide, summed with its fire
+    // to a white ball with rays by day and by night. Near a blast it keeps the fire's orange and a
+    // little less strength (look.blast_glow 0: as the game has it)
+    static const EnhancedTune t_blast_glow("look.blast_glow", 1.f);
+    const auto& sl = g_enhanced_smoke_lights;
+    float w = 0.f;
+    for (int i = 0; i < sl.soot_count; i++) {
+      const float dx = in->pos[0] - sl.soot_pos[i][0], dy = in->pos[1] - sl.soot_pos[i][1],
+                  dz = in->pos[2] - sl.soot_pos[i][2];
+      const float d = std::sqrt(dx * dx + dy * dy + dz * dz) / sl.soot_pos[i][3];
+      w = std::max(w, 1.f - std::clamp((d - 0.55f) / 0.45f, 0.f, 1.f));
+    }
+    w *= std::clamp((float)t_blast_glow, 0.f, 1.f);
+    {
+      static int dbg_n = 0;
+      if (sl.soot_count > 0 && dbg_n++ < 8)
+        lg::info("[blastdbg] glow w {} rgba {} {} {} size {} d {}", w, rgba.x(), rgba.y(), rgba.z(),
+                 in->size_x / 4096.f,
+                 std::sqrt(std::pow(in->pos[0] - sl.soot_pos[0][0], 2.f) +
+                           std::pow(in->pos[1] - sl.soot_pos[0][1], 2.f) +
+                           std::pow(in->pos[2] - sl.soot_pos[0][2], 2.f)) / 4096.f);
+    }
+    if (w > 0.f) {
+      rgba.x() *= 1.f - 0.25f * w;
+      rgba.y() *= 1.f - 0.55f * w;
+      rgba.z() *= 1.f - 0.85f * w;
+    }
+  }
   out->flare_draw_color = rgba;
   // (Enhanced: the sky's own glows, as below: GlowRenderer keeps them out of the day's boost for
   // the light effects)

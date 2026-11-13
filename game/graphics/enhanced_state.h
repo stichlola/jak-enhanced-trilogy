@@ -154,6 +154,12 @@ struct EnhancedSmokeLights {
   float color[kMax][4] = {};
   int count = 0;
   float strength = 0.8f;  // 0 = off
+  // the last few explosions (world, game units; w: reach) and their age (s): their smoke turns to
+  // darker, thinner soot that clears sooner (look.blast_punch; soot_count 0 = off)
+  static constexpr int kSoot = 4;
+  float soot_pos[kSoot][4] = {};
+  float soot_age[kSoot] = {};
+  int soot_count = 0;
 };
 extern EnhancedSmokeLights g_enhanced_smoke_lights;
 

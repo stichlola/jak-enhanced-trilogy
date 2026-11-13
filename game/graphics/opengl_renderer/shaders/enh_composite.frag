@@ -1651,11 +1651,20 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
   vec3 col = vec3(0.0);
   float trans = 1.0;
   float upd = dot(ray, up_view);
-  if (blast_info[i].z <= 0.0 && age < 2.3 && abs(upd) > 0.01) {
+  // (look.blast_punch: the dust ring, pale sand-lit by day, read as a white haze around a blast; the
+  // fireball's core went to white, its soot a big grey veil. Now a darker, thinner, shorter ring, a
+  // saturated orange-yellow fireball, thinner soot that clears sooner)
+  bool punch = (look_bits() & 4) != 0;
+  float ring_end = punch ? 1.4 : 2.3;
+  if (punch) {
+    dust *= vec3(0.55, 0.5, 0.45);
+  }
+  if (blast_info[i].z <= 0.0 && age < ring_end && abs(upd) > 0.01) {
     // three sheets one over the other: low and wide, higher and behind it
     float grow = 1.0 - exp(-age * 3.0);
     float ring = rad * (0.35 + 1.9 * grow);
-    float fade = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(0.9, 2.3, age));
+    float fade = smoothstep(0.0, 0.08, age) * (1.0 - smoothstep(punch ? 0.4 : 0.9, ring_end, age)) *
+                 (punch ? 0.6 : 1.0);
     for (int k = 0; k < 3; k++) {
       float t = (dot(bp, up_view) + blast_info[i].z + float(k) * 0.14 * rad + 0.1 * 4096.0) / upd;
       if (t <= 0.0 || t > scene_dist) {
@@ -1677,7 +1686,7 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
   }
   if (age < 0.75) {
     float u = age / 0.75;
-    float r = rad * (0.25 + 0.75 * (1.0 - exp(-age * 9.0)));
+    float r = rad * (0.25 + 0.75 * (1.0 - exp(-age * 9.0))) * (punch ? 0.8 : 1.0);
     float tc = dot(bp, ray);
     float h2 = dot(bp, bp) - tc * tc;
     if (h2 < r * r && tc + r > 0.0) {
@@ -1697,11 +1706,17 @@ vec4 blast_layers(int i, vec3 ray, float scene_dist, vec3 dust) {
         // darker: it reads by color and by its dark smoke, not by brightness)
         float bday = (look_bits() & 2) != 0 ? clamp(sky_sun.w * 2.5, 0.0, 1.0) * (1.0 - clouds.w) : 0.0;
         vec3 fire_c = mix(vec3(0.6, 0.08, 0.01), vec3(1.0, 0.45, 0.08), smoothstep(0.0, 0.4, temp));
-        fire_c = mix(fire_c, mix(vec3(1.0, 0.9, 0.55), vec3(1.0, 0.7, 0.3), bday), smoothstep(0.45, 0.85, temp));
-        float soot = body * mix(0.2, 0.85, smoothstep(0.1, 0.8, u)) * (1.0 - smoothstep(-0.1, 0.25, temp));
+        // (punch: at 1.6x the shoulder took a 0.72 green core to lemon yellow by night; orange holds)
+        vec3 core = punch ? vec3(1.0, 0.6, 0.18) : vec3(1.0, 0.9, 0.55);
+        fire_c = mix(fire_c, mix(core, vec3(1.0, 0.7, 0.3), bday), smoothstep(0.45, 0.85, temp));
+        float soot = body * (1.0 - smoothstep(-0.1, 0.25, temp)) *
+                     (punch ? mix(0.15, 0.55, smoothstep(0.1, 0.7, u)) * (1.0 - smoothstep(0.7, 1.0, u))
+                            : mix(0.2, 0.85, smoothstep(0.1, 0.8, u)));
         soot = min(soot * (1.0 + 0.4 * bday), 1.0);
-        col = col * (1.0 - soot) + vec3(0.035, 0.03, 0.028) * soot + fire_c * body * mix(2.2 - 1.6 * u, 1.15 - 0.6 * u, bday);
-        trans *= 1.0 - max(soot, body * mix(0.5, 0.85, bday));
+        float glow = punch ? mix(1.6 - 1.1 * u, 1.15 - 0.6 * u, bday) : mix(2.2 - 1.6 * u, 1.15 - 0.6 * u, bday);
+        vec3 soot_c = punch ? vec3(0.02, 0.017, 0.015) : vec3(0.035, 0.03, 0.028);
+        col = col * (1.0 - soot) + soot_c * soot + fire_c * body * glow;
+        trans *= 1.0 - max(soot, body * mix(punch ? 0.75 : 0.5, 0.85, bday));
       }
     }
   }

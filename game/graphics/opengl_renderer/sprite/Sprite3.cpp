@@ -655,6 +655,18 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
         glUniform4fv(glGetUniformLocation(shader, "enh_light_color"), sl.count, &sl.color[0][0]);
         glUniform1f(glGetUniformLocation(shader, "enh_smoke"), sl.strength);
       }
+      // (an explosion's smoke: soot, the blended puffs; its additive flash sprites: their sum, which
+      // clipped to a white ball with rays, kept in the fire's orange)
+      const auto ab = mode.get_alpha_blend();
+      const bool add =
+          ab == DrawMode::AlphaBlend::SRC_0_SRC_DST || ab == DrawMode::AlphaBlend::SRC_0_FIX_DST;
+      const int soot = ab == DrawMode::AlphaBlend::SRC_DST_SRC_DST || add ? sl.soot_count : 0;
+      glUniform1i(glGetUniformLocation(shader, "enh_soot_count"), soot);
+      glUniform1i(glGetUniformLocation(shader, "enh_soot_add"), add ? 1 : 0);
+      if (soot > 0) {
+        glUniform4fv(glGetUniformLocation(shader, "enh_soot_pos"), soot, &sl.soot_pos[0][0]);
+        glUniform1fv(glGetUniformLocation(shader, "enh_soot_age"), soot, sl.soot_age);
+      }
     }
 
     m_enhanced_fx.set_bucket(render_state, tbp, *tex,

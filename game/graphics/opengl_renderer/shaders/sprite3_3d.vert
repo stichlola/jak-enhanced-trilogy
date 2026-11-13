@@ -28,6 +28,15 @@ uniform int enh_light_count;     // Enhanced: lights near the smoke (world, radi
 uniform vec4 enh_light_pos[8];
 uniform vec4 enh_light_color[8];
 uniform float enh_smoke;         // how much they brighten and tint it
+uniform float tune_smoke_soot = 1.0;      // Enhanced: lit smoke tinted, not burnt white (0: off)
+uniform float tune_smoke_soot_cap = 1.3;  // how much brighter the light may make a puff
+uniform int enh_soot_count;      // Enhanced: the last explosions (world, reach), 0 = none
+uniform vec4 enh_soot_pos[4];
+uniform float enh_soot_age[4];   // 0..1 over the soot's life
+uniform float tune_soot_dark = 0.45;   // an explosion's grey puffs taken to this much of their color
+uniform float tune_soot_thin = 0.7;    // and of their opacity, fading out over the soot's life
+uniform int enh_soot_add;              // this draw is additive (an explosion's flash and fire sprites)
+uniform float tune_soot_flash = 1.0;   // their sum kept orange, not clipped white (0: as the game has it)
 uniform int enh_fx_class;        // Enhanced: this draw's smoke or flames (EnhancedParticles), 0 = no
 
 flat out vec4 fragment_color;
@@ -218,6 +227,37 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
 
+  if (enh_soot_count > 0 && enh_soot_add != 0 && rendermode != 2u) {
+    // Enhanced: an explosion's additive sprites (its white flash, its glows) summed past full to a
+    // white ball with rays over the sand by day and the dark by night: kept in the fire's hue, the
+    // white ones toward orange-yellow and a little dimmer, early in the blast only
+    float w = 0.0;
+    for (int i = 0; i < enh_soot_count; i++) {
+      float k = 1.0 - smoothstep(0.55, 1.0, length(position - enh_soot_pos[i].xyz) / enh_soot_pos[i].w);
+      w = max(w, k);
+    }
+    w *= tune_soot_flash;
+    fragment_color.rgb *= mix(vec3(1.0), vec3(0.85, 0.52, 0.2), w);
+  } else if (enh_soot_count > 0 && rendermode != 2u) {
+    // Enhanced: an explosion's grey puffs, pale over noon sand and lit to white by its flash, are
+    // soot: darker, a little warm, thinner, and gone sooner (look.blast_punch 0: as the game has them)
+    float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
+    float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
+    float w = 0.0;
+    float fade = 0.0;
+    for (int i = 0; i < enh_soot_count; i++) {
+      vec3 d = position - enh_soot_pos[i].xyz;
+      float r = enh_soot_pos[i].w;
+      float k = 1.0 - smoothstep(0.55, 1.0, length(d) / r);
+      w = max(w, k);
+      fade = max(fade, k * smoothstep(0.3, 1.0, enh_soot_age[i]));
+    }
+    w *= 1.0 - smoothstep(0.25, 0.5, sat);  // grey smoke only, not the flames
+    fade *= 1.0 - smoothstep(0.25, 0.5, sat);
+    fragment_color.rgb *= mix(vec3(1.0), vec3(1.0, 0.9, 0.8) * tune_soot_dark, w);
+    fragment_color.a *= mix(1.0, tune_soot_thin, w) * (1.0 - fade);
+  }
+
   if (enh_light_count > 0 && rendermode != 2u) {
     // Enhanced: a puff near a lamp or a fire takes its color, by the falloff the post pass uses
     vec3 added = vec3(0.0);
@@ -234,7 +274,18 @@ void main() {
     // past full to a pale yellow-green)
     float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
     float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
-    fragment_color.rgb *= 1.0 + min(added, vec3(2.0)) * enh_smoke * (1.0 - smoothstep(0.2, 0.45, sat));
+    vec3 lit = fragment_color.rgb * (1.0 + min(added, vec3(2.0)) * enh_smoke * (1.0 - smoothstep(0.2, 0.45, sat)));
+    // (an explosion's flash, the frame's strongest light, took its own grey smoke to 2.6x: a milky
+    // white cloud by day and by night. The light tints the smoke and brightens it at most by
+    // tune_smoke_soot_cap; past that only the hue moves toward the light's. 0: as before)
+    if (tune_smoke_soot > 0.0) {
+      const vec3 lw = vec3(0.3, 0.59, 0.11);
+      float l0 = dot(fragment_color.rgb, lw);
+      float l1 = dot(lit, lw);
+      float cap = l0 * tune_smoke_soot_cap;
+      lit *= mix(1.0, min(1.0, cap / max(l1, 1e-4)), tune_smoke_soot);
+    }
+    fragment_color.rgb = lit;
   }
 
   fragment_color *= 2;

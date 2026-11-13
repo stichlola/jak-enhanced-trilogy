@@ -998,7 +998,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     // kept under the highlights. Tuning look.sky_extras / look.blast_day 0: off)
     static const EnhancedTune t_sky_extras("look.sky_extras", 1.f);
     static const EnhancedTune t_blast_day("look.blast_day", 1.f);
-    const int bits = ((float)t_sky_extras > 0.5f ? 1 : 0) | ((float)t_blast_day > 0.5f ? 2 : 0);
+    // 4: a punchier fireball, thinner shorter soot and a darker, smaller dust ring (look.blast_punch)
+    static const EnhancedTune t_blast_punch("look.blast_punch", 1.f);
+    const int bits = ((float)t_sky_extras > 0.5f ? 1 : 0) | ((float)t_blast_day > 0.5f ? 2 : 0) |
+                     ((float)t_blast_punch > 0.5f ? 4 : 0);
     glUniform4f(glGetUniformLocation(id, "fog"), m_settings.fog_density / kMeter,
                 m_settings.fog_height / kMeter, have_scene ? m_settings.fog_amount * m_fog : 0.f,
                 (float)bits);
@@ -1285,6 +1288,46 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       g_enhanced_explosions.count = 0;
+    }
+    {
+      // the smoke of the last few explosions (kind 0) for the particle renderer: darker, thinner
+      // soot that clears sooner (look.blast_punch 0: the game's grey puffs as they are)
+      static const EnhancedTune t_punch("look.blast_punch", 1.f);
+      static const EnhancedTune t_soot_life("look.blast_soot_life", 4.5f);
+      // (its own memory: m_blasts forgets an explosion after 2.4 s, its smoke lingers longer)
+      static std::vector<Blast> soot;
+      for (const auto& b : m_blasts) {
+        if (b.kind == 0 && m_time - b.start < 1.0 / 30.0) {
+          if (std::none_of(soot.begin(), soot.end(),
+                           [&](const Blast& s) { return s.start == b.start && s.pos[0] == b.pos[0]; })) {
+            soot.push_back(b);
+          }
+        }
+      }
+      const float life = std::max((float)t_soot_life, 0.5f);
+      std::erase_if(soot, [&](const Blast& b) { return m_time - b.start > life || m_time < b.start; });
+      auto& sl = g_enhanced_smoke_lights;
+      {
+        static int dbg_n = 0;
+        if (dbg_n < 20 && !m_blasts.empty()) {
+          dbg_n++;
+          lg::info("[blastdbg] blasts {} kind {} age {} soot {} on {} punch {}", m_blasts.size(),
+                   m_blasts.back().kind, m_time - m_blasts.back().start, soot.size(), on,
+                   (float)t_punch);
+        }
+      }
+      sl.soot_count = 0;
+      if (on && (float)t_punch > 0.5f) {
+        for (size_t k = soot.size(); k-- > 0 && sl.soot_count < EnhancedSmokeLights::kSoot;) {
+          const auto& b = soot[k];
+          const int i = sl.soot_count++;
+          sl.soot_pos[i][0] = b.pos[0];
+          sl.soot_pos[i][1] = b.pos[1];
+          sl.soot_pos[i][2] = b.pos[2];
+          sl.soot_pos[i][3] = std::clamp(b.radius * 3.f, 6.f * kMeter, 25.f * kMeter);
+          sl.soot_age[i] = (float)(m_time - b.start) / life;
+        }
+      }
     }
     m_blasts.erase(std::remove_if(m_blasts.begin(), m_blasts.end(),
                                   [&](const Blast& b) {
