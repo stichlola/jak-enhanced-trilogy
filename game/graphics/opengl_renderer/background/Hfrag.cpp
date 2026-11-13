@@ -486,7 +486,8 @@ void Hfrag::render_hfrag_level(Hfrag::HfragLevel* lev,
   // moved with the weather or the sun, and seen from the ground they lay across the sand as dark
   // horizontal bands. The reference: the mean of the brightest fifth of the colors
   float tod_lit[3] = {0.f, 0.f, 0.f};
-  if (lev->num_colors) {
+  // (Enhanced off: zero, hfrag.vert keeps the game's colors)
+  if (lev->num_colors && g_enhanced_on) {
     m_tod_luma.resize(lev->num_colors);
     for (u64 i = 0; i < lev->num_colors; i++) {
       const auto& c = m_color_result[i];

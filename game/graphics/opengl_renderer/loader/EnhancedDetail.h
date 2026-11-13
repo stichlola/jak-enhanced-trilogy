@@ -18,6 +18,8 @@ extern bool g_enhanced_detail;
 // the key light in world space (xyz) and its strength (w, 0 when down): the dunes shade the fine normal by it
 // themselves (hfrag.frag). Set by the post pass each frame
 extern float g_enhanced_detail_sun[4];
+// Enhanced is on this frame (false with it off in the menu: scene shaders keep the classic look)
+extern bool g_enhanced_on;
 // the boot switch alone (JAK_ENHANCED_DETAIL=0: false)
 bool enhanced_detail_allowed();
 

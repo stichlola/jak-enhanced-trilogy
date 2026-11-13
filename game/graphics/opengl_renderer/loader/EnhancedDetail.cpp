@@ -16,6 +16,7 @@
 
 bool g_enhanced_detail = true;
 float g_enhanced_detail_sun[4] = {0.f, 1.f, 0.f, 0.f};
+bool g_enhanced_on = false;
 
 bool enhanced_detail_allowed() {
   static const bool allowed = [] {

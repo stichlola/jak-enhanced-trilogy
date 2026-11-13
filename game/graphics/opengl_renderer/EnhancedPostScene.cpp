@@ -685,6 +685,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   }
   if (!m_settings.enabled) {
     g_enhanced_camera.valid = false;
+    g_enhanced_on = false;  // (the dunes' baked shade back, Hfrag.cpp)
     // the ambient sounds go quiet with the rest of Enhanced
     static const float silent[snd::ambience::kLayers] = {};
     snd::ambience::set_targets(silent);
