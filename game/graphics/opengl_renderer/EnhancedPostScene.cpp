@@ -1284,6 +1284,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           b.dir[1] = e[5];
           b.dir[2] = e[6];
           b.kind = (int)e[7];
+          // (test switch "debug": {"blast_radius": m}: every explosion as one of that radius, to
+          // look at a grenade's and a vehicle's size with the test explosion; 0: the game's own)
+          static const EnhancedTune t_blast_radius("debug.blast_radius", 0.f);
+          if (b.kind == 0 && (float)t_blast_radius > 0.f) {
+            b.radius = (float)t_blast_radius * kMeter;
+          }
           m_blasts.push_back(b);
         }
       }
@@ -1364,7 +1370,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
       }
       c.pos[3] = std::clamp(b.radius * 4.f, 8.f * kMeter, 30.f * kMeter);
-      float k = 4.f * std::exp(-age * 5.f) * m_settings.blast * m_settings.light_strength;
+      // (look.blast_flash_fade: how fast an explosion's light dies, 1/s. At 5 it still stood at 0.9
+      // after 0.3 s, past the composite's ceiling all that while: by day a flat orange pool over the
+      // ground around the blast for a third of a second. A flash: full for a frame or two, then gone)
+      static const EnhancedTune t_flash_fade("look.blast_flash_fade", 11.f);
+      float k = 4.f * std::exp(-age * (b.kind == 0 ? std::max((float)t_flash_fade, 1.f) : 5.f)) *
+                m_settings.blast * m_settings.light_strength;
       // the red gun: a short red-orange flash carried ahead of the muzzle with its wave
       // (the charged shot: red-fuchsia)
       const float tint[3] = {1.f, b.kind == 1 ? 0.32f : b.kind == 3 ? 0.2f : 0.62f,

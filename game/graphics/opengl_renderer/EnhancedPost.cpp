@@ -664,6 +664,34 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
       lg::info("[enhanced] tune debug.classic = {}", want ? 1 : 0);
     }
   }
+  {
+    // (test switches "debug": {"hour": 0-23} holds that time of day while it is set (asked again
+    // every 10 s: the game's clock runs on), {"blast_every": frames} sets off the test explosion in
+    // front of Jak every that many frames (0: stop): noon, evening and night in one run)
+    static const EnhancedTune t_hour("debug.hour", -1.f);
+    static const EnhancedTune t_blast_every("debug.blast_every", -1.f);
+    static float s_hour = -1.f, s_every = -1.f;
+    static double s_hour_t = 0.0;
+    const float hour = (float)t_hour, every = (float)t_blast_every;
+    // (one request slot: the next only once the game has taken the last)
+    bool free_slot = false;
+    {
+      std::lock_guard<std::mutex> lock(g_enhanced_menu.mutex);
+      free_slot = g_enhanced_menu.request == 0;
+    }
+    if (!free_slot) {
+    } else if (hour >= 0.f && (hour != s_hour || m_time - s_hour_t > 10.0 || m_time < s_hour_t)) {
+      g_enhanced_menu.ask(1, std::to_string((int)hour));
+      s_hour_t = m_time;
+      s_hour = hour;
+    } else if (every != s_every && every >= 0.f) {
+      g_enhanced_menu.ask(7, std::to_string((int)every));
+      s_every = every;
+    }
+    if (hour < 0.f) {
+      s_hour = hour;
+    }
+  }
   m_fx_count++;  // (capture_fx: copies from this frame)
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
