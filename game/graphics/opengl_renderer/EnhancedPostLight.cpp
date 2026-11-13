@@ -316,10 +316,20 @@ void EnhancedPost::update_scene() {
         const double period = std::max(30.0, (double)w.spell_period);
         float p = (float)(std::fmod(tt, period) / period);
         const uint32_t index = (uint32_t)(tt / period);
-        const uint32_t spell = index * 2654435761u + 977u;
+        // (murmur3's finalizer: the plain multiplicative hash gave strengths falling by 0.2 from
+        // one spell to the next, and the kinds came in a pattern)
+        auto hash_mix = [](uint32_t h) {
+          h ^= h >> 16;
+          h *= 0x85ebca6bu;
+          h ^= h >> 13;
+          h *= 0xc2b2ae35u;
+          h ^= h >> 16;
+          return h;
+        };
+        const uint32_t spell = hash_mix(index * 2654435761u + 977u);
         const float roll = (float)((spell >> 8) % 1000) / 1000.f;
         // how strong this one is (a drizzle or a downpour, a haze or a storm)
-        float strength = (float)(((spell * 2246822519u) >> 12) % 1000) / 1000.f;
+        float strength = (float)((hash_mix(spell ^ 0x9e3779b9u) >> 12) % 1000) / 1000.f;
         std::array<float, kSpellKinds> odds;
         float total = 0.f;
         for (int k = 0; k < kSpellKinds; k++) {
@@ -430,7 +440,8 @@ void EnhancedPost::update_scene() {
           default:
             // fair weather clouds drift over now and then
             want.clouds = std::max(want.clouds, 0.2f + 0.4f * strength * win(0.25f, 0.67f));
-            wind = 0.1f + 0.25f * strength;
+            // (calm to a light breeze: the grass and palms hardly move)
+            wind = 0.1f + 0.15f * strength;
             m_weather_state = 6;
             break;
         }
