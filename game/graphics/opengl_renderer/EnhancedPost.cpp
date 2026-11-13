@@ -636,6 +636,34 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
   // the dev loop: tuning.json saved since, shaders saved since or asked for (EnhancedTune.h)
   enhanced_tune_poll();
   shaders.hot_reload();
+  {
+    // (test switch "debug": {"classic": 1}: the Classic preset (vanilla look) while it is set, the
+    // settings from before put back when it is cleared, to compare ON and OFF in one run)
+    static const EnhancedTune t_classic("debug.classic", 0.f);
+    static bool s_classic = false;
+    static Settings s_before;
+    static bool s_merc = true, s_wind = true, s_push = true;
+    static int s_veg = 2;
+    const bool want = (float)t_classic > 0.5f;
+    if (want != s_classic) {
+      s_classic = want;
+      if (want) {
+        s_before = m_settings;
+        s_merc = g_enhanced_merc.enabled;
+        s_wind = g_enhanced_wind.enabled;
+        s_push = g_enhanced_wind.push;
+        s_veg = g_enhanced_vegetation;
+        apply_preset(0);
+      } else {
+        m_settings = s_before;
+        g_enhanced_merc.enabled = s_merc;
+        g_enhanced_wind.enabled = s_wind;
+        g_enhanced_wind.push = s_push;
+        g_enhanced_vegetation = s_veg;
+      }
+      lg::info("[enhanced] tune debug.classic = {}", want ? 1 : 0);
+    }
+  }
   m_fx_count++;  // (capture_fx: copies from this frame)
   if (g_enhanced_menu.hints_dirty.exchange(false)) {
     save_menu_settings();  // a one-time hint was shown (pc-enhanced-hint-once)
