@@ -966,7 +966,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     // TAA's history. On by default: Spargus 18h at 2560x1600, composite 13.0 -> 7.5 ms, 42 -> 55
     // fps, full-size frames equal to vrs 0 within the TAA's noise; Hellcat diving at 50 m/s: no
     // blocks, the Hellcat stays at full rate)
-    static const EnhancedTune t_vrs("post.vrs", 1.f);
+    // (off by default for now: wavy bands on smooth dark rock at night, user 2026-11-14; 1 = on)
+    static const EnhancedTune t_vrs("post.vrs", 0.f);
     static const EnhancedTune t_vrs_log("post.vrs_log", 0.f);
     static const EnhancedTune t_vrs_force("post.vrs_force", -1.f);
     static const EnhancedTune t_vrs_show("post.vrs_show", 0.f);
