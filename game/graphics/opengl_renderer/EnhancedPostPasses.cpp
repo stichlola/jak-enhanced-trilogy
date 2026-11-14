@@ -222,8 +222,16 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
   glUniform1i(glGetUniformLocation(id, "tex_T0"), 0);
   glActiveTexture(GL_TEXTURE11);
   glBindTexture(GL_TEXTURE_2D, m_normals_ready ? m_normal_tex : m_black_tex);
+  // (the histories' units hold a plain texture when their history is off: unit 13 kept the composite's
+  // sun shadow map, compare mode on, and every draw logged GL's "undefined behavior" warning)
+  for (int unit : {12, 13}) {
+    glActiveTexture(GL_TEXTURE0 + unit);
+    glBindTexture(GL_TEXTURE_2D, m_black_tex);
+  }
   glActiveTexture(GL_TEXTURE0);
   glUniform1i(glGetUniformLocation(id, "tex_T11"), 11);
+  glUniform1i(glGetUniformLocation(id, "tex_T12"), 12);
+  glUniform1i(glGetUniformLocation(id, "tex_T13"), 13);
   glUniformMatrix3fv(glGetUniformLocation(id, "view_to_world"), 1, GL_TRUE, &cam.rot[0][0]);
   glUniform4f(glGetUniformLocation(id, "proj"), cam.depth_a, cam.depth_b, cam.fx, fy);
   glUniform2f(glGetUniformLocation(id, "texel"), 1.f / w, 1.f / h);

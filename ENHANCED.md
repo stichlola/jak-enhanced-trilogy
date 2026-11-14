@@ -458,6 +458,30 @@ change (`fbo-WxH`) and every frame the game sent late (`no-chain`); 2 also saves
 in `JAK_ENHANCED_DUMP_DIR`. `"debug": {"auto_level": n}` holds the auto quality level (a test steps
 the render scale with it), `"debug": {"drop_chain": n}` leaves every n-th frame undrawn.
 
+Fixed: Spargus at dusk at 38-47 fps (2560x1600, RTX 5070 Laptop; Haven at night ~47). The composite
+cost 17.5 ms there (30 ms at full rate). No single effect was to blame (zeroing them one at a time:
+lamps 2.7 ms, rock detail 2.2, sun haze 2.0, sun shadows 1.8, water 1.1, the rest under 1): the
+~700-line water-surface block, unused on most pixels, took registers from every pixel. The composite
+is now two programs: `enh_composite_dry` (`ENH_NO_WATER`, the water block compiled out, discards the
+water's pixels) draws everything else, then the full `enh_composite` draws only the water's pixels
+(`cloud_pass` 2, discards the rest; skipped when `water_strength` is 0). The shore's wet band (the
+ground just above the water: darker, glossy, the sea's foam line) is drawn on dry pixels, so it stays
+in the dry program (`tune_water_dbg` 45 paints it magenta, green where water was found nearby but the
+ground is higher; 33 turns it off). On the desert shore by Spargus (2600, 11, 50 m, 18h) the composite
+is 12.4 ms in one program, 7.5 split with the band, 7.65 with the band off (its loop is within the
+noise). Full rate 30 -> 15 ms; tuning
+`"post": {"dry_composite": 0}` goes back to one program. VRS: last frame's edge/texture flags are
+now taken from where the tile was last frame (its corners reprojected with the camera's move and their
+depth, `"post": {"vrs_dilate": 2}`; 1 = the old 3x3 tiles around), and `post.vrs_tex` is 0.02 (was
+0.01); from auto level 3 `auto.vrs` [edge, tex] raises both (0.15, 0.03). Spargus 18h: composite 17.5
+-> 7 ms, post 21 -> 11, GPU 26 -> 16.5, 60 fps; Haven at night post 17.5 -> 13-14.5, desert 19 -> 10.
+Same picture (within the frame-to-frame noise of the NPCs and torches). Also gone: ~5000 GL
+"undefined behavior" warnings a minute (the SSAO's history units held the composite's compare-mode
+shadow map; empty shadow samplers get 1x1 depth textures; `copy_uniforms_from` copies cube-array
+samplers). Cost probe: tuning `"debug": {"composite_probe": 1}` (each new value restarts it, < 0 at
+boot keeps it off) times the composite with each `JAK_ENHANCED_COMPOSITE_OFF` group zeroed in turn,
+`JAK_ENHANCED_COMPOSITE_SLOT` seconds a slot (default 3).
+
 ### The nap's animations
 
 Jak lies down on his back, sleeps with a big cartoon breath, gets up and stretches: four Mixamo

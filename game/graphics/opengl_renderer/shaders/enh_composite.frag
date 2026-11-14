@@ -3196,6 +3196,19 @@ void composite_unused() {
       height = dot(up_view, p);
     }
   }
+  // (the composite in two programs where the water shows: enh_composite_dry, the same without the
+  // water's surface (its ~700 lines set every pixel's registers: the composite cost twice as much
+  // where no water is in view, 30 -> 15 ms at 2560x1600, Spargus 18h), draws the rest; then this
+  // program with cloud_pass 2 only the water's pixels. Both decide from the same wsurf above)
+#ifdef ENH_NO_WATER
+  if (wsurf > 0.0) {
+    discard;
+  }
+#else
+  if (cloud_pass == 2 && wsurf == 0.0) {
+    discard;
+  }
+#endif
   // explosions: a shockwave ring racing out from each one bends the picture for half a second
   for (int i = 0; i < blast_count; i++) {
     vec3 bp = blast_pos[i].xyz;
@@ -3518,6 +3531,7 @@ void composite_unused() {
 
   // water: our own shading over the game's, the same for the near and far sea (drawn by two
   // renderers with different colors), with reflections, sun glints, clearer shallows and foam
+#ifndef ENH_NO_WATER
   if (wsurf > 0.0) {
     // ripples: the slope of a non-repeating noise height field (finite differences)
     vec2 world = water_world;
@@ -4172,7 +4186,10 @@ void composite_unused() {
       c = c_old;
     }
     if (abs(tune_water_dbg - 34.0) < 0.5) { c = wc; }
-  } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
+  } else
+#endif
+  // (the shore is on dry pixels: it stays in enh_composite_dry, the wet pass discards them)
+  if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
     // the shore: the ground just above the water is wet, darker and a little glossy, its line
     // ragged and breathing with the water (the sea's runs up and down with the waves and leaves
     // a thin line of foam). The water's height: from any water seen within a meter or two.
@@ -4187,6 +4204,7 @@ void composite_unused() {
         break;
       }
     }
+    if (abs(tune_water_dbg - 45.0) < 0.5 && above_water < 1e8) { c = vec3(0.0, 0.5, 0.0); }
     if (above_water > -0.05 && above_water < 1.0) {
       float t = haze.w;
       vec2 wxz = water_world;
@@ -4209,6 +4227,8 @@ void composite_unused() {
         float line = exp(-sq((above_water - lap) / 0.02)) * lace;
         c = mix(c, vec3(0.9, 0.92, 0.9) * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0)), line * 0.5);
       }
+      // (tune_water_dbg 45 paints the shore band magenta, brighter where wetter)
+      if (abs(tune_water_dbg - 45.0) < 0.5) { c = vec3(1.0, 0.0, 1.0) * (0.25 + 0.75 * wet); }
     }
   }
 
