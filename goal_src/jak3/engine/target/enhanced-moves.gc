@@ -12,7 +12,8 @@
 ;; taking Jak's pose.
 ;;   Ashelin  square: a karate front snap kick; with her pistol out: steps in and strikes down with its grip
 ;;   Sig      square: a forward elbow strike (*enhanced-sig-boxer*: a jab and a straight instead);
-;;            with his Peacemaker out: its butt thrust forward; circle: a spinning backfist
+;;            with his Peacemaker out: its butt thrust forward; circle: Jak's own spin kick (no move here:
+;;            he takes Jak's pose, enhanced-skin-retarget; JAK_ENHANCED_SIG_BACKFIST=1: a spinning backfist)
 ;; The tables (enhanced-move-tables.gc, made by scripts/enhanced/char_moves.py from generated motion clips)
 ;; hold, 30 times a second, vectors in the character's model space (+x left, +y up, +z forward): they don't
 ;; depend on a rig's joint axes, bind pose or proportions. Here, per frame: the body over its root (sway),
@@ -79,6 +80,10 @@
 (define *enhanced-sig-boxer-buf* (new 'global 'string 8 (the-as string #f)))
 (define *enhanced-sig-boxer* (if (pc-enhanced-getenv "JAK_ENHANCED_SIG_BOXER" *enhanced-sig-boxer-buf* 8) #t #f))
 
+;; Sig's circle: #f Jak's spin kick in his pose, #t the spinning backfist (JAK_ENHANCED_SIG_BACKFIST=1)
+(define *enhanced-sig-backfist-buf* (new 'global 'string 8 (the-as string #f)))
+(define *enhanced-sig-backfist* (if (pc-enhanced-getenv "JAK_ENHANCED_SIG_BACKFIST" *enhanced-sig-backfist-buf* 8) #t #f))
+
 ;; JAK_ENHANCED_MOVE_TEST=<k|w|b|s>[:<hundredths of a second>] (test boots, for pictures): on the open sand
 ;; by the desert's parked Hellcat, 12 s in, one attack: k square (Ashelin's kick, Sig's elbow or boxer), w / b
 ;; the same with the gun out first (her pistol whip, his rifle butt), s circle (his spin). With a time, the
@@ -134,6 +139,13 @@
          (format 0 "[move-test] shot~%")
          )
         )
+      ;; Sig's circle as Jak's spin kick (no move to hold): Jak's clock stopped at that point instead
+      (when (and (= kind #x73) (not *enhanced-sig-backfist*) (<= 0.0 *enhanced-move-freeze*)
+                 (= t (+ 720 (the int (* 60.0 *enhanced-move-freeze*))))
+                 )
+        (update-rates! (-> *display* target-clock) 0.0)
+        (format 0 "[move-test] shot~%")
+        )
       (set! *enhanced-pad-rightx* (if (and (>= t 630) (< t 700)) 200 -1))
       )
     )
@@ -175,7 +187,7 @@
             (else *enhanced-move-sig-elbow*)
             )
           )
-         (('target-attack) *enhanced-move-sig-spin*)
+         (('target-attack) (if *enhanced-sig-backfist* *enhanced-move-sig-spin* (the-as enhanced-move #f)))
          (else (the-as enhanced-move #f))
          )
        )
