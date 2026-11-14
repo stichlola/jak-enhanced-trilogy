@@ -3792,9 +3792,15 @@ void composite_unused() {
       // (where that lands on the water, the sky's color there instead)
       float ed = texture(tex_T3, env_uv).r;
       float efd = texture(tex_T6, env_uv).r;
-      if ((texture(tex_T5, env_uv).r > ed + 1e-7 || (efd > 1e-7 && abs(efd - ed) < 1e-7)) &&
-          abs(tune_water_dbg - 12.0) > 0.5) {
-        refl = fog_color;
+      bool env_near = texture(tex_T5, env_uv).r > ed + 1e-7;
+      if ((env_near || (efd > 1e-7 && abs(efd - ed) < 1e-7)) && abs(tune_water_dbg - 12.0) > 0.5) {
+        // (landed on the game's far ocean only, and no sky over it below: its own fogged picture
+        // stays, close to the haze around it. The flat fog color there drew light/olive blocks the
+        // shape of the far tiles that rise over the horizon, desert coast by day. The fog color is
+        // still the fallback over the near ocean. tune_water_dbg 52: fog color everywhere, as before)
+        if (env_near || abs(tune_water_dbg - 52.0) < 0.5) {
+          refl = fog_color;
+        }
         refl_uv = vec2(-1.0);
         env_dbg.r = 1.0;
         // (the game's far ocean rises a little toward the horizon, so a ray just over level still
