@@ -464,7 +464,12 @@ lamps 2.7 ms, rock detail 2.2, sun haze 2.0, sun shadows 1.8, water 1.1, the res
 ~700-line water-surface block, unused on most pixels, took registers from every pixel. The composite
 is now two programs: `enh_composite_dry` (`ENH_NO_WATER`, the water block compiled out, discards the
 water's pixels) draws everything else, then the full `enh_composite` draws only the water's pixels
-(`cloud_pass` 2, discards the rest; skipped when `water_strength` is 0). Full rate 30 -> 15 ms; tuning
+(`cloud_pass` 2, discards the rest; skipped when `water_strength` is 0). The shore's wet band (the
+ground just above the water: darker, glossy, the sea's foam line) is drawn on dry pixels, so it stays
+in the dry program (`tune_water_dbg` 45 paints it magenta, green where water was found nearby but the
+ground is higher; 33 turns it off). On the desert shore by Spargus (2600, 11, 50 m, 18h) the composite
+is 12.4 ms in one program, 7.5 split with the band, 7.65 with the band off (its loop is within the
+noise). Full rate 30 -> 15 ms; tuning
 `"post": {"dry_composite": 0}` goes back to one program. VRS: last frame's edge/texture flags are
 now taken from where the tile was last frame (its corners reprojected with the camera's move and their
 depth, `"post": {"vrs_dilate": 2}`; 1 = the old 3x3 tiles around), and `post.vrs_tex` is 0.02 (was

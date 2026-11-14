@@ -4183,7 +4183,10 @@ void composite_unused() {
       c = c_old;
     }
     if (abs(tune_water_dbg - 34.0) < 0.5) { c = wc; }
-  } else if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
+  } else
+#endif
+  // (the shore is on dry pixels: it stays in enh_composite_dry, the wet pass discards them)
+  if (water_strength > 0.0 && z > 0.0 && z < 90.0 * 4096.0 && abs(tune_water_dbg - 33.0) > 0.5) {
     // the shore: the ground just above the water is wet, darker and a little glossy, its line
     // ragged and breathing with the water (the sea's runs up and down with the waves and leaves
     // a thin line of foam). The water's height: from any water seen within a meter or two.
@@ -4198,6 +4201,7 @@ void composite_unused() {
         break;
       }
     }
+    if (abs(tune_water_dbg - 45.0) < 0.5 && above_water < 1e8) { c = vec3(0.0, 0.5, 0.0); }
     if (above_water > -0.05 && above_water < 1.0) {
       float t = haze.w;
       vec2 wxz = water_world;
@@ -4220,9 +4224,10 @@ void composite_unused() {
         float line = exp(-sq((above_water - lap) / 0.02)) * lace;
         c = mix(c, vec3(0.9, 0.92, 0.9) * (0.35 + 0.65 * clamp(sky_sun.w * 2.5, 0.0, 1.0)), line * 0.5);
       }
+      // (tune_water_dbg 45 paints the shore band magenta, brighter where wetter)
+      if (abs(tune_water_dbg - 45.0) < 0.5) { c = vec3(1.0, 0.0, 1.0) * (0.25 + 0.75 * wet); }
     }
   }
-#endif
 
   // cutscenes: a real depth of field around what the camera looks at (autofocus on the middle of
   // the screen): each sample counts if its own blur reaches this pixel, and something behind only
