@@ -128,6 +128,7 @@ enum class ShaderId {
   ENH_HIZ = 65,     // Enhanced: the depth pyramid (post.hiz)
   ENH_SKY_MAP = 66, // Enhanced: the open sky straight up, traced (post.sky_map)
   ENH_PROBES = 67,  // Enhanced: light probes around the camera, traced (post.probes)
+  ENH_COMPOSITE_DRY = 68,  // Enhanced: enh_composite without the water's surface (ENH_NO_WATER)
   MAX_SHADERS
 };
 

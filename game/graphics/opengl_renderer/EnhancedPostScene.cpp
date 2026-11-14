@@ -150,7 +150,8 @@ bool check() {
 
 // the rate image for this frame (prev_tex: last frame's finished picture); false = shade normally
 bool make(int w, int h, bool log, GLuint prev_tex, GLuint scene_tex, GLuint depth_tex, const float* proj,
-          float edge_thr, float tex_thr, float depth_thr, int force, int show) {
+          float edge_thr, float tex_thr, float depth_thr, int force, int show, int dilate,
+          const float* to_prev, const float* to_prev_offset, float prev_fx, float prev_fy) {
   g.active = false;
   if (!check()) {
     return false;
@@ -246,6 +247,11 @@ bool make(int w, int h, bool log, GLuint prev_tex, GLuint scene_tex, GLuint dept
   glUniform1i(glGetUniformLocation(g.prog, "force"), force);
   glUniform1i(glGetUniformLocation(g.prog, "show"), show);
   glUniform1i(glGetUniformLocation(g.prog, "stats"), log ? 1 : 0);
+  glUniform1i(glGetUniformLocation(g.prog, "dilate"), dilate);
+  glUniformMatrix3fv(glGetUniformLocation(g.prog, "to_prev"), 1, GL_FALSE, to_prev);
+  glUniform3f(glGetUniformLocation(g.prog, "to_prev_offset"), to_prev_offset[0], to_prev_offset[1],
+              to_prev_offset[2]);
+  glUniform2f(glGetUniformLocation(g.prog, "prev_f"), prev_fx, prev_fy);
   glBindImageTexture(0, g.flags_tex, 0, GL_FALSE, 0, GL_READ_WRITE, GL_R8UI);
   glBindImageTexture(1, g.rate_tex, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R8UI);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, g.stats);
@@ -965,14 +971,27 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     static const EnhancedTune t_vrs_force("post.vrs_force", -1.f);
     static const EnhancedTune t_vrs_show("post.vrs_show", 0.f);
     static const EnhancedTune t_vrs_edge("post.vrs_edge", 0.1f);
-    static const EnhancedTune t_vrs_tex("post.vrs_tex", 0.01f);
+    static const EnhancedTune t_vrs_tex("post.vrs_tex", 0.02f);
     static const EnhancedTune t_vrs_depth("post.vrs_depth", 0.f);
+    // (last frame's edges and texture: 2 from where the tile's pixels were last frame, the camera's
+    // move reprojected (still: the tile alone), 1 the 3x3 tiles around as before, 0 the tile alone)
+    static const EnhancedTune t_vrs_dilate("post.vrs_dilate", 2.f);
+    // (the auto quality's level 3 and up, before it lowers the resolution: the coarse rates reach
+    // a little further, edges and texture a step stronger before they keep a tile at full rate)
+    static const EnhancedTune t_auto_vrs("auto.vrs", {0.15f, 0.03f});
+    float vrs_edge = (float)t_vrs_edge, vrs_tex = (float)t_vrs_tex;
+    if (m_auto_level >= 3 && t_auto_vrs.size() >= 2) {
+      vrs_edge = std::max(vrs_edge, t_auto_vrs[0]);
+      vrs_tex = std::max(vrs_tex, t_auto_vrs[1]);
+    }
     vrs::g.active = false;
     if ((float)t_vrs > 0.5f && have_scene && taa && taa_mode == 1 && m_taa_history && reproject &&
         m_taa_w == w && m_taa_h == h) {
       ENH_TIMED("enh-vrs", vrs::make(w, h, (float)t_vrs_log > 0.5f, m_taa_tex[1 - m_taa_cur], m_scene_tex, m_depth_tex,
-                                     m_last_proj.data(), (float)t_vrs_edge, (float)t_vrs_tex, (float)t_vrs_depth,
-                                     (int)std::round((float)t_vrs_force), (int)(float)t_vrs_show));
+                                     m_last_proj.data(), vrs_edge, vrs_tex, (float)t_vrs_depth,
+                                     (int)std::round((float)t_vrs_force), (int)(float)t_vrs_show,
+                                     (int)std::round((float)t_vrs_dilate), &to_prev[0][0], offset,
+                                     m_prev_camera.fx, m_prev_fy));
     }
   }
 
@@ -2642,6 +2661,50 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   }
   // the world's sun shadow looks at half size (tuning "shadow.half")
   ENH_CPU_SPLIT("mb+player+clouds");
+  {
+    // the composite's shadow samplers (sun maps T9/T22/T26, lamp maps T35) never on an empty unit:
+    // a map not made this frame left texture 0 there, and every draw logged GL's "undefined
+    // behavior" warning (~40 a second in Spargus at dusk). A 1x1 depth texture, compared, lit
+    static GLuint dummy_2d = 0, dummy_cube = 0;
+    if (!dummy_2d) {
+      enh_post::KeepTexture2D keep;
+      const float one[6] = {1.f, 1.f, 1.f, 1.f, 1.f, 1.f};
+      glGenTextures(1, &dummy_2d);
+      glBindTexture(GL_TEXTURE_2D, dummy_2d);
+      glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT32F, 1, 1, 0, GL_DEPTH_COMPONENT, GL_FLOAT, one);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+      GLint old_cube = 0;
+      glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP_ARRAY, &old_cube);
+      glGenTextures(1, &dummy_cube);
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, dummy_cube);
+      glTexImage3D(GL_TEXTURE_CUBE_MAP_ARRAY, 0, GL_DEPTH_COMPONENT32F, 1, 1, 6, 0, GL_DEPTH_COMPONENT,
+                   GL_FLOAT, one);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+      glTexParameteri(GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, old_cube);
+    }
+    for (int unit : {9, 22, 26}) {
+      glActiveTexture(GL_TEXTURE0 + unit);
+      GLint bound = 0;
+      glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+      if (!bound) {
+        glBindTexture(GL_TEXTURE_2D, dummy_2d);
+      }
+    }
+    glActiveTexture(GL_TEXTURE0 + 35);
+    GLint bound = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_CUBE_MAP_ARRAY, &bound);
+    if (!bound) {
+      glBindTexture(GL_TEXTURE_CUBE_MAP_ARRAY, dummy_cube);
+      glUniform1i(glGetUniformLocation(id, "tex_T35"), 35);
+    }
+    glActiveTexture(GL_TEXTURE0);
+  }
   if (have_scene) {
     draw_sun_half(id, w, h, render_fbo, prof, render_state);
   } else {
@@ -2689,6 +2752,29 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     return out;
   }();
   int probe_group = -1;
+  // (test switch "debug": {"composite_probe": n}: each new n > 0 runs the probe again from the
+  // start, 2 s later, so it can time a place reached with debug.tp / debug.hour in the same run;
+  // < 0 at boot: no run of its own 10 s after the first frame)
+  static const EnhancedTune t_probe("debug.composite_probe", 0.f);
+  if (!probe.groups.empty() && probe.start < 0.0 && !probe.done && (float)t_probe < 0.f) {
+    probe.done = true;
+  }
+  {
+    static float s_probe = 0.f;
+    if (!probe.groups.empty() && (float)t_probe > 0.f && (float)t_probe != s_probe) {
+      s_probe = (float)t_probe;
+      const double now =
+          std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+      if (!probe.query) {
+        glGenQueries(1, &probe.query);
+      }
+      probe.start = now + 2.0;
+      probe.done = false;
+      probe.sum.assign(probe.groups.size(), 0.0);
+      probe.count.assign(probe.groups.size(), 0);
+      lg::info("[enhanced] composite cost probe {} restarted", s_probe);
+    }
+  }
   if (!probe.groups.empty() && !probe.done) {
     const double now =
         std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -2698,12 +2784,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     }
     const double t = now - probe.start;
     const int slots = (int)probe.groups.size() * 2;
-    if (t >= 0.0 && t < slots * 3.0) {
-      probe_group = (int)(t / 3.0) % (int)probe.groups.size();
-      if (std::fmod(t, 3.0) < 0.5) {
+    // (JAK_ENHANCED_COMPOSITE_SLOT: seconds per group, default 3; a long list in less time)
+    static const double slot = [] {
+      const char* e = std::getenv("JAK_ENHANCED_COMPOSITE_SLOT");
+      return e ? std::clamp(std::atof(e), 0.8, 10.0) : 3.0;
+    }();
+    if (t >= 0.0 && t < slots * slot) {
+      probe_group = (int)(t / slot) % (int)probe.groups.size();
+      if (std::fmod(t, slot) < std::min(0.5, slot * 0.3)) {
         probe_group = -probe_group - 2;  // (switched just now: not timed yet, but zeroed)
       }
-    } else if (t >= slots * 3.0) {
+    } else if (t >= slots * slot) {
       probe.done = true;
       for (size_t g = 0; g < probe.groups.size(); g++) {
         std::string names;
@@ -2780,7 +2871,27 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, scene_tex);
   vrs::begin();
+  // (post.dry_composite 1: the composite in two programs. enh_composite_dry, without the water's
+  // surface, draws every pixel but the water's; then, where water was drawn this frame, this one
+  // with cloud_pass 2 only the water's pixels. The water's ~700 lines set every pixel's registers,
+  // so fewer pixels ran at once: Spargus 18h at 2560x1600, all full rate, 30 -> 15 ms. Same picture)
+  static const EnhancedTune t_dry("post.dry_composite", 1.f);
+  const Shader& dry = render_state->shaders[ShaderId::ENH_COMPOSITE_DRY];
+  const bool use_dry = (float)t_dry > 0.5f && dry.okay();
+  float water_on = 0.f;
+  if (use_dry) {
+    glGetUniformfv(id, glGetUniformLocation(id, "water_strength"), &water_on);
+    dry.copy_uniforms_from(shader);  // (binds it)
+  }
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+  if (use_dry) {
+    glUseProgram(id);
+    if (water_on > 0.f) {
+      glUniform1i(glGetUniformLocation(id, "cloud_pass"), 2);
+      ENH_TIMED("enh-composite-wet", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+      glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);
+    }
+  }
   {
     // (test switch "debug": {"gpu_burn": n}: the composite drawn n more times, the same picture,
     // to make the graphics card the bottleneck when testing the auto quality)

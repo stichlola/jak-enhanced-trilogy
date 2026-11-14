@@ -3193,6 +3193,19 @@ void composite_unused() {
       height = dot(up_view, p);
     }
   }
+  // (the composite in two programs where the water shows: enh_composite_dry, the same without the
+  // water's surface (its ~700 lines set every pixel's registers: the composite cost twice as much
+  // where no water is in view, 30 -> 15 ms at 2560x1600, Spargus 18h), draws the rest; then this
+  // program with cloud_pass 2 only the water's pixels. Both decide from the same wsurf above)
+#ifdef ENH_NO_WATER
+  if (wsurf > 0.0) {
+    discard;
+  }
+#else
+  if (cloud_pass == 2 && wsurf == 0.0) {
+    discard;
+  }
+#endif
   // explosions: a shockwave ring racing out from each one bends the picture for half a second
   for (int i = 0; i < blast_count; i++) {
     vec3 bp = blast_pos[i].xyz;
@@ -3515,6 +3528,7 @@ void composite_unused() {
 
   // water: our own shading over the game's, the same for the near and far sea (drawn by two
   // renderers with different colors), with reflections, sun glints, clearer shallows and foam
+#ifndef ENH_NO_WATER
   if (wsurf > 0.0) {
     // ripples: the slope of a non-repeating noise height field (finite differences)
     vec2 world = water_world;
@@ -4208,6 +4222,7 @@ void composite_unused() {
       }
     }
   }
+#endif
 
   // cutscenes: a real depth of field around what the camera looks at (autofocus on the middle of
   // the screen): each sample counts if its own blur reaches this pixel, and something behind only
