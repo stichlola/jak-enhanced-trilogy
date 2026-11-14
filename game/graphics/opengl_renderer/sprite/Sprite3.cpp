@@ -650,6 +650,9 @@ void Sprite3::flush_sprites(SharedRenderState* render_state,
       bool lit = mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST && sl.count > 0 &&
                  sl.strength > 0.f;
       glUniform1i(glGetUniformLocation(shader, "enh_light_count"), lit ? sl.count : 0);
+      // (the normally blended ones: dust and smoke, darkened with the hour, enh_scene_light)
+      glUniform1i(glGetUniformLocation(shader, "enh_blended"),
+                  mode.get_alpha_blend() == DrawMode::AlphaBlend::SRC_DST_SRC_DST ? 1 : 0);
       if (lit) {
         glUniform4fv(glGetUniformLocation(shader, "enh_light_pos"), sl.count, &sl.pos[0][0]);
         glUniform4fv(glGetUniformLocation(shader, "enh_light_color"), sl.count, &sl.color[0][0]);

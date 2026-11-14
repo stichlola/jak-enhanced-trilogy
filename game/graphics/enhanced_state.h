@@ -169,6 +169,9 @@ struct EnhancedFx {
   float detail = 0.f;
   float time = 0.f;
   float sun[4] = {0.f, 1.f, 0.f, 0.f};  // toward the sun (world), how much it lights them (0: night)
+  // how much of the day's light the scene has at this hour (1 day, 0 deep night; the sun up or not):
+  // the normally blended dust and smoke are darkened by it (Sprite3, tune_smoke_ambient)
+  float light = 1.f;
 };
 extern EnhancedFx g_enhanced_fx;
 

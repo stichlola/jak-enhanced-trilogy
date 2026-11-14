@@ -220,6 +220,10 @@ void EnhancedSpriteFx::begin_flush(SharedRenderState* render_state,
   m_class_loc = glGetUniformLocation(shader, "enh_fx_class");
   m_on = on && g_enhanced_fx.detail > 0.f;
   glUniform1i(m_class_loc, 0);
+  // the scene's light at this hour, for the blended dust and smoke (1: as the game draws them; the
+  // HUD's flush and Classic too)
+  glUniform1f(glGetUniformLocation(shader, "enh_scene_light"),
+              on && g_enhanced_fx.detail > 0.f ? g_enhanced_fx.light : 1.f);
   if (!m_on) {
     return;
   }
