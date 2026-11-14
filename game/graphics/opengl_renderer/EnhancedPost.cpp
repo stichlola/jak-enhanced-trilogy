@@ -724,6 +724,7 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
     // (the scene's light at this hour, for the dust and smoke the game draws at a fixed color: a tan
     // puff stayed noon-bright in a dusk street and glowed yellow-ochre over the dark ground)
     g_enhanced_fx.light = g_enhanced_sun.valid ? std::clamp(1.f - std::max(m_night, night_darkness()), 0.f, 1.f) : 1.f;
+    g_enhanced_fx.dusk = g_enhanced_sun.valid ? std::clamp(m_dusk, 0.f, 1.f) : 0.f;
   }
   g_enhanced_lights.count = 0;  // the glows of this frame add themselves
   // the characters of this frame add themselves (Merc2), for the sun shadow map

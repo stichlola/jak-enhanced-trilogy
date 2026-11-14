@@ -45,6 +45,10 @@ uniform float enh_scene_light = 1.0;
 uniform int enh_blended;                     // this draw is normally blended (dust, smoke)
 uniform float tune_smoke_ambient = 1.0;      // how much they follow the hour (0: as before)
 uniform float tune_smoke_night_floor = 0.3;  // at deep night, this much of the game's color
+uniform float enh_scene_dusk = 0.0;          // the sun going down (0..1, 16:30 to 18:30)
+uniform float tune_dust_dusk_dark = 0.45;    // then the dust's level, on the hour's (1: as before)
+uniform float tune_dust_dusk_grey = 0.6;     // its tan taken toward a warm grey (0: as before)
+uniform float tune_dust_dusk_thin = 0.6;     // and its opacity (1: as before)
 
 flat out vec4 fragment_color;
 out vec3 tex_coord;
@@ -275,8 +279,17 @@ void main() {
     float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
     float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
     float level = mix(tune_smoke_night_floor, 1.0, clamp(enh_scene_light, 0.0, 1.0));
-    shade = mix(1.0, level, min(tune_smoke_ambient, 1.0) * (1.0 - smoothstep(0.35, 0.5, sat)) *
-                                (1.0 - soot_w));
+    float wgt = min(tune_smoke_ambient, 1.0) * (1.0 - smoothstep(0.35, 0.5, sat)) * (1.0 - soot_w);
+    // (the evening: the sun low, the streets in shade and graded dark while the game's tan dust kept
+    // its noon color, a glowing yellow sheet on the ground. It drops to the shade's level, greyer and
+    // thinner, from 16:30 to sundown)
+    // (a looser color gate than the night's: the tan puffs are fairly saturated; full by ~17:45)
+    float wd = min(tune_smoke_ambient, 1.0) * (1.0 - smoothstep(0.6, 0.8, sat)) * (1.0 - soot_w) *
+               smoothstep(0.0, 0.6, enh_scene_dusk);
+    float l = dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11));
+    fragment_color.rgb = mix(fragment_color.rgb, l * vec3(1.0, 0.95, 0.9), wd * tune_dust_dusk_grey);
+    fragment_color.a *= mix(1.0, tune_dust_dusk_thin, wd);
+    shade = mix(1.0, level, wgt) * mix(1.0, tune_dust_dusk_dark, wd);
   }
 
   if (enh_light_count > 0 && rendermode != 2u) {

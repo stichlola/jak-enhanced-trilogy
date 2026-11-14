@@ -250,6 +250,8 @@ void EnhancedSpriteFx::begin_flush(SharedRenderState* render_state,
   // HUD's flush and Classic too)
   glUniform1f(glGetUniformLocation(shader, "enh_scene_light"),
               on && g_enhanced_fx.detail > 0.f ? g_enhanced_fx.light : 1.f);
+  glUniform1f(glGetUniformLocation(shader, "enh_scene_dusk"),
+              on && g_enhanced_fx.detail > 0.f ? g_enhanced_fx.dusk : 0.f);
   if (!m_on) {
     return;
   }

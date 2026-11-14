@@ -172,6 +172,9 @@ struct EnhancedFx {
   // how much of the day's light the scene has at this hour (1 day, 0 deep night; the sun up or not):
   // the normally blended dust and smoke are darkened by it (Sprite3, tune_smoke_ambient)
   float light = 1.f;
+  // the sun going down (0..1: 16:30 to 18:30, out by 20:48; softer at dawn): the dust takes the
+  // evening's shade, darker, greyer and thinner (Sprite3, tune_dust_dusk_*)
+  float dusk = 0.f;
 };
 extern EnhancedFx g_enhanced_fx;
 
