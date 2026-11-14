@@ -421,7 +421,7 @@ punch and spin-kick states (physics, momentum, hit spheres, sounds), the charact
 a pose table instead of taking Jak's pose. Ashelin, square: a karate front snap kick; with her pistol out:
 its grip brought down from over her head. Sig, square: a forward elbow strike
 (`JAK_ENHANCED_SIG_BOXER=1`: a jab and a straight); with his Peacemaker out: its butt thrust forward;
-circle: a spinning backfist. The tables (`enhanced-move-tables.gc`) are made by
+circle: Jak's own spin kick, in Jak's pose (`JAK_ENHANCED_SIG_BACKFIST=1`: a spinning backfist). The tables (`enhanced-move-tables.gc`) are made by
 `scripts/enhanced/char_moves.py` from generated motion clips (Higgsfield Kimodo, original motion, kept in
 `local/higgsfield/motion`, not in git): key poses on a stylized timeline, as rig-independent directions.
 Hit and dying, Ashelin plays her own clips (thrown back and kip-up, dying on the spot). In vehicles and
