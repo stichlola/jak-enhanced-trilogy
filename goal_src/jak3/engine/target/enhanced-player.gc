@@ -338,10 +338,14 @@
     )
   )
 
+;; tests (REPL): a character name that wins over the menu, #f: off
+(define *enhanced-player-force* (the-as string #f))
+
 (defun enhanced-player-name ()
   "The selected character's name: the menu's (live, EnhancedPost.cpp answers JAK_ENHANCED_PLAYER_MENU),
    else JAK_ENHANCED_PLAYER (a gk without that menu), else \"jak\"."
   (cond
+    (*enhanced-player-force* *enhanced-player-force*)
     ((pc-enhanced-getenv "JAK_ENHANCED_PLAYER_MENU" *enhanced-player-menu-buf* 16)
      *enhanced-player-menu-buf*)
     (*enhanced-player-env* *enhanced-player-buf*)
@@ -1378,6 +1382,17 @@
 ;; Jak's gun type before Sig made it the Peacemaker (given back when he is Jak again), -1: none
 (define *enhanced-sig-jak-gun* -1)
 
+;; Ashelin's snap kick: this much of the running attack's forward travel (REPL: 1.0 = Jak's)
+(define *enhanced-ashelin-kick-travel* 0.5)
+(define *enhanced-kick-in* #f)
+(define *enhanced-kick-start* (new 'global 'vector))
+(define-extern enhanced-ashelin-gun-active-out? (function symbol))
+
+;; Sig's own Peacemaker pool (ENHANCED_SIG_POOL_MAX shots, full the first time he plays, kept for the session):
+;; while he plays it's in gun-ammo 3 and Jak's dark ammo waits in *enhanced-sig-jak-ammo* (-1.0: not parked)
+(define *enhanced-sig-ammo* ENHANCED_SIG_POOL_MAX)
+(define *enhanced-sig-jak-ammo* -1.0)
+
 (defun enhanced-sig-gun-update ((sig? symbol))
   "Sig's Peacemaker is Jak's (gun-dark-1: the same shots, damage and ammo; D-pad right, target-gun.gc).
    If Jak hasn't got it yet it's lent while Sig plays (with a full clip the first time, if it's empty)."
@@ -1387,12 +1402,25 @@
       )
   (cond
     (sig?
+     ;; his pool in, Jak's dark ammo parked
+     (when (< *enhanced-sig-jak-ammo* 0.0)
+       (set! *enhanced-sig-jak-ammo* (-> *game-info* gun-ammo 3))
+       (set! (-> *game-info* gun-ammo 3) *enhanced-sig-ammo*)
+       (set! *enhanced-sig-pool-active* #t)
+       (format 0 "[sig-ammo] in: Sig ~D, Jak's dark ~,,2f parked~%" (the int *enhanced-sig-ammo*) *enhanced-sig-jak-ammo*)
+       )
+     (if (< ENHANCED_SIG_POOL_MAX (-> *game-info* gun-ammo 3))
+         (set! (-> *game-info* gun-ammo 3) ENHANCED_SIG_POOL_MAX)
+         )
+     (when (!= (-> *game-info* gun-ammo 3) *enhanced-sig-ammo*)
+       (set! *enhanced-sig-ammo* (-> *game-info* gun-ammo 3))
+       (if (or (zero? (mod (the int *enhanced-sig-ammo*) 10)) (< *enhanced-sig-ammo* 3.0))
+           (format 0 "[sig-ammo] ~D~%" (the int *enhanced-sig-ammo*))
+           )
+       )
      (let ((need (logclear (game-feature gun gun-dark-1) (-> *game-info* features))))
        (when (nonzero? need)
          (logior! (-> *game-info* features) need)
-         (if (= (-> *game-info* gun-ammo 3) 0.0)
-             (set! (-> *game-info* gun-ammo 3) (get-max-ammo-for-gun *game-info* (pickup-type ammo-dark)))
-             )
          ;; (again when the game sets Jak's features anew, e.g. entering the city: logged once)
          (if (zero? *enhanced-sig-lent*)
              (format 0 "[enhanced-player] Sig's Peacemaker lent (~D shots)~%" (the int (-> *game-info* gun-ammo 3)))
@@ -1425,6 +1453,14 @@
        )
      )
     (else
+      ;; his pool out, Jak's dark ammo back
+      (when (>= *enhanced-sig-jak-ammo* 0.0)
+        (set! *enhanced-sig-ammo* (fmin ENHANCED_SIG_POOL_MAX (-> *game-info* gun-ammo 3)))
+        (set! *enhanced-sig-pool-active* #f)
+        (set! (-> *game-info* gun-ammo 3) *enhanced-sig-jak-ammo*)
+        (set! *enhanced-sig-jak-ammo* -1.0)
+        (format 0 "[sig-ammo] out: Sig ~D kept, Jak's dark ~,,2f back~%" (the int *enhanced-sig-ammo*) (-> *game-info* gun-ammo 3))
+        )
       (when (nonzero? *enhanced-sig-lent*)
         (logclear! (-> *game-info* features) (the-as game-feature *enhanced-sig-lent*))
         (set! *enhanced-sig-lent* 0)
@@ -1499,8 +1535,28 @@
           )
     ;; (by the choice, not by his process: it's gone for a moment when the target is made again, e.g. a new
     ;; level's start, and the lent gun was taken back and lent again)
-    (if *target*
+    (when *target*
         (enhanced-sig-gun-update (if (and ch (string= (-> ch name) "sig")) #t #f))
+  ;; Ashelin's snap kick (not her pistol whip) carries her half as far as Jak's punch
+  (let ((kick? (and ch (string= (-> ch name) "ashelin") (not (enhanced-ashelin-gun-active-out?)))))
+    (set! *enhanced-kick-travel* (if kick? *enhanced-ashelin-kick-travel* 1.0))
+    ;; (Ashelin: how far each running attack carried her, logged when it ends)
+    (let ((in? (and *target* (-> *target* state) (= (-> *target* state name) 'target-running-attack))))
+      (cond
+        ((and in? (not *enhanced-kick-in*))
+         (vector-copy! *enhanced-kick-start* (-> *target* control trans))
+         (set! *enhanced-kick-in* #t)
+         )
+        ((and (not in?) *enhanced-kick-in*)
+         (set! *enhanced-kick-in* #f)
+         (if (and ch (string= (-> ch name) "ashelin"))
+             (format 0 "[kick-travel] scale ~,,2f moved ~,,2fm~%" *enhanced-kick-travel*
+                     (/ (vector-vector-xz-distance (-> *target* control trans) *enhanced-kick-start*) 4096.0))
+             )
+         )
+        )
+      )
+    )
         )
     )
   (none)

@@ -61,12 +61,17 @@
    (ammo        int32)            ;; rounds left in the magazine (ASHELIN_GUN_MAGAZINE full)
    (reloading   symbol)           ;; reloading: no shots until reload-time + ASHELIN_GUN_RELOAD
    (reload-time time-frame)
+   (reserve     int32)            ;; rounds left beyond the magazine (ASHELIN_GUN_TOTAL in all, full)
+   (pool-ok     int32)            ;; nonzero: ammo and reserve set (the first time she plays: kept for the session)
+   (dry-time    time-frame)       ;; last dry click (empty)
    )
   )
 
 ;; her magazine: 20 rounds, then a reload (her art group has no reload clip: standing, she lowers the gun
 ;; with her putaway clip and brings it back up with her takeout; moving, only the pause), with the gun sounds
 (defconstant ASHELIN_GUN_MAGAZINE 20)
+;; all she carries: the magazine plus the reserve reloads draw from; ammo pickups refill the reserve
+(defconstant ASHELIN_GUN_TOTAL 200)
 (defconstant ASHELIN_GUN_RELOAD (seconds 1.1))
 
 ;; Her idle (ashelin-idle0) is the oasis AI's combat-ready loop: under a second long, her whole body rocks
@@ -105,6 +110,26 @@
         #f
         )
     )
+  )
+
+(defun enhanced-ashelin-ammo-pickup ((amount float))
+  "Ammo picked up while Ashelin plays: into her reserve (at most ASHELIN_GUN_TOTAL in all). #t: taken."
+  (when (enhanced-ashelin-gun-active?)
+    (let* ((st *enhanced-ashelin-gun*)
+           (n (min (max 1 (the int amount)) (- ASHELIN_GUN_TOTAL (+ (-> st ammo) (-> st reserve)))))
+           )
+      (+! (-> st reserve) (max 0 n))
+      (format 0 "[ashelin-gun] pickup +~D reserve ~D~%" (max 0 n) (-> st reserve))
+      )
+    #t
+    )
+  )
+
+(set! *enhanced-ashelin-ammo-pickup* enhanced-ashelin-ammo-pickup)
+
+(defun enhanced-ashelin-gun-active-out? ()
+  "Ashelin playing with her pistol out (her square is then the pistol whip)."
+  (and (enhanced-ashelin-gun-active?) (-> *enhanced-ashelin-gun* out))
   )
 
 (defun enhanced-character-gun-hud ()
@@ -146,15 +171,15 @@
 (defun enhanced-character-gun-ammo ()
   "The ammo count the gun HUD shows for a character's own gun: Ashelin's rounds left, Sig's Jak's dark ammo."
   (if (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-red-2)))
-      (-> *enhanced-ashelin-gun* ammo)
+      (+ (-> *enhanced-ashelin-gun* ammo) (-> *enhanced-ashelin-gun* reserve))
       (the int (-> *target* game gun-ammo (+ (gun->ammo (pickup-type gun-dark-1)) -15)))
       )
   )
 
 (defun enhanced-character-gun-max-ammo ()
-  "Its full count for the HUD (the shells and \"n/max\"): Ashelin's magazine, else 0 (the gun type's own)."
+  "Its full count for the HUD (the shells and \"n/max\"): Ashelin's total, else 0 (the gun type's own)."
   (if (= (enhanced-character-gun-hud) (the-as int (pickup-type gun-red-2)))
-      ASHELIN_GUN_MAGAZINE
+      ASHELIN_GUN_TOTAL
       0
       )
   )
@@ -210,7 +235,11 @@
       (set! (-> st trans-anim) -1)
       (set! (-> st aimed) #f)
       (set! (-> st fire-time) 0)
-      (set! (-> st ammo) ASHELIN_GUN_MAGAZINE)
+      (when (zero? (-> st pool-ok))
+        (set! (-> st pool-ok) 1)
+        (set! (-> st ammo) ASHELIN_GUN_MAGAZINE)
+        (set! (-> st reserve) (- ASHELIN_GUN_TOTAL ASHELIN_GUN_MAGAZINE))
+        )
       (set! (-> st reloading) #f)
       (set! (-> st reload-time) 0)
       ;; holstered: the gun as far from her right thigh as in her bind pose (arms down, the gun at her side)
@@ -1089,7 +1118,10 @@
         ;; the magazine: reloaded ASHELIN_GUN_RELOAD after the last round (standing: the gun back up)
         (when (and (-> st reloading) (time-elapsed? (-> st reload-time) ASHELIN_GUN_RELOAD))
           (set! (-> st reloading) #f)
-          (set! (-> st ammo) ASHELIN_GUN_MAGAZINE)
+          (let ((n (min (- ASHELIN_GUN_MAGAZINE (-> st ammo)) (-> st reserve))))
+            (+! (-> st ammo) n)
+            (+! (-> st reserve) (- n))
+            )
           (when (-> st out)
             (sound-play "gun-takeout")
             (when (= (-> st trans-anim) ASHELIN_STANDING_TO_WAITING)
@@ -1097,7 +1129,21 @@
               (set! (-> self anim) -1)
               )
             )
-          (format 0 "[ashelin-gun] reloaded ~D~%" (-> st ammo))
+          (format 0 "[ashelin-gun] reloaded ~D reserve ~D~%" (-> st ammo) (-> st reserve))
+          )
+        ;; empty magazine with rounds in reserve (e.g. after a pickup): reload
+        (when (and (not (-> st reloading)) (<= (-> st ammo) 0) (> (-> st reserve) 0))
+          (set! (-> st reloading) #t)
+          (set-time! (-> st reload-time))
+          (format 0 "[ashelin-gun] reload~%")
+          )
+        ;; nothing left at all: a dry click, no shot (the gun stays out)
+        (when (and (-> st out) fire? (not (-> st reloading)) (<= (-> st ammo) 0) (<= (-> st reserve) 0)
+                   (time-elapsed? (-> st dry-time) (seconds 0.4))
+                   )
+          (set-time! (-> st dry-time))
+          (sound-play "gun-switch")
+          (format 0 "[ashelin-gun] empty~%")
           )
         (let* ((own-gun-anim? (enhanced-ashelin-gun-anim? (-> self anim)))
                ;; (reloading, the arm lets her own clip lower the gun)
@@ -1194,7 +1240,11 @@
               (enhanced-ashelin-gun-fire tgt pos dir)
               ;; one round less; the last one starts the reload
               (+! (-> st ammo) -1)
-              (when (<= (-> st ammo) 0)
+              (when (and (<= (-> st ammo) 0) (<= (-> st reserve) 0))
+                (sound-play "gun-putaway")
+                (format 0 "[ashelin-gun] last round~%")
+                )
+              (when (and (<= (-> st ammo) 0) (> (-> st reserve) 0))
                 (set! (-> st reloading) #t)
                 (set-time! (-> st reload-time))
                 (sound-play "gun-putaway")

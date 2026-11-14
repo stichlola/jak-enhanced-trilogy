@@ -2369,6 +2369,10 @@
                             )
         )
 
+;; Enhanced: how far the running attack carries Jak forward (its align speed times this), set each frame by
+;; enhanced-player-update (Ashelin's snap kick: *enhanced-ashelin-kick-travel*)
+(define *enhanced-kick-travel* 1.0)
+
 (defstate target-running-attack (target)
   :event (behavior ((proc process) (argc int) (message symbol) (block event-message-block))
     (case message
@@ -2626,7 +2630,7 @@
         )
     (initialize (-> self control impact-ctrl) self 28 3276.8 (-> self control root-prim prim-core collide-with))
     (let ((f26-0 (the-as number 0.0))
-          (f30-0 1.0)
+          (f30-0 *enhanced-kick-travel*)
           (gp-2 0)
           (f28-0 1.0)
           )

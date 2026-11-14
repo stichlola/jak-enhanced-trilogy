@@ -415,8 +415,14 @@ git: the Tripo icons).
 shapes; calmer palette, raised blocks with a lit bevel and a shadow on the streets, outlines, deeper
 water with a light rim; the painted maps of the desert enlarged with Real-ESRGAN).
 
-Ashelin and Sig (Jak 3, played in Jak's place). Ashelin's pistol holds 20 rounds, then reloads (1.1 s; the
-HUD shows `n/20`). Their attacks are their own moves (`enhanced-moves.gc`): Jak's target stays in his
+Ashelin and Sig (Jak 3, played in Jak's place). Ashelin's pistol carries 200 rounds in all: a 20-round magazine,
+reloaded (1.1 s) from the reserve; with both empty R1 only clicks. The HUD shows her total (`n/200`); ammo
+pickups while she plays (yellow, red, blue) refill her reserve up to 200. Sig's Peacemaker (Jak's gun-dark-1) has
+its own 100 shots: while he plays they sit in Jak's dark ammo slot (Jak's own dark ammo parked and given back
+unchanged when he is Jak again; the dark max reads 100 then, so dark pickups refill him up to 100). Both pools
+start full the first time the character is used and last for the session (not saved). Ashelin's snap kick
+carries her half as far as Jak's punch (`*enhanced-ashelin-kick-travel*` 0.5, scaling the running attack's
+align speed; the pistol whip keeps Jak's). Their attacks are their own moves (`enhanced-moves.gc`): Jak's target stays in his
 punch and spin-kick states (physics, momentum, hit spheres, sounds), the character's bones are aimed along
 a pose table instead of taking Jak's pose. Ashelin, square: a karate front snap kick; with her pistol out:
 its grip brought down from over her head. Sig, square: a forward elbow strike

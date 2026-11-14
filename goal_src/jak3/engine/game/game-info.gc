@@ -198,7 +198,25 @@
 ;; Enhanced: every gun carries this many times its vanilla ammo. 1.0 = vanilla.
 (define *enhanced-ammo-mult* 2.0)
 
+;; Enhanced: while Sig plays, gun-ammo 3 holds his own Peacemaker pool (enhanced-sig-gun-update), whose cap
+;; is this many shots instead of Jak's dark max
+(define *enhanced-sig-pool-active* #f)
+(defconstant ENHANCED_SIG_POOL_MAX 100.0)
+
+;; Enhanced: ammo picked up while Ashelin plays goes to her pistol's reserve (enhanced-ashelin-gun.gc sets
+;; the real one): #t when it took the amount (Jak's ammo then left as it is)
+(defun enhanced-ashelin-ammo-pickup-stub ((amount float))
+  #f
+  )
+(define *enhanced-ashelin-ammo-pickup* enhanced-ashelin-ammo-pickup-stub)
+
 (defmethod get-max-ammo-for-gun ((this game-info) (gun pickup-type))
+  (if (and *enhanced-sig-pool-active*
+           (or (= gun (pickup-type ammo-dark)) (= gun (pickup-type eco-dark)) (= gun (pickup-type gun-dark-1))
+               (= gun (pickup-type gun-dark-2)) (= gun (pickup-type gun-dark-3)))
+           )
+      (return ENHANCED_SIG_POOL_MAX)
+      )
   (let ((f0-0 (the-as number 0.0)))
     (case gun
       (((pickup-type ammo-yellow)
@@ -928,6 +946,9 @@
        )
       (('ammo-yellow 'ammo-red 'ammo-blue 'ammo-dark)
        0.0
+       (if (and (< 0.0 arg1) (!= arg0 'ammo-dark) (*enhanced-ashelin-ammo-pickup* arg1))
+           (return (-> this gun-ammo (cond ((= arg0 'ammo-yellow) 0) ((= arg0 'ammo-red) 1) (else 2))))
+           )
        (let* ((v1-47 arg0)
               (s4-1 (cond
                       ((= v1-47 'ammo-yellow)
