@@ -178,6 +178,32 @@ void EnhancedSpriteFx::mark_blended(SharedRenderState* render_state, u32 tbp, u6
   }
 }
 
+bool EnhancedSpriteFx::is_dust(SharedRenderState* render_state, u32 tbp, u64 gl_texture) {
+  auto it = m_dust.find(gl_texture);
+  if (it == m_dust.end()) {
+    std::string name = render_state->texture_pool->get_debug_texture_name_from_tbp(tbp);
+    const auto slash = name.rfind('/');
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    // (classify's smoke and anything named like dust or smoke; not a flame's picture)
+    const bool flame = name.find("flame") != std::string::npos ||
+                       name.find("explo") != std::string::npos ||
+                       name.find("fire") != std::string::npos;
+    const bool dust = !flame && (name.find("dust") != std::string::npos ||
+                                 name.find("dirt") != std::string::npos ||
+                                 name.find("smoke") != std::string::npos ||
+                                 name.find("puff") != std::string::npos ||
+                                 name.find("big-cloud") != std::string::npos);
+    static const bool debug = std::getenv("JAK_ENHANCED_FX_DEBUG") != nullptr;
+    if (debug) {
+      lg::info("[fx] blended sprite texture {}: dust {}", name, dust);
+    }
+    it = m_dust.emplace(gl_texture, dust).first;
+  }
+  return it->second;
+}
+
 void EnhancedSpriteFx::copy_depth(SharedRenderState* render_state) {
   const int w = render_state->render_fb_w, h = render_state->render_fb_h;
   glActiveTexture(GL_TEXTURE0 + kDepthUnit);
@@ -220,6 +246,12 @@ void EnhancedSpriteFx::begin_flush(SharedRenderState* render_state,
   m_class_loc = glGetUniformLocation(shader, "enh_fx_class");
   m_on = on && g_enhanced_fx.detail > 0.f;
   glUniform1i(m_class_loc, 0);
+  // the scene's light at this hour, for the blended dust and smoke (1: as the game draws them; the
+  // HUD's flush and Classic too)
+  glUniform1f(glGetUniformLocation(shader, "enh_scene_light"),
+              on && g_enhanced_fx.detail > 0.f ? g_enhanced_fx.light : 1.f);
+  glUniform1f(glGetUniformLocation(shader, "enh_scene_dusk"),
+              on && g_enhanced_fx.detail > 0.f ? g_enhanced_fx.dusk : 0.f);
   if (!m_on) {
     return;
   }

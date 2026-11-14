@@ -21,8 +21,8 @@ uniform float tune_fx_wash0 = 0.03;
 uniform float tune_fx_wash1 = 0.08;
 uniform float tune_fx_wash_lod = 1.5;
 uniform float fx_mark;  // 1: tex_T2's alpha is 1 - the blended dust's coverage
-uniform float tune_fx_dust0 = 0.03;  // (as in enh_composite)
-uniform float tune_fx_dust1 = 0.25;
+uniform float tune_fx_dust0 = 0.005;  // (as in enh_composite)
+uniform float tune_fx_dust1 = 0.06;
 
 in vec2 tex_coord;
 out vec4 color;

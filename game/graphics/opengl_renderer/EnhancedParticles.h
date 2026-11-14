@@ -28,6 +28,9 @@ class EnhancedSpriteFx {
   // a normally blended draw that isn't a flame (dust, smoke, leaves): with g_enhanced_fx_blend_mark it
   // takes its coverage out of the frame's alpha, so the composite keeps it out of the light effects
   void mark_blended(SharedRenderState* render_state, u32 tbp, u64 gl_texture);
+  // the draw's picture is dust or smoke by its name (dirtpuff, bigpuff, ...): what takes the hour's
+  // light (enh_blended); splashes, glints, eco and leaves are normally blended too and keep the game's
+  bool is_dust(SharedRenderState* render_state, u32 tbp, u64 gl_texture);
 
  private:
   int classify(SharedRenderState* render_state,
@@ -49,6 +52,7 @@ class EnhancedSpriteFx {
   int m_class_loc = -1;
   std::unordered_map<u64, int> m_classes;  // by GL texture (stable, the VRAM address isn't) + blend
   std::unordered_map<u64, bool> m_flames;  // by GL texture: a flame's picture (not marked)
+  std::unordered_map<u64, bool> m_dust;    // by GL texture: a dust or smoke picture (is_dust)
 };
 
 // set by EnhancedPost::capture_fx when it cleared the frame's alpha to 1 before the sprite buckets:

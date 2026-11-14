@@ -38,6 +38,17 @@ uniform float tune_soot_thin = 0.7;    // and of their opacity, fading out over 
 uniform int enh_soot_add;              // this draw is additive (an explosion's flash and fire sprites)
 uniform float tune_soot_flash = 1.0;   // their sum kept orange, not clipped white (0: as the game has it)
 uniform int enh_fx_class;        // Enhanced: this draw's smoke or flames (EnhancedParticles), 0 = no
+// Enhanced: the normally blended dust and smoke, drawn by the game at one fixed color whatever the
+// hour, take the scene's light (enh_scene_light: 1 day .. 0 night): a tan puff in a dusk street
+// glowed yellow-ochre over the darkened ground. Near a lamp the lit-smoke light comes back on top
+uniform float enh_scene_light = 1.0;
+uniform int enh_blended;                     // this draw is normally blended (dust, smoke)
+uniform float tune_smoke_ambient = 1.0;      // how much they follow the hour (0: as before)
+uniform float tune_smoke_night_floor = 0.3;  // at deep night, this much of the game's color
+uniform float enh_scene_dusk = 0.0;          // the sun going down (0..1, 16:30 to 18:30)
+uniform float tune_dust_dusk_dark = 0.45;    // then the dust's level, on the hour's (1: as before)
+uniform float tune_dust_dusk_grey = 0.6;     // its tan taken toward a warm grey (0: as before)
+uniform float tune_dust_dusk_thin = 0.6;     // and its opacity (1: as before)
 
 flat out vec4 fragment_color;
 out vec3 tex_coord;
@@ -227,6 +238,7 @@ void main() {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
   }
 
+  float soot_w = 0.0;  // (an explosion's sprite: its own darkening, not the hour's below)
   if (enh_soot_count > 0 && enh_soot_add != 0 && rendermode != 2u) {
     // Enhanced: an explosion's additive sprites (its white flash, its glows) summed past full to a
     // white ball with rays over the sand by day and the dark by night: kept in the fire's hue, the
@@ -238,6 +250,7 @@ void main() {
     }
     w *= tune_soot_flash;
     fragment_color.rgb *= mix(vec3(1.0), vec3(0.85, 0.52, 0.2), w);
+    soot_w = 1.0;
   } else if (enh_soot_count > 0 && rendermode != 2u) {
     // Enhanced: an explosion's grey puffs, pale over noon sand and lit to white by its flash, are
     // soot: darker, a little warm, thinner, and gone sooner (look.blast_punch 0: as the game has them)
@@ -256,6 +269,27 @@ void main() {
     fade *= 1.0 - smoothstep(0.25, 0.5, sat);
     fragment_color.rgb *= mix(vec3(1.0), vec3(1.0, 0.9, 0.8) * tune_soot_dark, w);
     fragment_color.a *= mix(1.0, tune_soot_thin, w) * (1.0 - fade);
+    soot_w = w;
+  }
+
+  // the hour's light on the blended dust and smoke (grey and tan ones: not the flames, eco or magic
+  // that are normally blended too; not an explosion's soot, darkened above)
+  float shade = 1.0;
+  if (enh_blended != 0 && rendermode != 2u && tune_smoke_ambient > 0.0) {
+    float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
+    float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
+    float level = mix(tune_smoke_night_floor, 1.0, clamp(enh_scene_light, 0.0, 1.0));
+    float wgt = min(tune_smoke_ambient, 1.0) * (1.0 - smoothstep(0.35, 0.5, sat)) * (1.0 - soot_w);
+    // (the evening: the sun low, the streets in shade and graded dark while the game's tan dust kept
+    // its noon color, a glowing yellow sheet on the ground. It drops to the shade's level, greyer and
+    // thinner, from 16:30 to sundown)
+    // (a looser color gate than the night's: the tan puffs are fairly saturated; full by ~17:45)
+    float wd = min(tune_smoke_ambient, 1.0) * (1.0 - smoothstep(0.6, 0.8, sat)) * (1.0 - soot_w) *
+               smoothstep(0.0, 0.6, enh_scene_dusk);
+    float l = dot(fragment_color.rgb, vec3(0.3, 0.59, 0.11));
+    fragment_color.rgb = mix(fragment_color.rgb, l * vec3(1.0, 0.95, 0.9), wd * tune_dust_dusk_grey);
+    fragment_color.a *= mix(1.0, tune_dust_dusk_thin, wd);
+    shade = mix(1.0, level, wgt) * mix(1.0, tune_dust_dusk_dark, wd);
   }
 
   if (enh_light_count > 0 && rendermode != 2u) {
@@ -274,18 +308,23 @@ void main() {
     // past full to a pale yellow-green)
     float mx = max(fragment_color.r, max(fragment_color.g, fragment_color.b));
     float sat = (mx - min(fragment_color.r, min(fragment_color.g, fragment_color.b))) / max(mx, 1e-3);
-    vec3 lit = fragment_color.rgb * (1.0 + min(added, vec3(2.0)) * enh_smoke * (1.0 - smoothstep(0.2, 0.45, sat)));
+    // (on the hour's shade: a puff by a torch is warm, one in the dark street stays dark)
+    vec3 gain = min(added, vec3(2.0)) * enh_smoke * (1.0 - smoothstep(0.2, 0.45, sat));
+    vec3 lit = fragment_color.rgb * (shade + gain);
     // (an explosion's flash, the frame's strongest light, took its own grey smoke to 2.6x: a milky
     // white cloud by day and by night. The light tints the smoke and brightens it at most by
     // tune_smoke_soot_cap; past that only the hue moves toward the light's. 0: as before)
+    // (the cap on the shaded color away from the lights, on the game's own where they are strong)
     if (tune_smoke_soot > 0.0) {
       const vec3 lw = vec3(0.3, 0.59, 0.11);
       float l0 = dot(fragment_color.rgb, lw);
       float l1 = dot(lit, lw);
-      float cap = l0 * tune_smoke_soot_cap;
+      float cap = l0 * tune_smoke_soot_cap * mix(shade, 1.0, min(dot(gain, lw), 1.0));
       lit *= mix(1.0, min(1.0, cap / max(l1, 1e-4)), tune_smoke_soot);
     }
     fragment_color.rgb = lit;
+  } else {
+    fragment_color.rgb *= shade;
   }
 
   fragment_color *= 2;

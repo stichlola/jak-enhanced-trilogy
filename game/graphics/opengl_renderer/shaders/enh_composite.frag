@@ -307,8 +307,11 @@ uniform float tune_spec_occ = 1.0;  // reflections taken away by the AO (specula
 uniform float tune_ao_view = 0.0;   // test: 1 = the SSAO debug view (as JAK_ENHANCED_AO_DEBUG=1)
 uniform float tune_chr_dark = 0.5;   // and how much darker they get after the grade, in full shade
 uniform float fx_mark;  // 1: tex_T24's alpha is 1 - the blended dust's coverage (capture_fx)
-uniform float tune_fx_dust0 = 0.03;   // that coverage from here...
-uniform float tune_fx_dust1 = 0.25;   // ...to here: not a light effect (dust, smoke)
+// (a thin puff's coverage is small: from 0.03 to 0.25 the soft edges and thin parts of Spargus' dust
+// still counted as light, added back ungraded with the effects' gain: glowing yellow sheets on the
+// shaded ground and a glow around the citizens at dusk)
+uniform float tune_fx_dust0 = 0.005;  // that coverage from here...
+uniform float tune_fx_dust1 = 0.06;   // ...to here: not a light effect (dust, smoke)
 uniform float tune_beacon_soft = 1.0;   // far lamps' columns on water: hidden behind walls, rolled off (0: old)
 uniform float tune_beacon_water = 0.25;  // and how bright they get at most
 const float tune_beacon_ab = 0.0;     // (test: 1 = the far lamps' points off)
