@@ -961,6 +961,12 @@ class EnhancedPost {
   enum SkyNight { kStarry, kFewStars, kFullMoon, kNearlyFull, kRedEclipse, kSkyNights };
   int m_night_kind = kStarry;
   bool m_red_sunset = false;
+  // the menu's Showcase: the Classic look on (before/after: not saved meanwhile), a stop's weather
+  // to set (-1 none) and the clock to freeze once the stop is taken; the Freeze time switch
+  bool m_classic_on = false;
+  int m_showcase_weather = -1;
+  bool m_showcase_freeze = false;
+  bool m_time_frozen = false;
   float m_dusk = 0.f;
   float m_red_dusk = 0.f;
   float m_last_hour = -1.f;

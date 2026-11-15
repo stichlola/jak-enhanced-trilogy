@@ -371,6 +371,11 @@ void enhanced_shortcuts(const SDL_Event& event) {
   if (enhanced_light() && which > 0) {
     return;
   }
+  // F8 (unless it's one of the shortcuts): Enhanced off and on, before/after (the Showcase's)
+  if (which < 0 && key == SDLK_F8 && !enhanced_light()) {
+    g_enhanced_menu.classic = !g_enhanced_menu.classic;
+    return;
+  }
   switch (which) {
     case 0:
       enhanced_flip_menu();

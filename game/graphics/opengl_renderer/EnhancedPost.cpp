@@ -646,9 +646,10 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
     static Settings s_before;
     static bool s_merc = true, s_wind = true, s_push = true;
     static int s_veg = 2;
-    const bool want = (float)t_classic > 0.5f;
+    const bool want = (float)t_classic > 0.5f || g_enhanced_menu.classic;
     if (want != s_classic) {
       s_classic = want;
+      m_classic_on = want;
       if (want) {
         s_before = m_settings;
         s_merc = g_enhanced_merc.enabled;
@@ -664,6 +665,21 @@ void EnhancedPost::begin_frame(ShaderLibrary& shaders, int w, int h) {
         g_enhanced_vegetation = s_veg;
       }
       lg::info("[enhanced] tune debug.classic = {}", want ? 1 : 0);
+    }
+    // a showcase stop's weather (after the settings from before are back) and frozen clock (once
+    // the game has taken the stop's request: one request slot)
+    if (m_showcase_weather >= 0 && !s_classic) {
+      m_settings.weather = m_showcase_weather;
+      m_settings.weather_mix = kWeatherPresets[m_showcase_weather].mix;
+      m_showcase_weather = -1;
+    }
+    if (m_showcase_freeze) {
+      std::lock_guard<std::mutex> lock(g_enhanced_menu.mutex);
+      if (g_enhanced_menu.request == 0) {
+        g_enhanced_menu.request = 4;
+        g_enhanced_menu.arg = "0";
+        m_showcase_freeze = false;
+      }
     }
   }
   {
