@@ -306,9 +306,6 @@ struct EnhancedMenu {
   std::atomic<u32> keys[kShortcuts] = {kDefaultKeys[0], kDefaultKeys[1], kDefaultKeys[2],
                                        kDefaultKeys[3]};
   std::atomic<int> listening = -1;
-  // before/after (the menu's Showcase, F8): the Classic look while set, the settings from before
-  // put back when it is cleared (EnhancedPost::begin_frame, like the test switch debug.classic)
-  std::atomic<bool> classic = false;
   // the one-time hints already shown (bits, see pc-enhanced-hint-once), saved in
   // enhanced-settings.json; hints_dirty: shown since the last save
   std::atomic<int> hints_shown = 0;

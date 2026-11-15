@@ -604,50 +604,6 @@ void EnhancedPost::draw_menu() {
       check("Jak's lantern in the desert", &s.desert_lamp);
       ImGui::TreePop();
     }
-    if (group("Showcase")) {
-      // before/after for a video: the whole of Enhanced off (the Classic look) and back, F8 too
-      bool on = !g_enhanced_menu.classic;
-      if (menu_toggle(on ? "Enhanced ON (after)  -  F8###before_after"
-                         : "Enhanced OFF (before)  -  F8###before_after",
-                      &on)) {
-        g_enhanced_menu.classic = !on;
-      }
-      // one click a stop: Jak there, the hour, the weather, the clock frozen (and Enhanced on)
-      struct Stop {
-        const char* name;
-        const char* cont;
-        int hour, weather;
-      };
-      static const Stop stops[] = {
-          {"Dunes, golden hour", "desert-start", 17, 0},
-          {"Sandstorm", "desert-ac-start", 14, 3},
-          {"Desert storm at night", "desert-facing-wasdoors", 23, 4},
-          {"Desert heights, morning", "desert-deswalk", 9, 7},
-          {"Spargus, dusty sunset", "wascitya-start", 17, 19},
-          {"Spargus, torches at night", "wascitya-start", 22, 0},
-          {"Spargus palms in the wind", "wascitya-start", 12, 22},
-          {"Spargus coast, far sea", "wascityb-start", 19, 0},
-          {"Haven port, cloudy day", "ctyport-start", 11, 9},
-          {"Haven slums, rain at night", "ctysluma-alley", 22, 11},
-          {"Industrial zone, snowy dawn", "ctyinda-start", 6, 17},
-          {"Central sector, evening drizzle", "ctygenb-start", 20, 10},
-      };
-      for (int i = 0; i < (int)(sizeof(stops) / sizeof(stops[0])); i++) {
-        if (i % 2) {
-          ImGui::SameLine(260);
-        }
-        if (ImGui::Button(stops[i].name, ImVec2(245, 0))) {
-          g_enhanced_menu.classic = false;
-          g_enhanced_menu.ask(9, fmt::format("{} -1 {}", stops[i].hour, stops[i].cont));
-          m_showcase_weather = stops[i].weather;
-          m_showcase_freeze = true;
-          m_time_frozen = true;
-          lg::info("[enhanced] showcase stop {}: {} {}:00 {}", i, stops[i].cont, stops[i].hour,
-                   kWeatherPresets[stops[i].weather].name);
-        }
-      }
-      ImGui::TreePop();
-    }
     if (group("Sky and weather")) {
       check("Clouds", &s.clouds);
       check("Cloud shadows", &s.cloud_shadows);
@@ -902,8 +858,9 @@ void EnhancedPost::draw_menu() {
     if (ImGui::Button("Set")) {
       g_enhanced_menu.ask(1, std::to_string(hour));
     }
-    if (menu_toggle("Freeze time", &m_time_frozen)) {
-      g_enhanced_menu.ask(4, m_time_frozen ? "0" : "1");
+    static bool frozen = false;
+    if (menu_toggle("Freeze time", &frozen)) {
+      g_enhanced_menu.ask(4, frozen ? "0" : "1");
     }
     // this evening's sky (each evening picks its own: this sets it by hand)
     static const char* nights[] = {"Starry", "Few stars", "Full moon", "Nearly full moon",
@@ -1337,7 +1294,7 @@ void EnhancedPost::apply_preset(int preset) {
 // written only when something changed (the menu calls it every frame it is open)
 void EnhancedPost::save_menu_settings() {
   auto text = menu_settings_json();
-  if (text == m_saved_settings || m_classic_on) {
+  if (text == m_saved_settings) {
     return;
   }
   m_saved_settings = text;
