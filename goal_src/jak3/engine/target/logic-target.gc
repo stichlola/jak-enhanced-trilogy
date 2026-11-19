@@ -463,6 +463,97 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
   :init-specs ((:fade-a -1.28))
   )
 
+;; Enhanced: the Hellcat's L2 "ultra turbo" (desert-hellcat.gc, *enhanced-hellcat-boost*): a long
+;; purple-violet flame out of each thruster, far bigger than the board's, a violet glow around it,
+;; glitter thrown off it and a short glowing trail left in the air. Drawn the ways that show in the
+;; borrowed deshcat level (as 5450/5451): the flame a 3D sprite facing back along the exhaust, the rest
+;; glows. desert-hellcat.gc sets the flame's and halo's sizes and colours per step (init-specs 4, 8-12
+;; for 5470, 2-3 and 7 for 5471), as draw-thrusters does for 5450/5451.
+(defpart 5470
+  :init-specs ((:texture (laser-hit2 level-default-sprite))
+    (:birth-func 'birth-func-set-quat)
+    (:num 1.0)
+    (:z (meters 0))
+    (:scale-x (meters 2))
+    (:rot-x (degrees 0))
+    (:rot-y (degrees 0))
+    (:rot-z (degrees 0))
+    (:scale-y (meters 2))
+    (:r 200.0)
+    (:g 90.0)
+    (:b 255.0)
+    (:a 200.0)
+    (:vel-y (meters 0))
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 left-multiply-quat))
+    )
+  )
+
+(defpart 5471
+  :init-specs ((:texture (glow level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 4))
+    (:scale-y (meters 4))
+    (:r 170.0)
+    (:g 40.0)
+    (:b 255.0)
+    (:a 40.0)
+    (:omega (degrees 6763.5))
+    (:timer (seconds 0.017))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 glow))
+    )
+  )
+
+;; (the glitter: small bright pink-white-violet sparks flung out of the flame, slowing, twinkling out)
+(defpart 5472
+  :init-specs ((:texture (glow level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 0.25) (meters 0.5))
+    (:scale-y :copy scale-x)
+    (:r 200.0 55.0)
+    (:g 110.0 130.0)
+    (:b 255.0)
+    (:a 90.0 60.0)
+    (:omega (degrees 6763.5))
+    (:vel-y (meters 0.03) (meters 0.08))
+    (:scalevel-x (meters -0.004))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.35 -0.25)
+    (:friction 0.92)
+    (:timer (seconds 0.35) (seconds 0.35))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 glow))
+    (:conerot-x (degrees 30) (degrees 120))
+    (:conerot-y (degrees 0) (degrees 360))
+    )
+  )
+
+;; (the trail: violet glows left hanging where the thrusters were, fading in a quarter second)
+(defpart 5473
+  :init-specs ((:texture (glow level-default-sprite))
+    (:num 1.0)
+    (:scale-x (meters 1.2) (meters 0.5))
+    (:scale-y :copy scale-x)
+    (:r 150.0 40.0)
+    (:g 30.0 30.0)
+    (:b 255.0)
+    (:a 50.0 16.0)
+    (:omega (degrees 6763.5))
+    (:scalevel-x (meters -0.03))
+    (:scalevel-y :copy scalevel-x)
+    (:fade-a -0.22)
+    (:timer (seconds 0.27))
+    (:flags (sp-cpuinfo-flag-2 sp-cpuinfo-flag-3 glow))
+    )
+  )
+
+;; Enhanced: the Hellcat's L2 "ultra turbo" (desert-hellcat.gc): 0..1, the pad's left trigger as
+;; pressed (L2 held on a keyboard: 1), eased in and out; the Hellcat's top speed is 50 m/s times
+;; 1 + *enhanced-hellcat-boost-max* times it. *enhanced-hellcat-boost-force* >= 0 stands in for the
+;; trigger (tests, from the REPL).
+(define *enhanced-hellcat-boost* 0.0)
+(define *enhanced-hellcat-boost-max* 1.0) ;; (top speed 50 m/s x 2 = 100 m/s at full L2)
+(define *enhanced-hellcat-boost-force* -1.0)
+
 ;; Enhanced: a Hellcat parked in the desert, by desert-start. Jak walks up to it and gets in with
 ;; triangle like any vehicle, and out again with triangle. Its code and art are the deshcat level
 ;; (level-info.gc), in wasall's borrow slot 0: wanted while wasall is in and no task has given
@@ -3462,7 +3553,8 @@ capture exactly."
   (when *target*
     ;; (the trigger comes back from pc-enhanced-set-player, in the second vector: last frame's)
     (let ((v (-> *enhanced-player-vec* 1)))
-      (set! (-> v x) *enhanced-board-boost*)
+      ;; (the Hellcat's turbo too: the same stronger blur)
+      (set! (-> v x) (fmax *enhanced-board-boost* *enhanced-hellcat-boost*))
       ;; z: whether Jak aims his gun (out and firing), for a light depth of field
       (set! (-> v z) (if (and (focus-test? *target* gun) (not (focus-test? *target* pilot board))
                               (or (cpad-hold? 0 r1) (focus-test? *target* shooting))
@@ -3508,7 +3600,7 @@ capture exactly."
           )
         )
       ;; (the view opening with it)
-      (set! *enhanced-fov-kick* (+ 1.0 (* 0.18 *enhanced-board-boost*)))
+      (set! *enhanced-fov-kick* (+ 1.0 (* 0.18 (fmax *enhanced-board-boost* *enhanced-hellcat-boost*))))
       )
     )
   ;; Enhanced: grass bends away from Jak

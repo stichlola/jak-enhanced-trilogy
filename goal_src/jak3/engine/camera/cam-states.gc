@@ -2921,6 +2921,19 @@
   )
 
 ;; WARN: Return type mismatch float vs object.
+;; Enhanced: the string camera follows its spline at most max-move a step (two or more steps a frame):
+;; 0.6 m a step on a vehicle, about 72 m/s, and the Hellcat's L2 turbo (up to 200 m/s) ran away from
+;; it. Piloting or on the board, the move (and its acceleration) grows with how far the target went
+;; this frame, so the camera keeps its distance at any speed; slower than the old limit, unchanged.
+(defun enhanced-cam-move-scale ((max-move float))
+  (if (and *target* (focus-test? *target* pilot board))
+      (let ((d (vector-vector-distance (-> *camera* tpos-curr-adj) (-> *camera* tpos-old-adj))))
+        (fmax 1.0 (/ (* 0.75 (fmin d (meters 20))) max-move))
+        )
+      1.0
+      )
+  )
+
 (defbehavior cam-string-code camera-slave ()
   (if *debug-segment*
       (cam-debug-reset-coll-tri)
@@ -3000,17 +3013,25 @@
           ((and (logtest? (-> *camera* settings slave-options) (cam-slave-options BIKE_MODE))
                 (logtest? (-> self options) (cam-slave-options-u32 PLAYER_MOVING_CAMERA))
                 )
-           (tracking-spline-method-21 (-> self position-spline) (-> self trans) 102.4 4096.0 0.1 0.0 (the-as vector #f))
+           (let ((r (enhanced-cam-move-scale 4096.0)))
+             (tracking-spline-method-21 (-> self position-spline) (-> self trans) (* r 102.4) (* r 4096.0) 0.1 0.0 (the-as vector #f))
+             )
            )
           ((logtest? (-> *camera* settings slave-options) (cam-slave-options BIKE_MODE))
-           (tracking-spline-method-21 (-> self position-spline) (-> self trans) 40.96 4096.0 0.1 0.0 (the-as vector #f))
+           (let ((r (enhanced-cam-move-scale 4096.0)))
+             (tracking-spline-method-21 (-> self position-spline) (-> self trans) (* r 40.96) (* r 4096.0) 0.1 0.0 (the-as vector #f))
+             )
            )
           ((logtest? (-> self options) (cam-slave-options-u32 PLAYER_MOVING_CAMERA))
            (tracking-spline-method-21
              (-> self position-spline)
              (-> self trans)
-             (-> *camera* settings string-spline-accel-player)
-             (-> *camera* settings string-spline-max-move-player)
+             (* (enhanced-cam-move-scale (-> *camera* settings string-spline-max-move-player))
+                (-> *camera* settings string-spline-accel-player)
+                )
+             (* (enhanced-cam-move-scale (-> *camera* settings string-spline-max-move-player))
+                (-> *camera* settings string-spline-max-move-player)
+                )
              0.1
              0.0
              (the-as vector #f)
@@ -3020,8 +3041,12 @@
             (tracking-spline-method-21
               (-> self position-spline)
               (-> self trans)
-              (-> *camera* settings string-spline-accel)
-              (-> *camera* settings string-spline-max-move)
+              (* (enhanced-cam-move-scale (-> *camera* settings string-spline-max-move))
+                 (-> *camera* settings string-spline-accel)
+                 )
+              (* (enhanced-cam-move-scale (-> *camera* settings string-spline-max-move))
+                 (-> *camera* settings string-spline-max-move)
+                 )
               0.1
               0.0
               (the-as vector #f)
@@ -3031,6 +3056,19 @@
         )
       )
     (update-rates! (-> self clock) f30-0)
+    )
+  ;; Enhanced: the spline moves the camera each step a tenth of how far it trails the string, so the
+  ;; faster the target the farther behind it falls (at the Hellcat's L2 turbo it was left behind).
+  ;; Piloting or on the board faster than 54 m/s, the camera goes over to the string's own point
+  ;; (string-trans, its length behind the target): all of it from 70 m/s.
+  (when (and *target* (focus-test? *target* pilot board))
+    (let* ((d (vector-vector-distance (-> *camera* tpos-curr-adj) (-> *camera* tpos-old-adj)))
+           (k (fmax 0.0 (fmin 1.0 (/ (- d 3686.4) 1024.0))))
+           )
+      (if (and (< 0.0 k) (< d (meters 20)))
+          (vector-lerp! (-> self trans) (-> self trans) (-> self string-trans) k)
+          )
+      )
     )
   )
 
