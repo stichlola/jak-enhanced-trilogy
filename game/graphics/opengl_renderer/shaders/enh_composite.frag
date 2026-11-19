@@ -3591,7 +3591,7 @@ void composite_unused() {
                       water_height(world + vec2(0.0, e), t, water_foot, wwarp, w_old_warp) - h0) / e;
     // (the fine ripples, their slope over 2 cm: 8 cm is a whole cell of the finest)
     vec2 dslope = vec2(0.0);
-    if (!w_old_detail && WATER_DETAIL > 0.0 && water_foot < 0.1) {
+    if (!w_old_detail && WATER_DETAIL > 0.0 && water_foot < 0.2) {  // (the fade below ends at 0.2: a lower cut drew a ring)
       const float de = 0.02;
       float d0 = water_detail(world, t, water_foot, wwarp);
       dslope = WATER_DETAIL * vec2(water_detail(world + vec2(de, 0.0), t, water_foot, wwarp) - d0,
@@ -7127,7 +7127,8 @@ void composite_unused() {
     if (wsurf > 0.0 && abs(tune_water_dbg - 60.0) > 0.5 && abs(tune_water_dbg - 62.0) > 0.5) {
       const vec3 lw = vec3(0.299, 0.587, 0.114);
       vec3 gray = c * dot(grade_gain, lw) + vec3(dot(grade_lift, lw)) * (1.0 - clamp(c, 0.0, 1.0));
-      graded = mix(gray, graded, WATER_GRADE);
+      // (by the water's share: fully on at any water, its soft edge pixels drew a line)
+      graded = mix(graded, mix(gray, graded, WATER_GRADE), clamp(wsurf, 0.0, 1.0));
     }
     c = graded;
   }
@@ -7626,7 +7627,8 @@ void composite_unused() {
   }
   if (abs(tune_water_dbg - 4.0) < 0.5) {
     c = vec3(wsurf, fx_w, 0.0);  // (test: the water's mask, the effects' weight)
-  }  if (abs(tune_water_dbg - 37.0) < 0.5) {
+  }
+  if (abs(tune_water_dbg - 37.0) < 0.5) {
     // (test: r what was drawn after the sprites' copy (the warp bucket), g water, b a disc lying on
     // it (water_decal), half: the picture before the warp where it isn't water)
     vec3 dw = abs(texture(tex_T0, tex_coord).rgb - texture(tex_T24, tex_coord).rgb);

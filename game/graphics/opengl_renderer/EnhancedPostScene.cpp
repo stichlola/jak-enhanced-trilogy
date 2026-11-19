@@ -1077,9 +1077,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     const bool desert = jak3 && (m_pond || spargus);
     const bool haven = jak3 && m_haven_windows;
     const float place = old ? 0.f : std::clamp((float)t_place, 0.f, 1.f);
-    const float body = old ? 1.f : 1.f + ((float)t_body - 1.f) * (1.f - m_night);
+    // (Haven only half as much brighter: at 1.5 its port went bright cyan at sunset, not grey teal)
+    const float body = old ? 1.f : 1.f + ((float)t_body - 1.f) * (1.f - m_night) * (haven ? 0.5f : 1.f);
     const float des_deep[3] = {0.05f, 0.30f, 0.38f}, des_shallow[3] = {0.20f, 0.62f, 0.58f};
-    const float hav_deep[3] = {0.06f, 0.20f, 0.24f}, hav_shallow[3] = {0.14f, 0.36f, 0.34f};
+    const float hav_deep[3] = {0.06f, 0.20f, 0.24f}, hav_shallow[3] = {0.12f, 0.30f, 0.30f};
     for (int i = 0; i < 3; i++) {
       float pd = m_settings.water_deep[i], ps = m_settings.water_shallow[i];
       if (desert) {
