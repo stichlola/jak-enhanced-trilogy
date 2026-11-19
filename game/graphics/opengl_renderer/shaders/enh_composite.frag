@@ -216,6 +216,8 @@ uniform float tune_water_moon_soft = 1.0;  // the same for the moon's tight glin
 uniform float tune_water_lamp_map = 1.0;  // a lamp's column on the water only where its shadow map lets its light reach (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
+uniform float tune_water_day = 2.25;  // the desert's water by day, after the grade: its brightness (gain on its luma, rolled off to 1; 1 or 0: off, as before)
+uniform float tune_water_day_hue = 0.55;  // ...and how far toward turquoise near the shore / blue out at sea
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -3163,6 +3165,8 @@ void composite_unused() {
   bool water_deep = true;
   bool water_decal = false;  // something flat lying on the water (splash and ripple discs)
   bool warp_undo = false;    // a splash's ripple mesh over something else: shown without it
+  float water_tq = 0.0;      // the water's turquoise share (near the shore), for its day look after the grade
+  float water_fres = 0.0;    // ...and its fresnel (the sky it mirrors keeps its own color)
   if (water_strength > 0.0) {
     float wd = texture(tex_T5, uv).r;
     float fd = texture(tex_T6, uv).r;
@@ -3834,6 +3838,16 @@ void composite_unused() {
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
     vec3 body_col = mix(water_deep_color, water_shallow_color, clear_water);
+    // (turquoise toward the shore, blue out at sea, for the day look after the grade: by the depth
+    // where the bed is seen, else by the distance over a long, smooth fall (from high up the game
+    // draws no near sea: nothing else tells the shore). A pond (an oasis) turquoise all over)
+    {
+      float wdh = length(p - up_view * dot(up_view, p)) / 4096.0;
+      float tq = exp(-wdh / 380.0);
+      tq = max(tq, exp(-depth_real / 3.0) * (1.0 - near_fade));
+      water_tq = pond_here ? 0.85 : tq;
+      water_fres = fresnel;
+    }
     // (the body follows the hour: full at noon, dimmer and tinted by the low sky as the sun goes
     // down; the night's darkening is night_dim's, so the factor goes back to 1 into the night)
     if (tune_water_hour > 0.0) {
@@ -7167,6 +7181,29 @@ void composite_unused() {
   float wl = l - 0.35;
   wl *= (wl < 0.0 && warmth > 0.0) ? tune_warm_shadow : 1.0;
   c += warmth * vec3(1.0, 0.25, -0.75) * wl * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
+
+  // the desert's water by day: the noon exposure, the grade and its contrast took a light teal body to
+  // a dark one (Spargus sea 12h from 110 m up: luma 0.16, 0.06/0.19/0.20). Its luma lifted, rolled
+  // off toward 1 (glints keep their white), never under 0.06; its hue steered turquoise near the
+  // shore and a deeper blue out at sea, less where it mirrors the sky (a low sun's warm sky stays).
+  // Not by night (the night factor) nor in a sandstorm's or a cloud's grey. (tune_water_day 1: off)
+  if (wsurf > 0.0 && tune_water_day > 1.0 && sun_haze > 0.0 && abs(tune_water_dbg - 60.0) > 0.5) {
+    float wday = smoothstep(0.02, 0.45, sky_sun.w) * (1.0 - clouds.w) * min(sun_haze * 1.25, 1.0) *
+                 (1.0 - 0.6 * clamp(weather.x, 0.0, 1.0)) * clamp(wsurf, 0.0, 1.0);
+    float g = 1.0 + (tune_water_day - 1.0) * wday;
+    float l0 = max(luma(c), 0.0);
+    float l1 = max(l0 * g / (1.0 + l0 * (g - 1.0)), 0.06 * wday);
+    vec3 lifted = c * (l1 / max(l0, 1e-4));
+    // (luma-1 hues: turquoise 0.25/0.62/0.58, deep blue 0.10/0.36/0.60)
+    vec3 hue = mix(vec3(0.32, 1.17, 1.94), vec3(0.50, 1.23, 1.15), water_tq) * l1;
+    float hk = tune_water_day_hue * wday * smoothstep(0.15, 0.5, sky_sun.w) *
+               (1.0 - 0.75 * smoothstep(0.1, 0.6, water_fres));
+    // (what was near black has no hue of its own to keep)
+    hk = max(hk, wday * (1.0 - smoothstep(0.02, 0.08, l0)));
+    // (the bright parts, glints and foam, keep theirs)
+    hk *= 1.0 - smoothstep(0.55, 0.85, l1);
+    c = mix(lifted, hue, clamp(hk, 0.0, 1.0));
+  }
 
   // the desert under a high sun: the game's ground comes in near white (bluish on the slopes), the
   // grade above whiter still: its highlights rolled off softly (a film shoulder) and warmed back
