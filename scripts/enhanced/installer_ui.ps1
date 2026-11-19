@@ -620,6 +620,8 @@ function Start-Build {
   $script:installDir = $dest
   $script:started = $true
   $script:inner = Start-Process -FilePath $cfg.Setup -ArgumentList $argList -PassThru
+  # (below normal priority, it and the extractor and compiler it starts: this window stays responsive)
+  try { $script:inner.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal } catch { }
   Set-Page 2
   $timer.Start()
 }
@@ -678,6 +680,9 @@ $ui.NextBtn.Add_Click({
 })
 $ui.BackBtn.Add_Click({ if ($script:page -eq 3) { $win.Close() } else { Show-Note $ui.Note1 ''; Set-Page 0 } })
 $ui.MinBtn.Add_Click({ $win.WindowState = 'Minimized' })
+# (back from the taskbar: a borderless see-through window sometimes misses the taskbar's restore while it
+# is busy; it still gets activated, so being activated while minimized brings it back)
+$win.Add_Activated({ if ($win.WindowState -eq 'Minimized') { $win.WindowState = 'Normal' } })
 $ui.CloseBtn.Add_Click({ $win.Close() })
 $win.Add_Closing({ param($s, $e)
   if ($script:page -eq 2 -and $script:inner -and -not $script:inner.HasExited) {

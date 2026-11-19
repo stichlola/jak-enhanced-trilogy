@@ -82,7 +82,12 @@ if ($Gui) {
   $ui.Text = 'Jak Enhanced Trilogy'
   try { $ui.Icon = New-Object Drawing.Icon (Join-Path $Root 'data\game\assets\enhanced\art\jak-enhanced.ico') } catch { }
   $ui.FormBorderStyle = 'FixedDialog'
-  $ui.ControlBox = $false
+  # (a minimize button, so it can go to the taskbar and come back from it: without a control box the
+  # taskbar can't restore it; closing it mid-update is refused, the update can't stop half done)
+  $ui.MaximizeBox = $false
+  $ui.MinimizeBox = $true
+  $script:uiDone = $false
+  $ui.Add_FormClosing({ param($s, $e) if (-not $script:uiDone -and $e.CloseReason -eq 'UserClosing') { $e.Cancel = $true } })
   $ui.StartPosition = 'CenterScreen'
   $ui.ClientSize = New-Object Drawing.Size 480, 118
   $ui.Font = [Drawing.SystemFonts]::MessageBoxFont
@@ -381,6 +386,7 @@ try {
 }
 if ($ui) {
   try { Stop-Transcript | Out-Null } catch { }
+  $script:uiDone = $true
   $ui.Close()
 }
 # (the game the player chose to keep open isn't started a second time)

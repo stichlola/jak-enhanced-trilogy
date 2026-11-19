@@ -91,6 +91,9 @@ try {
   $psi.WorkingDirectory = $Root
   $psi.EnvironmentVariables['JAK_ENHANCED_HIDDEN'] = '1'
   $cmd = [Diagnostics.Process]::Start($psi)
+  # (the build below normal priority, and so everything it starts: this window and the PC stay responsive,
+  # minimized and back, while extracting and compiling use every core)
+  try { $cmd.PriorityClass = [Diagnostics.ProcessPriorityClass]::BelowNormal } catch { }
   $null = $cmd.Handle
 
   # the status window: shown while a step runs (and when starting takes long: the disc check, GitHub)
@@ -287,12 +290,18 @@ try {
       [Windows.Forms.Application]::DoEvents()
       Start-Sleep -Milliseconds 200
     }
+    $windowSeen = -not $game.HasExited -and $game.MainWindowHandle -ne [IntPtr]::Zero
     $form.Hide()
     $form.Dispose()
     $game.WaitForExit()
-    [IO.File]::AppendAllText($log, "launcher: gk.exe ended, exit code $($game.ExitCode)`r`n")
-    if ($game.ExitCode -ne 0) {
-      & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $Proj 'scripts\enhanced\report.ps1')))) -Proj $Proj -Crash $game.ExitCode
+    $ranSec = [int]$game.ExitTime.Subtract($game.StartTime).TotalSeconds
+    [IO.File]::AppendAllText($log, "launcher: gk.exe ended, exit code $($game.ExitCode), after $ranSec s, window seen: $windowSeen`r`n")
+    # (a game that closes by itself in its first seconds failed even with exit code 0: the report
+    # window then too, with -1 for that code)
+    $crash = $game.ExitCode
+    if ($crash -eq 0 -and $ranSec -lt 20) { $crash = -1 }
+    if ($crash -ne 0) {
+      & ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $Proj 'scripts\enhanced\report.ps1')))) -Proj $Proj -Crash $crash
     }
     exit 0
   }
