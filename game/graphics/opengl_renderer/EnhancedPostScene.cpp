@@ -2189,64 +2189,191 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       enhanced_upload_decals(id, cam.trans, (float)m_time, on && m_settings.fx_detail > 0.f);
     }
     ENH_CPU_SPLIT("b1709");
-    // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert, not a
-    // city), dry and calm, a few dozen meters around Jak, each wandering on its own
+    // fireflies at night, seeds and pollen drifting by day: out in the wild (not the desert but its
+    // oasis, not a city), dry and calm, a few dozen meters around Jak. Fireflies keep to swarms
+    // fixed in the world (a jittered 16 m lattice: some cells hold one, of their own size), drift
+    // lazily around them, and each fades in and out at the end of its life: no pops
     {
       constexpr int kMotes = 24;
+      constexpr float kCell = 16.f;  // m
       const auto& pl = g_enhanced_player;
       static const bool force = [] {
         const char* m = std::getenv("JAK_ENHANCED_MOTES");
         return m && std::strcmp(m, "force") == 0;
       }();
-      const bool wild =
-          force || (!m_city && !m_pond && m_snow < 0.1f && m_rain < 0.1f && m_storm < 0.1f);
+      // (in Jak 3's desert the ocean renderer draws only the oases' ponds: water drawn lately = by
+      // an oasis, its grass and palms)
+      if (m_pond && m_ocean_ready) {
+        m_motes_pond = m_time;
+      }
+      const bool oasis = m_pond && m_time - m_motes_pond < 8.0;
+      const bool wild = force || ((oasis || (!m_city && !m_pond)) && m_snow < 0.1f &&
+                                  m_rain < 0.1f && m_storm < 0.1f);
       const float dt = m_motes_time < 0 ? 0.f : (float)std::min(0.1, m_time - m_motes_time);
       m_motes_time = m_time;
-      const float target = wild && pl.valid && on && m_settings.motes > 0.f ? 1.f : 0.f;
+      // (not tied to the dynamic lights setting: they're glows of their own)
+      const float target =
+          wild && pl.valid && have_scene && cam.valid && m_settings.motes > 0.f ? 1.f : 0.f;
       m_motes_on += (target - m_motes_on) * std::min(1.f, dt * (force ? 5.f : 0.5f));
       const bool night = m_night > 0.5f;
+      if (night != m_motes_night) {
+        m_motes.clear();  // (both kinds are faded out at the switch)
+        m_motes_night = night;
+      }
       static std::mt19937 rng{std::random_device{}()};
       std::uniform_real_distribution<float> u(0.f, 1.f);
+      auto hash = [](int x, int z, uint32_t salt) {
+        uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)z * 19349663u ^ salt * 83492791u;
+        h ^= h >> 13;
+        h *= 0x5bd1e995u;
+        h ^= h >> 15;
+        return (float)(h & 0xffffu) / 65535.f;
+      };
+      // the swarms near Jak (m): x, z, weight
+      float swarm[26][3];  // (5x5 cells, plus the test one)
+      int swarms = 0;
+      float swarm_w = 0.f;
+      if (night) {
+        const int cx = (int)std::floor(pl.pos[0] / kMeter / kCell);
+        const int cz = (int)std::floor(pl.pos[2] / kMeter / kCell);
+        for (int i = -2; i <= 2; i++) {
+          for (int j = -2; j <= 2; j++) {
+            const int x = cx + i, z = cz + j;
+            if (hash(x, z, 1) > 0.45f) {
+              continue;  // an empty cell
+            }
+            const float sx = (x + hash(x, z, 2)) * kCell, sz = (z + hash(x, z, 3)) * kCell;
+            const float dx = sx - pl.pos[0] / kMeter, dz = sz - pl.pos[2] / kMeter;
+            const float d = std::sqrt(dx * dx + dz * dz);
+            if (d > 22.f || d < 8.f) {
+              continue;  // (none right around Jak: they're seen out there)
+            }
+            const float w = (0.25f + hash(x, z, 4)) * (1.f - d / 30.f);
+            swarm[swarms][0] = sx;
+            swarm[swarms][1] = sz;
+            swarm[swarms][2] = w;
+            swarm_w += w;
+            swarms++;
+          }
+        }
+        if (force) {
+          // (screenshots: one swarm 13 m ahead of the camera, past Jak, too)
+          float fx = cam.rot[0][2], fz = cam.rot[2][2];
+          const float fl = std::max(1e-3f, std::sqrt(fx * fx + fz * fz));
+          swarm[swarms][0] = pl.pos[0] / kMeter + fx / fl * 13.f;
+          swarm[swarms][1] = pl.pos[2] / kMeter + fz / fl * 13.f;
+          swarm[swarms][2] = 1.f;
+          swarm_w += 1.f;
+          swarms++;
+        }
+      }
       auto spawn = [&](Mote& m) {
-        const float a = u(rng) * 6.2832f, r = (3.f + 19.f * std::sqrt(u(rng))) * kMeter;
-        m.pos[0] = pl.pos[0] + std::cos(a) * r;
-        m.pos[1] = pl.pos[1] + (0.3f + 2.2f * u(rng)) * kMeter;
-        m.pos[2] = pl.pos[2] + std::sin(a) * r;
         m.vel[0] = m.vel[1] = m.vel[2] = 0.f;
-        m.seed = u(rng) * 100.f;
+        m.seed = std::floor(u(rng) * 999.f);
+        m.age = 0.f;
+        m.fade = 0.f;
+        m.life = 0.f;
+        float hx, hz;
+        if (night) {
+          if (swarms == 0) {
+            return;  // no swarm around: it waits
+          }
+          float pick = u(rng) * swarm_w;
+          int s = 0;
+          while (s < swarms - 1 && pick > swarm[s][2]) {
+            pick -= swarm[s][2];
+            s++;
+          }
+          // a bigger swarm also spreads wider
+          const float a = u(rng) * 6.2832f, r = (1.f + 4.f * swarm[s][2]) * std::sqrt(u(rng));
+          hx = swarm[s][0] + std::cos(a) * r;
+          hz = swarm[s][1] + std::sin(a) * r;
+          // kept 7 m or more from Jak
+          const float jx = hx - pl.pos[0] / kMeter, jz = hz - pl.pos[2] / kMeter;
+          const float jd = std::sqrt(jx * jx + jz * jz);
+          if (jd < 7.f) {
+            const float k = 7.f / std::max(jd, 1e-3f);
+            hx = pl.pos[0] / kMeter + jx * k;
+            hz = pl.pos[2] / kMeter + jz * k;
+          }
+          m.life = 14.f + 26.f * u(rng);
+        } else {
+          const float a = u(rng) * 6.2832f, r = 3.f + 19.f * std::sqrt(u(rng));
+          hx = pl.pos[0] / kMeter + std::cos(a) * r;
+          hz = pl.pos[2] / kMeter + std::sin(a) * r;
+          m.life = 10.f + 20.f * u(rng);
+        }
+        m.home[0] = hx * kMeter;
+        m.home[1] = pl.pos[1] + (night ? 0.3f + 1.6f * u(rng) : 0.3f + 2.2f * u(rng)) * kMeter;
+        m.home[2] = hz * kMeter;
+        for (int k = 0; k < 3; k++) {
+          m.pos[k] = m.home[k];
+        }
       };
       if (m_motes_on <= 0.01f || !pl.valid) {
         m_motes.clear();
       } else {
-        while ((int)m_motes.size() < kMotes) {
+        // fireflies: few and sparse (half the slots)
+        const int want_n = night ? kMotes / 2 : kMotes;
+        if ((int)m_motes.size() > want_n) {
+          m_motes.resize(want_n);
+        }
+        while ((int)m_motes.size() < want_n) {
           m_motes.emplace_back();
           spawn(m_motes.back());
+          // (the first ones start at different points of their lives)
+          m_motes.back().age = m_motes.back().life * 0.5f * u(rng);
         }
+        const float t = (float)std::fmod(m_time, 10000.0);
         for (auto& m : m_motes) {
+          m.age += dt;
           const float dx = m.pos[0] - pl.pos[0], dz = m.pos[2] - pl.pos[2];
-          if (dx * dx + dz * dz > 26.f * 26.f * kMeter * kMeter) {
-            spawn(m);  // left behind: one comes in somewhere else around Jak
+          const float d = std::sqrt(dx * dx + dz * dz) / kMeter;
+          // left behind: it dies off quickly (fades), then comes back somewhere around Jak
+          if (d > 26.f) {
+            m.age = std::max(m.age, m.life - 1.5f);
           }
-          // a wander: a slow random push, damped; fireflies hover, seeds drift with the breeze and
-          // sink slowly
+          if (m.age >= m.life) {
+            spawn(m);
+            continue;
+          }
+          m.fade = std::min({1.f, m.age / 2.f, (m.life - m.age) / 1.5f}) *
+                   (1.f - std::clamp((d - 18.f) / 8.f, 0.f, 1.f));
+          // a lazy flight: a smooth wander made of two slow swings per axis, the fly's own
+          const float s = m.seed;
+          float want[3];
           for (int k = 0; k < 3; k++) {
-            m.vel[k] += (u(rng) - 0.5f) * (night ? 3.f : 1.5f) * kMeter * dt;
-            m.vel[k] *= 1.f - std::min(1.f, dt * 0.8f);
+            const float f1 = 0.13f + 0.11f * std::fmod(s * (0.37f + k * 0.11f), 1.f);
+            const float f2 = 0.31f + 0.23f * std::fmod(s * (0.71f + k * 0.17f), 1.f);
+            want[k] = std::sin(t * f1 + s * (1.3f + k)) + 0.5f * std::sin(t * f2 + s * (2.9f + k));
           }
-          if (!night) {
-            m.vel[0] += 0.25f * kMeter * dt;
-            m.vel[2] += 0.12f * kMeter * dt;
-            m.vel[1] -= 0.05f * kMeter * dt;
+          const float amp_h = night ? 0.35f : 0.25f, amp_v = night ? 0.12f : 0.08f;
+          want[0] *= amp_h;
+          want[1] *= amp_v;
+          want[2] *= amp_h;
+          if (night) {
+            // kept to its swarm by a soft pull, stronger the further it strays
+            for (int k = 0; k < 3; k++) {
+              const float off = (m.home[k] - m.pos[k]) / kMeter;
+              want[k] += off * (k == 1 ? 0.5f : 0.12f);
+            }
+          } else {
+            // seeds drift with the breeze and sink slowly
+            want[0] += 0.3f;
+            want[2] += 0.15f;
+            want[1] -= 0.05f;
           }
-          // between half a meter and three over Jak's ground
+          // between a few decimeters and three meters over Jak's ground
           const float above = (m.pos[1] - pl.pos[1]) / kMeter;
-          if (above < 0.4f) {
-            m.vel[1] += 1.f * kMeter * dt;
+          if (above < 0.25f) {
+            want[1] += 0.4f;
           }
           if (above > 3.f) {
-            m.vel[1] -= 1.f * kMeter * dt;
+            want[1] -= 0.4f;
           }
+          const float ease = std::min(1.f, dt * 1.2f);
           for (int k = 0; k < 3; k++) {
+            m.vel[k] += (want[k] * kMeter - m.vel[k]) * ease;
             m.pos[k] += m.vel[k] * dt;
           }
         }
@@ -2254,6 +2381,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float mote[kMotes * 4] = {};
       int mote_count = 0;
       for (const auto& m : m_motes) {
+        if (m.life <= 0.f || m.fade <= 0.002f) {
+          continue;
+        }
         float v[3] = {0.f, 0.f, 0.f};
         for (int col = 0; col < 3; col++) {
           for (int row = 0; row < 3; row++) {
@@ -2264,14 +2394,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           continue;
         }
         std::memcpy(mote + mote_count * 4, v, sizeof(v));
-        mote[mote_count * 4 + 3] = m.seed;
+        // w: the seed (whole part) and how faded in it is (fraction)
+        mote[mote_count * 4 + 3] = m.seed + std::min(m.fade, 0.999f);
         mote_count++;
       }
       glUniform1i(glGetUniformLocation(id, "mote_count"), cam.valid ? mote_count : 0);
       glUniform4fv(glGetUniformLocation(id, "mote"), kMotes, mote);
-      // kind (0 fireflies, 1 seeds and pollen), strength, time (s)
+      // kind (0 fireflies, 1 seeds and pollen), strength, time (s). Fireflies wake at dusk and the
+      // seeds settle before it: both are out at the switch
+      auto ss = [](float a, float b, float x) {
+        const float k = std::clamp((x - a) / (b - a), 0.f, 1.f);
+        return k * k * (3.f - 2.f * k);
+      };
       glUniform3f(glGetUniformLocation(id, "mote_style"), night ? 0.f : 1.f,
-                  m_motes_on * m_settings.motes * (night ? m_night : 1.f - m_night),
+                  m_motes_on * m_settings.motes *
+                      (night ? ss(0.5f, 0.85f, m_night) : 1.f - ss(0.15f, 0.5f, m_night)),
                   (float)std::fmod(m_time, 1000.0));
     }
     glUniform1i(glGetUniformLocation(id, "fire_count"), fire_count);
