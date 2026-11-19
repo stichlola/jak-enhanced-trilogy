@@ -204,8 +204,13 @@ void BlitDisplays::do_slow_time(SharedRenderState* render_state, ScopedProfilerN
   glClear(GL_COLOR_BUFFER_BIT);
 
   // GL Setup
+  // (Enhanced: set the blend explicitly, as zoom blur does. It used whatever the frame's last draw
+  // left: after an additive one (HUD, glows: src_alpha + one) the old frame was kept whole and the
+  // new one added on top every frame, so Light Jak's freeze faded the screen to white in seconds)
   glDisable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
+  glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+  glBlendEquation(GL_FUNC_ADD);
   glBindTexture(GL_TEXTURE_2D, m_blur_old_copier.texture());
 
   // draw old image
