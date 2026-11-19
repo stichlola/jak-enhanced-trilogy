@@ -3057,6 +3057,19 @@
       )
     (update-rates! (-> self clock) f30-0)
     )
+  ;; Enhanced: the spline moves the camera each step a tenth of how far it trails the string, so the
+  ;; faster the target the farther behind it falls (at the Hellcat's L2 turbo it was left behind).
+  ;; Piloting or on the board faster than 54 m/s, the camera goes over to the string's own point
+  ;; (string-trans, its length behind the target): all of it from 70 m/s.
+  (when (and *target* (focus-test? *target* pilot board))
+    (let* ((d (vector-vector-distance (-> *camera* tpos-curr-adj) (-> *camera* tpos-old-adj)))
+           (k (fmax 0.0 (fmin 1.0 (/ (- d 3686.4) 1024.0))))
+           )
+      (if (and (< 0.0 k) (< d (meters 20)))
+          (vector-lerp! (-> self trans) (-> self trans) (-> self string-trans) k)
+          )
+      )
+    )
   )
 
 ;; WARN: Return type mismatch float vs vector.
