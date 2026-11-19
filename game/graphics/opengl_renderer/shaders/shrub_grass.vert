@@ -65,6 +65,16 @@ uniform float tune_grass_v2_foot = 0.65;  // (tuning: v2: the ground-class blade
 uniform float tune_grass_v2_gain = 0.9;   // (tuning: v2: the ground-class blades' screen color, times scr_gain)
 uniform float tune_grass_v2_up = 0.5;     // (tuning: v2: the ground-class blades' normals toward the floor's)
 uniform float tune_grass_v2_spot = 0.72;  // (tuning: v2: the ground-class blades' baked color (feet hidden or off screen), times: as bright as the screen's)
+// variety (the painted meadows, v2): by area, from large rotated noises blended smoothly: low
+// lawn-like patches and tall lush ones, drifts of other kinds (thin wispy blades, broad ones, seed
+// heads, a few tiny flowers), dry straw streaks, warmer/cooler greens, the sway's amount; each
+// blade its own thickness and flutter
+uniform float tune_grass_variety = 1.0;     // (tuning: 1 the meadows varied by area, 0 as plain v2, 2 debug paint: lawn red, lush blue, between green, dry yellow; tips: wispy white, broad black, seed head orange, flower magenta)
+uniform float tune_grass_var_lawn = 0.55;   // (tuning: variety: the grass's height in the short lawn patches, times)
+uniform float tune_grass_var_lush = 1.5;    // (tuning: variety: and in the tall lush ones)
+uniform float tune_grass_var_kinds = 1.0;   // (tuning: variety: how many wispy / broad / seed-head blades, times)
+uniform float tune_grass_var_flowers = 1.0; // (tuning: variety: how many flowers, times)
+uniform float tune_grass_var_dry = 0.8;     // (tuning: variety: the dry streaks' strength)
 uniform sampler2D enh_noise;    // smooth noise, 4 channels, tiling every 32 units (EnhancedGrass make_gl)
 uniform float enh_ground_class;  // 1: a ground-class field (the level's own grassy floor)
 
@@ -243,6 +253,25 @@ void main() {
     dryness = vnoise(wm / 7.0 + 3.0);
     dense = smoothstep(0.05, 0.4, lush) * smoothstep(0.0, 0.25, patchy + 0.2) * enh_zone.w;
   }
+  // variety (meadows): the area's masks, from three noises at scales that aren't each other's or
+  // the tiles', rotated differently, each stretched (two smooth noises averaged bunch around 0.5:
+  // without it the lawns and lush patches would hardly ever be there); the middle one stretched
+  // into streaks, the fine one breaking the others' borders
+  bool var = v2 && !gc && tune_grass_variety > 0.5;
+  float v_lawn = 0.0, v_lush = 0.0, v_dz = 0.0;
+  vec4 vA = vec4(0.5), vB = vec4(0.5), vC = vec4(0.5);
+  if (var) {
+    vA = nz(kRotC * wm / 16.0 + vec2(17.3, 4.1));  // r lawn..lush, g wispy, b broad, a heads
+    vec2 qb = kRotA * wm;
+    vB = nz(vec2(qb.x / 30.0, qb.y / 4.0) + vec2(2.3, 21.7));  // r dry streaks, g hue, b sway
+    vC = nz(kRotB * wm / 6.1 + vec2(9.1, 27.3));
+    float hn = smoothstep(0.3, 0.7, vA.r * 0.7 + vC.r * 0.3);
+    v_lawn = 1.0 - smoothstep(0.3, 0.46, hn);
+    v_lush = smoothstep(0.54, 0.7, hn);
+    v_dz = smoothstep(0.6, 0.74, vB.r * 0.85 + vC.b * 0.15) * tune_grass_var_dry;
+    // (the short lawn denser: it covers the sand)
+    dense = min(dense * mix(1.0, 1.4, v_lawn), 1.0);
+  }
   if (rnd(bs, 3u) > dense) {
     hide();
     return;
@@ -273,15 +302,86 @@ void main() {
     return;
   }
 
+  // variety (meadows): the area's look and this blade's kind
+  float v_h = 1.0, v_w = 1.0, v_sway = 1.0, v_flut = 1.0, v_lag = 0.0, v_dry = 0.0;
+  float v_head = 0.0;  // the head's width (game units; 0: a plain pointed blade)
+  float v_head_t = 1.0;  // where along the blade it starts
+  float v_hf = 0.0;  // how much of the head's shape (fading out before the blades drop to 2 segments)
+  float v_foot = 0.35;  // the foot's shade, times the tip's
+  vec3 v_tint = vec3(1.0), v_head_c = vec3(0.0);
+  int kind = 0;  // 0 plain, 1 wispy, 2 broad, 3 seed head, 4 flower
+  if (var) {
+    float lawn = v_lawn;
+    v_h = mix(1.0, tune_grass_var_lawn, lawn) * mix(1.0, tune_grass_var_lush, v_lush);
+    // (the kinds' share of the blades by area (each mask stretched too), then each blade picks by
+    // its own chance; no thin wispy blades in the short lawn: it would show the sand)
+    float kk = tune_grass_var_kinds;
+    float fa = smoothstep(0.3, 0.7, vA.a * 0.8 + vC.a * 0.2);
+    float p_flower = ((1.0 - smoothstep(0.12, 0.32, fa)) * 0.15 + 0.006) * mix(0.3, 1.0, lawn) * tune_grass_var_flowers;
+    float p_seed = smoothstep(0.68, 0.88, fa) * 0.3 * (1.0 - lawn) * kk;
+    float p_wisp = smoothstep(0.6, 0.85, smoothstep(0.3, 0.7, vA.g * 0.8 + vC.g * 0.2)) * 0.5 * (1.0 - lawn) * kk;
+    float p_broad = smoothstep(0.6, 0.85, smoothstep(0.3, 0.7, vA.b * 0.8 + vC.b * 0.2)) * 0.5 * kk;
+    float pk = rnd(bs, 20u);
+    kind = pk < p_flower                    ? 4
+           : pk < p_flower + p_seed         ? 3
+           : rnd(bs, 21u) < p_wisp          ? 1
+           : rnd(bs, 22u) < p_broad         ? 2 : 0;
+    // (dry streaks: most blades in them straw, the others half; warmer or cooler greens; the
+    // lawn lighter and fresher against a deeper lush green, about the plain grass's brightness on
+    // the whole; the sway's amount by area)
+    v_dry = clamp(v_dz * 1.4 - rnd(bs, 23u) * 0.7, 0.0, 1.0);
+    v_tint = mix(vec3(0.94, 1.0, 1.04), vec3(1.05, 1.0, 0.92), smoothstep(0.25, 0.75, vB.g)) *
+             mix(vec3(1.0), vec3(0.72, 0.84, 0.8), v_lush) * mix(vec3(1.0), vec3(1.08, 1.22, 0.88), lawn);
+    v_foot = mix(mix(0.35, 0.5, lawn), 0.29, v_lush);
+    v_sway = mix(0.7, 1.35, smoothstep(0.2, 0.8, vB.b));
+    v_w = mix(0.75, 1.3, rnd(bs, 24u)) * mix(1.0, 2.0, lawn);  // (the short lawn wider: it still covers the sand)
+    v_flut = mix(0.75, 1.3, rnd(bs, 25u));
+    v_lag = rnd(bs, 26u) * 0.8;  // m behind the gust
+    // (the heads fade into plain blades before their tiles drop to 2 segments, no pop)
+    v_hf = 1.0 - smoothstep(enh_reach.y * 0.55, enh_reach.y * 0.85, d);
+    v_h *= mix(1.0, 0.9, v_dry);
+    if (kind == 1) {  // thin wispy blades, taller, lighter, swaying more and faster
+      v_w *= 0.5;
+      v_h *= 1.15;
+      v_sway = min(v_sway * 1.3, 1.6);
+      v_flut *= 1.3;
+      v_tint *= vec3(1.06, 1.06, 0.97);
+    } else if (kind == 2) {  // broad blades, shorter, deeper, stiffer
+      v_w *= 1.8;
+      v_h *= 0.8;
+      v_sway *= 0.65;
+      v_flut *= 0.7;
+      v_tint *= vec3(0.9, 0.97, 0.95);
+    } else if (kind == 3) {  // a thin stalk over the grass, a long seed head
+      v_w *= mix(1.0, 0.4, v_hf);
+      v_h *= mix(1.0, 1.35, v_hf);
+      v_sway *= 1.2;
+      v_head = 0.022 * m;
+      v_head_t = 0.74;
+      v_head_c = mix(vec3(0.62, 0.5, 0.3), vec3(0.78, 0.68, 0.42), rnd(bs, 27u));
+    } else if (kind == 4) {  // a tiny flower just above the grass around
+      v_w *= mix(1.0, 0.35, v_hf);
+      v_h *= mix(1.0, 1.2, v_hf);  // (its head just over the grass around)
+      v_head = 0.055 * m;
+      v_head_t = 0.88;
+      float fc = rnd(bs, 27u);
+      v_head_c = fc < 0.45 ? vec3(1.0, 0.97, 0.9) : fc < 0.8 ? vec3(1.0, 0.82, 0.22) : vec3(0.78, 0.62, 1.0);
+    }
+    if (enh_segs < 4 || v_hf <= 0.0) {
+      v_head = 0.0;  // (far: too few segments for a head, a plain blade)
+    }
+  }
+
   // the blade: tall where it's lush, shorter toward the edge
   float h0 = mix(0.55, 1.25, rnd(bs, 4u)) * mix(0.6, 1.2, patchy) * mix(0.35, 1.15, smoothstep(0.1, 0.9, lush)) *
              m * enh_style.x;
   float h, w;
   if (v2) {
     // (a blade going away thins rather than shrinks: the field's height stays the same)
-    h0 *= big_h * mix(1.0, clump_h, 0.5);
+    h0 *= big_h * mix(1.0, clump_h, 0.5) * v_h;
     h = h0 * mix(0.4, 1.0, keep);
-    w = mix(0.045, 0.075, rnd(bs, 5u)) * widen * keep * m * enh_style.y;
+    w = mix(0.045, 0.075, rnd(bs, 5u)) * widen * keep * m * enh_style.y * v_w;
+    v_head *= sqrt(widen) * keep;
   } else {
     h = h0 * keep;
     w = mix(0.045, 0.075, rnd(bs, 5u)) * widen * m * enh_style.y;
@@ -295,17 +395,22 @@ void main() {
 
   // its lean: its own, the wind's gusts rolling across the field, a flutter; pushed by Jak
   vec2 wind_dir = normalize(vec2(0.8, 0.6));
-  float flutter = sin(enh_time * 5.3 + rnd(bs, 7u) * 6.2832) * 0.08;
+  float flutter = sin(enh_time * 5.3 * v_flut + rnd(bs, 7u) * 6.2832) * 0.08;
+  if (var) {
+    // (the tall lush grass also swings slowly, each blade its own beat)
+    flutter += sin(enh_time * mix(1.3, 2.0, rnd(bs, 28u)) + rnd(bs, 29u) * 6.2832) * 0.07 * v_lush;
+  }
   vec2 lean;
   if (v2) {
     // (gusts: two noises rolling downwind at different speeds, irregular fronts, no stripes; the
     // short grass hardly bends, it flutters)
-    float g1 = nz(kRotB * (wm / 14.0 - wind_dir * enh_time * 0.35)).a;
-    float g2 = nz(kRotA * (wm / 4.5 - wind_dir * enh_time * 0.9) + vec2(7.3, 1.1)).a;
+    vec2 gw = wm - wind_dir * v_lag;  // (variety: each blade a little behind the gust, its own way)
+    float g1 = nz(kRotB * (gw / 14.0 - wind_dir * enh_time * 0.35)).a;
+    float g2 = nz(kRotA * (gw / 4.5 - wind_dir * enh_time * 0.9) + vec2(7.3, 1.1)).a;
     float gust = smoothstep(0.25, 0.8, g1) * mix(0.55, 1.3, g2);
     float tall = mix(0.3, 1.0, smoothstep(0.25, 0.9, h0 / m));
     lean = face * (rnd(bs, 8u) - 0.5) * 0.8 + clump_lean * 0.5 +
-           wind_dir * (gust * gust * 0.7 * tall + flutter) * enh_wind * enh_style.z;
+           wind_dir * (gust * gust * 0.7 * tall + flutter) * enh_wind * enh_style.z * v_sway;
   } else {
     float gust = 0.5 + 0.5 * sin(dot(wm, wind_dir) / 1.6 - enh_time * 2.1 + vnoise(wm / 6.0) * 4.0);
     lean = face * (rnd(bs, 8u) - 0.5) * 0.8 + wind_dir * (gust * gust * 0.7 + flutter) * enh_wind * enh_style.z;
@@ -336,10 +441,24 @@ void main() {
   int row = gl_VertexID / 2;
   float t = float(min(row, enh_segs)) / float(enh_segs);
   float s = row >= enh_segs ? 0.0 : (gl_VertexID % 2 == 0 ? -1.0 : 1.0);
+  float width = w * pow(1.0 - t, 0.75);
+  bool in_head = false;
+  if (v_head > 0.0) {
+    // (a head: the stalk's rows up to where it starts, the last row before the tip its widest)
+    int sr = enh_segs - 2;
+    float th = row <= sr ? float(row) / float(sr) * v_head_t : row < enh_segs ? mix(v_head_t, 1.0, 0.5) : 1.0;
+    float wh = row <= sr ? w * (1.0 - 0.4 * th) : row < enh_segs ? v_head : 0.0;
+    if (kind == 4 && row < enh_segs && row == sr) {
+      wh = max(wh, v_head * 0.5);  // (petals: the flower a round blob, not a diamond)
+    }
+    // (toward the far fade, back to the plain blade's rows)
+    t = mix(t, th, v_hf);
+    width = mix(width, wh, v_hf);
+    in_head = row > sr;
+  }
   // (a quadratic arc: rising, bending over toward the lean; shorter as it bends)
   float rise = h * t * (1.0 - 0.35 * bend * t);
   vec2 over = lean_dir * h * 0.6 * bend * t * t;
-  float width = w * pow(1.0 - t, 0.75);
   vec3 world = vec3(xz.x + over.x + side.x * s * width * 0.5, y + rise - 0.02 * m,
                     xz.y + over.y + side.y * s * width * 0.5);
   // its normal: the flat side, tipped back as it bends, and rounded across (lit like a blade, not a
@@ -404,7 +523,27 @@ void main() {
     // (each blade its own shade, less so on the short ground-class grass: no dark dots)
     tipc *= (gc ? mix(0.9, 1.1, rnd(bs, 9u)) : mix(0.8, 1.15, rnd(bs, 9u))) * big_tone * mix(1.0, clump_tone, 0.5);
     tipc *= gc ? tune_grass_v2_spot : 1.0;
-    albedo = mix(tipc * (gc ? tune_grass_v2_foot : 0.35), tipc, pow(t, 0.6));
+    if (var) {
+      // (the area's tint; in a dry streak toward straw, more so up the blade)
+      float lum = dot(tipc, vec3(0.3, 0.59, 0.11));
+      vec3 straw = max(dry, vec3(lum)) * vec3(1.06, 0.97, 0.75);
+      tipc = mix(tipc * v_tint, straw, v_dry * (0.45 + 0.5 * t));
+    }
+    albedo = mix(tipc * (gc ? tune_grass_v2_foot : v_foot), tipc, pow(t, 0.6));
+    if (in_head) {
+      // (the seed head, the flower: its own color, about as bright as the grass's tips)
+      float lum = max(dot(green, vec3(0.3, 0.59, 0.11)), 0.02);
+      // (a flower a little brighter, held to a plain albedo: it reads, but never glows at night)
+      vec3 hc = kind == 4 ? v_head_c * clamp(lum * 2.5, 0.12, 0.35) : v_head_c * lum * 1.4;
+      albedo = mix(albedo, hc, v_hf);
+    }
+    if (var && tune_grass_variety > 1.5) {
+      // (debug paint: the areas, and the kinds at the tips)
+      vec3 dc = mix(mix(vec3(0.05, 0.3, 0.05), vec3(0.4, 0.02, 0.02), v_lawn), vec3(0.02, 0.05, 0.45), v_lush);
+      dc = mix(dc, vec3(0.45, 0.4, 0.02), clamp(v_dz * 1.25, 0.0, 1.0));
+      vec3 kc = kind == 1 ? vec3(0.5) : kind == 2 ? vec3(0.0) : kind == 3 ? vec3(0.5, 0.2, 0.0) : vec3(0.5, 0.0, 0.5);
+      albedo = kind > 0 && t > 0.55 ? kc : dc;
+    }
   } else {
     tipc *= mix(0.75, 1.2, rnd(bs, 9u));
     albedo = mix(tipc * 0.35, tipc, pow(t, 0.6));
