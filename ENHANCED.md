@@ -282,7 +282,7 @@ crash. Read-only: it never starts or stops a game. gk keeps only ~10 logs per na
 | Guns fire faster | `*enhanced-gun-fire-rate*` | 1.5 |
 | Ammo capacity | `*enhanced-ammo-mult*` | 2.0 |
 | Desert vehicle driving modes | `(enhanced-drive-mode 'classic / 'sport / 'turbo)` | sport (1.35x torque) |
-| Hellcat L2 ultra turbo | `*enhanced-hellcat-boost-max*` (`*enhanced-hellcat-boost-force*` 0..1 stands in for L2) | 0.4 (50 m/s up to 70 m/s) |
+| Hellcat L2 ultra turbo | `*enhanced-hellcat-boost-max*` (`*enhanced-hellcat-boost-force*` 0..1 stands in for L2) | 1.0 (50 m/s up to 100 m/s) |
 
 With `gk` running: `goalc --user-auto --game jak3`, then `(lt)`, `(mi)` (loads the project's types),
 then e.g. `(set! *enhanced-board-speed* 1.6)`. `scripts/enhanced/og_repl.py "<form>"` sends forms to
@@ -311,7 +311,7 @@ second), l1 the `warf-projectile` missile and its blast (8, one back every 20 s)
 comes down level (its own leveling torque in place of the mission's, which pitches it along its path) to rest
 hovering on the ground with Jak in it, flying as the empty one meanwhile (none of the mission's thrust, which
 never lets it go under 37.5 m/s); x or the stick back takes off again with the mission's start
-(`[hellcat] landed by circle at <y> ground <g>` in the log). L2 is its ultra turbo, as the jetboard's (it had nothing on L2): the trigger as pressed (L2 held: full), eased in and out, pushes it from 50 m/s up to 70 m/s (`*enhanced-hellcat-boost-max*` 0.4, apply-gravity! in desert-hellcat.gc, its drag made up for; the vehicle camera then goes over to its string point, cam-states.gc, so it keeps up), with the board's stronger motion blur and wider view, and long purple-violet flames out of both thrusters as big as it's pressed (up to 17 m by 5 m: a 3D-sprite core, violet glows, glitter, a short glowing trail; parts 5470-5473, logic-target.gc). Its thruster flames are fac-part.gc's 2761/2762
+(`[hellcat] landed by circle at <y> ground <g>` in the log). L2 is its ultra turbo, as the jetboard's (it had nothing on L2): the trigger as pressed (L2 held: full), eased in and out, pushes it from 50 m/s up to 100 m/s (`*enhanced-hellcat-boost-max*` 1.0, apply-gravity! in desert-hellcat.gc, its drag made up for; the vehicle camera then goes over to its string point, cam-states.gc, so it keeps up), with the board's stronger motion blur and wider view, and long purple-violet flames out of both thrusters as big as it's pressed (up to 8 m by 2.5 m: a 3D-sprite core, violet glows, glitter, a short glowing trail; parts 5470-5473, logic-target.gc). Its thruster flames are fac-part.gc's 2761/2762
 and the missile's trail and muzzle flash warf-projectile.gc's, as GAME copies (parts 5450-5460, group 1690,
 logic-target.gc), and drawn so they show: the game launches them as 2D sprites, and those drew nothing here
 (day or night; 3D sprites and glows do), so the flame is a 3D sprite facing back along the exhaust

@@ -531,7 +531,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 (defpart 5473
   :init-specs ((:texture (glow level-default-sprite))
     (:num 1.0)
-    (:scale-x (meters 2.5) (meters 1))
+    (:scale-x (meters 1.2) (meters 0.5))
     (:scale-y :copy scale-x)
     (:r 150.0 40.0)
     (:g 30.0 30.0)
@@ -551,7 +551,7 @@ the city's load boundaries rewrite the list as he walks and know nothing of the 
 ;; 1 + *enhanced-hellcat-boost-max* times it. *enhanced-hellcat-boost-force* >= 0 stands in for the
 ;; trigger (tests, from the REPL).
 (define *enhanced-hellcat-boost* 0.0)
-(define *enhanced-hellcat-boost-max* 0.4) ;; (top speed 50 m/s x 1.4 = 70 m/s at full L2)
+(define *enhanced-hellcat-boost-max* 1.0) ;; (top speed 50 m/s x 2 = 100 m/s at full L2)
 (define *enhanced-hellcat-boost-force* -1.0)
 
 ;; Enhanced: a Hellcat parked in the desert, by desert-start. Jak walks up to it and gets in with
