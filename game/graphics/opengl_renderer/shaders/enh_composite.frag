@@ -202,6 +202,7 @@ const float WATER_DETAIL = 1.0;       // two fine drifting ripple octaves (5.5 a
 const float WATER_DETAIL_SPEED = 1.3; // their drift x
 const float WATER_SPARKLE = 1.0;      // the sun's glitter sharper where the fine ripples are steep
 const float WATER_SHORE_ANIM = 1.0;   // shore foam in bands running up the beach (0: still)
+const float WATER_CELL_EDGE_M = 4.0;  // m: the shallows fade to deep this far before the near sea's cells end (0: a hard line; dbg 69)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
@@ -3630,6 +3631,27 @@ void composite_unused() {
         float nh = clamp((whigh - 6.0) / 8.0, 0.0, 1.0);
         nf = max(nf, nh);
         near_fade = nf * nf * nf * (nf * (nf * 6.0 - 15.0) + 10.0);
+      }
+      // (the game draws the near sea's 24 m cells with the far sea's plane a few meters under them,
+      // and the cells around them with that plane at the surface, over the bed: where a cell ends
+      // across the shallows, a straight hard line ran along them, light against deep, starkest at
+      // sunset. Taps around the pixel that land on that plane at the surface fade the shallows into
+      // the deep look over the last meters before it (the land and the deep water inside the cells
+      // don't count). tune_water_dbg 69: off)
+      if (!w_old_clear && WATER_CELL_EDGE_M > 0.0 && near_fade < 0.999 && abs(tune_water_dbg - 69.0) > 0.5) {
+        float r_cell = clamp(WATER_CELL_EDGE_M * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 2.0 * texel.y, 0.15);
+        float out_n = 0.0;
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * 0.7854 + 0.3;
+          vec2 tuv = uv + vec2(cos(a) * texel.x / texel.y, sin(a)) * r_cell * (i % 2 == 0 ? 1.0 : 0.5);
+          float tfd = textureLod(tex_T6, tuv, 0.0).r;
+          if (tfd > 1e-7 && abs(tfd - textureLod(tex_T3, tuv, 0.0).r) < 1e-7) {
+            out_n += 1.0;
+          }
+        }
+        // (half the taps out: at the edge itself, all deep)
+        float ce = clamp(out_n / 4.0, 0.0, 1.0);
+        near_fade = max(near_fade, ce * ce * (3.0 - 2.0 * ce));
       }
       depth_m = mix(depth_m, 40.0, near_fade);
     }
