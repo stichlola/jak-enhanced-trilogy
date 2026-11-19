@@ -184,6 +184,25 @@ uniform float tune_spill_chr = 0.4;   // the light spill on characters (times; 1
 // (the shade's share on the water and on what it mirrors: the scene's open shade keeps 0.42 of the
 // shadow's strength as sky fill, and loses a little more to the occlusion)
 const float k_water_shade = 0.62;
+// The water's look (constants: no new uniforms here). Every one goes back to the old look with
+// tune_water_dbg 60 (all of them at once, live A/B), or one at a time with 61-68 (see there).
+const float WATER_GRADE = 0.4;        // the area's color grade on the water: this share, the rest only its brightness (1: all, as before)
+const float WATER_F0 = 0.04;          // the water's reflectance head-on (was 0.02)
+const float WATER_SKY_MIN = 0.08;     // the reflection's least weight, also seen from above (was 0)
+const float WATER_GRAZE = 0.8;        // grazing, the reflection's strength setting gives way to a full mirror by this share (was 0)
+const float WATER_SCATTER = 0.06;     // the sky's light scattered in the water's body (was 0)
+const float WATER_CLEAR_M = 0.9;      // the sea: the bed shows through this many meters (was 0.35)
+const float WATER_CLEAR_K = 0.75;     // ...at most this clear (was 0.6)
+const float WATER_NEAR_A = 14.0;      // m: the shallows' clearness fades from here (was 8; the near sea's cells end at 24 m)
+const float WATER_NEAR_B = 23.0;      // ...to here (was 22)
+const float WATER_MIRROR_A = 40.0;    // m: the far planar mirror takes over from here (was 25)
+const float WATER_MIRROR_B = 140.0;   // ...to here (was 50)
+const float WATER_WARP = 6.0;         // the ripples' small octaves shifted by a slow noise field, in noise cells (0: a 24.6 m repeat)
+const float WATER_DETAIL = 1.0;       // two fine drifting ripple octaves (5.5 and 11 /m) over the others (0: none)
+const float WATER_DETAIL_SPEED = 1.3; // their drift x
+const float WATER_SPARKLE = 1.0;      // the sun's glitter sharper where the fine ripples are steep
+const float WATER_SHORE_ANIM = 1.0;   // shore foam in bands running up the beach (0: still)
+const float WATER_CELL_EDGE_M = 4.0;  // m: the shallows fade to deep this far before the near sea's cells end (0: a hard line; dbg 69)
 uniform float tune_water_hour = 1.0;  // the water's body dims and tints with a low sun (0: fixed)
 uniform float tune_water_env_floor = 1.0;  // far sea under the horizon: the reflected ray's lift follows the calm mirror ray (0: a fixed 0.03, a flat band)
 uniform float tune_water_env_lift = 1.0;  // a reflected ray that lands on the sea itself: lifted to the first sky over the sea's edge (0: the fog color)
@@ -197,6 +216,8 @@ uniform float tune_water_moon_soft = 1.0;  // the same for the moon's tight glin
 uniform float tune_water_lamp_map = 1.0;  // a lamp's column on the water only where its shadow map lets its light reach (0: off)
 uniform float tune_water_oasis = 1.0; // desert oases at the sea's 9 m (k_oases) are ponds too (0: by height only, they took the sea's pale shallows)
 const vec3 k_oases[1] = vec3[](vec3(620.0, 2520.0, 170.0));  // x, z, radius (m): desert-ashelin's oasis
+uniform float tune_water_day = 2.25;  // the desert's water by day, after the grade: its brightness (gain on its luma, rolled off to 1; 1 or 0: off, as before)
+uniform float tune_water_day_hue = 0.55;  // ...and how far toward turquoise near the shore / blue out at sea
 uniform float tune_water_ssr_far = 300.0;  // the water's traced reflection out to here, m (80: the old, far shores unreflected; > 80 also the far planar mirror)
 uniform float light_spill;      // at night the bright pixels light the surfaces near them
 uniform float lens_flare;       // the sun in the lens (0 = off)
@@ -512,18 +533,36 @@ float gnoise(vec2 x) {
 
 // water height (m) at a world point (m): four octaves moving in different directions, each
 // faded out when its waves get smaller than a pixel (foot: meters per pixel) so nothing aliases
-float water_height(vec2 w, float t, float foot) {
+// (warp: a slow noise field (about -0.5..0.5, ~50 m across) that shifts the small octaves by a few
+// of their own cells, so the noise table's 64-cell repeat (24.6 m at 2.6 /m) no longer lines up;
+// 0 and the old turn (3-4-5, rational) give the old water)
+float water_height(vec2 w, float t, float foot, vec2 warp, bool old) {
   float h = 0.0;
-  mat2 turn = mat2(0.8, -0.6, 0.6, 0.8);
+  // (0.61 rad: no rational angle, the octaves' lattices never fall back in line)
+  mat2 turn = old ? mat2(0.8, -0.6, 0.6, 0.8) : mat2(0.8196, -0.5729, 0.5729, 0.8196);
   vec2 q = w;
   for (int i = 0; i < 4; i++) {
     float freq = i == 0 ? 0.12 : i == 1 ? 0.35 : i == 2 ? 0.95 : 2.6;
     float amp = i == 0 ? 0.045 : i == 1 ? 0.016 : i == 2 ? 0.0055 : 0.0018;
     vec2 drift = i == 0 ? vec2(0.35, 0.2) : i == 1 ? vec2(-0.25, 0.4) : i == 2 ? vec2(0.5, -0.3) : vec2(-0.6, -0.45);
     float fade = 1.0 - smoothstep(0.3, 1.1, foot * freq);
-    h += amp * fade * gnoise(q * freq + drift * t * freq * 1.1 + float(i) * 17.3);
+    vec2 sh = i < 2 ? vec2(0.0) : warp * (i == 2 ? 0.5 : 1.0);
+    h += amp * fade * gnoise(q * freq + sh + drift * t * freq * 1.1 + float(i) * (old ? 17.3 : 17.618));
     q = turn * q;
   }
+  return h;
+}
+
+// the fine ripples: two small octaves drifting against each other over the others (cat's paws),
+// gone where they'd be under a pixel
+float water_detail(vec2 w, float t, float foot, vec2 warp) {
+  vec2 q1 = mat2(0.309, -0.951, 0.951, 0.309) * w;
+  vec2 q2 = mat2(-0.719, -0.695, 0.695, -0.719) * w;
+  float ts = t * WATER_DETAIL_SPEED;
+  float h = 0.0009 * (1.0 - smoothstep(0.3, 1.1, foot * 5.5)) *
+            gnoise(q1 * 5.5 + warp * 1.3 + vec2(0.55, 0.3) * ts * 5.5 + 3.71);
+  h += 0.0004 * (1.0 - smoothstep(0.3, 1.1, foot * 11.0)) *
+       gnoise(q2 * 11.0 + warp * 1.7 - vec2(0.4, -0.5) * ts * 11.0 + 41.3);
   return h;
 }
 
@@ -3126,6 +3165,8 @@ void composite_unused() {
   bool water_deep = true;
   bool water_decal = false;  // something flat lying on the water (splash and ripple discs)
   bool warp_undo = false;    // a splash's ripple mesh over something else: shown without it
+  float water_tq = 0.0;      // the water's turquoise share (near the shore), for its day look after the grade
+  float water_fres = 0.0;    // ...and its fresnel (the sky it mirrors keeps its own color)
   if (water_strength > 0.0) {
     float wd = texture(tex_T5, uv).r;
     float fd = texture(tex_T6, uv).r;
@@ -3538,9 +3579,37 @@ void composite_unused() {
     float t = haze.w;
     float far = 1.0 / (1.0 + z / (140.0 * 4096.0));
     float e = 0.08;
-    float h0 = water_height(world, t, water_foot);
-    vec2 slope = vec2(water_height(world + vec2(e, 0.0), t, water_foot) - h0,
-                      water_height(world + vec2(0.0, e), t, water_foot) - h0) / e;
+    // (tune_water_dbg 60: the old look, every WATER_* term off; 61 the old colors only (C++), 62 the
+    // grade, 63 fresnel/sky, 64 clearness and near fade, 65 the mirror's reach, 66 warp, 67 detail and
+    // sparkle, 68 the shore's animation)
+    bool w_old = abs(tune_water_dbg - 60.0) < 0.5;
+    bool w_old_sky = w_old || abs(tune_water_dbg - 63.0) < 0.5;
+    bool w_old_clear = w_old || abs(tune_water_dbg - 64.0) < 0.5;
+    bool w_old_mirror = w_old || abs(tune_water_dbg - 65.0) < 0.5;
+    bool w_old_warp = w_old || abs(tune_water_dbg - 66.0) < 0.5;
+    bool w_old_detail = w_old || abs(tune_water_dbg - 67.0) < 0.5;
+    bool w_old_shore = w_old || abs(tune_water_dbg - 68.0) < 0.5;
+    vec2 wwarp = w_old_warp ? vec2(0.0)
+                            : WATER_WARP * vec2(gnoise(world * 0.021), gnoise(world * 0.021 + 9.1));
+    float h0 = water_height(world, t, water_foot, wwarp, w_old_warp);
+    vec2 slope = vec2(water_height(world + vec2(e, 0.0), t, water_foot, wwarp, w_old_warp) - h0,
+                      water_height(world + vec2(0.0, e), t, water_foot, wwarp, w_old_warp) - h0) / e;
+    // (the fine ripples, their slope over 2 cm: 8 cm is a whole cell of the finest)
+    vec2 dslope = vec2(0.0);
+    if (!w_old_detail && WATER_DETAIL > 0.0 && water_foot < 0.2) {  // (the fade below ends at 0.2: a lower cut drew a ring)
+      const float de = 0.02;
+      float d0 = water_detail(world, t, water_foot, wwarp);
+      dslope = WATER_DETAIL * vec2(water_detail(world + vec2(de, 0.0), t, water_foot, wwarp) - d0,
+                                   water_detail(world + vec2(0.0, de), t, water_foot, wwarp) - d0) / de;
+      slope += dslope;
+    }
+    // (the far planar mirror's share, here so the ripples can calm with it: a long blend, no ring)
+    float mirror_k = w_old_mirror ? smoothstep(25.0 * 4096.0, 50.0 * 4096.0, z)
+                                  : smoothstep(WATER_MIRROR_A * 4096.0, WATER_MIRROR_B * 4096.0, z);
+    mirror_k *= step(80.5, tune_water_ssr_far);
+    if (!w_old_mirror) {
+      slope *= 1.0 - 0.35 * mirror_k;
+    }
 
     // how deep the water is here (meters), from the sea bed seen through it (near sea only)
     float depth_m = 40.0;
@@ -3557,7 +3626,37 @@ void composite_unused() {
       float whigh = max(-height, 0.0) / 4096.0;
       // (the clearness itself fades, evenly: fading the depth instead, exp() made it all happen in a
       // few meters, a visible arc around the camera)
-      near_fade = max(smoothstep(8.0, 22.0, wdist), smoothstep(6.0, 14.0, whigh));
+      // (wider and softer than it was (8-22 m, smoothstep): its inner edge drew a lighter disc around
+      // the camera; smootherstep has no visible start or end)
+      if (w_old_clear) {
+        near_fade = max(smoothstep(8.0, 22.0, wdist), smoothstep(6.0, 14.0, whigh));
+      } else {
+        float nf = clamp((wdist - WATER_NEAR_A) / (WATER_NEAR_B - WATER_NEAR_A), 0.0, 1.0);
+        float nh = clamp((whigh - 6.0) / 8.0, 0.0, 1.0);
+        nf = max(nf, nh);
+        near_fade = nf * nf * nf * (nf * (nf * 6.0 - 15.0) + 10.0);
+      }
+      // (the game draws the near sea's 24 m cells with the far sea's plane a few meters under them,
+      // and the cells around them with that plane at the surface, over the bed: where a cell ends
+      // across the shallows, a straight hard line ran along them, light against deep, starkest at
+      // sunset. Taps around the pixel that land on that plane at the surface fade the shallows into
+      // the deep look over the last meters before it (the land and the deep water inside the cells
+      // don't count). tune_water_dbg 69: off)
+      if (!w_old_clear && WATER_CELL_EDGE_M > 0.0 && near_fade < 0.999 && abs(tune_water_dbg - 69.0) > 0.5) {
+        float r_cell = clamp(WATER_CELL_EDGE_M * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 2.0 * texel.y, 0.15);
+        float out_n = 0.0;
+        for (int i = 0; i < 8; i++) {
+          float a = float(i) * 0.7854 + 0.3;
+          vec2 tuv = uv + vec2(cos(a) * texel.x / texel.y, sin(a)) * r_cell * (i % 2 == 0 ? 1.0 : 0.5);
+          float tfd = textureLod(tex_T6, tuv, 0.0).r;
+          if (tfd > 1e-7 && abs(tfd - textureLod(tex_T3, tuv, 0.0).r) < 1e-7) {
+            out_n += 1.0;
+          }
+        }
+        // (half the taps out: at the edge itself, all deep)
+        float ce = clamp(out_n / 4.0, 0.0, 1.0);
+        near_fade = max(near_fade, ce * ce * (3.0 - 2.0 * ce));
+      }
       depth_m = mix(depth_m, 40.0, near_fade);
     }
     // a pond: murky, the bed gone a few cm down, no swell or caustics (in the desert: the oases'
@@ -3577,7 +3676,8 @@ void composite_unused() {
     // sea, the only one the bed is seen through, on some cells around the camera and not on others:
     // any wider clearness showed those cells, square patches moving with the camera)
     float clear_water = pond_here ? exp(-depth_real / 0.25) * (1.0 - near_fade)
-                                  : exp(-depth_real / 0.35) * 0.6 * (1.0 - near_fade);
+                      : w_old_clear ? exp(-depth_real / 0.35) * 0.6 * (1.0 - near_fade)
+                                    : exp(-depth_real / WATER_CLEAR_M) * WATER_CLEAR_K * (1.0 - near_fade);
 
     // how rough the sea is: some chop always, rising and falling over minutes, more with rain and
     // a sandstorm (ponds stay still). In a thunderstorm the water looks as in clear weather: no
@@ -3730,13 +3830,24 @@ void composite_unused() {
     vec3 vdir = normalize(p);
     vec3 r = reflect(vdir, n);
     float facing = clamp(dot(-vdir, n), 0.0, 1.0);
-    float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
+    float wf0 = w_old_sky ? 0.02 : WATER_F0;
+    float fresnel = wf0 + (1.0 - wf0) * pow(1.0 - facing, 5.0);
 
     // the water's body: one color for the near and far sea (the game draws them differently),
     // shaded a little by the ripples so it keeps some texture; clearer where it's shallow, where
     // what's under it (and the game's own water) shows through
     float shade = 1.0 + 0.3 * far * dot(n - up_view, normalize(fwd_view + right_view * 0.3));
     vec3 body_col = mix(water_deep_color, water_shallow_color, clear_water);
+    // (turquoise toward the shore, blue out at sea, for the day look after the grade: by the depth
+    // where the bed is seen, else by the distance over a long, smooth fall (from high up the game
+    // draws no near sea: nothing else tells the shore). A pond (an oasis) turquoise all over)
+    {
+      float wdh = length(p - up_view * dot(up_view, p)) / 4096.0;
+      float tq = exp(-wdh / 380.0);
+      tq = max(tq, exp(-depth_real / 3.0) * (1.0 - near_fade));
+      water_tq = pond_here ? 0.85 : tq;
+      water_fres = fresnel;
+    }
     // (the body follows the hour: full at noon, dimmer and tinted by the low sky as the sun goes
     // down; the night's darkening is night_dim's, so the factor goes back to 1 into the night)
     if (tune_water_hour > 0.0) {
@@ -3748,6 +3859,10 @@ void composite_unused() {
       vec3 wsk = sky_color(normalize(fwd_view + up_view * 0.2));
       vec3 wtint = clamp(wsk / max(luma(wsk), 1e-3), vec3(0.6), vec3(1.5));
       body_col *= wk * mix(vec3(1.0), wtint, 0.4 * tune_water_hour * (1.0 - wday));
+    }
+    // (the sky's light scattered back out of the water: by day, out of the sun's shade)
+    if (!w_old_sky) {
+      body_col += sky_color(up_view) * (WATER_SCATTER * (1.0 - wsh) * (1.0 - clouds.w));
     }
     vec3 body = night_dim(body_col * shade) * (1.0 - shadow_strength * k_water_shade * wsh);
     // (at night no darker than a share of the game's own water there: a canal between walls in
@@ -3765,7 +3880,13 @@ void composite_unused() {
       body = mix(night_dim(water_deep_color * shade), c * vec3(0.7, 0.76, 0.78), clear_water);
     }
     // (only a little of the game's own water texture shows: it's a small repeating tile)
+    // (the shallows: the bed seen through the water, tinted by it (the shallow color's hue as its
+    // transmittance), turquoise over sand)
     vec3 wc = mix(body, c, clear_water * 0.3 * water_unify + (1.0 - water_unify));
+    if (!w_old_clear && !pond_here) {
+      vec3 trans = water_shallow_color / max(max(water_shallow_color.g, water_shallow_color.b), 1e-3);
+      wc = mix(body, c * mix(vec3(1.0), trans, 0.7), clear_water * 0.5 * water_unify + (1.0 - water_unify));
+    }
 
     // reflection. Far away: the screen where the reflected ray vanishes (sky, distant hills).
     // Near: trace the ray through the depth buffer (which has no water) to catch nearby things.
@@ -3780,7 +3901,7 @@ void composite_unused() {
     if (re_up < re_floor) {
       re = normalize(re + up_view * (re_floor - re_up));
     }
-    vec3 refl = fog_color;
+    vec3 refl = w_old_sky ? fog_color : mix(fog_color, sky_color(re), 1.0 - clouds.w);
     vec2 refl_uv = vec2(-1.0);  // where on screen the env sample was read (x < 0: not the scene)
     vec2 ssr_uv = vec2(-1.0);   // ...and the traced one
     vec3 env_dbg = vec3(0.0);
@@ -3798,8 +3919,10 @@ void composite_unused() {
         // stays, close to the haze around it. The flat fog color there drew light/olive blocks the
         // shape of the far tiles that rise over the horizon, desert coast by day. The fog color is
         // still the fallback over the near ocean. tune_water_dbg 52: fog color everywhere, as before)
+        // (the sky's own color there by day, not the fog's: the desert's dusty fog, Haven's grey, drew
+        // a dull band where the reflected ray meets the sea)
         if (env_near || abs(tune_water_dbg - 52.0) < 0.5) {
-          refl = fog_color;
+          refl = w_old_sky ? fog_color : mix(fog_color, sky_color(re), 1.0 - clouds.w);
         }
         refl_uv = vec2(-1.0);
         env_dbg.r = 1.0;
@@ -3832,7 +3955,6 @@ void composite_unused() {
     // far off the view grazes the water: a ripple tilted a degree toward the eye sent the ray down
     // into the sea and nothing was found. There the march follows the calm surface's mirror ray
     // (a planar mirror) and the ripples bend the picture it finds instead
-    float mirror_k = smoothstep(25.0 * 4096.0, 50.0 * 4096.0, z) * step(80.5, tune_water_ssr_far);
     vec3 rs = normalize(mix(r, reflect(vdir, up_view), mirror_k));
     bool hiz = hiz_levels > 0 && !(abs(tune_hiz_dbg - 1.0) < 0.5 && tex_coord.x < 0.5);
     bool hiz_ran = hiz && z < tune_hiz_range_m * 4096.0;
@@ -3924,7 +4046,12 @@ void composite_unused() {
     // (faded out from 150 to 200 m, no seam)
     refl = reflection_with_rt(p, r, refl, ssr, ssr_hit, 400.0 * 4096.0,
                               1.0 - smoothstep(150.0 * 4096.0, 200.0 * 4096.0, z));
-    wc = rt_mode == 3 ? refl : mix(wc, refl, clamp(fresnel * 1.2, 0.0, 1.0) * water_strength);
+    float rw = clamp(fresnel * 1.2 + (w_old_sky ? 0.0 : WATER_SKY_MIN), 0.0, 1.0);
+    // (grazing, the water mirrors nearly all of the sky: the reflection's strength setting gives
+    // way there, so the far sea takes the low sky's color at sunset, not the body's dark teal)
+    float rws = w_old_sky ? water_strength
+                          : mix(water_strength, max(water_strength, 1.0), WATER_GRAZE * pow(1.0 - facing, 3.0));
+    wc = rt_mode == 3 ? refl : mix(wc, refl, rw * rws);
     if (abs(tune_water_dbg - 3.0) < 0.5) {
       wc = body;  // (test: no reflection)
     }
@@ -4030,8 +4157,14 @@ void composite_unused() {
       // oval a sixth of the screen wide, with a dark ring around it; vanilla has none)
       if (tune_water_glint_soft > 0.0) {
         float tight = pow(sr, 900.0) * 7.0;
-        float glit = 1.6 * smoothstep(0.1, 0.45, gnoise(world * 2.5 + vec2(t * 0.8, -t * 0.6))) *
-                     smoothstep(-0.2, 0.3, gnoise(world * 6.0 - vec2(t * 1.1, t * 0.7)));
+        // (the glitter's noise turned and warped as the ripples: straight, it repeated every 25.6 m)
+        vec2 gw = w_old_warp ? world : mat2(0.8196, -0.5729, 0.5729, 0.8196) * world + wwarp * 0.4;
+        float glit = 1.6 * smoothstep(0.1, 0.45, gnoise(gw * 2.5 + vec2(t * 0.8, -t * 0.6))) *
+                     smoothstep(-0.2, 0.3, gnoise(gw * 6.0 - vec2(t * 1.1, t * 0.7)));
+        // (sharper sparkles where the fine ripples are steep)
+        if (!w_old_detail) {
+          tight *= 1.0 + 2.0 * WATER_SPARKLE * clamp(length(dslope) * 80.0, 0.0, 1.0);
+        }
         float soft = tight * glit / (1.0 + tight * glit);
         glint = mix(tight, soft, tune_water_glint_soft) + pow(sr, 80.0) * 0.25;
       }
@@ -4066,6 +4199,14 @@ void composite_unused() {
       float wave = 0.5 + 0.7 * gnoise(world * 1.4 + vec2(t * 0.35, -t * 0.2)) +
                    0.35 * gnoise(world * 3.7 - vec2(t * 0.5, t * 0.3));
       float foam = smoothstep(0.8, 0.05, depth_m) * smoothstep(0.25, 0.75, wave + 0.6 - depth_m);
+      // (alive: soft bands of foam running up the beach, their fronts bent by noise, a slow surge
+      // that grows and thins them)
+      if (!w_old_shore && WATER_SHORE_ANIM > 0.0) {
+        float run = depth_m * 18.0 + t * 1.6 + gnoise(world * 0.3) * 3.0;
+        float band = smoothstep(0.15, 0.85, 0.5 + 0.5 * sin(run));
+        float surge = 0.75 + 0.25 * sin(t * 0.45 + gnoise(world * 0.08) * 4.0);
+        foam *= mix(1.0, (0.35 + 0.9 * band) * surge, WATER_SHORE_ANIM);
+      }
       // (lit as the wake's foam and the runup line on the sand: dimmer at dusk, night-dimmed, shaded
       // by the sun's shadow; the fixed white glowed along every beach after sunset. Never darker than
       // the water it lies on: at sunset the sea mirrors a bright sky, and dim foam drew dark streaks.
@@ -4099,7 +4240,8 @@ void composite_unused() {
     // the very edge: the last few cm of water fade into the wet ground beside them (the color of
     // the dry ground nearby, darkened as the shore band below darkens it), no hard line where the
     // sand dips under the water
-    if (!water_deep && seabed_d > 1e-7 && depth_m < 0.35 && abs(tune_water_dbg - 31.0) > 0.5) {
+    float edge_w = w_old_shore ? 0.0 : 0.15;  // (a wider, softer wet edge)
+    if (!water_deep && seabed_d > 1e-7 && depth_m < 0.35 + edge_w && abs(tune_water_dbg - 31.0) > 0.5) {
       float r_uv = clamp(0.8 * 4096.0 * abs(proj.w) * 0.5 / max(z, 1.0), 2.0 * texel.y, 0.06);
       vec3 shore_sum = vec3(0.0);
       float shore_n = 0.0;
@@ -4112,7 +4254,10 @@ void composite_unused() {
         }
       }
       if (shore_n > 0.0) {
-        float edge = smoothstep(0.0, pond_here ? 0.14 : 0.3, depth_m);
+        // (the waterline breathing a little with the waves)
+        float lap_e = w_old_shore || pond_here ? 0.0
+            : 0.04 * sin(t * 1.1 + gnoise(world * 0.25) * 6.0);
+        float edge = smoothstep(0.0, pond_here ? 0.14 : 0.3 + edge_w, depth_m + lap_e);
         wc = mix(shore_sum / shore_n * vec3(0.6, 0.6, 0.62), wc, edge);
       }
     }
@@ -7011,7 +7156,18 @@ void composite_unused() {
     c *= mix(vec3(1.0), vec3(1.03, 1.02, 1.03), nd);
     c = max(mix(vec3(luma(c)), c, 1.0 + 0.18 * nd), 0.0);
   }
-  c = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
+  {
+    vec3 graded = c * grade_gain + grade_lift * (1.0 - clamp(c, 0.0, 1.0));
+    // (the water takes the grade's brightness but only part of its tint: the desert's warm gain
+    // turned the teal sea olive-black. tune_water_dbg 60/62: the full grade, as before)
+    if (wsurf > 0.0 && abs(tune_water_dbg - 60.0) > 0.5 && abs(tune_water_dbg - 62.0) > 0.5) {
+      const vec3 lw = vec3(0.299, 0.587, 0.114);
+      vec3 gray = c * dot(grade_gain, lw) + vec3(dot(grade_lift, lw)) * (1.0 - clamp(c, 0.0, 1.0));
+      // (by the water's share: fully on at any water, its soft edge pixels drew a line)
+      graded = mix(graded, mix(gray, graded, WATER_GRADE), clamp(wsurf, 0.0, 1.0));
+    }
+    c = graded;
+  }
   float l = luma(c);
   c = max(mix(vec3(l), c, saturation * (1.0 + 0.12 * weather2.z)), 0.0);
   // (on 0..1, what's over it kept: past 1 the curve falls back to 0, the flames' bright red cores
@@ -7025,6 +7181,29 @@ void composite_unused() {
   float wl = l - 0.35;
   wl *= (wl < 0.0 && warmth > 0.0) ? tune_warm_shadow : 1.0;
   c += warmth * vec3(1.0, 0.25, -0.75) * wl * (1.0 - 0.6 * smoothstep(0.55, 0.9, l));
+
+  // the desert's water by day: the noon exposure, the grade and its contrast took a light teal body to
+  // a dark one (Spargus sea 12h from 110 m up: luma 0.16, 0.06/0.19/0.20). Its luma lifted, rolled
+  // off toward 1 (glints keep their white), never under 0.06; its hue steered turquoise near the
+  // shore and a deeper blue out at sea, less where it mirrors the sky (a low sun's warm sky stays).
+  // Not by night (the night factor) nor in a sandstorm's or a cloud's grey. (tune_water_day 1: off)
+  if (wsurf > 0.0 && tune_water_day > 1.0 && sun_haze > 0.0 && abs(tune_water_dbg - 60.0) > 0.5) {
+    float wday = smoothstep(0.02, 0.45, sky_sun.w) * (1.0 - clouds.w) * min(sun_haze * 1.25, 1.0) *
+                 (1.0 - 0.6 * clamp(weather.x, 0.0, 1.0)) * clamp(wsurf, 0.0, 1.0);
+    float g = 1.0 + (tune_water_day - 1.0) * wday;
+    float l0 = max(luma(c), 0.0);
+    float l1 = max(l0 * g / (1.0 + l0 * (g - 1.0)), 0.06 * wday);
+    vec3 lifted = c * (l1 / max(l0, 1e-4));
+    // (luma-1 hues: turquoise 0.25/0.62/0.58, deep blue 0.10/0.36/0.60)
+    vec3 hue = mix(vec3(0.32, 1.17, 1.94), vec3(0.50, 1.23, 1.15), water_tq) * l1;
+    float hk = tune_water_day_hue * wday * smoothstep(0.15, 0.5, sky_sun.w) *
+               (1.0 - 0.75 * smoothstep(0.1, 0.6, water_fres));
+    // (what was near black has no hue of its own to keep)
+    hk = max(hk, wday * (1.0 - smoothstep(0.02, 0.08, l0)));
+    // (the bright parts, glints and foam, keep theirs)
+    hk *= 1.0 - smoothstep(0.55, 0.85, l1);
+    c = mix(lifted, hue, clamp(hk, 0.0, 1.0));
+  }
 
   // the desert under a high sun: the game's ground comes in near white (bluish on the slopes), the
   // grade above whiter still: its highlights rolled off softly (a film shoulder) and warmed back

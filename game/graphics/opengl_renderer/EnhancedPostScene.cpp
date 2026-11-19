@@ -1063,9 +1063,35 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     // sunny: Jak 1's turquoise sea
     const float deep[3] = {0.02f, 0.3f, 0.4f}, shallow[3] = {0.12f, 0.68f, 0.66f};
     float d[3], sh[3];
+    // each place its own water (Jak 3): the desert's (its coast, Spargus' sea, the oases) teal
+    // near the shore and a clear blue out, fitting the warm sand; Haven's a readable grey teal.
+    // The body a little brighter by day (it was an almost black blue). water.place 0 and
+    // water.body 1 (or shaders.tune_water_dbg 60/61): the old colors
+    static const EnhancedTune t_place("water.place", 1.f);
+    static const EnhancedTune t_body("water.body", 1.5f);
+    float dbg = 0.f;
+    enhanced_tune_lookup("shaders.tune_water_dbg", &dbg, 1);
+    const bool old = std::abs(dbg - 60.f) < 0.5f || std::abs(dbg - 61.f) < 0.5f;
+    const bool jak3 = g_game_version == GameVersion::Jak3;
+    const bool spargus = jak3 && m_city && !m_haven_windows;
+    const bool desert = jak3 && (m_pond || spargus);
+    const bool haven = jak3 && m_haven_windows;
+    const float place = old ? 0.f : std::clamp((float)t_place, 0.f, 1.f);
+    // (Haven only half as much brighter: at 1.5 its port went bright cyan at sunset, not grey teal)
+    const float body = old ? 1.f : 1.f + ((float)t_body - 1.f) * (1.f - m_night) * (haven ? 0.5f : 1.f);
+    const float des_deep[3] = {0.05f, 0.30f, 0.38f}, des_shallow[3] = {0.20f, 0.62f, 0.58f};
+    const float hav_deep[3] = {0.06f, 0.20f, 0.24f}, hav_shallow[3] = {0.12f, 0.30f, 0.30f};
     for (int i = 0; i < 3; i++) {
-      d[i] = m_settings.water_deep[i] + (deep[i] - m_settings.water_deep[i]) * m_sunny;
-      sh[i] = m_settings.water_shallow[i] + (shallow[i] - m_settings.water_shallow[i]) * m_sunny;
+      float pd = m_settings.water_deep[i], ps = m_settings.water_shallow[i];
+      if (desert) {
+        pd += (des_deep[i] - pd) * place;
+        ps += (des_shallow[i] - ps) * place;
+      } else if (haven) {
+        pd += (hav_deep[i] - pd) * place;
+        ps += (hav_shallow[i] - ps) * place;
+      }
+      d[i] = (pd + (deep[i] - pd) * m_sunny) * body;
+      sh[i] = (ps + (shallow[i] - ps) * m_sunny) * body;
     }
     glUniform3fv(glGetUniformLocation(id, "water_deep_color"), 1, d);
     glUniform3fv(glGetUniformLocation(id, "water_shallow_color"), 1, sh);
