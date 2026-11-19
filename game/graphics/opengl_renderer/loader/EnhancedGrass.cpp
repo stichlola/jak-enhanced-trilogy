@@ -389,6 +389,7 @@ struct FieldGl {
 struct GrassGl {
   bool made = false;
   GLuint vao = 0, vbo = 0, white = 0;
+  GLuint noise = 0;  // shrub_grass.vert's smooth noise (enh_noise)
   std::unordered_map<u64, FieldGl> fields;
   std::vector<math::Vector4f> tiles[3];
   std::vector<math::Vector4f> all;
@@ -410,6 +411,43 @@ void make_gl() {
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, &white);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  // the blades' noise: 4 channels of smooth value noise, each its own random lattice of 32 x 32
+  // (wrapping), 8 texels a lattice cell (quintic between), so a feature per 1/32 of the texture
+  {
+    constexpr int kN = 256, kL = 32, kPer = kN / kL;
+    std::vector<u8> lattice(kL * kL * 4);
+    u32 st = 0x9E3779B9u;
+    for (auto& v : lattice) {
+      st ^= st << 13;
+      st ^= st >> 17;
+      st ^= st << 5;
+      v = (u8)(st >> 24);
+    }
+    std::vector<u8> px(kN * kN * 4);
+    for (int y = 0; y < kN; y++) {
+      for (int x = 0; x < kN; x++) {
+        const int cx = x / kPer, cy = y / kPer;
+        float fx = (x % kPer) / (float)kPer, fy = (y % kPer) / (float)kPer;
+        fx = fx * fx * fx * (fx * (fx * 6.f - 15.f) + 10.f);
+        fy = fy * fy * fy * (fy * (fy * 6.f - 15.f) + 10.f);
+        for (int c = 0; c < 4; c++) {
+          auto at = [&](int i, int k) {
+            return (float)lattice[(((k % kL) * kL) + (i % kL)) * 4 + c];
+          };
+          const float a = at(cx, cy) + (at(cx + 1, cy) - at(cx, cy)) * fx;
+          const float b = at(cx, cy + 1) + (at(cx + 1, cy + 1) - at(cx, cy + 1)) * fx;
+          px[(y * kN + x) * 4 + c] = (u8)std::lround(a + (b - a) * fy);
+        }
+      }
+    }
+    glGenTextures(1, &g_gl.noise);
+    glBindTexture(GL_TEXTURE_2D, g_gl.noise);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, kN, kN, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+  }
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
@@ -958,15 +996,32 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
   // lush every half meter (grassy or not, softened over ~2 m so the edge thins out)
   constexpr int kMinCells = 40;
   int made = 0, cells_total = 0;
+  std::vector<int> sq_cells(sq_x * sq_z, 0);
   for (int sk = 0; sk < sq_z; sk++) {
     for (int si = 0; si < sq_x; si++) {
-      int cells = 0;
       for (int k = sk * per; k < (sk + 1) * per; k++) {
         for (int i = si * per; i < (si + 1) * per; i++) {
-          cells += grassy[k * gx + i];
+          sq_cells[sk * sq_x + si] += grassy[k * gx + i];
         }
       }
-      if (cells < kMinCells) {
+    }
+  }
+  for (int sk = 0; sk < sq_z; sk++) {
+    for (int si = 0; si < sq_x; si++) {
+      const int cells = sq_cells[sk * sq_x + si];
+      // (a square with a little of it, next to one with enough: a field too, or the grass running
+      // across would stop at a straight line)
+      bool next_to = false;
+      for (int dk = -1; dk <= 1 && cells > 0 && cells < kMinCells; dk++) {
+        for (int di = -1; di <= 1; di++) {
+          const int ni = si + di, nk = sk + dk;
+          if ((di || dk) && ni >= 0 && nk >= 0 && ni < sq_x && nk < sq_z &&
+              sq_cells[nk * sq_x + ni] >= kMinCells) {
+            next_to = true;
+          }
+        }
+      }
+      if (cells < kMinCells && !next_to) {
         continue;
       }
       const float cx = (x0 + (si + 0.5f) * kSquare) * kMeter, cz = (z0 + (sk + 0.5f) * kSquare) * kMeter;
@@ -978,17 +1033,26 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
       field->x0 = cx - r;
       field->z0 = cz - r;
       field->heights.assign(field->n * field->n, kNoFloor);
-      std::vector<float> raw(field->n * field->n, 0.f);
+      // (how grassy: also kMargin spots past the square's edge, so the blur below goes on into the
+      // neighbor square as it does there: no straight cut or step of density at the 64 m edges)
+      constexpr int kMargin = 4;
+      const int ne = field->n + 2 * kMargin;
+      std::vector<float> raw_e(ne * ne, 0.f);
       std::vector<std::array<float, 3>> floor_rgb(field->n * field->n, {-1.f, 0.f, 0.f});
       double rgb_sum[3] = {0, 0, 0};
       int rgb_count = 0;
-      for (int k = 0; k < field->n; k++) {
-        for (int i = 0; i < field->n; i++) {
+      for (int ke = 0; ke < ne; ke++) {
+        for (int ie = 0; ie < ne; ie++) {
+          const int i = ie - kMargin, k = ke - kMargin;
+          const bool inside = i >= 0 && k >= 0 && i < field->n && k < field->n;
           float y, rgb[3];
           float g = 0.f;
           if (ground(field->x0 + i * kStep * kMeter, field->z0 + k * kStep * kMeter, &y, &g, rgb)) {
+            raw_e[ke * ne + ie] = g;
+            if (!inside) {
+              continue;
+            }
             field->heights[k * field->n + i] = y;
-            raw[k * field->n + i] = g;
             if (g > 0.f) {
               for (int c = 0; c < 3; c++) {
                 rgb_sum[c] += rgb[c];
@@ -1005,31 +1069,37 @@ void enhanced_grass_ground_fields(tfrag3::Level& level,
       }
       // (a box blur 2 m wide, twice: the grass fades within a meter or two of its floor's edge)
       const int n = field->n;
-      std::vector<float> tmp(raw.size());
+      std::vector<float> tmp(raw_e.size());
       for (int pass = 0; pass < 2; pass++) {
-        for (int k = 0; k < n; k++) {
-          for (int i = 0; i < n; i++) {
+        for (int k = 0; k < ne; k++) {
+          for (int i = 0; i < ne; i++) {
             float s = 0;
             int c = 0;
             for (int d = -2; d <= 2; d++) {
-              int ii = std::clamp(i + d, 0, n - 1);
-              s += raw[k * n + ii];
+              int ii = std::clamp(i + d, 0, ne - 1);
+              s += raw_e[k * ne + ii];
               c++;
             }
-            tmp[k * n + i] = s / c;
+            tmp[k * ne + i] = s / c;
           }
         }
-        for (int k = 0; k < n; k++) {
-          for (int i = 0; i < n; i++) {
+        for (int k = 0; k < ne; k++) {
+          for (int i = 0; i < ne; i++) {
             float s = 0;
             int c = 0;
             for (int d = -2; d <= 2; d++) {
-              int kk = std::clamp(k + d, 0, n - 1);
-              s += tmp[kk * n + i];
+              int kk = std::clamp(k + d, 0, ne - 1);
+              s += tmp[kk * ne + i];
               c++;
             }
-            raw[k * n + i] = s / c;
+            raw_e[k * ne + i] = s / c;
           }
+        }
+      }
+      std::vector<float> raw(n * n);
+      for (int k = 0; k < n; k++) {
+        for (int i = 0; i < n; i++) {
+          raw[k * n + i] = raw_e[(k + kMargin) * ne + i + kMargin];
         }
       }
       field->lush.resize(raw.size());
@@ -1156,7 +1226,7 @@ struct SceneCopy {
   bool ok = false;
 };
 SceneCopy g_scene;
-constexpr int kSceneColorUnit = 11, kSceneDepthUnit = 12, kSceneNormalUnit = 13;
+constexpr int kSceneColorUnit = 11, kSceneDepthUnit = 12, kSceneNormalUnit = 13, kNoiseUnit = 14;
 
 bool copy_scene(SharedRenderState* render_state) {
   auto& s = g_scene;
@@ -1435,7 +1505,12 @@ void draw_field(const std::shared_ptr<const GrassField>& fp,
   glUniform1i(glGetUniformLocation(id, "tex_T4"), 4);
   glActiveTexture(GL_TEXTURE4);
   glBindTexture(GL_TEXTURE_2D, crush_tex);
+  // (the noise: unit 14, which the post binds again for its own passes)
+  glUniform1i(glGetUniformLocation(id, "enh_noise"), kNoiseUnit);
+  glActiveTexture(GL_TEXTURE0 + kNoiseUnit);
+  glBindTexture(GL_TEXTURE_2D, g_gl.noise);
   glActiveTexture(GL_TEXTURE0);
+  glUniform1f(glGetUniformLocation(id, "enh_ground_class"), f.ground_class ? 1.f : 0.f);
   // (drawn like the tree's grass: its first cutout draw's settings, then solid)
   DrawMode mode;
   bool found = false;
