@@ -54,6 +54,9 @@ struct Zone {
   // toward the radius
   std::string paint;
   std::vector<std::array<float, 3>> lush, edge;
+  // m, unpainted zones: full grass out to radius - edge, thinning over the last edge meters
+  // (0: full only within 70% of the radius)
+  float full_edge = 0.f;
   float fade = 12.f;  // m: past the lush strokes, how far it thins away where no edge stroke is near
   // made by the editor's brush (grass_paint/user_zones.json): baked from the kept floors, nearest
   // its height y (m), drawn with whichever shrub tree draws first
@@ -150,6 +153,8 @@ std::vector<Zone>& zones() {
         z.z = e.value("z", 0.f);
         z.radius = e.value("radius", kUserRadius);
         z.paint = e.value("paint", std::string());
+        z.full_edge = e.value("edge", z.full_edge);
+        z.water = e.value("water", z.water);
         read_paint(z);
         out.push_back(z);
       }
@@ -175,6 +180,7 @@ std::vector<Zone>& zones() {
         z.level = e.value("level", z.level);
         z.heightfield = e.value("floor", std::string()) == "heightfield";
         z.paint = e.value("paint", std::string());
+        z.full_edge = e.value("edge", z.full_edge);
         read_paint(z);
         out.push_back(z);
       }
@@ -264,7 +270,10 @@ Lush bake_lush(const GrassField& f, const Zone& zone) {
         continue;
       }
       if (!painted) {
-        float t = std::clamp((std::hypot(x - zone.x, z - zone.z) / zone.radius - 0.7f) / 0.3f, 0.f, 1.f);
+        const float d = std::hypot(x - zone.x, z - zone.z);
+        float t = zone.full_edge > 0.f
+                      ? std::clamp((d - (zone.radius - zone.full_edge)) / zone.full_edge, 0.f, 1.f)
+                      : std::clamp((d / zone.radius - 0.7f) / 0.3f, 0.f, 1.f);
         v = 1.f - t * t * (3.f - 2.f * t);
       } else if (!lush.empty()) {
         float dl = 1e30f, de = 1e30f;
@@ -593,6 +602,12 @@ void save_user_zones() {
                      {"z", std::round(z.z * 10) / 10},
                      {"radius", z.radius},
                      {"paint", z.paint}});
+      if (z.full_edge > 0.f) {
+        arr.back()["edge"] = z.full_edge;
+      }
+      if (z.water > -999.f) {
+        arr.back()["water"] = z.water;
+      }
     }
   }
   j[game_version_names[g_game_version]] = arr;
