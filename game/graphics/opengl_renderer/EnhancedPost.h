@@ -636,8 +636,14 @@ class EnhancedPost {
   struct Mote {
     float pos[3];
     float vel[3];
-    float seed;
+    float seed;            // 0..999, a whole number (the shader reads it from the uniform's w)
+    float home[3];         // fireflies: the swarm it belongs to (they keep to a spot of the world)
+    float age = 0.f;       // s; it fades in, lives, fades out, and comes back elsewhere
+    float life = 0.f;      // s; 0: waiting for a swarm to join
+    float fade = 0.f;
   };
+  bool m_motes_night = false;
+  double m_motes_pond = -1e9;  // when an oasis' water was last drawn (fireflies there at night)
   std::vector<Mote> m_motes;
   float m_motes_on = 0.f;  // fades in and out with the place and the weather
   double m_motes_time = -1.0;

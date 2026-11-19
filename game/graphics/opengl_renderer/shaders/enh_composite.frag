@@ -73,7 +73,7 @@ uniform vec4 fire_pos[4];
 uniform vec4 fire_seed4;       // (one seed per fire: a vec4, 1 constant register, not 4)
 uniform vec3 fire;              // hot air strength, embers strength, time (s)
 uniform int mote_count;         // fireflies or seeds drifting around Jak: view space (game units),
-uniform vec4 mote[24];          // w: seed
+uniform vec4 mote[24];          // w: seed (whole part) + fade (fraction)
 uniform vec3 mote_style;        // kind (0 fireflies, 1 seeds and pollen), strength, time (s)
 uniform vec2 vol_texel;
 uniform float gi_strength;
@@ -5768,26 +5768,48 @@ void composite_unused() {
     }
     vec2 muv = vec2(mp.x * proj.z / mp.z, mp.y * proj.w / mp.z) * 0.5 + 0.5;
     vec2 dpx = (tex_coord - muv) / texel;
-    if (dot(dpx, dpx) > 1600.0) {
+    float d2 = dot(dpx, dpx);
+    if (d2 > 3600.0) {
       continue;
     }
-    float seed = mote[i].w;
+    // w: the seed (whole part, 0..999) and how faded in it is (fraction: born, dying, far from Jak)
+    float seed = floor(mote[i].w) * 0.1;
+    float fade = fract(mote[i].w);
+    float zm = mp.z / 4096.0;
+    fade *= smoothstep(0.4, 1.5, zm) * (1.0 - smoothstep(16.0, 26.0, zm));
     if (mote_style.x < 0.5) {
-      // a blink: on for about a second out of every 2-5
-      float period = 2.0 + 3.0 * fract(seed * 0.618);
-      float ph = fract(mote_style.z / period + seed * 0.37);
-      float on_k = smoothstep(0.0, 0.1, ph) * (1.0 - smoothstep(0.3, 0.55, ph));
-      float radius = clamp(0.05 * 4096.0 * abs(proj.z) * 0.5 / (mp.z * texel.x), 1.3, 4.0);
-      float d2 = dot(dpx, dpx);
-      float glow = exp(-d2 / (radius * radius)) + 0.35 * exp(-d2 / (radius * radius * 25.0));
-      c += vec3(0.75, 1.0, 0.3) * glow * on_k * mote_style.y * 2.6;
+      // (fireflies stay out there: they fade before they come near the camera)
+      fade *= smoothstep(4.0, 9.0, zm);
+    }
+    if (mote_style.x < 0.5) {
+      // each its own slow pulse: a swell (~0.4 s) and a glowing fade (~1.5 s) every 3-7 s, some
+      // with a weaker second flash; between them a faint ember
+      float period = 3.0 + 4.0 * fract(seed * 0.618);
+      float t = fract(mote_style.z / period + fract(seed * 0.37)) * period;
+      float flash = smoothstep(0.0, 0.4, t) * exp(-2.0 * max(t - 0.4, 0.0));
+      float t2 = t - 0.9;
+      flash += step(0.6, fract(seed * 0.29)) * 0.55 * smoothstep(0.0, 0.3, t2) *
+               exp(-2.6 * max(t2 - 0.3, 0.0));
+      float on_k = (0.03 + flash) * fade * mote_style.y;
+      // a tiny hot core, a faint small halo and a hint of bloom (sizes in meters, on screen)
+      float m2px = 4096.0 * abs(proj.z) * 0.5 / (mp.z * texel.x);
+      float rc = clamp(0.006 * m2px, 0.5, 1.2);
+      float rh = clamp(0.025 * m2px, 1.2, 3.0);
+      float rb = clamp(0.08 * m2px, 3.0, 7.0);
+      if (d2 > rb * rb * 9.0) {
+        continue;
+      }
+      vec3 glow = vec3(1.0, 0.97, 0.78) * 1.6 * exp(-d2 / (rc * rc)) +
+                  vec3(0.92, 0.95, 0.42) * 0.22 * exp(-d2 / (rh * rh)) +
+                  vec3(0.8, 0.88, 0.3) * 0.03 * exp(-d2 / (rb * rb));
+      c += glow * on_k;
     } else {
       float radius = clamp(0.02 * 4096.0 * abs(proj.z) * 0.5 / (mp.z * texel.x), 0.9, 2.2);
       float glow = exp(-dot(dpx, dpx) / (radius * radius));
       // (they twinkle as they turn in the light)
       float tw = 0.6 + 0.4 * sin(mote_style.z * (2.0 + fract(seed) * 3.0) + seed);
       vec3 lit = vec3(1.0, 0.96, 0.86) * (0.35 + 0.9 * clamp(sky_sun.w * 2.5, 0.0, 1.0));
-      c = mix(c, lit, clamp(glow * tw * mote_style.y * 1.1, 0.0, 1.0));
+      c = mix(c, lit, clamp(glow * tw * mote_style.y * fade * 1.1, 0.0, 1.0));
     }
   }
 
