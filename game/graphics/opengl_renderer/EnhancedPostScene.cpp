@@ -341,6 +341,8 @@ struct LightStab {
     float sw;    // its shadow's weight (0: none)
     int slot;    // its shadow map's slot, -1: none
     bool instant;
+    bool moving;  // a moving light (a car's, a shot's): its jumps counted apart (mjumps)
+    u32 id;      // its track (0: none): the same light next frame, wherever it moved
   };
   std::vector<L> prev;
   float prev_trans[3] = {0.f, 0.f, 0.f};
@@ -348,7 +350,7 @@ struct LightStab {
   double last_print = 0.0;
   int newvis = 0;  // new ones whose reach touched the view last frame too (popped in where seen)
   int cand = 0, inview = 0, used = 0, over32 = 0, nw = 0, newnear = 0, newpop = 0, gone = 0,
-      capdrop = 0, jumps = 0, cast = 0, castpop = 0, mapsw = 0, forgot = 0, frames = 0;
+      capdrop = 0, jumps = 0, cast = 0, castpop = 0, mapsw = 0, forgot = 0, frames = 0, mjumps = 0;
   float jump = 0.f;
   u32 assigns0 = 0;
   bool first = true;
@@ -1140,6 +1142,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       bool violet = false;  // an effect's violet glow (shots, dark eco clouds)
       bool instant = false;  // lit at once, not smoothed (an explosion's flash, a fire's flicker)
       bool burst = false;    // an explosion's flash or a gun's charge: short, at full strength at once
+      bool mem = false;      // a lamp's light from memory (its glow not drawn this frame)
     };
     std::vector<Candidate> candidates;
     struct Fire {
@@ -1350,6 +1353,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // near, where its glow can't be hidden for long; further out after a minute)
       const bool forget_in_view =
           in_view && ((dist < 30.f * kMeter && unseen > 3.0) || unseen > 60.0);
+      if (in_view && unseen > 0.1) {
+        l.dark_on_screen = true;  // (back later: a blink)
+      }
       if (forget_in_view || (!steady && unseen > 1.0) || unseen > 900.0) {
         if (forget_in_view && steady) {
           g_light_stab.forgot++;
@@ -1367,7 +1373,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float mlo = t_mem_min * kMeter;
       const float mradius =
           std::clamp(l.size * m_settings.light_reach, mlo, std::max(mlo, t_mem_max * kMeter));
-      if (steady && unseen > 0.0 && dist < 150.f * kMeter && v[2] > -mradius) {
+      if (steady && unseen > 0.0 && dist < 150.f * kMeter && v[2] > -mradius &&
+          !(in_view && l.blinking(m_time))) {
         float lc[3];
         for (int k = 0; k < 3; k++) {
           lc[k] = l.color[k] * l.hold * l.fade;
@@ -1385,6 +1392,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           intensity *= 1.f - 0.65f * pure;
           if (intensity > 0.f) {
             Candidate c;
+            c.mem = true;
             std::memcpy(c.pos, v, sizeof(float) * 3);
             c.pos[3] = radius * (1.f - 0.45f * pure);
             for (int k = 0; k < 3; k++) {
@@ -1870,11 +1878,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float sw = 0.f;    // its shadow's weight (a caster)
       float mapw = 0.f;  // its shadow map's share of its shadow
       float prev_l = -1.f;  // r + g + b as uploaded last frame (-1: not uploaded)
+      float vel[3] = {0.f, 0.f, 0.f};  // world units a second (a shot, a car's lights)
+      float dist = 0.f;                // from the camera
       int map_slot = -1;
       double seen = 0.0, shown_since = 0.0, caster_since = 0.0, view_t = 0.0;
       int cand = -1;  // this frame's candidate
       bool instant = false, flash = false, lamp = false, in_view = false, shown = false;
       bool caster = false, leaving = false, target = false;
+      bool mem = false;  // its light from the lamp's memory last
+      bool moving = false;
     };
     static std::vector<LightTrack> tracks;
     std::vector<int> up_track;  // per uploaded light, its track
@@ -1902,6 +1914,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       static const EnhancedTune t_cdwell("lights.caster_dwell_s", 2.f);
       static const EnhancedTune t_sfade("lights.shadow_fade_s", 0.5f);
       static const EnhancedTune t_track_m("lights.track_m", 1.5f);
+      static const EnhancedTune t_moving("lights.moving_mps", 3.f);
+      static const EnhancedTune t_moving_in("lights.moving_fade_s", 0.15f);
+      static const EnhancedTune t_near_bonus("lights.near_bonus", 1.f);
+      static const EnhancedTune t_cout("lights.caster_out_s", 1.5f);
       const float rate_in = dt / std::max((float)t_fade_in, 0.01f);
       const float rate_in_near = dt / std::max((float)t_fade_near, 0.01f);
       const float rate_out = dt / std::max((float)t_fade_out, 0.01f);
@@ -1959,26 +1975,57 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       std::vector<int> cmatch(nc, -1);
       {
+        // (where each track's light should be now: a moving one (a shot, a car's lights) moved on
+        // since last frame, matched there, not lost and lit again from nothing every few frames)
         const float tm = std::clamp((float)t_track_m, 0.1f, 4.f) * kMeter;
-        const float m2 = tm * tm;
-        std::vector<std::tuple<float, int, int>> pairs;
-        for (size_t i = 0; i < nc; i++) {
-          const float* a = &cworld[i * 3];
-          for (size_t j = 0; j < tracks.size(); j++) {
-            const float* b = tracks[j].world;
-            const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
-            const float d2 = dx * dx + dy * dy + dz * dz;
-            // (a flash is its own light, never a lamp's next to it)
-            if (d2 < m2 && tracks[j].flash == candidates[i].burst) {
-              pairs.emplace_back(d2, (int)i, (int)j);
+        std::vector<float> pred(tracks.size() * 3);
+        std::vector<float> reach(tracks.size());
+        for (size_t j = 0; j < tracks.size(); j++) {
+          const auto& t = tracks[j];
+          float step = 0.f;
+          for (int k = 0; k < 3; k++) {
+            pred[j * 3 + k] = t.world[k] + t.vel[k] * dt;
+            step += t.vel[k] * t.vel[k];
+          }
+          reach[j] = tm + std::min(std::sqrt(step) * dt * 0.5f, 4.f * kMeter);
+        }
+        auto hue_like = [&](const float* a, const float* b) {
+          const float ab = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+          const float aa = a[0] * a[0] + a[1] * a[1] + a[2] * a[2];
+          const float bb = b[0] * b[0] + b[1] * b[1] + b[2] * b[2];
+          return ab > 0.f && ab * ab > 0.81f * aa * bb;  // (within ~25 degrees of color)
+        };
+        for (int pass = 0; pass < 2; pass++) {
+          // (pass 1: the lights seen last frame and not found near where they should be, to a new
+          // one of their color within 8 m: a fast shot keeps its light, not a new one at nothing)
+          std::vector<std::tuple<float, int, int>> pairs;
+          for (size_t i = 0; i < nc; i++) {
+            if (cmatch[i] >= 0) {
+              continue;
+            }
+            const float* a = &cworld[i * 3];
+            for (size_t j = 0; j < tracks.size(); j++) {
+              const auto& t = tracks[j];
+              // (a flash is its own light, never a lamp's next to it)
+              if (t.cand >= 0 || t.flash != candidates[i].burst) {
+                continue;
+              }
+              const float* b = &pred[j * 3];
+              const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+              const float d2 = dx * dx + dy * dy + dz * dz;
+              if (pass == 0 ? d2 < reach[j] * reach[j]
+                            : (d2 < 64.f * kMeter * kMeter && m_time - t.seen <= raw_dt + 1e-4 &&
+                               !t.mem && !candidates[i].mem && hue_like(t.color, candidates[i].color))) {
+                pairs.emplace_back(d2, (int)i, (int)j);
+              }
             }
           }
-        }
-        std::sort(pairs.begin(), pairs.end());
-        for (const auto& [d2, i, j] : pairs) {
-          if (cmatch[i] < 0 && tracks[j].cand < 0) {
-            cmatch[i] = j;
-            tracks[j].cand = i;
+          std::sort(pairs.begin(), pairs.end());
+          for (const auto& [d2, i, j] : pairs) {
+            if (cmatch[i] < 0 && tracks[j].cand < 0) {
+              cmatch[i] = j;
+              tracks[j].cand = i;
+            }
           }
         }
       }
@@ -2038,14 +2085,31 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         }
         const auto& c = candidates[t.cand];
         {
-          // (follows its light; a jump of more than half a meter (its glow handed over to the lamp's
-          // memory, a little off) eased, not a step)
+          // (follows its light, a moving one at once; only a glow handed over to the lamp's memory or
+          // back (a little off) is eased over a few frames when more than half a meter off)
           const float* cw = &cworld[t.cand * 3];
           const float jx = cw[0] - t.world[0], jy = cw[1] - t.world[1], jz = cw[2] - t.world[2];
-          const float kw = (cut || jx * jx + jy * jy + jz * jz < 0.25f * kMeter * kMeter) ? 1.f : 0.2f;
+          const bool handover = t.mem != c.mem && jx * jx + jy * jy + jz * jz > 0.25f * kMeter * kMeter;
+          const float kw = (cut || !handover) ? 1.f : 0.2f;
+          float speed2 = 0.f;
           for (int k = 0; k < 3; k++) {
-            t.world[k] += (cw[k] - t.world[k]) * kw;
+            const float d = (cw[k] - t.world[k]) * kw;
+            t.world[k] += d;
+            if (handover || cut || dt <= 0.f || t.mem || c.mem) {
+              t.vel[k] = 0.f;
+            } else {
+              t.vel[k] += (d / dt - t.vel[k]) * 0.5f;
+            }
+            speed2 += t.vel[k] * t.vel[k];
           }
+          if (speed2 > 300.f * kMeter * 300.f * kMeter) {
+            for (float& v : t.vel) {
+              v = 0.f;  // (a respawn, a teleported glow: not a speed)
+            }
+            speed2 = 0.f;
+          }
+          t.moving = speed2 > (float)t_moving * (float)t_moving * kMeter * kMeter;
+          t.mem = c.mem;
         }
         t.seen = m_time;
         t.instant = c.instant;
@@ -2059,7 +2123,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           float ks = k_smooth;
           const float dl = std::abs(c.color[0] + c.color[1] + c.color[2] - t.color[0] - t.color[1] -
                                     t.color[2]) * t.w;
-          if (dl * ks > max_dl) {
+          if (dl * ks > max_dl && !t.moving) {
             ks = std::max(max_dl / dl, std::min(1.f, dt));
           }
           for (int k = 0; k < 4; k++) {
@@ -2072,6 +2136,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           float v[3];
           to_view(t.world, v);
           t.in_view = touches(v, t.radius * reach_x);
+          t.dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
         }
         if (t.in_view) {
           t.view_t = m_time;
@@ -2093,7 +2158,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       auto rank_score = [&](int j) {
         const auto& t = tracks[j];
-        return t.score * (1.f + (t.shown ? (float)t_keep * t.w : 0.f)) + (t.flash ? 1e3f : 0.f);
+        // (the lamps right around Jak first, their pools are what is seen: lights.near_bonus, 30 m)
+        const float nearness = std::clamp(1.f - t.dist / (30.f * kMeter), 0.f, 1.f);
+        return t.score * (1.f + (t.shown ? (float)t_keep * t.w : 0.f)) *
+                   (1.f + std::max((float)t_near_bonus, 0.f) * nearness) +
+               (t.flash ? 1e3f : 0.f);
       };
       std::stable_sort(order.begin(), order.end(),
                        [&](int a, int b) { return rank_score(a) > rank_score(b); });
@@ -2158,8 +2227,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           float v[3];
           to_view(t.world, v);
           const bool close = v[0] * v[0] + v[1] * v[1] + v[2] * v[2] < 25.f * kMeter * 25.f * kMeter;
-          const float dw = std::max(std::min(close ? rate_in_near : rate_in, max_dl / lum(t.color)),
-                                    0.5f * dt);
+          // (a moving light, a shot or a car's lights, in at once (lights.moving_fade_s): it is
+          // somewhere new every frame, no pop where something was lit)
+          const float dw =
+              t.moving ? dt / std::max((float)t_moving_in, 0.01f)
+                       : std::max(std::min(close ? rate_in_near : rate_in, max_dl / lum(t.color)),
+                                  0.5f * dt);
           t.w = std::min(1.f, t.w + dw);
         } else if (t.shown || t.in_view) {
           // (fading out in its slot, its slot freed once uploaded at nothing; or in view with no
@@ -2174,7 +2247,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           t.w = std::max(0.f, t.w - dw);
         }
         // (its color eased and its fade together: their sum held to max_luma_per_s too)
-        if (!cut && !t.instant && t.shown && t.prev_l >= 0.f) {
+        if (!cut && !t.instant && !t.moving && t.shown && t.prev_l >= 0.f) {
           const float l = lum(t.color);
           const float lw = std::clamp(l * t.w, t.prev_l - max_dl, t.prev_l + max_dl);
           t.w = std::clamp(lw / l, 0.f, 1.f);
@@ -2206,8 +2279,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             challengers.push_back((int)j);
           }
         }
+        // (by strength, the lamps around Jak first as for the slots)
+        auto cscore = [&](const LightTrack& t) {
+          const float nearness = std::clamp(1.f - t.dist / (30.f * kMeter), 0.f, 1.f);
+          return t.score * (1.f + std::max((float)t_near_bonus, 0.f) * nearness);
+        };
         std::sort(challengers.begin(), challengers.end(),
-                  [&](int a, int b) { return tracks[a].score > tracks[b].score; });
+                  [&](int a, int b) { return cscore(tracks[a]) > cscore(tracks[b]); });
         bool swapping = false;
         for (int j : challengers) {
           auto& t = tracks[j];
@@ -2220,9 +2298,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
               if (!o.caster) {
                 continue;
               }
+              // (out of view lights.caster_out_s: a camera swaying at a lamp's edge kept swapping it)
               if (!o.shown) {
-                out = (int)k;
-              } else if (!o.leaving && (weak < 0 || o.score < tracks[weak].score)) {
+                if (m_time - o.view_t > (float)t_cout) {
+                  out = (int)k;
+                }
+              } else if (!o.leaving && (weak < 0 || cscore(o) < cscore(tracks[weak]))) {
                 weak = (int)k;
               }
             }
@@ -2237,7 +2318,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
               }
               if (!swapping && !leaving_now && weak >= 0 &&
                   m_time - tracks[weak].caster_since > (float)t_cdwell &&
-                  t.score > std::max((float)t_ckeep, 1.f) * tracks[weak].score) {
+                  cscore(t) > std::max((float)t_ckeep, 1.f) * cscore(tracks[weak])) {
                 tracks[weak].leaving = true;
                 swapping = true;
               }
@@ -3175,7 +3256,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
         }
         std::sort(cs.begin(), cs.end(), [&](int a, int b) { return tracks[a].score > tracks[b].score; });
+        // (maps only for the casters within lights.shadow_map_m, 10 m more for one that has its map:
+        // a lamp 80 m away got one, its shadow too small to tell from the march, and as the camera
+        // turned the far ones came and went, maps redrawn on every turn)
+        static const EnhancedTune t_map_m("lights.shadow_map_m", 35.f);
         for (int j : cs) {
+          const float far_m = ((float)t_map_m + (tracks[j].map_slot >= 0 ? 10.f : 0.f)) * kMeter;
+          if (tracks[j].dist > far_m) {
+            continue;
+          }
           LampWant lw;
           std::memcpy(lw.pos, tracks[j].world, sizeof(lw.pos));
           lw.radius = tracks[j].radius * (1.f + 0.6f * dark);
@@ -3187,21 +3276,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float match_u =
           std::max(std::clamp((float)t_still_m, 0.02f, 2.f), 0.3f) * kMeter;
       const float match2 = match_u * match_u;
-      // per light (the first 8), its shadow for the composite in one float: 16 x its weight (0-15)
-      // + the slot of its map (8: none) + 0.9 x the map's share of the shadow (eased in as the map
-      // gets ready, lights.map_fade_s; the rest the screen-space march). Per slot, its place and
-      // far plane
+      // per light (the first 8), its shadow for the composite in one float: 32 x its weight (0-15)
+      // + the slot of its map (16: none) + 0.9 x the map's share of the shadow (eased in as the map
+      // gets ready, lights.map_fade_s; the rest the screen-space march). Per light, its map's place
+      // and far plane (the slots are more than 8)
       static const EnhancedTune t_map_fade("lights.map_fade_s", 0.4f);
       static double map_last_t = 0.0;
       const float map_rate =
           (float)std::clamp(m_time - map_last_t, 0.0, 0.25) / std::max((float)t_map_fade, 0.01f);
       map_last_t = m_time;
       float light_slot[8];
-      float slot_pos[EnhancedPost::kLampSlots * 4] = {};
+      float slot_pos[8 * 4] = {};
       float stab_sw[8];
       int stab_slot[8];
       for (int i = 0; i < 8; i++) {
-        light_slot[i] = 8.f;
+        light_slot[i] = 16.f;
         stab_sw[i] = 0.f;
         stab_slot[i] = -1;
         if (i >= n || i >= (int)up_track.size()) {
@@ -3218,20 +3307,35 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame &&
               dx * dx + dy * dy + dz * dz < match2) {
             slot = s;
-            std::memcpy(slot_pos + s * 4, sl.pos, sizeof(float) * 3);
-            slot_pos[s * 4 + 3] = sl.far_u;
+            std::memcpy(slot_pos + i * 4, sl.pos, sizeof(float) * 3);
+            slot_pos[i * 4 + 3] = sl.far_u;
             break;
           }
         }
-        if (slot >= 0) {
+        if (slot < 0 && t.caster && m_lamp_ready && t.map_slot >= 0 && t.map_slot < m_lamp_alloc &&
+            t.mapw > 0.f && sw > 0.f) {
+          // (its map no longer wanted, but still drawn for it: eased out, not a switch to the march)
+          const auto& sl = m_lamp_slots[t.map_slot];
+          const float dx = sl.pos[0] - t.world[0], dy = sl.pos[1] - t.world[1],
+                      dz = sl.pos[2] - t.world[2];
+          if (sl.used && sl.faces >= 6 && dx * dx + dy * dy + dz * dz < match2) {
+            t.mapw = std::max(0.f, t.mapw - map_rate);
+            if (t.mapw > 0.f) {
+              slot = t.map_slot;
+              std::memcpy(slot_pos + i * 4, sl.pos, sizeof(float) * 3);
+              slot_pos[i * 4 + 3] = sl.far_u;
+            }
+          }
+        } else if (slot >= 0) {
           // (a lamp lit just now, or after a cut: its map at once)
           t.mapw = (t.w < 0.1f || sw <= 0.f) ? 1.f : std::min(1.f, t.mapw + map_rate);
-        } else {
+        }
+        if (slot < 0) {
           t.mapw = 0.f;
         }
         t.map_slot = slot;
         const float q = std::round(std::clamp(sw, 0.f, 1.f) * 15.f);
-        light_slot[i] = 16.f * q + (slot >= 0 ? (float)slot + 0.9f * t.mapw : 8.f);
+        light_slot[i] = 32.f * q + (slot >= 0 ? (float)slot + 0.9f * t.mapw : 16.f);
         stab_sw[i] = q / 15.f;
         stab_slot[i] = slot;
       }
@@ -3267,6 +3371,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           l.sw = i < 8 ? stab_sw[i] : 0.f;
           l.slot = i < 8 ? stab_slot[i] : -1;
           l.instant = light_instant[i];
+          l.id = i < (int)up_track.size() ? tracks[up_track[i]].id : 0;
+          l.moving = i < (int)up_track.size() && tracks[up_track[i]].moving;
         }
         // (a cut: the first frame, or the camera jumped: no events)
         static float last_cam[3] = {0.f, 0.f, 0.f};
@@ -3286,7 +3392,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
               const auto& b = st.prev[j].world;
               const float d2 = (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
                                (a[2] - b[2]) * (a[2] - b[2]);
-              if (d2 < kMeter * kMeter) {
+              // (the same track; by place only a light with none: two tracks at one lamp, one
+              // leaving the view as the other comes in, read as one light's jump)
+              if (cur[i].id != 0 && cur[i].id == st.prev[j].id) {
+                pairs.emplace_back(-1.f, i, j);
+              } else if ((cur[i].id == 0 || st.prev[j].id == 0) && d2 < kMeter * kMeter) {
                 pairs.emplace_back(d2, i, j);
               }
             }
@@ -3323,11 +3433,20 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             continue;
           }
           const float dj = std::abs(l.luma - p.luma);
-          st.jump = std::max(st.jump, dj);
-          if (dj > 0.08f) {
+          if (!l.moving && !p.moving) {
+            st.jump = std::max(st.jump, dj);
+          }
+          if (dj > 0.08f && (l.moving || p.moving)) {
+            st.mjumps++;
+          } else if (dj > 0.08f) {
             st.jumps++;
             if (ev) {
-              lg::info("[enhanced] lightstab+ jump {:.1f} m {:.3f} -> {:.3f} idx {}", d, p.luma, l.luma, i);
+              const LightTrack* t = i < (int)up_track.size() ? &tracks[up_track[i]] : nullptr;
+              lg::info("[enhanced] lightstab+ jump {:.1f} m {:.3f} -> {:.3f} idx {} id {} prev id {} w {:.2f} "
+                       "shown {:.2f} s cand {} mem {} moving {} r {:.1f} m",
+                       d, p.luma, l.luma, i, l.id, p.id, t ? t->w : -1.f,
+                       t ? m_time - t->shown_since : -1.0, t ? t->cand : -2, t && t->mem ? 1 : 0,
+                       t && t->moving ? 1 : 0, l.radius / kMeter);
             }
           }
           if (l.luma > 0.05f || p.luma > 0.05f) {
@@ -3355,7 +3474,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           if (!pm[j] && !p.instant && p.luma > 0.05f && touches_view(p.world, p.radius)) {
             st.gone++;
             if (ev) {
-              lg::info("[enhanced] lightstab+ gone luma {:.3f} sw {:.2f}", p.luma, p.sw);
+              const LightTrack* t = nullptr;
+              for (const auto& o : tracks) {
+                t = o.id == p.id ? &o : t;
+              }
+              lg::info("[enhanced] lightstab+ gone luma {:.3f} sw {:.2f} id {} track {} w {:.2f} shown {} "
+                       "in_view {} cand {} moving {} flash {}",
+                       p.luma, p.sw, p.id, t ? 1 : 0, t ? t->w : -1.f, t && t->shown ? 1 : 0,
+                       t && t->in_view ? 1 : 0, t ? t->cand : -2, p.moving ? 1 : 0, t && t->flash ? 1 : 0);
             }
           }
         }
@@ -3365,23 +3491,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         if (m_time - st.last_print >= 1.0) {
           static const EnhancedTune t_tag("lights.stab_tag", 0.f);
           lg::info("[enhanced] lightstab tag {} cand {} inview {} used {} over32 {} new {} newnear {} "
-                   "newpop {} newvis {} gone {} capdrop {} jump {:.3f} jumps {} cast {} castpop {} "
+                   "newpop {} newvis {} gone {} capdrop {} jump {:.3f} jumps {} mjumps {} cast {} castpop {} "
                    "mapsw {} assigns {} forgot {} frames {}",
                    (int)(float)t_tag, st.cand, st.inview, st.used, st.over32, st.nw, st.newnear,
-                   st.newpop, st.newvis, st.gone, st.capdrop, st.jump, st.jumps, st.cast, st.castpop, st.mapsw,
+                   st.newpop, st.newvis, st.gone, st.capdrop, st.jump, st.jumps, st.mjumps, st.cast, st.castpop,
+                   st.mapsw,
                    m_lamp_assigns >= st.assigns0 ? m_lamp_assigns - st.assigns0 : m_lamp_assigns,
                    st.forgot, st.frames);
           st.last_print = m_time;
           st.assigns0 = m_lamp_assigns;
           st.cand = st.inview = st.used = st.over32 = st.nw = st.newnear = st.newpop = st.gone = 0;
           st.newvis = 0;
-          st.capdrop = st.jumps = st.cast = st.castpop = st.mapsw = st.forgot = st.frames = 0;
+          st.capdrop = st.jumps = st.cast = st.castpop = st.mapsw = st.forgot = st.frames = st.mjumps = 0;
           st.jump = 0.f;
         }
       }
       static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
       glUniform4fv(glGetUniformLocation(id, "lamp_shadow_slot"), 2, light_slot);
-      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_pos"), EnhancedPost::kLampSlots, slot_pos);
+      glUniform4fv(glGetUniformLocation(id, "lamp_shadow_pos"), 8, slot_pos);
       glUniform2f(glGetUniformLocation(id, "lamp_shadow_params"),
                   std::max((float)t_near, 0.05f) * kMeter, 2.f / std::max(m_lamp_res, 1));
       glActiveTexture(GL_TEXTURE0 + 35);

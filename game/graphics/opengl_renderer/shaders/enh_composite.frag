@@ -667,31 +667,32 @@ float light_blocked(vec3 from, vec3 lp, float jitter) {
 // lamps' shadow maps (lights.shadow_maps): a cube map per slot, its faces as GL's cube maps want
 // them, depth from a 90 degree perspective with the lamp's near and far planes
 uniform samplerCubeArrayShadow tex_T35;
-uniform vec4 lamp_shadow_pos[8];   // world (game units), far plane (game units)
-// the first 8 lights' shadows, one float each: 16 x its weight (0-15 for 0-1) + the slot of its map
-// (8: none) + 0.9 x the map's share of the shadow (the rest the screen-space march)
+uniform vec4 lamp_shadow_pos[8];   // per light (the first 8): its map's place (world, game units), far plane
+// the first 8 lights' shadows, one float each: 32 x its weight (0-15 for 0-1) + the slot of its map
+// (the cube array's layer, 0-15; 16: none) + 0.9 x the map's share of the shadow (the rest the march)
 uniform vec4 lamp_shadow_slot[2];
 uniform vec2 lamp_shadow_params;  // near plane (game units), 2 / the faces' size
 uniform float tune_lamp_map_bias = 1.5;  // pushed off the surface along its normal (texels there)
 uniform float tune_lamp_map_soft = 1.5;  // penumbra: 4 taps this many texels around (0: one tap)
 uniform float tune_lamp_map_dbg = 0.0;   // test: > 0 adds the map's shadow red, the march's green (times this)
 uniform float tune_lamp_map_dbg_slot = -1.0;  // test: only this slot's (-1: all)
-// (x: the shadow's weight, y: the map's slot (8: none), z: the map's share)
+// (x: the shadow's weight, y: the map's slot (16: none), z: the map's share)
 vec3 lamp_shadow_of(int i) {
   if (i >= 8) {
-    return vec3(0.0, 8.0, 0.0);
+    return vec3(0.0, 16.0, 0.0);
   }
   float v = lamp_shadow_slot[i >> 2][i & 3];
-  float s = mod(floor(v), 16.0);
-  return vec3(floor(v / 16.0) / 15.0, s, s < 8.0 ? clamp(fract(v) / 0.9, 0.0, 1.0) : 0.0);
+  float s = mod(floor(v), 32.0);
+  return vec3(floor(v / 32.0) / 15.0, s, s < 16.0 ? clamp(fract(v) / 0.9, 0.0, 1.0) : 0.0);
 }
 int lamp_map_slot(int i) {
   vec3 sh = lamp_shadow_of(i);
-  return sh.y < 8.0 && sh.z > 0.0 ? int(sh.y) : -1;
+  return sh.y < 16.0 && sh.z > 0.0 ? int(sh.y) : -1;
 }
-float lamp_map_tap(int s, vec3 d) {
+// (i: the light, its map's place and far plane; s: its map's layer)
+float lamp_map_tap(int i, int s, vec3 d) {
   float zf = max(abs(d.x), max(abs(d.y), abs(d.z)));
-  float n = lamp_shadow_params.x, f = lamp_shadow_pos[s].w;
+  float n = lamp_shadow_params.x, f = lamp_shadow_pos[i].w;
   if (zf <= n || zf >= f) {
     return 1.0;
   }
@@ -699,12 +700,12 @@ float lamp_map_tap(int s, vec3 d) {
   return texture(tex_T35, vec4(d, float(s)), ref);
 }
 // 1 lit, 0 in the lamp's shadow (wp, wn: the pixel's world place and normal)
-float lamp_map_lit(int s, vec3 wp, vec3 wn, float jitter) {
-  vec3 d = wp - lamp_shadow_pos[s].xyz;
+float lamp_map_lit(int i, int s, vec3 wp, vec3 wn, float jitter) {
+  vec3 d = wp - lamp_shadow_pos[i].xyz;
   float texel = max(abs(d.x), max(abs(d.y), abs(d.z))) * lamp_shadow_params.y;
   d += wn * texel * tune_lamp_map_bias;
   if (tune_lamp_map_soft <= 0.0) {
-    return lamp_map_tap(s, d);
+    return lamp_map_tap(i, s, d);
   }
   vec3 dn = normalize(d);
   vec3 t1 = normalize(cross(dn, abs(dn.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
@@ -715,7 +716,7 @@ float lamp_map_lit(int s, vec3 wp, vec3 wn, float jitter) {
   for (int k = 0; k < 4; k++) {
     float ang = a + float(k) * 1.5707963;
     float rk = (k == 0 || k == 2) ? r : 0.5 * r;
-    sum += lamp_map_tap(s, d + (t1 * cos(ang) + t2 * sin(ang)) * rk);
+    sum += lamp_map_tap(i, s, d + (t1 * cos(ang) + t2 * sin(ang)) * rk);
   }
   return sum * 0.25;
 }
@@ -4116,10 +4117,12 @@ void composite_unused() {
         // (not a lamp behind the canal's wall: its light never reaches this water, so it has no
         // image on it. The SSR test below misses it when the reflected ray climbs the wall off the
         // top of the screen: a soft white blob on dark canal water at 22h, none in vanilla)
+        // (its weight and the map's share as on land: eased in and out, never on or off at once)
         int ls = tune_water_lamp_map > 0.0 && light_shadow > 0.0 ? lamp_map_slot(i) : -1;
         if (ls >= 0 && sp > 0.001) {
-          sp *= 1.0 - tune_water_lamp_map *
-                          (1.0 - lamp_map_lit(ls, view_to_world * p + cam_pos, view_to_world * up_view, 0.5));
+          vec3 wsh = lamp_shadow_of(i);
+          sp *= 1.0 - tune_water_lamp_map * wsh.x * wsh.z *
+                          (1.0 - lamp_map_lit(i, ls, view_to_world * p + cam_pos, view_to_world * up_view, 0.5));
         }
         lsum += light_color[i].rgb * sp / (1.0 + 0.04 * rr * rr);
       }
@@ -5113,11 +5116,11 @@ void composite_unused() {
         vec3 lsh = lamp_shadow_of(i);
         if (light_shadow > 0.0 && lsh.x > 0.0 && k * k * lit > 0.02 && lamp && !full_day) {
           // (its shadow map when it has one: the real shapes, Jak's own too)
-          int ls = lsh.y < 8.0 ? int(lsh.y) : -1;
+          int ls = lsh.y < 16.0 ? int(lsh.y) : -1;
           float mapw = ls >= 0 ? lsh.z : 0.0;
           float msh = 0.0, march = 0.0;
           if (mapw > 0.0) {
-            msh = 1.0 - lamp_map_lit(ls, view_to_world * from + cam_pos, view_to_world * nn, jitter);
+            msh = 1.0 - lamp_map_lit(i, ls, view_to_world * from + cam_pos, view_to_world * nn, jitter);
             if (tune_lamp_map_dbg > 0.0 && (tune_lamp_map_dbg_slot < 0.0 || float(ls) == tune_lamp_map_dbg_slot)) {
               // (test: red the map's shadow, green the screen-space march's, yellow both)
               added += vec3(msh, light_blocked(from, light_pos[i].xyz, jitter), 0.0) * k * k * tune_lamp_map_dbg;

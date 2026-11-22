@@ -1384,7 +1384,7 @@ void EnhancedPost::do_shadow_map(SharedRenderState* render_state, ScopedProfiler
   const auto& cam = g_enhanced_camera;
   const bool sun_up = g_enhanced_sun.valid && len >= 1e-6f && sun[1] / len >= 0.05f;
   // (the lamps' shadow maps draw the same casters, by night too: their list is kept up below)
-  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 8.f);
+  static const EnhancedTune t_lamp_maps("lights.shadow_maps", 12.f);
   const bool lamp_maps = (float)t_lamp_maps > 0.5f && m_settings.light_shadow > 0.f;
   if (!cam.valid || (!sun_up && !lamp_maps)) {
     return;  // no sun, or below the horizon
@@ -2248,7 +2248,7 @@ void EnhancedPost::draw_shadow_casters(SharedRenderState* render_state,
 // map convention, so the composite looks them up with the direction from the lamp, in world space.
 void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof) {
   m_lamp_ready = false;
-  static const EnhancedTune t_maps("lights.shadow_maps", 8.f);
+  static const EnhancedTune t_maps("lights.shadow_maps", 12.f);
   static const EnhancedTune t_res("lights.shadow_map_res", 512.f);
   static const EnhancedTune t_faces("lights.shadow_faces_per_frame", 2.f);
   static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
@@ -2263,7 +2263,8 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     return;
   }
   const int res = std::clamp((int)(float)t_res, 128, 2048);
-  // (the arrays hold as many slots as asked for: 512^2 depth, 6 MB a cube, two arrays)
+  // (the arrays hold as many slots as asked for: 512^2 depth, 6 MB a cube, two arrays; 12 slots for
+  // the 8 casters by default)
   if (res != m_lamp_res || want_n != m_lamp_alloc) {
     for (int k = 0; k < 2; k++) {
       GLuint* t = k ? &m_lamp_tex : &m_lamp_static_tex;
@@ -2404,7 +2405,7 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   }
   // a slot for each of the strongest lamps: the one already holding it (same place), else the one
   // left unused longest
-  const int n_want = std::min(want_n, (int)wanted.size());
+  const int n_want = std::min(std::min(want_n, 8), (int)wanted.size());
   int assign[kLampSlots];
   bool taken[kLampSlots] = {};
   for (int i = 0; i < n_want; i++) {

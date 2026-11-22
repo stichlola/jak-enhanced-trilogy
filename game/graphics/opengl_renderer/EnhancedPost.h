@@ -669,6 +669,12 @@ class EnhancedPost {
     double peak_t = 0.0;  // when the peak was seen
     float hold = 1.f;     // the peak's share still held when last seen (decays after 2 s)
     float fade = 1.f;     // the game's distance fade when last seen
+    // (a blinking lamp: its glow gone while on screen and back, 3 times in 6 s; its light follows
+    // its glow, no peak held, none from memory while on screen)
+    bool dark_on_screen = false;
+    int blinks = 0;
+    double blink_t = -100.0;
+    bool blinking(double now) const { return blinks >= 3 && now - blink_t < 6.0; }
   };
   std::vector<LampMemory> m_lamps;
   const LampMemory* remember_lamp(const float* pos, float size, const float* color, float fade);
@@ -725,7 +731,9 @@ class EnhancedPost {
   // static part (the levels' geometry, as the sun map draws it) is drawn once, a few faces a frame,
   // and kept while the lamp stays wanted; each frame a copy of it gets the characters near the lamp.
   void do_lamp_shadows(SharedRenderState* render_state, ScopedProfilerNode& prof);
-  static constexpr int kLampSlots = 8;  // (the arrays hold lights.shadow_maps of them)
+  // (the arrays hold lights.shadow_maps of them: more than the 8 casters, so a lamp's map is kept a
+  // while after it leaves them and a camera turned back finds the maps still drawn)
+  static constexpr int kLampSlots = 16;
   struct LampSlot {
     float pos[3] = {0.f, 0.f, 0.f};  // world, game units
     float far_u = 0.f;               // game units

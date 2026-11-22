@@ -1047,10 +1047,23 @@ const EnhancedPost::LampMemory* EnhancedPost::remember_lamp(const float* pos,
     if (dx * dx + dy * dy + dz * dz < kSame * kSame) {
       bool fresh = l.last != m_time;
       l.last = m_time;
+      if (fresh && l.dark_on_screen) {
+        l.blinks = m_time - l.blink_t < 6.0 ? l.blinks + 1 : 1;
+        l.blink_t = m_time;
+        l.dark_on_screen = false;
+      }
       const float b = color[0] + color[1] + color[2];
       const float age = (float)std::max(m_time - l.peak_t, 0.0);
       const float hold = std::exp(-std::max(age - 2.f, 0.f) / 2.f);
-      if (b >= (l.color[0] + l.color[1] + l.color[2]) * hold) {
+      // (a new peak only from a glow like the lamp's: a red shot or an explosion passing by turned a
+      // street lamp red and bigger for 4 s. Anything once the old peak has mostly decayed)
+      const float ab = color[0] * l.color[0] + color[1] * l.color[1] + color[2] * l.color[2];
+      const float aa = color[0] * color[0] + color[1] * color[1] + color[2] * color[2];
+      const float bb = l.color[0] * l.color[0] + l.color[1] * l.color[1] + l.color[2] * l.color[2];
+      const bool alike = ab > 0.f && ab * ab > 0.81f * aa * bb && size > 0.5f * l.size &&
+                         size < 2.f * l.size;
+      if (l.blinking(m_time) ||
+          (b >= (l.color[0] + l.color[1] + l.color[2]) * hold && (alike || hold < 0.3f))) {
         l.size = size;
         std::memcpy(l.color, color, sizeof(float) * 3);
         l.peak_t = m_time;
