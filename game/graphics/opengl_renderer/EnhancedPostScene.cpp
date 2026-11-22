@@ -1113,6 +1113,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float color[4];
       float score;
       bool violet = false;  // an effect's violet glow (shots, dark eco clouds)
+      bool instant = false;  // lit at once, not smoothed (an explosion's flash, a fire's flicker)
     };
     std::vector<Candidate> candidates;
     struct Fire {
@@ -1195,8 +1196,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       if (peak <= 0.f) {
         continue;
       }
-      float intensity =
-          std::min(1.5f, bright * 4.f) * m_settings.light_strength * (1.f - 0.85f * glow_day) * m_grade.glows;
+      // (fading out from 110 to 150 m: at the hard cut a whole street's lamps switched on at once)
+      const float far_fade = 1.f - std::clamp((dist / kMeter - 110.f) / 40.f, 0.f, 1.f);
+      float intensity = std::min(1.5f, bright * 4.f) * m_settings.light_strength *
+                        (1.f - 0.85f * glow_day) * m_grade.glows * far_fade;
       // a fire's glow: orange to yellow, no blue, flame sized (shots are pure red or purple, the
       // far beacons and the sky's glows are bigger), and staying put
       // (Spargus palace's braziers draw only a wide halo, 8-18 m: a fire too, its flame the size
@@ -1210,6 +1213,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                         dist < 60.f * kMeter;
       const float fire_size = big_halo ? std::min(0.2f * l.size, 2.5f * kMeter) : l.size;
       if (const auto* f = warm ? note_fire_glow(l.pos, fire_size) : nullptr) {
+        c.instant = true;
         // its light flickers on top of the game's own (a seed from where it stands)
         float seed = std::fmod(std::abs(f->pos[0] * 0.013f + f->pos[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
@@ -1289,6 +1293,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
     }    // the far lamps the game no longer draws: beacons from memory (the ones that stayed put for two
     // seconds; one gone from right in front of the camera was put out or destroyed: forgotten)
+    const float mem_ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
+    const float mem_iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
     for (size_t i = 0; on && i < m_lamps.size();) {
       auto& l = m_lamps[i];
       float v[3] = {0.f, 0.f, 0.f};
@@ -1300,12 +1306,48 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float dist = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
       double unseen = m_time - l.last;
       bool steady = l.last - l.first >= 2.0;
-      if ((dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) || unseen > 900.0) {
+      // (in view the game would draw its glow; off view it never does, so a lamp is forgotten only in
+      // view: turning the camera no longer puts out the lamps behind it)
+      const bool in_view =
+          v[2] > 0.f && std::abs(v[0]) < v[2] * mem_ix && std::abs(v[1]) < v[2] * mem_iy;
+      if ((in_view && dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) ||
+          unseen > 900.0) {
         m_lamps[i] = m_lamps.back();
         m_lamps.pop_back();
         continue;
       }
       i++;
+      // a lamp the game doesn't draw this frame (its glow off screen) still lights what's in view
+      // around it: its light no longer pops in when its glow comes on screen
+      if (steady && unseen > 0.0 && dist < 150.f * kMeter && v[2] > -4.f * l.size) {
+        const float lpeak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
+        const float lbright = l.color[0] + l.color[1] + l.color[2];
+        const bool violet = l.color[1] < 0.5f * std::min(l.color[0], l.color[2]);
+        if (lpeak > 0.f && !violet) {
+          static const EnhancedTune t_mem_min("lights.glow_min_m", 4.f);
+          static const EnhancedTune t_mem_max("lights.glow_max_m", 20.f);
+          const float lo = t_mem_min * kMeter;
+          const float radius =
+              std::clamp(l.size * m_settings.light_reach, lo, std::max(lo, t_mem_max * kMeter));
+          const float far_fade = 1.f - std::clamp((dist / kMeter - 110.f) / 40.f, 0.f, 1.f);
+          float intensity = std::min(1.5f, lbright * 4.f) * m_settings.light_strength *
+                            (1.f - 0.85f * glow_day) * m_grade.glows * far_fade;
+          const float lmin = std::min(l.color[0], std::min(l.color[1], l.color[2]));
+          const float pure = std::clamp((0.3f - (lbright - lpeak - lmin) / lpeak) / 0.2f, 0.f, 1.f);
+          intensity *= 1.f - 0.65f * pure;
+          if (intensity > 0.f) {
+            Candidate c;
+            std::memcpy(c.pos, v, sizeof(float) * 3);
+            c.pos[3] = radius * (1.f - 0.45f * pure);
+            for (int k = 0; k < 3; k++) {
+              c.color[k] = l.color[k] / lpeak * intensity;
+            }
+            c.color[3] = 0.f;
+            c.score = lbright * c.pos[3] / (dist + c.pos[3]);
+            candidates.push_back(c);
+          }
+        }
+      }
       if (!steady || unseen <= 0.0 || dist < 40.f * kMeter || dist > 2500.f * kMeter || v[2] <= 0.f) {
         continue;
       }
@@ -1410,6 +1452,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         continue;  // the flash is over (the sparks fly on)
       }
       Candidate c;
+      c.instant = true;
       for (int col = 0; col < 3; col++) {
         c.pos[col] = 0.f;
         for (int row = 0; row < 3; row++) {
@@ -1523,6 +1566,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                                wander * 0.6f * std::sin(ft * 9.7f),
                            fs[2] + wander * std::cos(ft * 6.1f) * std::sin(ft * 1.7f)};
       Candidate c;
+      c.instant = true;
       for (int col = 0; col < 3; col++) {
         c.pos[col] = 0.f;
         for (int row = 0; row < 3; row++) {
@@ -1738,6 +1782,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       float k = lit * m_settings.light_strength * m_settings.lamp_strength;
       if (ml.flicker) {
+        c.instant = true;
         float seed = std::fmod(std::abs(ml.pos[0] * 0.013f + ml.pos[2] * 0.007f), 6.2832f);
         float t = (float)m_time;
         k *= 0.82f + 0.18f * (0.5f * std::sin(t * 11.f + seed) + 0.3f * std::sin(t * 23.f + 1.7f * seed) +
@@ -1763,6 +1808,136 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         return (std::abs(c.pos[0]) - c.pos[2] * ix) * nx > r ||
                (std::abs(c.pos[1]) - c.pos[2] * iy) * ny > r;
       });
+    }
+    // Steady lights. Before, the 32 slots went to the best scores of each frame: lights of near equal
+    // score swapped slots every frame, a lamp dropped by the game for a frame went dark, and a glow
+    // half hidden (a passer-by in front) dimmed its light with it: pop-in and flicker, worst in Haven
+    // at night. Now a light shown last frame keeps its slot unless a clearly stronger one comes, its
+    // light eases toward the new value instead of jumping, a far one newly picked fades in and a
+    // dropped one fades out in its last place. Explosions and fires (instant) as before.
+    // (tuning.json "lights": {"fade_in_s", "fade_out_s", "smooth_s", "keep_bonus"})
+    {
+      struct Shown {
+        float world[3];
+        float color[4];  // smoothed, before the fade
+        float radius;
+        float w;  // fade in/out
+      };
+      static std::vector<Shown> shown;
+      static double shown_time = 0.0;
+      const float dt = (float)std::clamp(m_time - shown_time, 0.0, 0.25);
+      shown_time = m_time;
+      static const EnhancedTune t_fade_in("lights.fade_in_s", 0.4f);
+      static const EnhancedTune t_fade_out("lights.fade_out_s", 0.5f);
+      static const EnhancedTune t_smooth("lights.smooth_s", 0.25f);
+      static const EnhancedTune t_keep("lights.keep_bonus", 0.8f);
+      const float rate_in = dt / std::max((float)t_fade_in, 0.01f);
+      const float rate_out = dt / std::max((float)t_fade_out, 0.01f);
+      const float k_smooth = std::min(1.f, dt / std::max((float)t_smooth, 0.01f));
+      const size_t nc = candidates.size();
+      std::vector<int> match(nc, -1);
+      std::vector<float> world(nc * 3);
+      for (size_t i = 0; i < nc; i++) {
+        auto& c = candidates[i];
+        float* wp = &world[i * 3];
+        for (int row = 0; row < 3; row++) {
+          wp[row] = cam.trans[row];
+          for (int col = 0; col < 3; col++) {
+            wp[row] += cam.rot[row][col] * c.pos[col];
+          }
+        }
+        float best = 4.f * kMeter * kMeter;  // (within 2 m: the same light)
+        for (size_t j = 0; j < shown.size(); j++) {
+          const auto& o = shown[j];
+          const float dx = o.world[0] - wp[0], dy = o.world[1] - wp[1], dz = o.world[2] - wp[2];
+          const float d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < best) {
+            best = d2;
+            match[i] = (int)j;
+          }
+        }
+        if (match[i] >= 0) {
+          c.score *= 1.f + (float)t_keep * shown[match[i]].w;
+        }
+      }
+      std::vector<size_t> order(nc);
+      for (size_t i = 0; i < nc; i++) {
+        order[i] = i;
+      }
+      std::stable_sort(order.begin(), order.end(),
+                       [&](size_t x, size_t y) { return candidates[x].score > candidates[y].score; });
+      // the picked ones, then the dropped ones still fading out (at most 8 slots for those)
+      std::vector<size_t> pick;
+      std::vector<char> kept(shown.size(), 0);
+      for (size_t r = 0; r < nc && (int)pick.size() < kLights; r++) {
+        pick.push_back(order[r]);
+        if (match[order[r]] >= 0) {
+          kept[match[order[r]]] = 1;
+        }
+      }
+      std::vector<size_t> fading;
+      for (size_t j = 0; j < shown.size(); j++) {
+        if (!kept[j] && shown[j].w - rate_out > 0.02f) {
+          fading.push_back(j);
+        }
+      }
+      std::sort(fading.begin(), fading.end(), [&](size_t x, size_t y) { return shown[x].w > shown[y].w; });
+      if (fading.size() > 8) {
+        fading.resize(8);
+      }
+      while (!pick.empty() && pick.size() + fading.size() > (size_t)kLights) {
+        pick.pop_back();  // (the weakest new ones wait a frame or two)
+      }
+      std::vector<Candidate> out;
+      std::vector<Shown> next;
+      for (size_t i : pick) {
+        Candidate c = candidates[i];
+        const float d = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
+        const Shown* o = match[i] >= 0 ? &shown[match[i]] : nullptr;
+        Shown sn;
+        std::memcpy(sn.world, &world[i * 3], sizeof(float) * 3);
+        sn.radius = c.pos[3];
+        if (c.instant || dt <= 0.f) {
+          sn.w = 1.f;
+          std::memcpy(sn.color, c.color, sizeof(float) * 4);
+        } else {
+          sn.w = o ? std::min(1.f, o->w + rate_in) : (d < 25.f * kMeter ? 1.f : rate_in);
+          for (int k = 0; k < 4; k++) {
+            sn.color[k] = o ? o->color[k] + (c.color[k] - o->color[k]) * k_smooth : c.color[k];
+          }
+          if (o) {
+            sn.radius = o->radius + (c.pos[3] - o->radius) * k_smooth;
+          }
+        }
+        c.pos[3] = sn.radius;
+        for (int k = 0; k < 3; k++) {
+          c.color[k] = sn.color[k] * sn.w;
+        }
+        c.color[3] = sn.color[3];
+        out.push_back(c);
+        next.push_back(sn);
+      }
+      for (size_t j : fading) {
+        Shown sn = shown[j];
+        sn.w -= rate_out;
+        Candidate c;
+        for (int col = 0; col < 3; col++) {
+          c.pos[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            c.pos[col] += (sn.world[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+        c.pos[3] = sn.radius;
+        for (int k = 0; k < 3; k++) {
+          c.color[k] = sn.color[k] * sn.w;
+        }
+        c.color[3] = sn.color[3];
+        c.score = 0.f;
+        out.push_back(c);
+        next.push_back(sn);
+      }
+      shown = std::move(next);
+      candidates = std::move(out);
     }
     const int n = std::min((int)candidates.size(), kLights);
     float pos[kLights * 4] = {};
