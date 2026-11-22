@@ -343,7 +343,10 @@ struct LightStab {
     bool instant;
   };
   std::vector<L> prev;
+  float prev_trans[3] = {0.f, 0.f, 0.f};
+  float prev_rot[3][3] = {};
   double last_print = 0.0;
+  int newvis = 0;  // new ones whose reach touched the view last frame too (popped in where seen)
   int cand = 0, inview = 0, used = 0, over32 = 0, nw = 0, newnear = 0, newpop = 0, gone = 0,
       capdrop = 0, jumps = 0, cast = 0, castpop = 0, mapsw = 0, forgot = 0, frames = 0;
   float jump = 0.f;
@@ -1136,6 +1139,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       float score;
       bool violet = false;  // an effect's violet glow (shots, dark eco clouds)
       bool instant = false;  // lit at once, not smoothed (an explosion's flash, a fire's flicker)
+      bool burst = false;    // an explosion's flash or a gun's charge: short, at full strength at once
     };
     std::vector<Candidate> candidates;
     struct Fire {
@@ -1192,7 +1196,17 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       const float raw_peak = std::max(raw.color[0], std::max(raw.color[1], raw.color[2]));
       const bool lamp_sized = raw.size > 0.6f * kMeter && raw.size < 12.f * kMeter;
       if (lamp_sized && raw_peak > 0.f && dist < 2500.f * kMeter) {
-        remember_lamp(raw.pos, raw.size, raw.color);
+        // (its light from the lamp's remembered peak: steady through the glow's pulse, and the
+        // same as when its glow is off screen and the light comes from memory)
+        if (const auto* mem = remember_lamp(raw.pos, raw.size, raw.color, raw.fade)) {
+          l.size = mem->size;
+          for (int k = 0; k < 3; k++) {
+            l.color[k] = mem->color[k] * mem->hold * raw.fade;
+          }
+          radius = std::clamp(l.size * m_settings.light_reach, glow_lo,
+                              std::max(glow_lo, t_glow_max * kMeter));
+          c.pos[3] = radius;
+        }
       }
       if (dist > 40.f * kMeter && dist < 2500.f * kMeter && lamp_sized) {
         float peak = raw_peak;
@@ -1332,9 +1346,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       // view: turning the camera no longer puts out the lamps behind it)
       const bool in_view =
           v[2] > 0.f && std::abs(v[0]) < v[2] * mem_ix && std::abs(v[1]) < v[2] * mem_iy;
-      if ((in_view && dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) ||
-          unseen > 900.0) {
-        if (in_view && dist < 100.f * kMeter && unseen > 3.0 && steady) {
+      // (a lamp hidden behind a building may not be drawn by the game either: forgotten in view only
+      // near, where its glow can't be hidden for long; further out after a minute)
+      const bool forget_in_view =
+          in_view && ((dist < 30.f * kMeter && unseen > 3.0) || unseen > 60.0);
+      if (forget_in_view || (!steady && unseen > 1.0) || unseen > 900.0) {
+        if (forget_in_view && steady) {
           g_light_stab.forgot++;
         }
         m_lamps[i] = m_lamps.back();
@@ -1343,21 +1360,27 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       i++;
       // a lamp the game doesn't draw this frame (its glow off screen) still lights what's in view
-      // around it: its light no longer pops in when its glow comes on screen
-      if (steady && unseen > 0.0 && dist < 150.f * kMeter && v[2] > -4.f * l.size) {
-        const float lpeak = std::max(l.color[0], std::max(l.color[1], l.color[2]));
-        const float lbright = l.color[0] + l.color[1] + l.color[2];
-        const bool violet = l.color[1] < 0.5f * std::min(l.color[0], l.color[2]);
+      // around it: its light no longer pops in when its glow comes on screen (the same light as its
+      // glow's: its peak, the game's distance fade)
+      static const EnhancedTune t_mem_min("lights.glow_min_m", 4.f);
+      static const EnhancedTune t_mem_max("lights.glow_max_m", 20.f);
+      const float mlo = t_mem_min * kMeter;
+      const float mradius =
+          std::clamp(l.size * m_settings.light_reach, mlo, std::max(mlo, t_mem_max * kMeter));
+      if (steady && unseen > 0.0 && dist < 150.f * kMeter && v[2] > -mradius) {
+        float lc[3];
+        for (int k = 0; k < 3; k++) {
+          lc[k] = l.color[k] * l.hold * l.fade;
+        }
+        const float lpeak = std::max(lc[0], std::max(lc[1], lc[2]));
+        const float lbright = lc[0] + lc[1] + lc[2];
+        const bool violet = lc[1] < 0.5f * std::min(lc[0], lc[2]);
         if (lpeak > 0.f && !violet) {
-          static const EnhancedTune t_mem_min("lights.glow_min_m", 4.f);
-          static const EnhancedTune t_mem_max("lights.glow_max_m", 20.f);
-          const float lo = t_mem_min * kMeter;
-          const float radius =
-              std::clamp(l.size * m_settings.light_reach, lo, std::max(lo, t_mem_max * kMeter));
+          const float radius = mradius;
           const float far_fade = 1.f - std::clamp((dist / kMeter - 110.f) / 40.f, 0.f, 1.f);
           float intensity = std::min(1.5f, lbright * 4.f) * m_settings.light_strength *
                             (1.f - 0.85f * glow_day) * m_grade.glows * far_fade;
-          const float lmin = std::min(l.color[0], std::min(l.color[1], l.color[2]));
+          const float lmin = std::min(lc[0], std::min(lc[1], lc[2]));
           const float pure = std::clamp((0.3f - (lbright - lpeak - lmin) / lpeak) / 0.2f, 0.f, 1.f);
           intensity *= 1.f - 0.65f * pure;
           if (intensity > 0.f) {
@@ -1365,7 +1388,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             std::memcpy(c.pos, v, sizeof(float) * 3);
             c.pos[3] = radius * (1.f - 0.45f * pure);
             for (int k = 0; k < 3; k++) {
-              c.color[k] = l.color[k] / lpeak * intensity;
+              c.color[k] = lc[k] / lpeak * intensity;
             }
             c.color[3] = 0.f;
             c.score = lbright * c.pos[3] / (dist + c.pos[3]);
@@ -1478,6 +1501,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       Candidate c;
       c.instant = true;
+      c.burst = true;
       for (int col = 0; col < 3; col++) {
         c.pos[col] = 0.f;
         for (int row = 0; row < 3; row++) {
@@ -1824,148 +1848,471 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
     g_light_stab.cand = std::max(g_light_stab.cand, (int)candidates.size());
-    // only those whose reach (and halo, 1.5x) touches the view: every pixel loops over the list
+    // Steady lights. Every light is followed from frame to frame by its place in the world (a track:
+    // its smoothed color and reach, its fade, its shadow), whether in view or not, so:
+    // - one that leaves the view and comes back (the camera turning) is back at full strength, and
+    //   one coming into view from off screen is lit already (the view only decides what's uploaded);
+    // - at most kLights are uploaded: a light losing its slot fades out in it, a new one fades in,
+    //   none is ever dropped at full strength (Haven at night has 200+ lights in view);
+    // - the shadow casters (the first 8 the composite looks at) are a set of their own, chosen with
+    //   hysteresis: a lamp's shadow fades in and out with it (lamp_shadow_slot carries its weight),
+    //   never switching on or off in one frame as the lights' order changes.
+    // Explosions and fires (instant) are lit at once as before.
+    // (tuning.json "lights": {"fade_in_s", "fade_in_near_s", "fade_out_s", "smooth_s", "keep_bonus",
+    // "dwell_s", "caster_keep", "caster_dwell_s", "shadow_fade_s", "map_fade_s", "track_m"})
+    struct LightTrack {
+      u32 id = 0;
+      float world[3] = {0.f, 0.f, 0.f};
+      float color[4] = {0.f, 0.f, 0.f, 0.f};  // smoothed, before the fade
+      float radius = 0.f;                       // smoothed
+      float w = 0.f;                            // fade in/out
+      float score = 0.f;
+      float sw = 0.f;    // its shadow's weight (a caster)
+      float mapw = 0.f;  // its shadow map's share of its shadow
+      float prev_l = -1.f;  // r + g + b as uploaded last frame (-1: not uploaded)
+      int map_slot = -1;
+      double seen = 0.0, shown_since = 0.0, caster_since = 0.0, view_t = 0.0;
+      int cand = -1;  // this frame's candidate
+      bool instant = false, flash = false, lamp = false, in_view = false, shown = false;
+      bool caster = false, leaving = false, target = false;
+    };
+    static std::vector<LightTrack> tracks;
+    std::vector<int> up_track;  // per uploaded light, its track
     {
-      const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
-      const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
-      const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
-      std::erase_if(candidates, [&](const Candidate& c) {
-        const float r = c.pos[3] * 1.5f;
-        return (std::abs(c.pos[0]) - c.pos[2] * ix) * nx > r ||
-               (std::abs(c.pos[1]) - c.pos[2] * iy) * ny > r;
-      });
-    }
-    g_light_stab.inview = std::max(g_light_stab.inview, (int)candidates.size());
-    g_light_stab.over32 += candidates.size() > (size_t)kLights ? 1 : 0;
-    // Steady lights. Before, the 32 slots went to the best scores of each frame: lights of near equal
-    // score swapped slots every frame, a lamp dropped by the game for a frame went dark, and a glow
-    // half hidden (a passer-by in front) dimmed its light with it: pop-in and flicker, worst in Haven
-    // at night. Now a light shown last frame keeps its slot unless a clearly stronger one comes, its
-    // light eases toward the new value instead of jumping, a far one newly picked fades in and a
-    // dropped one fades out in its last place. Explosions and fires (instant) as before.
-    // (tuning.json "lights": {"fade_in_s", "fade_out_s", "smooth_s", "keep_bonus"})
-    {
-      struct Shown {
-        float world[3];
-        float color[4];  // smoothed, before the fade
-        float radius;
-        float w;  // fade in/out
-      };
-      static std::vector<Shown> shown;
-      static double shown_time = 0.0;
-      const float dt = (float)std::clamp(m_time - shown_time, 0.0, 0.25);
-      shown_time = m_time;
+      static u32 next_id = 1;
+      static double last_t = -1.0;
+      static float last_cam[3] = {0.f, 0.f, 0.f};
+      const bool last_t_was_unset = last_t < 0.0;
+      const double raw_dt = last_t_was_unset ? 0.0 : m_time - last_t;
+      last_t = m_time;
+      const float dt = (float)std::clamp(raw_dt, 0.0, 0.25);
+      const float cam_jump = std::sqrt((cam.trans[0] - last_cam[0]) * (cam.trans[0] - last_cam[0]) +
+                                       (cam.trans[1] - last_cam[1]) * (cam.trans[1] - last_cam[1]) +
+                                       (cam.trans[2] - last_cam[2]) * (cam.trans[2] - last_cam[2]));
+      std::memcpy(last_cam, cam.trans, sizeof(last_cam));
+      // (the first frame, or the camera cut or teleported: all lights as they are, at once)
+      const bool cut = last_t_was_unset || cam_jump > 20.f * kMeter;
       static const EnhancedTune t_fade_in("lights.fade_in_s", 0.4f);
+      static const EnhancedTune t_fade_near("lights.fade_in_near_s", 0.15f);
       static const EnhancedTune t_fade_out("lights.fade_out_s", 0.5f);
       static const EnhancedTune t_smooth("lights.smooth_s", 0.25f);
       static const EnhancedTune t_keep("lights.keep_bonus", 0.8f);
+      static const EnhancedTune t_dwell("lights.dwell_s", 1.f);
+      static const EnhancedTune t_ckeep("lights.caster_keep", 2.f);
+      static const EnhancedTune t_cdwell("lights.caster_dwell_s", 2.f);
+      static const EnhancedTune t_sfade("lights.shadow_fade_s", 0.5f);
+      static const EnhancedTune t_track_m("lights.track_m", 1.5f);
       const float rate_in = dt / std::max((float)t_fade_in, 0.01f);
+      const float rate_in_near = dt / std::max((float)t_fade_near, 0.01f);
       const float rate_out = dt / std::max((float)t_fade_out, 0.01f);
       const float k_smooth = std::min(1.f, dt / std::max((float)t_smooth, 0.01f));
+      const float rate_sw = dt / std::max((float)t_sfade, 0.01f);
+      // only what the reach (and halo, 1.5x) of touches the view is uploaded: every pixel loops over it
+      const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
+      const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
+      const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
+      // (the reach as the composite gets it, grown in the dark, and its halo)
+      const float reach_x = 1.5f * (1.f + 0.6f * night_darkness());
+      // (a light's change held to lights.max_luma_per_s of r+g+b a second: a bright one fading in
+      // over 0.15 s, or a big step eased over 0.25 s, still lit a street in a few frames. Never
+      // slower than 2 s for a fade, 1 s for a step)
+      static const EnhancedTune t_slew("lights.max_luma_per_s", 3.f);
+      const float max_dl = std::min(std::max((float)t_slew, 0.1f) * dt, 0.06f);  // (a long frame too)
+      auto lum = [](const float* c) { return std::max(c[0] + c[1] + c[2], 1e-4f); };
+      auto to_view = [&](const float* w, float* v) {
+        for (int col = 0; col < 3; col++) {
+          v[col] = 0.f;
+          for (int row = 0; row < 3; row++) {
+            v[col] += (w[row] - cam.trans[row]) * cam.rot[row][col];
+          }
+        }
+      };
+      auto touches = [&](const float* v, float r) {
+        return v[2] > -r && (std::abs(v[0]) - v[2] * ix) * nx <= r &&
+               (std::abs(v[1]) - v[2] * iy) * ny <= r;
+      };
+      auto on_screen = [&](const float* v) {
+        return v[2] > 0.f && std::abs(v[0]) < v[2] * ix && std::abs(v[1]) < v[2] * iy;
+      };
       const size_t nc = candidates.size();
-      std::vector<int> match(nc, -1);
-      std::vector<float> world(nc * 3);
+      std::vector<float> cworld(nc * 3);
+      std::vector<char> cview(nc);
+      int n_in_view = 0;
       for (size_t i = 0; i < nc; i++) {
-        auto& c = candidates[i];
-        float* wp = &world[i * 3];
+        const auto& c = candidates[i];
+        float* wp = &cworld[i * 3];
         for (int row = 0; row < 3; row++) {
           wp[row] = cam.trans[row];
           for (int col = 0; col < 3; col++) {
             wp[row] += cam.rot[row][col] * c.pos[col];
           }
         }
-        float best = 4.f * kMeter * kMeter;  // (within 2 m: the same light)
-        for (size_t j = 0; j < shown.size(); j++) {
-          const auto& o = shown[j];
-          const float dx = o.world[0] - wp[0], dy = o.world[1] - wp[1], dz = o.world[2] - wp[2];
-          const float d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 < best) {
-            best = d2;
-            match[i] = (int)j;
+        cview[i] = touches(c.pos, c.pos[3] * reach_x) ? 1 : 0;
+        n_in_view += cview[i];
+      }
+      g_light_stab.inview = std::max(g_light_stab.inview, n_in_view);
+      g_light_stab.over32 += n_in_view > kLights ? 1 : 0;
+      // each candidate to the nearest track (each used once, nearest pairs first)
+      for (auto& t : tracks) {
+        t.cand = -1;
+        t.prev_l = t.shown ? lum(t.color) * t.w : -1.f;
+      }
+      std::vector<int> cmatch(nc, -1);
+      {
+        const float tm = std::clamp((float)t_track_m, 0.1f, 4.f) * kMeter;
+        const float m2 = tm * tm;
+        std::vector<std::tuple<float, int, int>> pairs;
+        for (size_t i = 0; i < nc; i++) {
+          const float* a = &cworld[i * 3];
+          for (size_t j = 0; j < tracks.size(); j++) {
+            const float* b = tracks[j].world;
+            const float dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+            const float d2 = dx * dx + dy * dy + dz * dz;
+            // (a flash is its own light, never a lamp's next to it)
+            if (d2 < m2 && tracks[j].flash == candidates[i].burst) {
+              pairs.emplace_back(d2, (int)i, (int)j);
+            }
           }
         }
-        if (match[i] >= 0) {
-          c.score *= 1.f + (float)t_keep * shown[match[i]].w;
+        std::sort(pairs.begin(), pairs.end());
+        for (const auto& [d2, i, j] : pairs) {
+          if (cmatch[i] < 0 && tracks[j].cand < 0) {
+            cmatch[i] = j;
+            tracks[j].cand = i;
+          }
         }
       }
-      std::vector<size_t> order(nc);
+      // the tracks whose light is gone: a light still uploaded fades out in its place; one out of
+      // view waits a while (its glow off screen, the game may not draw it: back at full strength if
+      // it comes back); one in view and not shown, or a fire or a flash, goes at once
+      for (size_t j = 0; j < tracks.size();) {
+        auto& t = tracks[j];
+        bool drop = false;
+        if (t.cand < 0) {
+          float v[3];
+          to_view(t.world, v);
+          t.in_view = touches(v, t.radius * reach_x);
+          if (t.flash || cut) {
+            drop = true;  // (a flash is over at once)
+          } else if (t.shown && t.in_view) {
+            t.target = false;
+            drop = t.w <= 0.f;  // (uploaded at nothing last frame)
+          } else {
+            drop = m_time - t.seen > 10.0 || (on_screen(v) && m_time - t.seen > 0.5) ||
+                   (t.in_view && t.w <= 0.f);
+          }
+        }
+        if (drop) {
+          tracks[j] = tracks.back();
+          tracks.pop_back();
+          // (a swap moved the last track here: fix its candidate's link)
+          if (j < tracks.size() && tracks[j].cand >= 0) {
+            cmatch[tracks[j].cand] = (int)j;
+          }
+          continue;
+        }
+        j++;
+      }
+      // new lights: from nothing (out of view, or after a cut: as they are)
       for (size_t i = 0; i < nc; i++) {
-        order[i] = i;
+        if (cmatch[i] >= 0) {
+          continue;
+        }
+        const auto& c = candidates[i];
+        LightTrack t;
+        t.id = next_id++;
+        std::memcpy(t.world, &cworld[i * 3], sizeof(t.world));
+        std::memcpy(t.color, c.color, sizeof(t.color));
+        t.radius = c.pos[3];
+        t.flash = c.burst;
+        t.w = (cut || !cview[i] || c.burst) ? 1.f : 0.f;
+        t.view_t = m_time;
+        tracks.push_back(t);
+        cmatch[i] = (int)tracks.size() - 1;
+        tracks.back().cand = (int)i;
       }
+      // the lights seen this frame: their place, smoothed color and reach
+      for (auto& t : tracks) {
+        if (t.cand < 0) {
+          continue;
+        }
+        const auto& c = candidates[t.cand];
+        {
+          // (follows its light; a jump of more than half a meter (its glow handed over to the lamp's
+          // memory, a little off) eased, not a step)
+          const float* cw = &cworld[t.cand * 3];
+          const float jx = cw[0] - t.world[0], jy = cw[1] - t.world[1], jz = cw[2] - t.world[2];
+          const float kw = (cut || jx * jx + jy * jy + jz * jz < 0.25f * kMeter * kMeter) ? 1.f : 0.2f;
+          for (int k = 0; k < 3; k++) {
+            t.world[k] += (cw[k] - t.world[k]) * kw;
+          }
+        }
+        t.seen = m_time;
+        t.instant = c.instant;
+        t.flash = c.burst;
+        t.lamp = c.color[3] < 0.5f;
+        t.score = c.score;
+        if (c.instant || cut || dt <= 0.f) {
+          std::memcpy(t.color, c.color, sizeof(t.color));
+          t.radius = c.pos[3];
+        } else {
+          float ks = k_smooth;
+          const float dl = std::abs(c.color[0] + c.color[1] + c.color[2] - t.color[0] - t.color[1] -
+                                    t.color[2]) * t.w;
+          if (dl * ks > max_dl) {
+            ks = std::max(max_dl / dl, std::min(1.f, dt));
+          }
+          for (int k = 0; k < 4; k++) {
+            t.color[k] += (c.color[k] - t.color[k]) * ks;
+          }
+          t.radius += (c.pos[3] - t.radius) * k_smooth;
+        }
+        {
+          // (in view by where and how far it is uploaded: its eased place and reach)
+          float v[3];
+          to_view(t.world, v);
+          t.in_view = touches(v, t.radius * reach_x);
+        }
+        if (t.in_view) {
+          t.view_t = m_time;
+        }
+      }
+      // the slots: the best in view (a light shown already counts keep_bonus more) wanted; one shown
+      // and no longer wanted (after dwell_s) fades out in its slot; a wanted one gets a slot only
+      // when one is free. (kLights - 4 wanted: room for the fading and a sudden flash)
+      const int k_target = kLights - 4;
+      std::vector<int> order;
+      for (size_t j = 0; j < tracks.size(); j++) {
+        auto& t = tracks[j];
+        if (!t.in_view) {
+          t.shown = false;  // (nothing of it shows: its slot is free, its fade kept)
+        }
+        if (t.cand >= 0 && t.in_view) {
+          order.push_back((int)j);
+        }
+      }
+      auto rank_score = [&](int j) {
+        const auto& t = tracks[j];
+        return t.score * (1.f + (t.shown ? (float)t_keep * t.w : 0.f)) + (t.flash ? 1e3f : 0.f);
+      };
       std::stable_sort(order.begin(), order.end(),
-                       [&](size_t x, size_t y) { return candidates[x].score > candidates[y].score; });
-      // the picked ones, then the dropped ones still fading out (at most 8 slots for those)
-      std::vector<size_t> pick;
-      std::vector<char> kept(shown.size(), 0);
-      for (size_t r = 0; r < nc && (int)pick.size() < kLights; r++) {
-        pick.push_back(order[r]);
-        if (match[order[r]] >= 0) {
-          kept[match[order[r]]] = 1;
+                       [&](int a, int b) { return rank_score(a) > rank_score(b); });
+      for (auto& t : tracks) {
+        if (t.cand >= 0) {
+          t.target = false;
         }
       }
-      std::vector<size_t> fading;
-      for (size_t j = 0; j < shown.size(); j++) {
-        if (!kept[j] && shown[j].w - rate_out > 0.02f) {
-          fading.push_back(j);
+      for (size_t r = 0; r < order.size() && (int)r < k_target; r++) {
+        tracks[order[r]].target = true;
+      }
+      int n_shown = 0;
+      for (auto& t : tracks) {
+        if (t.shown && t.cand >= 0 && !t.target && m_time - t.shown_since < (float)t_dwell) {
+          t.target = true;  // (not displaced right after it came)
+        }
+        n_shown += t.shown ? 1 : 0;
+      }
+      for (int j : order) {
+        auto& t = tracks[j];
+        if (!t.target || t.shown) {
+          continue;
+        }
+        if (n_shown >= kLights) {
+          if (!t.flash) {
+            continue;  // (waits for a slot)
+          }
+          // a flash with no slot free: the faintest shown light makes room (rare)
+          int worst = -1;
+          for (size_t k = 0; k < tracks.size(); k++) {
+            const auto& o = tracks[k];
+            if (o.shown && !o.instant && (worst < 0 || o.w * (o.target ? 4.f : 1.f) <
+                                                           tracks[worst].w * (tracks[worst].target ? 4.f : 1.f))) {
+              worst = (int)k;
+            }
+          }
+          if (worst < 0) {
+            continue;
+          }
+          tracks[worst].shown = false;
+          tracks[worst].caster = tracks[worst].leaving = false;
+          tracks[worst].sw = 0.f;
+          g_light_stab.capdrop++;
+          n_shown--;
+        }
+        t.shown = true;
+        t.shown_since = m_time;
+        n_shown++;
+      }
+      // the fades
+      for (auto& t : tracks) {
+        if (t.flash) {
+          t.w = 1.f;  // (fires and flickers fade in and out too: only their color is not eased)
+          continue;
+        }
+        if (cut) {
+          t.w = (t.target || !t.in_view) ? 1.f : 0.f;
+          if (!t.target) {
+            t.shown = false;
+          }
+        } else if (t.shown && t.target) {
+          float v[3];
+          to_view(t.world, v);
+          const bool close = v[0] * v[0] + v[1] * v[1] + v[2] * v[2] < 25.f * kMeter * 25.f * kMeter;
+          const float dw = std::max(std::min(close ? rate_in_near : rate_in, max_dl / lum(t.color)),
+                                    0.5f * dt);
+          t.w = std::min(1.f, t.w + dw);
+        } else if (t.shown || t.in_view) {
+          // (fading out in its slot, its slot freed once uploaded at nothing; or in view with no
+          // slot: unseen, so its light starts from nothing when it gets one)
+          if (t.shown && t.w <= 0.f) {
+            t.shown = false;
+          }
+          // (in view with no slot: nothing at once, or it came in at its old strength when a slot
+          // freed up, a pop where it shows)
+          const float dw = t.shown ? std::max(std::min(rate_out, max_dl / lum(t.color)), 0.5f * dt)
+                                   : 1.f;
+          t.w = std::max(0.f, t.w - dw);
+        }
+        // (its color eased and its fade together: their sum held to max_luma_per_s too)
+        if (!cut && !t.instant && t.shown && t.prev_l >= 0.f) {
+          const float l = lum(t.color);
+          const float lw = std::clamp(l * t.w, t.prev_l - max_dl, t.prev_l + max_dl);
+          t.w = std::clamp(lw / l, 0.f, 1.f);
         }
       }
-      std::sort(fading.begin(), fading.end(), [&](size_t x, size_t y) { return shown[x].w > shown[y].w; });
-      if (fading.size() > 8) {
-        fading.resize(8);
+      // the shadow casters: at most 8 lamps shown, the strongest with hysteresis (one in the set
+      // stays caster_dwell_s, and gives way only to one caster_keep times stronger); a lamp's
+      // shadow fades in as it joins and out before it leaves (shadow_fade_s), at once when its
+      // light can't be seen (just lit, out of view)
+      {
+        int members = 0;
+        for (auto& t : tracks) {
+          if (!t.caster) {
+            continue;
+          }
+          // (out of view a while, or its light gone: out of the set at once, nothing of it shows)
+          if ((!t.shown && (m_time - t.view_t > 8.0 || t.w <= 0.02f)) || !t.lamp || t.flash) {
+            t.caster = t.leaving = false;
+            t.sw = 0.f;
+            continue;
+          }
+          members++;
+        }
+        std::vector<int> challengers;
+        for (size_t j = 0; j < tracks.size(); j++) {
+          const auto& t = tracks[j];
+          if (!t.caster && t.shown && t.in_view && t.lamp && !t.flash && t.cand >= 0 &&
+              (t.target || t.instant)) {
+            challengers.push_back((int)j);
+          }
+        }
+        std::sort(challengers.begin(), challengers.end(),
+                  [&](int a, int b) { return tracks[a].score > tracks[b].score; });
+        bool swapping = false;
+        for (int j : challengers) {
+          auto& t = tracks[j];
+          if (members >= 8) {
+            // a member out of view gives its place at once; else the weakest that has stayed long
+            // enough starts leaving (one at a time), if the challenger is clearly stronger
+            int out = -1, weak = -1;
+            for (size_t k = 0; k < tracks.size(); k++) {
+              const auto& o = tracks[k];
+              if (!o.caster) {
+                continue;
+              }
+              if (!o.shown) {
+                out = (int)k;
+              } else if (!o.leaving && (weak < 0 || o.score < tracks[weak].score)) {
+                weak = (int)k;
+              }
+            }
+            if (out >= 0) {
+              tracks[out].caster = tracks[out].leaving = false;
+              tracks[out].sw = 0.f;
+              members--;
+            } else {
+              bool leaving_now = false;
+              for (const auto& o : tracks) {
+                leaving_now |= o.caster && o.leaving;
+              }
+              if (!swapping && !leaving_now && weak >= 0 &&
+                  m_time - tracks[weak].caster_since > (float)t_cdwell &&
+                  t.score > std::max((float)t_ckeep, 1.f) * tracks[weak].score) {
+                tracks[weak].leaving = true;
+                swapping = true;
+              }
+              continue;
+            }
+          }
+          t.caster = true;
+          t.leaving = false;
+          t.caster_since = m_time;
+          // (lit just now, or out of view until now: its shadow at once)
+          t.sw = (cut || t.w * lum(t.color) < 0.05f || t.shown_since == m_time) ? 1.f : 0.f;
+          t.mapw = 0.f;
+          members++;
+        }
+        for (auto& t : tracks) {
+          if (!t.caster) {
+            t.sw = 0.f;
+            continue;
+          }
+          if (t.leaving) {
+            t.sw -= rate_sw;
+            if (t.sw <= 0.f || t.w <= 0.02f) {
+              t.caster = t.leaving = false;
+              t.sw = 0.f;
+            }
+          } else {
+            t.sw = cut ? 1.f : std::min(1.f, t.sw + rate_sw);
+          }
+        }
       }
-      while (!pick.empty() && pick.size() + fading.size() > (size_t)kLights) {
-        pick.pop_back();  // (the weakest new ones wait a frame or two)
-        g_light_stab.capdrop++;
+      // what's uploaded: the casters first (the first 8 the composite looks at for shadows), the
+      // flashes (shadowed too, when there's room), then the others, strongest first
+      std::vector<int> up;
+      for (size_t j = 0; j < tracks.size(); j++) {
+        if (tracks[j].shown && tracks[j].caster) {
+          up.push_back((int)j);
+        }
+      }
+      std::sort(up.begin(), up.end(), [&](int a, int b) { return tracks[a].id < tracks[b].id; });
+      std::vector<int> rest;
+      for (size_t j = 0; j < tracks.size(); j++) {
+        if (tracks[j].shown && !tracks[j].caster) {
+          rest.push_back((int)j);
+        }
+      }
+      std::sort(rest.begin(), rest.end(), [&](int a, int b) {
+        if (tracks[a].flash != tracks[b].flash) {
+          return tracks[a].flash;
+        }
+        return tracks[a].score > tracks[b].score;
+      });
+      up.insert(up.end(), rest.begin(), rest.end());
+      if (up.size() > (size_t)kLights) {
+        up.resize(kLights);
       }
       std::vector<Candidate> out;
-      std::vector<Shown> next;
-      for (size_t i : pick) {
-        Candidate c = candidates[i];
-        const float d = std::sqrt(c.pos[0] * c.pos[0] + c.pos[1] * c.pos[1] + c.pos[2] * c.pos[2]);
-        const Shown* o = match[i] >= 0 ? &shown[match[i]] : nullptr;
-        Shown sn;
-        std::memcpy(sn.world, &world[i * 3], sizeof(float) * 3);
-        sn.radius = c.pos[3];
-        if (c.instant || dt <= 0.f) {
-          sn.w = 1.f;
-          std::memcpy(sn.color, c.color, sizeof(float) * 4);
-        } else {
-          sn.w = o ? std::min(1.f, o->w + rate_in) : (d < 25.f * kMeter ? 1.f : rate_in);
-          for (int k = 0; k < 4; k++) {
-            sn.color[k] = o ? o->color[k] + (c.color[k] - o->color[k]) * k_smooth : c.color[k];
-          }
-          if (o) {
-            sn.radius = o->radius + (c.pos[3] - o->radius) * k_smooth;
-          }
-        }
-        c.pos[3] = sn.radius;
-        for (int k = 0; k < 3; k++) {
-          c.color[k] = sn.color[k] * sn.w;
-        }
-        c.color[3] = sn.color[3];
-        out.push_back(c);
-        next.push_back(sn);
-      }
-      for (size_t j : fading) {
-        Shown sn = shown[j];
-        sn.w -= rate_out;
+      out.reserve(up.size());
+      for (int j : up) {
+        const auto& t = tracks[j];
         Candidate c;
-        for (int col = 0; col < 3; col++) {
-          c.pos[col] = 0.f;
-          for (int row = 0; row < 3; row++) {
-            c.pos[col] += (sn.world[row] - cam.trans[row]) * cam.rot[row][col];
-          }
+        if (t.cand >= 0) {
+          c = candidates[t.cand];
+        } else {
+          c.instant = t.instant;
+          c.score = 0.f;
         }
-        c.pos[3] = sn.radius;
+        to_view(t.world, c.pos);
+        c.pos[3] = t.radius;
         for (int k = 0; k < 3; k++) {
-          c.color[k] = sn.color[k] * sn.w;
+          c.color[k] = t.color[k] * t.w;
         }
-        c.color[3] = sn.color[3];
-        c.score = 0.f;
+        c.color[3] = t.color[3];
         out.push_back(c);
-        next.push_back(sn);
+        up_track.push_back(j);
       }
-      shown = std::move(next);
       candidates = std::move(out);
     }
     const int n = std::min((int)candidates.size(), kLights);
@@ -2816,54 +3163,77 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     glUniform4fv(glGetUniformLocation(id, "light_pos"), kLights, pos);
     glUniform4fv(glGetUniformLocation(id, "light_color"), kLights, color);
     {
-      // lamps' shadow maps (lights.shadow_maps): the lights that cast shadows (the first 8, lamps:
-      // not one Jak carries nor a flash) back in the world for next frame's pass; this frame's ready
-      // maps matched to the lights by place
+      // lamps' shadow maps (lights.shadow_maps): the shadow casters (the steady set of up to 8
+      // lamps, see Steady lights) back in the world for next frame's pass, strongest first; this
+      // frame's ready maps matched to them by place
       m_lamp_want.clear();
+      {
+        std::vector<int> cs;
+        for (size_t j = 0; j < tracks.size(); j++) {
+          if (tracks[j].caster) {
+            cs.push_back((int)j);
+          }
+        }
+        std::sort(cs.begin(), cs.end(), [&](int a, int b) { return tracks[a].score > tracks[b].score; });
+        for (int j : cs) {
+          LampWant lw;
+          std::memcpy(lw.pos, tracks[j].world, sizeof(lw.pos));
+          lw.radius = tracks[j].radius * (1.f + 0.6f * dark);
+          m_lamp_want.push_back(lw);
+        }
+      }
       // (a slot is kept at the place its lamp was first seen still: a flame's light jitters around it)
       static const EnhancedTune t_still_m("lights.shadow_still_m", 0.5f);
       const float match_u =
           std::max(std::clamp((float)t_still_m, 0.02f, 2.f), 0.3f) * kMeter;
       const float match2 = match_u * match_u;
-      // (per light, the slot of its map or -1; per slot, its place and far plane)
+      // per light (the first 8), its shadow for the composite in one float: 16 x its weight (0-15)
+      // + the slot of its map (8: none) + 0.9 x the map's share of the shadow (eased in as the map
+      // gets ready, lights.map_fade_s; the rest the screen-space march). Per slot, its place and
+      // far plane
+      static const EnhancedTune t_map_fade("lights.map_fade_s", 0.4f);
+      static double map_last_t = 0.0;
+      const float map_rate =
+          (float)std::clamp(m_time - map_last_t, 0.0, 0.25) / std::max((float)t_map_fade, 0.01f);
+      map_last_t = m_time;
       float light_slot[8];
       float slot_pos[EnhancedPost::kLampSlots * 4] = {};
-      for (auto& s : light_slot) {
-        s = -1.f;
-      }
-      for (int i = 0; i < std::min(n, 8); i++) {
-        if (!(color[i * 4 + 3] < 0.5f)) {
+      float stab_sw[8];
+      int stab_slot[8];
+      for (int i = 0; i < 8; i++) {
+        light_slot[i] = 8.f;
+        stab_sw[i] = 0.f;
+        stab_slot[i] = -1;
+        if (i >= n || i >= (int)up_track.size()) {
           continue;
         }
-        LampWant lw;
-        for (int row = 0; row < 3; row++) {
-          lw.pos[row] = cam.trans[row];
-          for (int col = 0; col < 3; col++) {
-            lw.pos[row] += cam.rot[row][col] * pos[i * 4 + col];
-          }
-        }
-        lw.radius = pos[i * 4 + 3];
-        m_lamp_want.push_back(lw);
-        for (int s = 0; m_lamp_ready && s < m_lamp_alloc; s++) {
+        auto& t = tracks[up_track[i]];
+        const float sw = t.caster ? t.sw : (t.flash ? 1.f : 0.f);
+        int slot = -1;
+        for (int s = 0; t.caster && m_lamp_ready && s < m_lamp_alloc; s++) {
           const auto& sl = m_lamp_slots[s];
-          const float dx = sl.pos[0] - lw.pos[0], dy = sl.pos[1] - lw.pos[1],
-                      dz = sl.pos[2] - lw.pos[2];
+          const float dx = sl.pos[0] - t.world[0], dy = sl.pos[1] - t.world[1],
+                      dz = sl.pos[2] - t.world[2];
           // (two lights in one place share its map)
           if (sl.used && sl.faces >= 6 && sl.seen == m_lamp_frame &&
               dx * dx + dy * dy + dz * dz < match2) {
-            light_slot[i] = (float)s;
+            slot = s;
             std::memcpy(slot_pos + s * 4, sl.pos, sizeof(float) * 3);
             slot_pos[s * 4 + 3] = sl.far_u;
             break;
           }
         }
-      }
-      float stab_sw[8];
-      int stab_slot[8];
-      for (int i = 0; i < 8; i++) {
-        const float a = i < n ? color[i * 4 + 3] : 1.f;
-        stab_sw[i] = (a < 0.5f || a > 1.5f) ? 1.f : 0.f;
-        stab_slot[i] = (int)light_slot[i];
+        if (slot >= 0) {
+          // (a lamp lit just now, or after a cut: its map at once)
+          t.mapw = (t.w < 0.1f || sw <= 0.f) ? 1.f : std::min(1.f, t.mapw + map_rate);
+        } else {
+          t.mapw = 0.f;
+        }
+        t.map_slot = slot;
+        const float q = std::round(std::clamp(sw, 0.f, 1.f) * 15.f);
+        light_slot[i] = 16.f * q + (slot >= 0 ? (float)slot + 0.9f * t.mapw : 8.f);
+        stab_sw[i] = q / 15.f;
+        stab_slot[i] = slot;
       }
       static const EnhancedTune t_stab("lights.stab_log", 0.f);
       if (t_stab > 0.f) {
@@ -2871,11 +3241,13 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
         const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
         const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
-        auto touches_view = [&](const float* w, float r) {
+        auto touches_view = [&](const float* w, float r, bool before = false) {
+          const float* tr = before ? g_light_stab.prev_trans : cam.trans;
           float v[3] = {0.f, 0.f, 0.f};
           for (int col = 0; col < 3; col++) {
             for (int row = 0; row < 3; row++) {
-              v[col] += (w[row] - cam.trans[row]) * cam.rot[row][col];
+              v[col] += (w[row] - tr[row]) *
+                        (before ? g_light_stab.prev_rot[row][col] : cam.rot[row][col]);
             }
           }
           return v[2] > -r && (std::abs(v[0]) - v[2] * ix) * nx <= r &&
@@ -2939,6 +3311,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
               st.nw++;
               st.newnear += d < 25.f ? 1 : 0;
               st.newpop += l.luma > 0.1f ? 1 : 0;
+              st.newvis += (l.luma > 0.1f && touches_view(l.world, l.radius, true)) ? 1 : 0;
               if (ev) {
                 lg::info("[enhanced] lightstab+ new {:.1f} m luma {:.3f} idx {} sw {:.2f}", d, l.luma, i, l.sw);
               }
@@ -2970,6 +3343,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             }
             if (l.slot != p.slot && l.sw > 0.f) {
               st.mapsw++;
+              if (ev) {
+                lg::info("[enhanced] lightstab+ mapsw {:.1f} m slot {} -> {} idx {} sw {:.2f} ready {}", d,
+                         p.slot, l.slot, i, l.sw, m_lamp_ready ? 1 : 0);
+              }
             }
           }
         }
@@ -2983,17 +3360,21 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           }
         }
         st.prev = std::move(cur);
+        std::memcpy(st.prev_trans, cam.trans, sizeof(st.prev_trans));
+        std::memcpy(st.prev_rot, cam.rot, sizeof(st.prev_rot));
         if (m_time - st.last_print >= 1.0) {
           static const EnhancedTune t_tag("lights.stab_tag", 0.f);
           lg::info("[enhanced] lightstab tag {} cand {} inview {} used {} over32 {} new {} newnear {} "
-                   "newpop {} gone {} capdrop {} jump {:.3f} jumps {} cast {} castpop {} mapsw {} "
-                   "assigns {} forgot {} frames {}",
+                   "newpop {} newvis {} gone {} capdrop {} jump {:.3f} jumps {} cast {} castpop {} "
+                   "mapsw {} assigns {} forgot {} frames {}",
                    (int)(float)t_tag, st.cand, st.inview, st.used, st.over32, st.nw, st.newnear,
-                   st.newpop, st.gone, st.capdrop, st.jump, st.jumps, st.cast, st.castpop, st.mapsw,
-                   m_lamp_assigns - st.assigns0, st.forgot, st.frames);
+                   st.newpop, st.newvis, st.gone, st.capdrop, st.jump, st.jumps, st.cast, st.castpop, st.mapsw,
+                   m_lamp_assigns >= st.assigns0 ? m_lamp_assigns - st.assigns0 : m_lamp_assigns,
+                   st.forgot, st.frames);
           st.last_print = m_time;
           st.assigns0 = m_lamp_assigns;
           st.cand = st.inview = st.used = st.over32 = st.nw = st.newnear = st.newpop = st.gone = 0;
+          st.newvis = 0;
           st.capdrop = st.jumps = st.cast = st.castpop = st.mapsw = st.forgot = st.frames = 0;
           st.jump = 0.f;
         }

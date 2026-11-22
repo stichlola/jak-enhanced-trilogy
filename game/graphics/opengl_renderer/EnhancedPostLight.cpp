@@ -2319,29 +2319,46 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   static const EnhancedTune t_still_m("lights.shadow_still_m", 0.5f);
   const float still_u = std::clamp((float)t_still_m, 0.02f, 2.f) * kMeter;
   const float match2 = std::max(still_u, 0.3f * kMeter) * std::max(still_u, 0.3f * kMeter);
+  // (a lamp's count is kept ~600 frames after it was last wanted: a frame out of the casters no
+  // longer starts its 30 frames again, its map redrawn)
+  std::vector<u32> still_frames(m_lamp_want.size(), 1);
+  std::vector<std::array<float, 3>> still_pos(m_lamp_want.size());
   {
-    std::vector<std::pair<std::array<float, 3>, u32>> still;
     const float still2 = still_u * still_u;
-    for (const auto& w : m_lamp_want) {
-      std::pair<std::array<float, 3>, u32> e = {{w.pos[0], w.pos[1], w.pos[2]}, 1};
-      for (const auto& [p, c] : m_lamp_still) {
-        if (dist2(p.data(), w.pos) < still2) {
-          e = {p, c + 1};
+    std::vector<char> used(m_lamp_still.size(), 0);
+    for (size_t i = 0; i < m_lamp_want.size(); i++) {
+      const auto& w = m_lamp_want[i];
+      still_pos[i] = {w.pos[0], w.pos[1], w.pos[2]};
+      bool found = false;
+      for (size_t k = 0; k < m_lamp_still.size(); k++) {
+        auto& e = m_lamp_still[k];
+        if (!used[k] && dist2(e.pos.data(), w.pos) < still2) {
+          used[k] = 1;
+          // (one frame more for each frame it was wanted in a row; a gap starts it again only
+          // after it was away a while)
+          e.frames = (m_lamp_frame - e.last <= 600) ? e.frames + 1 : 1;
+          e.last = m_lamp_frame;
+          still_frames[i] = e.frames;
+          still_pos[i] = e.pos;
+          found = true;
           break;
         }
       }
-      still.push_back(e);
+      if (!found) {
+        m_lamp_still.push_back({{w.pos[0], w.pos[1], w.pos[2]}, 1, m_lamp_frame});
+        used.push_back(1);
+      }
     }
-    m_lamp_still.swap(still);
+    std::erase_if(m_lamp_still, [&](const LampStill& e) { return m_lamp_frame - e.last > 600; });
   }
   std::vector<LampWant> wanted;
   for (size_t i = 0; i < m_lamp_want.size(); i++) {
-    if (m_lamp_still[i].second >= (u32)std::max((float)t_still, 1.f)) {
+    if (still_frames[i] >= (u32)std::max((float)t_still, 1.f)) {
       // (two lights in one place, a Spargus lamp's two entries: one map, the larger reach; the
       // composite gives both lights that slot)
       bool dup = false;
       for (auto& w : wanted) {
-        if (dist2(w.pos, m_lamp_still[i].first.data()) < match2) {
+        if (dist2(w.pos, still_pos[i].data()) < match2) {
           w.radius = std::max(w.radius, m_lamp_want[i].radius);
           dup = true;
           break;
@@ -2351,7 +2368,7 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
         continue;
       }
       wanted.push_back(m_lamp_want[i]);
-      memcpy(wanted.back().pos, m_lamp_still[i].first.data(), sizeof(wanted.back().pos));
+      memcpy(wanted.back().pos, still_pos[i].data(), sizeof(wanted.back().pos));
     }
   }
   // (a little hysteresis: among the strongest few more than there are maps, the lamps whose map is

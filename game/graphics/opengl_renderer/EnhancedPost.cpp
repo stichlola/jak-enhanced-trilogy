@@ -1035,18 +1035,33 @@ const EnhancedPost::FireMemory* EnhancedPost::note_fire_glow(const float* pos, f
 
 // A far glow this frame: the lamp seen at the same spot, kept up to date (the brightest of its
 // glows), or a new one (a shot moving on leaves short-lived ones, dropped as they age)
-void EnhancedPost::remember_lamp(const float* pos, float size, const float* color) {
+// (its light from the peak of its glow's pulse, held 2 s then decaying over 2 s, as last seen: the
+// light of a pulsing glow stays steady, the same whether its glow is on screen or not)
+const EnhancedPost::LampMemory* EnhancedPost::remember_lamp(const float* pos,
+                                                            float size,
+                                                            const float* color,
+                                                            float fade) {
   constexpr float kSame = 2.f * kMeter;
   for (auto& l : m_lamps) {
     float dx = l.pos[0] - pos[0], dy = l.pos[1] - pos[1], dz = l.pos[2] - pos[2];
     if (dx * dx + dy * dy + dz * dz < kSame * kSame) {
       bool fresh = l.last != m_time;
       l.last = m_time;
-      if (fresh || color[0] + color[1] + color[2] > l.color[0] + l.color[1] + l.color[2]) {
+      const float b = color[0] + color[1] + color[2];
+      const float age = (float)std::max(m_time - l.peak_t, 0.0);
+      const float hold = std::exp(-std::max(age - 2.f, 0.f) / 2.f);
+      if (b >= (l.color[0] + l.color[1] + l.color[2]) * hold) {
         l.size = size;
         std::memcpy(l.color, color, sizeof(float) * 3);
+        l.peak_t = m_time;
+        l.hold = 1.f;
+      } else {
+        l.hold = hold;
       }
-      return;
+      if (fresh || fade > l.fade) {
+        l.fade = fade;
+      }
+      return &l;
     }
   }
   // (full: the oldest-seen goes)
@@ -1059,8 +1074,10 @@ void EnhancedPost::remember_lamp(const float* pos, float size, const float* colo
   std::memcpy(l.pos, pos, sizeof(float) * 3);
   l.size = size;
   std::memcpy(l.color, color, sizeof(float) * 3);
-  l.first = l.last = m_time;
+  l.first = l.last = l.peak_t = m_time;
+  l.fade = fade;
   m_lamps.push_back(l);
+  return &m_lamps.back();
 }
 
 void EnhancedPost::draw_debug_window() {

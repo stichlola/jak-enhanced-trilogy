@@ -664,11 +664,14 @@ class EnhancedPost {
   struct LampMemory {
     float pos[3];
     float size;
-    float color[3];
+    float color[3];  // its glow's peak (glows pulse)
     double first, last;
+    double peak_t = 0.0;  // when the peak was seen
+    float hold = 1.f;     // the peak's share still held when last seen (decays after 2 s)
+    float fade = 1.f;     // the game's distance fade when last seen
   };
   std::vector<LampMemory> m_lamps;
-  void remember_lamp(const float* pos, float size, const float* color);
+  const LampMemory* remember_lamp(const float* pos, float size, const float* color, float fade);
 
   // god rays, half resolution
   void do_shafts(GLuint scene_tex, GLuint screen_vao, SharedRenderState* render_state,
@@ -739,7 +742,12 @@ class EnhancedPost {
     float pos[3];
     float radius;
   };
-  std::vector<std::pair<std::array<float, 3>, u32>> m_lamp_still;  // frames each stayed put
+  struct LampStill {
+    std::array<float, 3> pos;  // where it was first seen still
+    u32 frames = 0;            // frames it stayed put
+    u32 last = 0;              // the last frame it was wanted (kept ~120 frames after)
+  };
+  std::vector<LampStill> m_lamp_still;
   std::vector<LampWant> m_lamp_want;  // last frame's shadow-casting lamps, strongest first (world)
   GLuint m_lamp_static_tex = 0, m_lamp_tex = 0, m_lamp_fbo = 0;
   int m_lamp_res = 0;
