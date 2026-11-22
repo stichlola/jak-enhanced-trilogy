@@ -329,6 +329,28 @@ struct CpuSplits {
 };
 CpuSplits g_setup_splits;
 #define ENH_CPU_SPLIT(name) g_setup_splits.mark(name)
+
+// lights.stab_log (1: a line a second, 2: also each event): how steady the dynamic lights are, from
+// what is uploaded each frame alone (so the same numbers for any way of picking them). Each uploaded
+// light is matched to last frame's by its place (1 m, nearest first, each used once).
+struct LightStab {
+  struct L {
+    float world[3];
+    float radius;
+    float luma;  // r + g + b as uploaded (its fade in it)
+    float sw;    // its shadow's weight (0: none)
+    int slot;    // its shadow map's slot, -1: none
+    bool instant;
+  };
+  std::vector<L> prev;
+  double last_print = 0.0;
+  int cand = 0, inview = 0, used = 0, over32 = 0, nw = 0, newnear = 0, newpop = 0, gone = 0,
+      capdrop = 0, jumps = 0, cast = 0, castpop = 0, mapsw = 0, forgot = 0, frames = 0;
+  float jump = 0.f;
+  u32 assigns0 = 0;
+  bool first = true;
+};
+LightStab g_light_stab;
 }  // namespace
 
 void enh_cpu_split(const char* name) {
@@ -1312,6 +1334,9 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           v[2] > 0.f && std::abs(v[0]) < v[2] * mem_ix && std::abs(v[1]) < v[2] * mem_iy;
       if ((in_view && dist < 100.f * kMeter && unseen > 3.0) || (!steady && unseen > 1.0) ||
           unseen > 900.0) {
+        if (in_view && dist < 100.f * kMeter && unseen > 3.0 && steady) {
+          g_light_stab.forgot++;
+        }
         m_lamps[i] = m_lamps.back();
         m_lamps.pop_back();
         continue;
@@ -1798,6 +1823,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     ENH_CPU_SPLIT("manual");
     std::sort(candidates.begin(), candidates.end(),
               [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+    g_light_stab.cand = std::max(g_light_stab.cand, (int)candidates.size());
     // only those whose reach (and halo, 1.5x) touches the view: every pixel loops over the list
     {
       const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
@@ -1809,6 +1835,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                (std::abs(c.pos[1]) - c.pos[2] * iy) * ny > r;
       });
     }
+    g_light_stab.inview = std::max(g_light_stab.inview, (int)candidates.size());
+    g_light_stab.over32 += candidates.size() > (size_t)kLights ? 1 : 0;
     // Steady lights. Before, the 32 slots went to the best scores of each frame: lights of near equal
     // score swapped slots every frame, a lamp dropped by the game for a frame went dark, and a glow
     // half hidden (a passer-by in front) dimmed its light with it: pop-in and flicker, worst in Haven
@@ -1887,6 +1915,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       while (!pick.empty() && pick.size() + fading.size() > (size_t)kLights) {
         pick.pop_back();  // (the weakest new ones wait a frame or two)
+        g_light_stab.capdrop++;
       }
       std::vector<Candidate> out;
       std::vector<Shown> next;
@@ -1942,9 +1971,11 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
     const int n = std::min((int)candidates.size(), kLights);
     float pos[kLights * 4] = {};
     float color[kLights * 4] = {};
+    bool light_instant[kLights] = {};
     for (int i = 0; i < n; i++) {
       std::memcpy(pos + i * 4, candidates[i].pos, sizeof(float) * 4);
       std::memcpy(color + i * 4, candidates[i].color, sizeof(float) * 4);
+      light_instant[i] = candidates[i].instant;
     }
     {
       // the strongest few back in world space for the smoke particles, drawn next frame
@@ -2825,6 +2856,146 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             slot_pos[s * 4 + 3] = sl.far_u;
             break;
           }
+        }
+      }
+      float stab_sw[8];
+      int stab_slot[8];
+      for (int i = 0; i < 8; i++) {
+        const float a = i < n ? color[i * 4 + 3] : 1.f;
+        stab_sw[i] = (a < 0.5f || a > 1.5f) ? 1.f : 0.f;
+        stab_slot[i] = (int)light_slot[i];
+      }
+      static const EnhancedTune t_stab("lights.stab_log", 0.f);
+      if (t_stab > 0.f) {
+        auto& st = g_light_stab;
+        const float ix = 1.f / std::max(std::abs(m_last_proj[2]), 1e-3f);
+        const float iy = 1.f / std::max(std::abs(m_last_proj[3]), 1e-3f);
+        const float nx = 1.f / std::sqrt(1.f + ix * ix), ny = 1.f / std::sqrt(1.f + iy * iy);
+        auto touches_view = [&](const float* w, float r) {
+          float v[3] = {0.f, 0.f, 0.f};
+          for (int col = 0; col < 3; col++) {
+            for (int row = 0; row < 3; row++) {
+              v[col] += (w[row] - cam.trans[row]) * cam.rot[row][col];
+            }
+          }
+          return v[2] > -r && (std::abs(v[0]) - v[2] * ix) * nx <= r &&
+                 (std::abs(v[1]) - v[2] * iy) * ny <= r;
+        };
+        std::vector<LightStab::L> cur(n);
+        for (int i = 0; i < n; i++) {
+          auto& l = cur[i];
+          for (int row = 0; row < 3; row++) {
+            l.world[row] = cam.trans[row];
+            for (int col = 0; col < 3; col++) {
+              l.world[row] += cam.rot[row][col] * pos[i * 4 + col];
+            }
+          }
+          l.radius = pos[i * 4 + 3];
+          l.luma = color[i * 4] + color[i * 4 + 1] + color[i * 4 + 2];
+          l.sw = i < 8 ? stab_sw[i] : 0.f;
+          l.slot = i < 8 ? stab_slot[i] : -1;
+          l.instant = light_instant[i];
+        }
+        // (a cut: the first frame, or the camera jumped: no events)
+        static float last_cam[3] = {0.f, 0.f, 0.f};
+        const float cj = std::sqrt((cam.trans[0] - last_cam[0]) * (cam.trans[0] - last_cam[0]) +
+                                   (cam.trans[1] - last_cam[1]) * (cam.trans[1] - last_cam[1]) +
+                                   (cam.trans[2] - last_cam[2]) * (cam.trans[2] - last_cam[2]));
+        std::memcpy(last_cam, cam.trans, sizeof(last_cam));
+        const bool cut = st.first || cj > 20.f * kMeter;
+        st.first = false;
+        std::vector<int> cm(n, -1);
+        std::vector<char> pm(st.prev.size(), 0);
+        {
+          std::vector<std::tuple<float, int, int>> pairs;
+          for (int i = 0; i < n; i++) {
+            for (int j = 0; j < (int)st.prev.size(); j++) {
+              const auto& a = cur[i].world;
+              const auto& b = st.prev[j].world;
+              const float d2 = (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) +
+                               (a[2] - b[2]) * (a[2] - b[2]);
+              if (d2 < kMeter * kMeter) {
+                pairs.emplace_back(d2, i, j);
+              }
+            }
+          }
+          std::sort(pairs.begin(), pairs.end());
+          for (const auto& [d2, i, j] : pairs) {
+            if (cm[i] < 0 && !pm[j]) {
+              cm[i] = j;
+              pm[j] = 1;
+            }
+          }
+        }
+        const bool ev = t_stab > 1.5f;
+        st.used = std::max(st.used, n);
+        st.frames++;
+        for (int i = 0; i < n && !cut; i++) {
+          const auto& l = cur[i];
+          const float d = std::sqrt(pos[i * 4] * pos[i * 4] + pos[i * 4 + 1] * pos[i * 4 + 1] +
+                                    pos[i * 4 + 2] * pos[i * 4 + 2]) / kMeter;
+          if (cm[i] < 0) {
+            if (!l.instant) {
+              st.nw++;
+              st.newnear += d < 25.f ? 1 : 0;
+              st.newpop += l.luma > 0.1f ? 1 : 0;
+              if (ev) {
+                lg::info("[enhanced] lightstab+ new {:.1f} m luma {:.3f} idx {} sw {:.2f}", d, l.luma, i, l.sw);
+              }
+            }
+            continue;
+          }
+          const auto& p = st.prev[cm[i]];
+          if (l.instant || p.instant) {
+            continue;
+          }
+          const float dj = std::abs(l.luma - p.luma);
+          st.jump = std::max(st.jump, dj);
+          if (dj > 0.08f) {
+            st.jumps++;
+            if (ev) {
+              lg::info("[enhanced] lightstab+ jump {:.1f} m {:.3f} -> {:.3f} idx {}", d, p.luma, l.luma, i);
+            }
+          }
+          if (l.luma > 0.05f || p.luma > 0.05f) {
+            if ((l.sw > 0.f) != (p.sw > 0.f)) {
+              st.cast++;
+            }
+            if (std::abs(l.sw - p.sw) > 0.2f) {
+              st.castpop++;
+              if (ev) {
+                lg::info("[enhanced] lightstab+ castpop {:.1f} m sw {:.2f} -> {:.2f} idx {} luma {:.3f}", d,
+                         p.sw, l.sw, i, l.luma);
+              }
+            }
+            if (l.slot != p.slot && l.sw > 0.f) {
+              st.mapsw++;
+            }
+          }
+        }
+        for (size_t j = 0; j < st.prev.size() && !cut; j++) {
+          const auto& p = st.prev[j];
+          if (!pm[j] && !p.instant && p.luma > 0.05f && touches_view(p.world, p.radius)) {
+            st.gone++;
+            if (ev) {
+              lg::info("[enhanced] lightstab+ gone luma {:.3f} sw {:.2f}", p.luma, p.sw);
+            }
+          }
+        }
+        st.prev = std::move(cur);
+        if (m_time - st.last_print >= 1.0) {
+          static const EnhancedTune t_tag("lights.stab_tag", 0.f);
+          lg::info("[enhanced] lightstab tag {} cand {} inview {} used {} over32 {} new {} newnear {} "
+                   "newpop {} gone {} capdrop {} jump {:.3f} jumps {} cast {} castpop {} mapsw {} "
+                   "assigns {} forgot {} frames {}",
+                   (int)(float)t_tag, st.cand, st.inview, st.used, st.over32, st.nw, st.newnear,
+                   st.newpop, st.gone, st.capdrop, st.jump, st.jumps, st.cast, st.castpop, st.mapsw,
+                   m_lamp_assigns - st.assigns0, st.forgot, st.frames);
+          st.last_print = m_time;
+          st.assigns0 = m_lamp_assigns;
+          st.cand = st.inview = st.used = st.over32 = st.nw = st.newnear = st.newpop = st.gone = 0;
+          st.capdrop = st.jumps = st.cast = st.castpop = st.mapsw = st.forgot = st.frames = 0;
+          st.jump = 0.f;
         }
       }
       static const EnhancedTune t_near("lights.shadow_near_m", 0.5f);
