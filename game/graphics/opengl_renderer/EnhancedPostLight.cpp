@@ -2260,6 +2260,12 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   // (the lights' shadows off, Medium and Performance presets: nothing reads the maps)
   if (want_n == 0 || !cam.valid || g_enhanced_menu.blank_world || m_lamp_want.empty() ||
       m_settings.light_shadow <= 0.f) {
+    static int idle = 0;
+    if ((float)t_log > 0.5f && ++idle % 300 == 0) {
+      lg::info("[enhanced] lamp shadows idle: maps {} cam {} blank {} wanted {} light_shadow {:.2f}",
+               want_n, cam.valid ? 1 : 0, g_enhanced_menu.blank_world ? 1 : 0, m_lamp_want.size(),
+               m_settings.light_shadow);
+    }
     return;
   }
   const int res = std::clamp((int)(float)t_res, 128, 2048);
@@ -2392,7 +2398,10 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     };
     std::vector<std::pair<float, size_t>> rank(wanted.size());
     for (size_t i = 0; i < wanted.size(); i++) {
-      rank[i] = {(float)i - (has_map(wanted[i]) ? keep + 0.5f : 0.f), i};
+      // (the casters always before the prewarmed lamps)
+      rank[i] = {(float)i - (has_map(wanted[i]) ? keep + 0.5f : 0.f) +
+                     (wanted[i].prewarm ? 1000.f : 0.f),
+                 i};
     }
     std::stable_sort(rank.begin(), rank.end(),
                      [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -2404,8 +2413,30 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     wanted.swap(sorted);
   }
   // a slot for each of the strongest lamps: the one already holding it (same place), else the one
-  // left unused longest
-  const int n_want = std::min(std::min(want_n, 8), (int)wanted.size());
+  // left unused longest. The casters first (at most 8), then the prewarmed lamps in what's left
+  // (they never take a caster's slot: the casters pick theirs first, and there are at most
+  // shadow_maps of both)
+  int n_cast = 0;
+  for (const auto& w : wanted) {
+    n_cast += w.prewarm ? 0 : 1;
+  }
+  n_cast = std::min(std::min(want_n, 8), n_cast);
+  {
+    std::vector<LampWant> keep_w;
+    int n_pre = 0;
+    for (const auto& w : wanted) {
+      if (!w.prewarm) {
+        if ((int)keep_w.size() < n_cast) {
+          keep_w.push_back(w);
+        }
+      } else if (n_cast + n_pre < want_n) {
+        n_pre++;
+        keep_w.push_back(w);
+      }
+    }
+    wanted.swap(keep_w);
+  }
+  const int n_want = (int)wanted.size();
   int assign[kLampSlots];
   bool taken[kLampSlots] = {};
   for (int i = 0; i < n_want; i++) {
@@ -2513,11 +2544,17 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
 
   // the static part: a few faces a frame, the strongest lamp's first
   int budget = std::max(1, (int)(float)t_faces);
-  int static_faces = 0;
+  int static_faces = 0, prewarm_faces = 0;
+  // (a prewarmed lamp's faces only in a frame with no caster's face to draw: no more faces a frame
+  // than before)
+  bool caster_faces = false;
   for (int i = 0; i < n_want && budget > 0; i++) {
-    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces >= 6) {
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces >= 6 ||
+        (wanted[i].prewarm && caster_faces)) {
       continue;
     }
+    caster_faces |= !wanted[i].prewarm;
+    prewarm_faces += wanted[i].prewarm ? 1 : 0;
     auto& shader = render_state->shaders[ShaderId::ENH_SHADOW];
     shader.activate();
     const auto id = shader.id();
@@ -2649,7 +2686,8 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
     near_cam[k] = x * x + y * y + z * z < cam_m * cam_m;
   }
   for (int i = 0; i < n_want; i++) {
-    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces < 6) {
+    // (a prewarmed lamp: its static map only, nothing reads it until it casts)
+    if (assign[i] < 0 || m_lamp_slots[assign[i]].faces < 6 || wanted[i].prewarm) {
       continue;
     }
     const int s_i = assign[i];
@@ -2727,10 +2765,10 @@ void EnhancedPost::do_lamp_shadows(SharedRenderState* render_state, ScopedProfil
   m_lamp_ready = live > 0;
   m_lamp_static_total += static_faces;
   if ((float)t_log > 0.5f && m_lamp_frame % 300 == 0) {
-    lg::info("[enhanced] lamp shadows: {} wanted ({} lamps, {} still), {} live, {} static faces "
-             "this frame ({} in 300 frames, {} new slots), {} character draws ({} too close), {} "
-             "faces copied; camera {:.1f},{:.1f},{:.1f}; slots {}",
-             n_want, m_lamp_want.size(), wanted.size(), live, static_faces, m_lamp_static_total,
+    lg::info("[enhanced] lamp shadows: {} wanted ({} casters, {} lamps), {} live, {} static faces "
+             "this frame ({} prewarm; {} in 300 frames, {} new slots), {} character draws ({} too "
+             "close), {} faces copied; camera {:.1f},{:.1f},{:.1f}; slots {}",
+             n_want, n_cast, m_lamp_want.size(), live, static_faces, prewarm_faces, m_lamp_static_total,
              m_lamp_assigns, char_draws, skipped_close, copied, cam.trans[0] / kMeter, cam.trans[1] / kMeter,
              cam.trans[2] / kMeter,
              [&]() {

@@ -749,6 +749,9 @@ class EnhancedPost {
   struct LampWant {
     float pos[3];
     float radius;
+    // a lamp that may soon cast (lights.map_prewarm): its static map drawn ahead in a spare slot,
+    // never a caster's slot, so it is ready when it joins (no march-to-map switch where seen)
+    bool prewarm = false;
   };
   struct LampStill {
     std::array<float, 3> pos;  // where it was first seen still
