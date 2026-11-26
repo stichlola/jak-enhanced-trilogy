@@ -40,6 +40,18 @@ from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[2]
 CACHE = ROOT / "out/enhanced-upscale-cache"
+# Our own models (custom_assets/upscale-models, see its README): Jak 3 is upscaled with 4x-GameAI, made for
+# PS2 textures (keeps grain and detail where realesrgan-x4plus made them waxy); the rest with x4plus.
+OWN_MODELS = ROOT / "custom_assets/upscale-models"
+DEFAULT_MODEL = {"jak3": "realesrgan-gameai"}
+
+
+def default_model(game, hud=False):
+    """the model a game's textures are made with (x4plus when ours is missing, and for the HUD)"""
+    model = "realesrgan-x4plus" if hud else DEFAULT_MODEL.get(game, "realesrgan-x4plus")
+    if model != "realesrgan-x4plus" and not (OWN_MODELS / f"{model}.bin").exists():
+        model = "realesrgan-x4plus"
+    return model
 PAD = 16
 
 GAMES = ("jak1", "jak2", "jak3")
@@ -86,7 +98,8 @@ def run_batch(files, model, gpu, out_dir, opaque=False):
             Image.fromarray(np.pad(rgba, ((PAD, PAD), (PAD, PAD), (0, 0)), mode="wrap")).save(
                 tmp / "padded" / f"{key}.png")
         command = [str(esrgan), "-i", str(tmp / "padded"), "-o", str(tmp / "scaled"), "-n", model, "-s", "4",
-                   "-m", str(esrgan.parent / "models"), "-f", "png"]
+                   "-m", str(OWN_MODELS if (OWN_MODELS / f"{model}.param").exists() else esrgan.parent / "models"),
+                   "-f", "png"]
         if gpu is not None:
             command += ["-g", str(gpu)]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -147,7 +160,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--game", choices=GAMES, default="jak3")
     parser.add_argument("--tpages", help="regex of texture pages to upscale (default: per game)")
-    parser.add_argument("--model", default="realesrgan-x4plus")
+    parser.add_argument("--model", help="(default: default_model(): 4x-GameAI for Jak 3, else realesrgan-x4plus)")
     parser.add_argument("--gpu", type=int)
     parser.add_argument("--min-size", type=int, default=16, help="skip textures smaller than this (px)")
     parser.add_argument("--max-size", type=int, default=256, help="skip textures larger than this (px)")
@@ -155,6 +168,7 @@ def main():
     parser.add_argument("--opaque-only", action="store_true", help="skip translucent textures")
     parser.add_argument("--hud", action="store_true", help="the HUD and menu art (out/enhanced/hud)")
     args = parser.parse_args()
+    args.model = args.model or default_model(args.game, args.hud)
     global OUT
     default_tpages = r"."
     dump = find_dump(args.game)

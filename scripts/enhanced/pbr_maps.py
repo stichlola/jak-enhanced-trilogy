@@ -82,7 +82,7 @@ def work(job):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--game", choices=hd.GAMES, default="jak3")
-    parser.add_argument("--model", default="realesrgan-x4plus")
+    parser.add_argument("--model", help="(default: the one hd_textures.py used: hd.default_model)")
     parser.add_argument("--min-size", type=int, default=16)
     parser.add_argument("--max-size", type=int, default=256)
     parser.add_argument("--scale", type=float, default=0.5, help="the map's size, of the HD texture's")
@@ -96,13 +96,15 @@ def main():
         ROOT = hd.ROOT = args.root.resolve()
         hd.CACHE = ROOT / "out/enhanced-upscale-cache"
 
+    args.model = args.model or hd.default_model(args.game)
     dump = hd.find_dump(args.game)
     skip = re.compile(hd.EXCLUDE)
     cache = hd.CACHE / args.model
     out = args.out or ROOT / "out" / "enhanced" / "pbr" / args.game
     maps = out / "maps"
     maps.mkdir(parents=True, exist_ok=True)
-    stamp = f"v{VERSION}-s{args.scale:g}"
+    # (the model too: maps made from another model's pictures are made again)
+    stamp = f"v{VERSION}-s{args.scale:g}" + ("" if args.model == "realesrgan-x4plus" else f"-{args.model}")
     stamp_file = maps / "version.txt"
     if not stamp_file.exists() or stamp_file.read_text().strip() != stamp:
         for old in maps.glob("*.png"):

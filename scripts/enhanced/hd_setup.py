@@ -39,6 +39,12 @@ ESRGAN_URL = ("https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0
 # 2: the translucent textures' colors upscaled from an opaque copy (the upscaler blacked out what
 #    lies under alpha 0: Daxter's cutscene face, every eyelid, hair and teeth drawn opaque)
 HD_VERSION = "2"
+# 3 (Jak 3 only): its textures upscaled with 4x-GameAI (custom_assets/upscale-models) instead of x4plus
+HD_VERSIONS = {"jak3": "3"}
+
+
+def hd_version(game):
+    return HD_VERSIONS.get(game, HD_VERSION)
 
 UPSCALED = re.compile(r"(?:upscaled|pbr) (\d+)/(\d+)")
 _shown = -1
@@ -81,7 +87,7 @@ def outdated(game):
     made = ROOT / "custom_assets" / game / "texture_replacements"
     if not made.is_dir() or next(made.glob("*/*.png"), None) is None:
         return False
-    return not stamp(game).exists() or stamp(game).read_text().strip() != HD_VERSION
+    return not stamp(game).exists() or stamp(game).read_text().strip() != hd_version(game)
 
 
 def main():
@@ -98,7 +104,7 @@ def main():
         if not args.games:
             return 0
         names = ", ".join(game.replace("jak", "Jak ") for game in args.games)
-        text = (f"{names}: this version makes some HD textures better (faces, eyelids, hair). They are "
+        text = (f"{names}: this version makes the HD textures sharper and more detailed. They are "
                 "redrawn and the levels made again: 15-40 minutes, only this once. You can leave it running.")
         print(f"@@step {text}" if hidden else text, flush=True)
 
@@ -151,7 +157,7 @@ def main():
         run(decompiler, config, "iso_data", "decompiler_out", "--version", version, "--config-override",
             json.dumps({"decompile_code": False, "levels_extract": True, "rip_levels": game == "jak3"}),
             span=(at(0.85), at(1)))
-        stamp(game).write_text(HD_VERSION)
+        stamp(game).write_text(hd_version(game))
     if not args.refresh:
         run(sys.executable, HERE / "minimap_maps.py", span=(98, 100))
     print("HD textures done.")

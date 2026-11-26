@@ -69,6 +69,7 @@ DATA = [
 HANDMADE = [
     ("custom_assets/jak3/texture_remade/_all", 1),  # tools/tripo/tasks.json in jak3-ue5: tex-*, tex2-*
     ("custom_assets/jak3/merc_replacements", 2),  # the same file: spargus_market
+    ("custom_assets/upscale-models", 3),  # 4x-GameAI for ncnn (WTFPL, its README): .bin out of git
 ]
 # in those folders but made from the game's own data, so never in a release: the HD Hellcat
 # (scripts/enhanced/hellcat_hd.py rebuilds the game's model)
