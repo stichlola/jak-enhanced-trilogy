@@ -376,7 +376,7 @@ uniform float chr_occ_on;   // its height span (m); 0: none this frame
 uniform float tune_chr_occ = 0.7;     // characters' ground occlusion: darkening right under them (0: off)
 uniform float tune_chr_occ_r = 0.45;   // ...its soft reach around their silhouette (m)
 uniform float tune_chr_occ_h = 1.2;    // ...and the height gap over which it fades (m)
-uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through, 35-39 splash sprites (see there), 40 shore foam in fixed white (unlit, as before)
+uniform float tune_water_dbg = 0.0;  // test: 1 no lamp columns, 2 no beacons, 3 no reflection, 4 water mask, 5 traced hits/distance/fresnel (r/g/b), 6 hits red / far-mirror share green, 7 depth sources (r far-sea copy = scene, g Hi-Z sea/sky, b near ocean in front), 8 height-8m/shade/slope, 9 deep/near_fade/fresnel, 10 env sample (r fog fallback, g ray ahead, b its screen y), 11 reflection only, 12 no fog fallback for env rays that land on the sea, 13 pond rule/height about 9 m/deep (r/g/b), 14 fresnel (grey), 15 slope (grey), 16 no sun shade on the water or its reflections, 17 the effects' day gain over water too, 18 the shade on the water / on the reflected scene (r/g), 30 no ground color on a creek's edge, 31 no fade at the very edge, 32 no shore foam, 33 no wet shore band, 34 nothing of the game's picture showing through, 35-39 splash sprites (see there), 40 shore foam in fixed white (unlit, as before), 71 lamp/headlight/beacon columns without the cost cull (every light on every pixel, as before)
 uniform float tune_raw_view = 0.0;  // test: 1 the game's own picture (vanilla's colors, effects included, no post), 2 on the right half
 uniform float tune_night_keep_raw = 1.0;  // the night spares what's bright in the game's own picture (0: after AO/shadows)
 uniform float tune_night_raw_lo = 0.6;    // ...from this luma of it (0.4: as the composite's own)
@@ -3647,6 +3647,9 @@ void composite_unused() {
     bool w_old_warp = w_old || abs(tune_water_dbg - 66.0) < 0.5;
     bool w_old_detail = w_old || abs(tune_water_dbg - 67.0) < 0.5;
     bool w_old_shore = w_old || abs(tune_water_dbg - 68.0) < 0.5;
+    // (the lamp, headlight and far-glow columns: lights whose lobe can't reach this pixel (nh under
+    // 0.9) skipped before the pows and map taps. tune_water_dbg 71: every light on every pixel, as before)
+    float lamp_cull = abs(tune_water_dbg - 71.0) < 0.5 ? 0.0 : 0.9;
     vec2 wwarp = w_old_warp ? vec2(0.0)
                             : WATER_WARP * vec2(gnoise(world * 0.021), gnoise(world * 0.021 + 9.1));
     float h0 = water_height(world, t, water_foot, wwarp, w_old_warp);
@@ -3806,6 +3809,9 @@ void composite_unused() {
       }
       vec2 rel = world - wake[i].xz / 4096.0;  // meters
       float dist = length(rel);
+      if (dist > 12.0) {
+        continue;  // (cost: past its widest ring (5.3 m) and foam (3.3 m) every term is < 1e-6)
+      }
       float age = wake[i].w - (big ? 20.0 : ride ? 10.0 : 0.0);
       if (big) {
         // a jump into the water: a wide ring racing out (the game's ripple disc bent the picture
@@ -4157,6 +4163,12 @@ void composite_unused() {
         float d = length(tl);
         vec3 h = normalize(tl / max(d, 1.0) - vdir);
         float nh = max(dot(n, h), 0.0);
+        // (cost: the column's lobes are tight, under nh 0.9 both terms are < 2e-4 of the lamp's
+        // color: no pows, no shadow-map taps there. On the hover bike in Haven's harbor at 22h the
+        // lamps, headlights and far glows took 1.8 of the composite's 6.3 ms at 960x540)
+        if (nh < lamp_cull) {
+          continue;
+        }
         float sp = pow(nh, 500.0) * 5.0 + pow(nh, 70.0) * 0.2;
         float rr = d / max(light_pos[i].w, 4096.0);
         // (not a lamp behind the canal's wall: its light never reaches this water, so it has no
@@ -4179,6 +4191,9 @@ void composite_unused() {
         float nh = max(dot(n, h), 0.0);
         // only toward where the headlight points (seen from the front it's blinding, from behind dark)
         float facing_us = smoothstep(0.3, 0.8, dot(-l, spot_dir[i].xyz));
+        if (nh < lamp_cull || facing_us <= 0.0) {
+          continue;  // (cost, as the lamps' above)
+        }
         lsum += vec3(1.0, 0.93, 0.8) * (pow(nh, 500.0) * 6.0 + pow(nh, 70.0) * 0.25) * facing_us *
                 spot_pos[i].w / (1.0 + d * d / (60.0 * 60.0 * 4096.0 * 4096.0));
       }
@@ -4195,9 +4210,14 @@ void composite_unused() {
     // pink bands with hard sides, where vanilla's water is plain dark blue)
     vec3 bsum = vec3(0.0);
     float bwide = mix(90.0, 220.0, tune_beacon_soft);
+    // (cost: where the wide lobe nh^bwide * 0.08 is under 1e-4, 0.97 at bwide 220: no pows there)
+    float bcull = lamp_cull > 0.0 ? exp(-6.68 / bwide) : 0.0;
     for (int i = 0; i < (abs(tune_water_dbg - 2.0) < 0.5 ? 0 : beacon_count); i++) {
       vec3 l = normalize(beacon_pos[i].xyz - p);
       float nh = max(dot(n, normalize(l - vdir)), 0.0);
+      if (nh < bcull) {
+        continue;  // (cost, as the lamps' columns)
+      }
       float fade = exp(-length(beacon_pos[i].xyz) / (1800.0 * 4096.0));
       bsum += beacon_color[i].rgb * beacon_color[i].w * fade * (pow(nh, 700.0) * 3.0 + pow(nh, bwide) * 0.08);
     }
