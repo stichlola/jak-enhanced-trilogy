@@ -364,6 +364,7 @@ uniform float tune_flash_day = 1.0;    // ...by day x this (desert noon: 1-3 cha
 uniform float tune_flash_day_late = 0.7;  // ...by day this share again after the highlights' squeeze (sunlit sand had no room left: a noon blast lit nothing; 0: off)
 uniform float tune_flash_dbg = 0.0;    // test: 1 = the flash's light alone (magenta), 2 = it added again at the very end
 vec3 g_flash = vec3(0.0);  // the flash's light added in the lights' pass (for the day's late share)
+vec3 g_lamp_dbg = vec3(0.0);  // (test tune_lamp_map_dbg 3: the lamps' shadow terms, shown alone)
 uniform float tune_dry_glints = 0.5;   // the lights' highlights on dry polished floors and metal (0: off)
 uniform float tune_glint_stone = 0.15;  // ...and how much plain stone gets of them
 uniform float tune_low_sheen = 0.5;     // level stone's grazing sheen looking into a low sun (0: off)
@@ -660,8 +661,46 @@ uint light_tile_bits() {
   return bits;
 }
 
+// the same, soft: the steps packed near the surface (t = u^2: the first ~1/steps^2 of the reach, a
+// few cm, so a leg standing on the floor is always met, not by one pixel in three), and each hit
+// shading by how clearly the ray passes behind the thing (its depth gap over the threshold) and
+// less the further along the ray it is (a wider penumbra). The binary march's coarse jittered steps
+// broke Jak's shadow from the cars' headlights at his feet into dark dashes and blocks (Haven port,
+// 22h, the brick and the plates by the curb). tune_lamp_map_soft 0: hard, the binary march
+uniform float tune_lamp_map_soft = 1.5;  // penumbra: 4 taps this many texels around (0: one tap)
+float light_blocked_soft(vec3 from, vec3 lp, float jitter, float reach, int steps) {
+  if (tune_lamp_map_soft <= 0.0) {
+    return light_blocked_by(from, lp, jitter, reach, steps);
+  }
+  vec3 dir = normalize(lp - from);
+  float sh = 0.0;
+  for (int s = 0; s < steps; s++) {
+    float u = (float(s) + jitter) / float(steps);
+    vec3 q = from + dir * (u * u * reach);
+    if (q.z < 0.3 * 4096.0) {
+      break;
+    }
+    vec2 quv = vec2(q.x * proj.z / q.z, q.y * proj.w / q.z) * 0.5 + 0.5;
+    if (quv.x < 0.0 || quv.y < 0.0 || quv.x > 1.0 || quv.y > 1.0) {
+      break;
+    }
+    float sd = texture(tex_T3, quv).r;
+    if (sd > 1e-7) {
+      float gap = q.z - view_z(sd);
+      float th = 0.04 * 4096.0 + q.z * 0.004;
+      if (gap > th && gap < 1.5 * 4096.0) {
+        sh = max(sh, smoothstep(th, 2.5 * th, gap) * (1.0 - 0.5 * u * u));
+        if (sh > 0.98) {
+          break;
+        }
+      }
+    }
+  }
+  return sh;
+}
+
 float light_blocked(vec3 from, vec3 lp, float jitter) {
-  return light_blocked_by(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
+  return light_blocked_soft(from, lp, jitter, min(length(lp - from) * 0.85, 3.0 * 4096.0), 8);
 }
 
 // lamps' shadow maps (lights.shadow_maps): a cube map per slot, its faces as GL's cube maps want
@@ -673,9 +712,10 @@ uniform vec4 lamp_shadow_pos[8];   // per light (the first 8): its map's place (
 uniform vec4 lamp_shadow_slot[2];
 uniform vec2 lamp_shadow_params;  // near plane (game units), 2 / the faces' size
 uniform float tune_lamp_map_bias = 1.5;  // pushed off the surface along its normal (texels there)
-uniform float tune_lamp_map_soft = 1.5;  // penumbra: 4 taps this many texels around (0: one tap)
+// (tune_lamp_map_soft: declared with the march above)
 uniform float tune_lamp_map_dbg = 0.0;   // test: > 0 adds the map's shadow red, the march's green (times this)
 uniform float tune_lamp_map_dbg_slot = -1.0;  // test: only this slot's (-1: all)
+uniform float tune_lamp_map_flat = 1.0;  // the maps looked up from the flat surface (0: from the detail normal, as before)
 // (x: the shadow's weight, y: the map's slot (16: none), z: the map's share)
 vec3 lamp_shadow_of(int i) {
   if (i >= 8) {
@@ -769,21 +809,24 @@ vec4 gbuf(vec2 uv) {
 
 // the surface normal in view space, toward the camera: the level's own normal where it wrote one,
 // else rebuilt from the depth buffer (the neighbor on each axis with the smaller depth jump)
+// (the flat triangle's normal from the depth buffer alone, toward the camera: no detail normals)
+vec3 depth_normal(vec2 uv, vec3 p) {
+  vec3 pr = view_pos(uv + vec2(texel.x, 0), texture(tex_T3, uv + vec2(texel.x, 0)).r);
+  vec3 pl = view_pos(uv - vec2(texel.x, 0), texture(tex_T3, uv - vec2(texel.x, 0)).r);
+  vec3 pu = view_pos(uv + vec2(0, texel.y), texture(tex_T3, uv + vec2(0, texel.y)).r);
+  vec3 pd = view_pos(uv - vec2(0, texel.y), texture(tex_T3, uv - vec2(0, texel.y)).r);
+  vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
+  vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
+  vec3 nn = normalize(cross(dx, dy));
+  return dot(nn, -p) < 0.0 ? -nn : nn;
+}
 vec3 surface_normal(vec2 uv, vec3 p) {
-  vec3 nn;
   vec4 g = gbuf(uv);
   if (g.a > 0.17) {
-    nn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
-  } else {
-    vec3 pr = view_pos(uv + vec2(texel.x, 0), texture(tex_T3, uv + vec2(texel.x, 0)).r);
-    vec3 pl = view_pos(uv - vec2(texel.x, 0), texture(tex_T3, uv - vec2(texel.x, 0)).r);
-    vec3 pu = view_pos(uv + vec2(0, texel.y), texture(tex_T3, uv + vec2(0, texel.y)).r);
-    vec3 pd = view_pos(uv - vec2(0, texel.y), texture(tex_T3, uv - vec2(0, texel.y)).r);
-    vec3 dx = abs(pr.z - p.z) < abs(p.z - pl.z) ? pr - p : p - pl;
-    vec3 dy = abs(pu.z - p.z) < abs(p.z - pd.z) ? pu - p : p - pd;
-    nn = normalize(cross(dx, dy));
+    vec3 nn = normalize((g.rgb * 2.0 - 1.0) * view_to_world);  // world -> view (transpose)
+    return dot(nn, -p) < 0.0 ? -nn : nn;
   }
-  return dot(nn, -p) < 0.0 ? -nn : nn;
+  return depth_normal(uv, p);
 }
 
 // the nearest level triangle along o + d * t (world, game units, d unit length), up to tmax:
@@ -5045,7 +5088,11 @@ void composite_unused() {
       // stopping 3 m short of it: the vehicle itself is in the depth buffer too)
       if (light_shadow > 0.0 && lit > 0.01 && dm > 4.0) {
         float reach = min(d - 3.0 * 4096.0, 12.0 * 4096.0);
-        lit *= 1.0 - light_shadow * light_blocked_by(from, spot_pos[i].xyz, jitter, reach, 10);
+        float sb = light_blocked_soft(from, spot_pos[i].xyz, jitter, reach, 10);
+        if (tune_lamp_map_dbg > 1.5) {
+          g_lamp_dbg.b = max(g_lamp_dbg.b, sb * min(cone, 1.0));  // (test 2: the headlights' march, blue)
+        }
+        lit *= 1.0 - light_shadow * sb;
       }
       added += vec3(1.0, 0.9, 0.72) * lit * 4.0;
     }
@@ -5072,6 +5119,7 @@ void composite_unused() {
     // a dark box twice his width under his feet at night (the port's pier); his contact shadow is there
     // for that, as vanilla's blob)
     float lamp_jak_keep = 1.0;
+    vec3 map_n = vec3(0.0, 0.0, 2.0);  // the flat normal for the lamps' maps (z 2: not read yet)
     vec3 flash_add = vec3(0.0);  // the explosions' and shots' flash, apart from the lamps
     if (tune_lamp_jak_m > 0.0 && dot(jak_fx.xyz, jak_fx.xyz) > 4096.0 * 4096.0) {
       vec3 jd = (p - jak_fx.xyz) / 4096.0;
@@ -5120,7 +5168,14 @@ void composite_unused() {
           float mapw = ls >= 0 ? lsh.z : 0.0;
           float msh = 0.0, march = 0.0;
           if (mapw > 0.0) {
-            msh = 1.0 - lamp_map_lit(i, ls, view_to_world * from + cam_pos, view_to_world * nn, jitter);
+            // (from the flat surface, not the detail normal: pushed along the bricks' bumpy normals
+            // the lookups wandered a few cm per brick and Jak's shadow at his feet broke into dark
+            // dashes along the brick rows, Haven 22h with PBR normals)
+            if (map_n.z > 1.5) {
+              map_n = tune_lamp_map_flat > 0.5 ? depth_normal(tex_coord, p) : nn;
+            }
+            vec3 mfrom = p + map_n * (0.05 * 4096.0 + z * 0.003);
+            msh = 1.0 - lamp_map_lit(i, ls, view_to_world * mfrom + cam_pos, view_to_world * map_n, jitter);
             if (tune_lamp_map_dbg > 0.0 && (tune_lamp_map_dbg_slot < 0.0 || float(ls) == tune_lamp_map_dbg_slot)) {
               // (test: red the map's shadow, green the screen-space march's, yellow both)
               added += vec3(msh, light_blocked(from, light_pos[i].xyz, jitter), 0.0) * k * k * tune_lamp_map_dbg;
@@ -5128,6 +5183,10 @@ void composite_unused() {
           }
           if (mapw < 0.999) {
             march = light_blocked(from, light_pos[i].xyz, jitter) * lamp_jak_keep;
+          }
+          if (tune_lamp_map_dbg > 1.5) {
+            // (test 2: what each term really darkens, every caster: red the map's, green the march's)
+            g_lamp_dbg = max(g_lamp_dbg, vec3(msh * mapw, march * (1.0 - mapw), 0.0) * lsh.x);
           }
           lit *= 1.0 - light_shadow * lsh.x * mix(march, msh, mapw);
         }
@@ -7729,6 +7788,11 @@ void composite_unused() {
   // (test 9 / 10: the world normal, this pixel's / the meter-wide one the sun's light uses)
   if (abs(tune_shadow_dbg - 9.0) < 0.5 || abs(tune_shadow_dbg - 10.0) < 0.5) {
     c = world_dir(tune_shadow_dbg < 9.5 ? surf_n : soft_n) * 0.5 + 0.5;
+  }
+  // (test tune_lamp_map_dbg 2: the strongest shadow each term casts here, over the grey scene:
+  // red the lamps' maps, green their march, blue the headlights' march)
+  if (tune_lamp_map_dbg > 1.5) {
+    c = mix(vec3(luma(c)) * 0.5, vec3(1.0, 1.0, 1.0) * g_lamp_dbg, step(0.02, dot(g_lamp_dbg, vec3(1.0))));
   }
   // (8 is no view: the low sun's shade on faces turned from it as it was, see sun_shadow_wide)
   if (tune_shadow_dbg > 1.5 && tune_shadow_dbg < 7.5) {
