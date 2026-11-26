@@ -855,8 +855,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       }
       moved += (cam.trans[c] - m_prev_camera.trans[c]) * (cam.trans[c] - m_prev_camera.trans[c]);
     }
-    // a cut or a teleport isn't motion
-    reproject = std::sqrt(moved) < 8.f * kMeter;
+    // a cut or a teleport isn't motion; nor is a sudden turn (a cutscene's shot/reverse shot keeps
+    // the camera within a few meters: motion blur and TAA smeared the new shot with the old one)
+    // (tuning post.cut_turn_deg: the turn in one frame that counts as a cut)
+    static const EnhancedTune t_cut_turn("post.cut_turn_deg", 25.f);
+    const float cos_turn =
+        std::clamp((to_prev[0][0] + to_prev[1][1] + to_prev[2][2] - 1.f) * 0.5f, -1.f, 1.f);
+    const bool turned = cos_turn < std::cos((float)t_cut_turn * 3.14159265f / 180.f);
+    reproject = std::sqrt(moved) < 8.f * kMeter && !turned;
+    m_cam_cut = !reproject;
   }
 
   // temporal anti-aliasing: this frame blended into the reprojected history. After the composite

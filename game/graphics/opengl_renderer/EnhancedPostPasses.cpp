@@ -363,7 +363,7 @@ void EnhancedPost::do_ssao(GLuint src_fbo,
       const float d = cam.trans[c] - m_prev_camera.trans[c];
       moved += d * d;
     }
-    cut = cut || std::sqrt(moved) > 8.f * kMeter;  // a cut or a teleport isn't motion
+    cut = cut || std::sqrt(moved) > 8.f * kMeter || m_cam_cut;  // a cut or a teleport isn't motion
     glActiveTexture(GL_TEXTURE13);
     glBindTexture(GL_TEXTURE_2D, m_rt_hist_tex[1 - m_rt_hist_cur]);
     glActiveTexture(GL_TEXTURE0);
@@ -1568,8 +1568,10 @@ Shader& EnhancedPost::activate_composite(SharedRenderState* render_state, int w,
     glUniform1f(glGetUniformLocation(id, "chr_occ_on"), m_chr_occ_ready ? m_chr_occ_depth_m : 0.f);
   }
   glUniform1f(glGetUniformLocation(id, "lens_drops"), m_movie > 0.5f ? 0.f : m_settings.lens_drops);
+  // (the most blur, px at 1080p: 9 made the background mush and a missed focus a blurred face)
+  static const EnhancedTune t_cine_blur("post.cine_blur_px", 6.f);
   glUniform3f(glGetUniformLocation(id, "cine_dof"), m_focus, m_settings.cine_aperture,
-              m_focus > 0.f && m_ssao_ready ? m_cine * 9.f * h / 1080.f : 0.f);
+              m_focus > 0.f && m_ssao_ready ? m_cine * (float)t_cine_blur * h / 1080.f : 0.f);
   glUniform1f(glGetUniformLocation(id, "blast_sparks"), m_settings.blast_sparks);
   glUniform1f(glGetUniformLocation(id, "fx_detail"), m_settings.fx_detail);
   glUniform1f(glGetUniformLocation(id, "close_up"), m_movie * kCloseUp);

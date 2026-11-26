@@ -1023,6 +1023,7 @@ class EnhancedPost {
   int m_focus_cur = 0;
   bool m_focus_pending[2] = {false, false};
   float m_focus = 0.f;  // view z (game units), 0 = none yet
+  bool m_cam_cut = false;  // the camera cut, teleported or turned suddenly this frame
   // the eye's adaptation: 48 scene pixels read back a frame later (as the focus), their mean
   // brightness eases the picture up in the dark and down in the glare, over a second or two
   void read_exposure(int w, int h);

@@ -966,20 +966,39 @@ void EnhancedPost::read_focus(int w, int h) {
     glBindBuffer(GL_PIXEL_PACK_BUFFER, m_focus_pbo[prev]);
     if (auto* d = (const float*)glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, 9 * sizeof(float),
                                                  GL_MAP_READ_BIT)) {
-      float nearest = 1e12f;
+      // The focus was the nearest of the 9 samples: in an over-the-shoulder shot (most dialogs) that
+      // is the shoulder in front, so the one speaking was blurred. Now the median of the samples
+      // (the middle one counted twice), and after a cut it's taken at once instead of sliding there
+      // over half a second (the new shot's subject blurred, then sharpening).
+      float zs[10];
+      int nz = 0;
       for (int i = 0; i < 9; i++) {
         // sky (0) is endless; nothing under half a meter (the camera brushing a wall)
         float z = d[i] > 1e-7f ? m_last_proj[1] / (d[i] * 2.f - 1.f - m_last_proj[0]) : 1e12f;
         z = std::abs(z);
-        if (z > 0.5f * kMeter) {
-          // the middle counts a little more
-          nearest = std::min(nearest, i == 4 ? z * 0.8f : z);
+        if (z > 0.5f * kMeter && z < 1e11f) {
+          zs[nz++] = z;
+          if (i == 4) {
+            zs[nz++] = z;
+          }
         }
       }
-      nearest = std::clamp(nearest, 0.5f * kMeter, 400.f * kMeter);
-      m_focus = m_focus <= 0.f ? nearest
-                               : std::exp(std::log(m_focus) +
-                                          (std::log(nearest) - std::log(m_focus)) * 0.1f);
+      float target = 400.f * kMeter;
+      if (nz > 0) {
+        std::sort(zs, zs + nz);
+        target = zs[(nz - 1) / 2];  // (the nearer of the two middle ones)
+      }
+      target = std::clamp(target, 0.5f * kMeter, 400.f * kMeter);
+      static double focus_time = 0.0;
+      const float dt = (float)std::clamp(m_time - focus_time, 0.0, 0.25);
+      focus_time = m_time;
+      const float jump = std::abs(std::log(target) - std::log(std::max(m_focus, 1.f)));
+      if (m_focus <= 0.f || m_cam_cut || jump > std::log(1.8f)) {
+        m_focus = target;  // a new shot (or a big change of subject): at once
+      } else {
+        const float k = 1.f - std::exp(-dt / 0.25f);
+        m_focus = std::exp(std::log(m_focus) + (std::log(target) - std::log(m_focus)) * k);
+      }
       glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
     }
     m_focus_pending[prev] = false;
