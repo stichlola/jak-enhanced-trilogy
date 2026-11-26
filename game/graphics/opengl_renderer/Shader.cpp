@@ -215,13 +215,15 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
   // (and the cloud rays alone, enh_cloud_rays)
   // (and the world's sun shadow looks at half size, enh_sun_half)
   // (and the composite without the water's surface, enh_composite_dry)
+  // (and the water's surface alone, enh_composite_wet: the land's code dropped, its registers too)
   if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half" ||
-      shader_name == "enh_composite_dry") {
+      shader_name == "enh_composite_dry" || shader_name == "enh_composite_wet") {
     const auto nl = frag_src.find('\n');
     frag_src.insert(nl == std::string::npos ? 0 : nl + 1,
                     shader_name == "enh_clouds"          ? "#define ENH_CLOUD_ONLY 1\n"
                     : shader_name == "enh_cloud_rays"    ? "#define ENH_RAYS_ONLY 1\n"
                     : shader_name == "enh_composite_dry" ? "#define ENH_NO_WATER 1\n"
+                    : shader_name == "enh_composite_wet" ? "#define ENH_WET_ONLY 1\n"
                                                          : "#define ENH_SUN_HALF_ONLY 1\n");
   }
 
@@ -432,7 +434,7 @@ Shader::Shader(const std::string& shader_name, GameVersion version) : m_name(sha
 
 std::string Shader::frag_file(const std::string& shader_name) {
   if (shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half" ||
-      shader_name == "enh_composite_dry") {
+      shader_name == "enh_composite_dry" || shader_name == "enh_composite_wet") {
     return "enh_composite";
   }
   return shader_name == "shrub_inst" || shader_name == "shrub_grass" ? "shrub" : shader_name;
@@ -440,7 +442,7 @@ std::string Shader::frag_file(const std::string& shader_name) {
 
 std::string Shader::vert_file(const std::string& shader_name) {
   return shader_name == "enh_clouds" || shader_name == "enh_cloud_rays" || shader_name == "enh_sun_half" ||
-                 shader_name == "enh_composite_dry"
+                 shader_name == "enh_composite_dry" || shader_name == "enh_composite_wet"
              ? "enh_composite"
              : shader_name;
 }
@@ -655,6 +657,7 @@ ShaderLibrary::ShaderLibrary(GameVersion version) : m_version(version) {
   at(ShaderId::ENH_SKY_MAP) = {"enh_sky_map", version};
   at(ShaderId::ENH_PROBES) = {"enh_probes", version};
   at(ShaderId::ENH_COMPOSITE_DRY) = {"enh_composite_dry", version};
+  at(ShaderId::ENH_COMPOSITE_WET) = {"enh_composite_wet", version};
 
   for (auto& shader : m_shaders) {
     ASSERT_MSG(shader.okay(), "error compiling shader");

@@ -4184,8 +4184,20 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
   }
   ENH_TIMED("enh-composite", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
   if (use_dry) {
+    // (post.wet_composite 1: the water's pixels by enh_composite_wet, the composite with only them in
+    // it (ENH_WET_ONLY): the land's code (shadows, the lights' loop, puddles, decals, ...) dropped
+    // and its registers with it, so more water pixels run at once. Haven's harbour 22h at
+    // 2000x1250, 13% of the screen water: the pass 4.8 -> 2.1 ms, same picture. 0: this program
+    // with cloud_pass 2, as before)
+    static const EnhancedTune t_wet("post.wet_composite", 1.f);
+    const Shader& wet = render_state->shaders[ShaderId::ENH_COMPOSITE_WET];
+    const bool use_wet = (float)t_wet > 0.5f && wet.okay();
+    if (water_on > 0.f && use_wet) {
+      wet.copy_uniforms_from(shader);  // (binds it)
+      ENH_TIMED("enh-composite-wet", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
+    }
     glUseProgram(id);
-    if (water_on > 0.f) {
+    if (water_on > 0.f && !use_wet) {
       glUniform1i(glGetUniformLocation(id, "cloud_pass"), 2);
       ENH_TIMED("enh-composite-wet", glDrawArrays(GL_TRIANGLE_STRIP, 0, 4));
       glUniform1i(glGetUniformLocation(id, "cloud_pass"), 0);

@@ -129,6 +129,7 @@ enum class ShaderId {
   ENH_SKY_MAP = 66, // Enhanced: the open sky straight up, traced (post.sky_map)
   ENH_PROBES = 67,  // Enhanced: light probes around the camera, traced (post.probes)
   ENH_COMPOSITE_DRY = 68,  // Enhanced: enh_composite without the water's surface (ENH_NO_WATER)
+  ENH_COMPOSITE_WET = 69,  // Enhanced: enh_composite with only the water's surface (ENH_WET_ONLY)
   MAX_SHADERS
 };
 
