@@ -1902,6 +1902,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       bool mem = false;  // its light from the lamp's memory last
       bool moving = false;
       float cimp = -1.f;     // caster importance: eased, seen from ahead of the camera (-1: unset)
+      float lpeak = -1.f;    // r + g + b held at its peak (lights.caster_peak_s; -1: unset)
+      bool ever_moved = false;  // it moved once (a car's light): never a caster
       float sw_fade = 0.f;   // its shadow's fade in/out time now (s, 0: lights.shadow_fade_s)
       double view_since = -1.0;  // in view since (-1: out of view)
       bool map_want = false;     // its shadow map wanted last frame (as a caster or prewarmed)
@@ -1960,6 +1962,15 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       static const EnhancedTune t_moving_in("lights.moving_fade_s", 0.15f);
       static const EnhancedTune t_near_bonus("lights.near_bonus", 1.f);
       static const EnhancedTune t_cout("lights.caster_out_s", 4.f);
+      // (steadier still, for the signs at Hip Hog: casters keep their light's slot; importance by
+      // the light's peak over lights.caster_peak_s, not its blinking value. Old: 0 and 0)
+      static const EnhancedTune t_chold("lights.caster_hold", 1.f);
+      static const EnhancedTune t_cpeak("lights.caster_peak_s", 8.f);
+      // (and a lamp challenges only after lights.caster_settle_s in view, never a light that moved:
+      // at Hip Hog the traffic's lights 13-18 m off came every second, each joined as "near Jak" and
+      // pushed a lamp out after its 1 s dwell. Old: 0 and caster_moved 1)
+      static const EnhancedTune t_csettle("lights.caster_settle_s", 1.f);
+      static const EnhancedTune t_cmoved("lights.caster_moved", 0.f);
       const float rate_in = dt / std::max((float)t_fade_in, 0.01f);
       const float rate_in_near = dt / std::max((float)t_fade_near, 0.01f);
       const float rate_out = dt / std::max((float)t_fade_out, 0.01f);
@@ -2150,6 +2161,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             speed2 = 0.f;
           }
           t.moving = speed2 > (float)t_moving * (float)t_moving * kMeter * kMeter;
+          t.ever_moved |= t.moving;
           t.mem = c.mem;
         }
         t.seen = m_time;
@@ -2219,6 +2231,12 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
       for (auto& t : tracks) {
         if (t.shown && t.cand >= 0 && !t.target && m_time - t.shown_since < (float)t_dwell) {
           t.target = true;  // (not displaced right after it came)
+        }
+        // (a shadow caster keeps its slot (lights.caster_hold 1): with ~90 lights in view at Hip
+        // Hog, the 28 slots churned by the frame's raw score and took the casters' lights with
+        // them, each a seat lost and a new caster)
+        if ((float)t_chold > 0.f && t.caster && !t.leaving && t.shown && t.cand >= 0 && t.in_view) {
+          t.target = true;
         }
         n_shown += t.shown ? 1 : 0;
       }
@@ -2320,6 +2338,19 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           const float x = t.world[0] - focus[0], y = t.world[1] - focus[1], z = t.world[2] - focus[2];
           return std::sqrt(x * x + y * y + z * z);
         };
+        // (the lamp whose pool Jak stands in: within caster_near_m of him and of 80% of its reach.
+        // By the camera alone, a dim lamp 14 m off counted "near" and waited a minute for a seat it
+        // couldn't win; without Jak: the camera's look-ahead point)
+        const auto& jpl = g_enhanced_player;
+        auto in_pool = [&](const LightTrack& t) {
+          float d = focus_d(t);
+          if (jpl.valid) {
+            const float x = t.world[0] - jpl.pos[0], y = t.world[1] - jpl.pos[1],
+                        z = t.world[2] - jpl.pos[2];
+            d = std::sqrt(x * x + y * y + z * z);
+          }
+          return d < near_u && d < 0.8f * t.radius;
+        };
         for (auto& t : tracks) {
           if (t.in_view) {
             if (t.view_since < 0.0) {
@@ -2331,9 +2362,18 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           if (!t.lamp || t.flash || old_score) {
             continue;
           }
+          // (a blinking sign or a cycling light by its peak, decaying over caster_peak_s: by its
+          // value now it fell and rose in the ranking, seats swapped at every blink)
+          const float peak_s = (float)t_cpeak;
+          const float l_now = lum(t.color);
+          if (peak_s <= 0.f || t.lpeak < 0.f || cut) {
+            t.lpeak = l_now;
+          } else {
+            t.lpeak = std::max(l_now, t.lpeak - t.lpeak * std::min(1.f, dt / peak_s));
+          }
           const float d = focus_d(t);
           const float nearness = std::clamp(1.f - d / (30.f * kMeter), 0.f, 1.f);
-          const float imp = lum(t.color) * t.radius / (d + std::max(t.radius, 1.f)) *
+          const float imp = t.lpeak * t.radius / (d + std::max(t.radius, 1.f)) *
                             (1.f + std::max((float)t_near_bonus, 0.f) * nearness);
           t.cimp = (t.cimp < 0.f || cut) ? imp : t.cimp + (imp - t.cimp) * k_imp;
         }
@@ -2370,7 +2410,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         for (size_t j = 0; j < tracks.size(); j++) {
           const auto& t = tracks[j];
           if (!t.caster && t.shown && t.in_view && t.lamp && !t.flash && t.cand >= 0 &&
-              (t.target || t.instant) && (max_u <= 0.f || t.dist < max_u)) {
+              (t.target || t.instant) && (max_u <= 0.f || t.dist < max_u) &&
+              ((float)t_cmoved > 0.5f || !t.ever_moved)) {
             challengers.push_back((int)j);
           }
         }
@@ -2381,7 +2422,14 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         for (int j : challengers) {
           auto& t = tracks[j];
           // (a lamp right by Jak: its pool is what is seen)
-          const bool by_jak = focus_d(t) < near_u || t.dist < near_u;
+          const bool by_jak = in_pool(t);
+          // (in view long enough to be a lamp, not a blink or a passer-by; a lamp just lit or just
+          // come into view still takes a free seat at once, its shadow with its light)
+          const bool settled = cut || (t.view_since >= 0.0 && m_time - t.view_since >= (float)t_csettle);
+          const bool just_lit = t.w * lum(t.color) < 0.05f || t.shown_since == m_time;
+          if (!settled && !(just_lit && members < 8)) {
+            continue;
+          }
           if (members >= 8) {
             // a member out of view gives its place (free of the swap budget) to one clearly
             // stronger or near; else the weakest in view that has stayed long enough starts
@@ -2404,7 +2452,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                     (out < 0 || cscore(o) < cscore(tracks[out]))) {
                   out = (int)k;
                 }
-              } else if (!o.leaving && (weak < 0 || cscore(o) < cscore(tracks[weak]))) {
+              } else if (!o.leaving && !(by_jak && in_pool(o)) &&
+                         (weak < 0 || cscore(o) < cscore(tracks[weak]))) {
                 weak = (int)k;
               }
             }
@@ -2429,7 +2478,7 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
                 g_light_stab.cweak++;
               } else if (!swapping && !leaving_now && weak >= 0 && budget &&
                   m_time - tracks[weak].caster_since > dwell &&
-                  cscore(t) > (by_jak ? 1.f : keep) * cscore(tracks[weak])) {
+                  (by_jak || cscore(t) > keep * cscore(tracks[weak]))) {
                 tracks[weak].leaving = true;
                 tracks[weak].sw_fade = by_jak ? sfade : swap_fade;
                 swapping = true;
@@ -2459,8 +2508,10 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
           members++;
           g_light_stab.cjoin++;
           if (g_light_stab.events) {
-            lg::info("[enhanced] lightstab+ join {:.1f} m imp {:.3f} near {} sw {:.2f} members {}",
-                     t.dist / kMeter, cscore(t), by_jak ? 1 : 0, t.sw, members);
+            lg::info("[enhanced] lightstab+ join {:.1f} m imp {:.3f} near {} sw {:.2f} members {} id {} "
+                     "moved {} view {:.1f} s",
+                     t.dist / kMeter, cscore(t), by_jak ? 1 : 0, t.sw, members, t.id,
+                     t.ever_moved ? 1 : 0, t.view_since >= 0.0 ? m_time - t.view_since : -1.0);
           }
         }
         for (auto& t : tracks) {
@@ -2483,8 +2534,8 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
         // (the metric: a near lamp in view 1.5 s and still no caster)
         if (!cut) {
           for (const auto& t : tracks) {
-            if (t.lamp && !t.flash && t.shown && t.in_view && t.cand >= 0 && !t.caster &&
-                t.dist < near_u && t.view_since >= 0.0 && m_time - t.view_since > 1.5) {
+            if (t.lamp && !t.flash && !t.ever_moved && t.shown && t.in_view && t.cand >= 0 && !t.caster &&
+                in_pool(t) && t.view_since >= 0.0 && m_time - t.view_since > 1.5) {
               g_light_stab.nearmiss++;
               break;
             }
