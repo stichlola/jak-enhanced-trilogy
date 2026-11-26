@@ -661,8 +661,8 @@ uint light_tile_bits() {
   return bits;
 }
 
-// the same, soft: the steps packed near the surface (t = u^2: the first ~1/steps^2 of the reach, a
-// few cm, so a leg standing on the floor is always met, not by one pixel in three), and each hit
+// the same, soft: the steps a little packed near the surface (t between u and u^2: a leg standing
+// on the floor met more often), and each hit
 // shading by how clearly the ray passes behind the thing (its depth gap over the threshold) and
 // less the further along the ray it is (a wider penumbra). The binary march's coarse jittered steps
 // broke Jak's shadow from the cars' headlights at his feet into dark dashes and blocks (Haven port,
@@ -676,7 +676,9 @@ float light_blocked_soft(vec3 from, vec3 lp, float jitter, float reach, int step
   float sh = 0.0;
   for (int s = 0; s < steps; s++) {
     float u = (float(s) + jitter) / float(steps);
-    vec3 q = from + dir * (u * u * reach);
+    // (half way between even steps and u^2: u^2 alone left the far end's gaps 2x the even ones,
+    // long shadows of legs and poles broke up past ~1.5 m)
+    vec3 q = from + dir * (mix(u, u * u, 0.5) * reach);
     if (q.z < 0.3 * 4096.0) {
       break;
     }
@@ -689,7 +691,7 @@ float light_blocked_soft(vec3 from, vec3 lp, float jitter, float reach, int step
       float gap = q.z - view_z(sd);
       float th = 0.04 * 4096.0 + q.z * 0.004;
       if (gap > th && gap < 1.5 * 4096.0) {
-        sh = max(sh, smoothstep(th, 2.5 * th, gap) * (1.0 - 0.5 * u * u));
+        sh = max(sh, smoothstep(th, 2.5 * th, gap) * (1.0 - 0.25 * u * u));
         if (sh > 0.98) {
           break;
         }

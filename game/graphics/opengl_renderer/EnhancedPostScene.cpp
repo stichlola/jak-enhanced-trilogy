@@ -2802,9 +2802,24 @@ void EnhancedPost::apply_to_scene(GLuint render_fbo,
             p.kind = rut ? 2 : (m_print_left ? 0 : 1);
             p.time = m_time;
             p.seg = moved;
-            // (in lying snow any ground takes them)
-            if ((soft || m_snow_cover > 0.15f) && m_settings.prints > 0.f) {
+            // (in lying snow any ground takes them. Not in Haven (levels cty*): its brick paving is
+            // "dirt" to the game, and at night under the pink lamps the brick passed the
+            // composite's sandy test: dark soles scattered around Jak's feet, read as a broken
+            // shadow. prints.city 1: as before)
+            static const EnhancedTune t_city_prints("prints.city", 0.f);
+            bool city = false;
+            if (soft && !rut && (float)t_city_prints < 0.5f) {
+              std::lock_guard<std::mutex> lock(g_enhanced_scene.mutex);
+              city = g_enhanced_scene.level.rfind("cty", 0) == 0;
+            }
+            if ((soft || m_snow_cover > 0.15f) && !city && m_settings.prints > 0.f) {
               m_prints.push_back(p);
+            } else if (city && m_settings.prints > 0.f) {
+              static double city_log_t = -1e9;
+              if (m_time - city_log_t > 10.0) {
+                city_log_t = m_time;
+                lg::info("[enhanced] prints: soft ground in a Haven level, no footprint");
+              }
             }
             if (!rut) {
               m_steps.push_back({{p.pos[0], p.pos[1], p.pos[2]}, 1.f, m_time});
